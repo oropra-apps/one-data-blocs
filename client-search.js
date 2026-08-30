@@ -13,7 +13,7 @@ OD.define('client-search', {
   // window.oropraDoublons). On s'assure de sa présence sans dépendre de
   // l'ordre du socle : si absent, on l'injecte une fois.
   const OROPRA_DOUBLONS_URL =
-    'https://cdn.jsdelivr.net/gh/Oropra/one-data-blocs@aa457b862a926340283e1b8e2e956cbff6357658/oropra-doublons.js';
+    'https://cdn.jsdelivr.net/gh/oropra-apps/one-data-blocs@aa457b862a926340283e1b8e2e956cbff6357658/oropra-doublons.js';
   function chargerDoublons() {
     if (window.oropraDoublons) return Promise.resolve();
     if (window.__oropraDoublonsChargement) return window.__oropraDoublonsChargement;
