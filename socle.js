@@ -48,7 +48,8 @@
 const HOST_MAP = {
     'one-data-dev.oropra.com': 'oropra',
     'app.oropra.com': 'oropra',
-    'oropra.one-data.fr': 'oropra',        // ← la nouvelle
+    'oropra.one-data.fr': 'oropra',
+    'teamcolin.one-data.fr': 'teamcolin',
 };
         const p = new URLSearchParams(location.search);
         if (p.get('tenant')) return p.get('tenant');
