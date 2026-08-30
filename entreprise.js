@@ -1,7 +1,7 @@
 // ENTREPRISE — module One Data (OD.define) v1 (Lot B)
 OD.define('entreprise', {
   mount(__anchor, ctx) {
-    const OROPRA_DOUBLONS_URL = 'https://cdn.jsdelivr.net/gh/Oropra/one-data-blocs@aa457b862a926340283e1b8e2e956cbff6357658/oropra-doublons.js';
+    const OROPRA_DOUBLONS_URL = 'https://cdn.jsdelivr.net/gh/oropra-apps/one-data-blocs@aa457b862a926340283e1b8e2e956cbff6357658/oropra-doublons.js';
     function chargerDoublons() {
       if (window.oropraDoublons) return Promise.resolve();
       if (window.__oropraDoublonsChargement) return window.__oropraDoublonsChargement;
