@@ -48,7 +48,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 : "${CP_URL:?CP_URL manquant dans .env (ex https://lerofucjmfrrduohnwet.supabase.co)}"
 : "${CP_SERVICE_KEY:?CP_SERVICE_KEY manquant dans .env (service_role du control plane)}"
 
-REPO="Oropra/one-data-blocs"
+REPO="oropra-apps/one-data-blocs"
 FILE="${MODULE}.js"
 TAG="${MODULE}-${VERSION}"
 
