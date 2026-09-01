@@ -99,8 +99,33 @@ async function loadHistory() {
   }
 }
 
-function selectHistoryEntry(entry) {
+async function selectHistoryEntry(entry) {
   if (!entry || !entry.CLIENT) return;
+
+  // Ouvrir un cycle de CONSULTATION sur le site sélectionné, comme le
+  // fait la recherche client (client-search.js). Sans cela, un clic
+  // depuis l'historique n'aurait pas le même effet qu'un clic depuis la
+  // recherche : la fiche s'afficherait sans rattachement au site.
+  //
+  // « Consultation » et non « Ouvert » : un cycle ouvert entre dans le
+  // kanban, les compteurs d'activité et les alertes de leads non
+  // traités. Revenir sur une fiche déjà consultée ne doit pas créer de
+  // tâche. La bascule en « Ouvert » se fait toute seule, par
+  // déclencheur, au premier acte réel.
+  //
+  // Non bloquant : on navigue même si l'ouverture échoue.
+  try {
+    const siteApi = window.oropraSite || null;
+    const idSite = siteApi && siteApi.getSiteId ? siteApi.getSiteId() : null;
+    if (idSite != null && entry.CLIENT.IDVu != null) {
+      await ctx.supabase.rpc('cycle_consulter', {
+        p_id_client: Number(entry.CLIENT.IDVu),
+        p_id_site:   idSite,
+        p_id_user:   viewerId != null ? Number(viewerId) : null
+      });
+    }
+  } catch (e) { console.warn('[ch] cycle_consulter:', e && e.message); }
+
   _writeVar(SELECTED_CLIENT_VAR_ID, Object.assign({}, entry.CLIENT));
   triggerFicheClient(entry.CLIENT.IDVu);          // 🔵 fetch + re-subscribe realtime
   state.open = false;
