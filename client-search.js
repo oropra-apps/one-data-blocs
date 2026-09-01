@@ -254,20 +254,31 @@ OD.define('client-search', {
 
   async function selectRow(row) {
     if (bdcvnActive()) { bdcvnReturn(row.IDVu); return; }   // 🔵 retour import BDC
-    // Ouvrir un cycle sur le site du vendeur si ce client n'en a pas encore
-    // un ici : sans cela, la policy SELECT masquerait la fiche dans son
-    // périmètre. Non bloquant — on navigue même si l'ouverture échoue.
+    // Ouvrir un cycle de CONSULTATION sur le site sélectionné si ce
+    // client n'en a pas encore un ici.
+    //
+    // ⚠️ cycle_consulter et non cycle_ouvrir (01/09/2026) : un cycle
+    // « Ouvert » entre dans le kanban, les compteurs d'activité et les
+    // alertes de leads non traités. Consulter une fiche par curiosité
+    // créerait donc une tâche pour le vendeur.
+    //
+    // Le statut « Consultation » porte le rattachement sans rien
+    // afficher, et bascule en « Ouvert » tout seul au premier acte réel
+    // — contact, propale, rendez-vous. La bascule est faite par un
+    // déclencheur en base : rien à appeler ici.
+    //
+    // Non bloquant : on navigue même si l'ouverture échoue.
     try {
       const siteApi = window.oropraSite || null;
       const idSite = siteApi && siteApi.getSiteId ? siteApi.getSiteId() : null;
       if (idSite != null && row && row.IDVu != null) {
-        await ctx.supabase.rpc('cycle_ouvrir', {
+        await ctx.supabase.rpc('cycle_consulter', {
           p_id_client: Number(row.IDVu),
           p_id_site:   idSite,
           p_id_user:   viewerId != null ? Number(viewerId) : null
         });
       }
-    } catch (e) { console.warn('[crs] cycle_ouvrir:', e && e.message); }
+    } catch (e) { console.warn('[crs] cycle_consulter:', e && e.message); }
     odSetSelectedClient(Object.assign({}, row, { full_count: state.totalCount }));
     triggerFicheClient(row.IDVu);
     navigateToFiche();
