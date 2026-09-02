@@ -147,6 +147,21 @@ OD.define('topnav', {
     setFicheTab(FICHE_TAB_DEFAULT);
     goPage(P.ficheClient);
   }
+  // Ouvre la fiche d'un client precis (apres un arbitrage) : on pose le client
+  // selectionne (variable + global + sessionStorage + evenement, comme la recherche),
+  // puis on navigue vers la fiche.
+  function odGoToClientFiche(idvu) {
+    if (idvu == null) return;
+    const obj = { IDVu: Number(idvu) };
+    try { wwLib.wwVariable.updateValue(VAR_CLIENT, obj); } catch (e) {}
+    try {
+      const w = (wwLib.getFrontWindow && wwLib.getFrontWindow()) || window;
+      w.__odSelectedClient = obj;
+      try { sessionStorage.setItem('od_selected_client', JSON.stringify(obj)); } catch (e2) {}
+      try { w.dispatchEvent(new Event('oropra-client-selected')); } catch (e2) {}
+    } catch (e) {}
+    openFicheClient();
+  }
   // Delco : relance l'embed externe pour réafficher le nombre après un (re)rendu de la nav.
   function kickDelco() {
     try { if (window.__delcoBadge && typeof window.__delcoBadge.refresh === 'function') window.__delcoBadge.refresh(); } catch (e) {}
@@ -795,6 +810,8 @@ OD.define('topnav', {
       if (error) throw error;
       // fiche_entrant = 'b' (créée), fiche_candidat = 'a' (existante)
       ARB.srcLabel = data.source_libelle || null;
+      ARB.type = data.type || 'doublon';
+      ARB.diff = data.champs_diff || null;
       ARB.detail = {
         id_file: ligne.id_file, score: ligne.score, detail: ligne.detail || {},
         a: data.fiche_candidat || {}, b: data.fiche_entrant || {}
@@ -806,9 +823,16 @@ OD.define('topnav', {
 
   function arbAnalyse(d) {
     const conflits = [], identiques = [];
+    // En mode « mise a jour », on ne presente QUE les champs signales divergents.
+    const majKeys = (ARB && ARB.type === 'maj' && ARB.diff) ? Object.keys(ARB.diff) : null;
     ARB_CHAMPS.forEach(function (pair) {
       const k = pair[0], lbl = pair[1];
       const va = arbVal(d.a, k), vb = arbVal(d.b, k);
+      if (majKeys) {
+        if (majKeys.indexOf(k) >= 0) conflits.push([k, lbl, va, vb]);
+        else if (va) identiques.push([k, lbl, va]);
+        return;
+      }
       if (va && vb && va.toLowerCase() === vb.toLowerCase()) identiques.push([k, lbl, va]);
       else if (!va && !vb) {}
       else conflits.push([k, lbl, va, vb]);
@@ -825,8 +849,12 @@ OD.define('topnav', {
   }
 
   function arbHead() {
+    const maj = (ARB && ARB.type === 'maj');
+    const title = maj ? 'Mise à jour BACS' : 'Arbitrage des doublons';
+    const sub = maj ? 'Le vendeur a modifié cette fiche dans BACS. Validez les changements.'
+                    : 'Deux fiches semblent désigner le même client. Vous tranchez.';
     return '<div class="od-arb-head"><div class="od-arb-ic">' + I_ARB.users + '</div>' +
-      '<div class="od-arb-htxt"><h1>Arbitrage des doublons</h1><p>Deux fiches semblent désigner le même client. Vous tranchez.</p></div>' +
+      '<div class="od-arb-htxt"><h1>' + title + '</h1><p>' + sub + '</p></div>' +
       '<button class="od-arb-x" data-arb-close>&times;</button></div>';
   }
   function arbRuban(reste) {
@@ -836,6 +864,10 @@ OD.define('topnav', {
       '<div class="od-arb-mini"><span><b>' + ARB.fus + '</b> fusionnés</span><span class="r"><b>' + ARB.rej + '</b> écartés</span></div></div>';
   }
   function arbMotif(d) {
+    if (ARB && ARB.type === 'maj') {
+      return '<div class="od-arb-mtf"><span class="od-arb-force moyen">Modifié dans BACS</span>' +
+        '<span class="sur">champs à valider</span></div>';
+    }
     const fort = (d.score >= 90);
     const sig = Object.keys(d.detail || {}).map(function (k) {
       const val = d.detail[k]; const cls = val > 0 ? 'pos' : 'neg';
@@ -897,9 +929,12 @@ OD.define('topnav', {
   }
 
   function arbActions(simple) {
+    const maj = (ARB && ARB.type === 'maj');
+    const bFus = maj ? 'Appliquer' : (simple ? 'Fusionner' : 'Fusionner ainsi');
+    const bRej = maj ? 'Garder One Data' : 'Pas un doublon';
     return '<div class="od-arb-act">' +
-      '<button class="od-arb-b fusion" data-arb="fusion"' + (ARB.busy ? ' disabled' : '') + '>' + I_ARB.check + '<span>' + (simple ? 'Fusionner' : 'Fusionner ainsi') + '</span></button>' +
-      '<button class="od-arb-b rejet" data-arb="rejet"' + (ARB.busy ? ' disabled' : '') + '>' + I_ARB.x + '<span>Pas un doublon</span></button>' +
+      '<button class="od-arb-b fusion" data-arb="fusion"' + (ARB.busy ? ' disabled' : '') + '>' + I_ARB.check + '<span>' + bFus + '</span></button>' +
+      '<button class="od-arb-b rejet" data-arb="rejet"' + (ARB.busy ? ' disabled' : '') + '>' + I_ARB.x + '<span>' + bRej + '</span></button>' +
       '<button class="od-arb-b report" data-arb="report"' + (ARB.busy ? ' disabled' : '') + '>' + I_ARB.clock + '<span>Plus tard</span></button></div>';
   }
   function arbVide() {
@@ -938,6 +973,7 @@ OD.define('topnav', {
   async function arbTrancher(action, d, conflits) {
     if (ARB.busy) return;
     ARB.busy = true;
+    let __arbData = null;
     const sb = arbSb(), uid = arbUserId();
     const carte = doc.getElementById('od-arb-carte');
     const anim = action === 'fusion' ? 'partir-fusion' : action === 'rejet' ? 'partir-rejet' : 'partir-report';
@@ -966,8 +1002,9 @@ OD.define('topnav', {
       } else {
         params = { p_id_file: d.id_file, p_decision: 'reporter', p_id_user: uid };
       }
-      const { error } = await sb.rpc('client_arbitrer', params);
-      if (error) throw error;
+      const res = await sb.rpc('client_arbitrer', params);
+      if (res.error) throw res.error;
+      __arbData = res.data;
     } catch (e) {
       ARB.busy = false;
       // afficher l'erreur sans perdre la carte
@@ -976,12 +1013,20 @@ OD.define('topnav', {
       return;
     }
 
-    if (action === 'fusion') ARB.fus++; else if (action === 'rejet') ARB.rej++;
+    // Validation (fusion / application) -> redirection vers la fiche client mise a jour.
+    if (action === 'fusion') {
+      ARB.fus++;
+      const cid = (__arbData && (__arbData.id_client != null ? __arbData.id_client : __arbData.survivant)) || (d.a && d.a.idvu);
+      arbClose();
+      if (cid != null) odGoToClientFiche(cid);
+      return;
+    }
+    if (action === 'rejet') ARB.rej++;
     if (carte) carte.classList.add(anim);
     setTimeout(function () {
       ARB.i++; ARB.detail = null; ARB.choix = {}; ARB.survivant = 'a'; ARB.busy = false;
       arbRender();
-    }, action === 'fusion' ? 480 : 430);
+    }, 430);
   }
 
   const I_ARB = {
