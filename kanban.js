@@ -170,6 +170,7 @@ OD.define('kanban', {
       maj: c.maj || c.updated_at || null,
       rpv_cde: c.rpv_cde != null ? Number(c.rpv_cde) : null,
       nb_versions: c.nb_versions != null ? Number(c.nb_versions) : 1,
+      veh_uniforme: c.veh_uniforme !== false,
       _moving: false
     }));
   }
@@ -507,11 +508,12 @@ OD.define('kanban', {
     if (c.vn_vo === 'VO' && c.vin) {
       h += '<div class="kc-veh"><span class="kc-vdot"></span><button type="button" class="kc-veh-link" data-vin="' + esc(c.vin) + '" title="Ouvrir la fiche VO">' + esc(c.vehicule || c.vin || '—') + '</button> <span class="kc-vt">VO</span></div>';
     } else {
-      h += '<div class="kc-veh"><span class="kc-vdot"></span>' + esc(c.vehicule || c.vin || '—') + (c.vn_vo ? ' <span class="kc-vt">' + esc(c.vn_vo) + '</span>' : '') + '</div>';
+      const vehTxt = (vnMulti && !c.veh_uniforme) ? 'Plusieurs modèles' : (c.vehicule || c.vin || '—');
+      h += '<div class="kc-veh"><span class="kc-vdot"></span>' + esc(vehTxt) + (c.vn_vo ? ' <span class="kc-vt">' + esc(c.vn_vo) + '</span>' : '') + '</div>';
     }
 
     h += '<div class="kc-row">' + (vnMulti
-      ? '<span class="kc-eur" style="font-size:12.5px;color:#7a98c5;font-weight:600">' + c.nb_versions + ' propositions</span>'
+      ? '<button type="button" data-vnchoose="' + c.id_propale_bdc + '" style="border:none;background:none;padding:0;font:inherit;cursor:pointer;font-size:12.5px;color:#2a5ea9;font-weight:700">' + c.nb_versions + ' propositions ▸</button>'
       : '<span class="kc-eur">' + eur(c.montant) + '</span>') + ageBadge(j) + '</div>';
 
     if (c.nb_versions > 1 && !vnMulti) {
@@ -522,7 +524,13 @@ OD.define('kanban', {
 
     h += '<div class="kc-actions">';
     if (isPdf) h += '<button class="kc-ic" data-pdf="' + c.id_propale_bdc + ':' + pdfType + '" data-maj="' + esc(c.maj || '') + '" title="PDF">' + ICON_PDF + '</button>';
-    if (c.status === 'propale' || c.status === 'draft') h += '<button class="kc-ic" data-modif="' + c.id_propale_bdc + '" title="Modifier">' + ICON_EDIT + '</button>';
+    if (c.status === 'propale' || c.status === 'draft') {
+      if (c.vn_vo === 'VN') {
+        if (!vnMulti) h += '<button class="kc-ic" data-modif="' + c.id_propale_bdc + '" title="Consulter">' + ICON_SEARCH + '</button>';
+      } else {
+        h += '<button class="kc-ic" data-modif="' + c.id_propale_bdc + '" title="Modifier">' + ICON_EDIT + '</button>';
+      }
+    }
     if (canArchive(c.status)) h += '<button class="kc-ic" data-archive="' + c.id_propale_bdc + '" title="Archiver">' + ICON_TRASH + '</button>';
     h += '<button class="kc-ic kc-move" data-menu="' + c.id_propale_bdc + '" title="Déplacer">' + ICON_MOVE + '</button>';
     h += '</div>';
@@ -2311,6 +2319,8 @@ OD.define('kanban', {
     const pdf = e.target.closest('[data-pdf]');
     if (pdf) { const [id, kind] = pdf.getAttribute('data-pdf').split(':'); pdfDoc(Number(id), kind, pdf.getAttribute('data-maj') || null); return; }
 
+    const vnch = e.target.closest('[data-vnchoose]');
+    if (vnch) { choisirQuoteVN(Number(vnch.getAttribute('data-vnchoose'))); return; }
     const mod = e.target.closest('[data-modif]');
     if (mod) { modifPropale(Number(mod.getAttribute('data-modif'))); return; }
 
@@ -2398,6 +2408,7 @@ OD.define('kanban', {
 
   const ICON_PDF = '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="12" y1="18" x2="12" y2="12"/><polyline points="9 15 12 18 15 15"/></svg>';
   const ICON_EDIT = '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>';
+  const ICON_SEARCH = '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>';
   const ICON_TRASH = '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6M14 11v6"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>';
   const ICON_MOVE = '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="5 9 2 12 5 15"/><polyline points="9 5 12 2 15 5"/><polyline points="15 19 12 22 9 19"/><polyline points="19 9 22 12 19 15"/><line x1="2" y1="12" x2="22" y2="12"/><line x1="12" y1="2" x2="12" y2="22"/></svg>';
 
