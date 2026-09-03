@@ -209,9 +209,11 @@
 
     // -- Récap (montants reflétés de BACS, pas de recalcul)
     const totalCmd = num(P.TotalProp) || num(P.MontantTTCEngagement);
+    const prixVeh  = totalCmd - optTotal - accTotal + remTotal; // le véhicule = le reste (assure un récap cohérent)
     const reprise  = num(P.ValeurReprise);
     const reste    = totalCmd - reprise;
     const sumRows = `
+      ${totalCmd ? `<div class="pv-sl"><span>Prix véhicule</span><b>${eur(prixVeh)}</b></div>` : ''}
       ${optTotal ? `<div class="pv-sl"><span>Options</span><b>+ ${eur(optTotal)}</b></div>` : ''}
       ${accTotal ? `<div class="pv-sl"><span>Accessoires</span><b>+ ${eur(accTotal)}</b></div>` : ''}
       ${remTotal ? `<div class="pv-sl minus"><span>Remises</span><b>− ${eur(remTotal)}</b></div>` : ''}
