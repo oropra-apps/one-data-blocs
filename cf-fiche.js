@@ -664,6 +664,7 @@ function render() {
   if (!soc) {
     body += '<div class="cf-section"><div class="cf-section-title">Préférences</div><div class="cf-grid">';
     body += fieldInput('Stop com', 'STOP_COM', 'checkbox');
+    body += '<div class="cf-field" style="display:flex;align-items:center"><button type="button" class="cf-btn cf-btn-ghost" data-cf-action="show-consent" style="padding:7px 12px">Consentements</button></div>';
     body += fieldInput('NPAI', 'NPAI', 'select', { options: npaiOptions.map(o => ({ value: o, label: o })), noPlaceholder: true });
     body += '</div></div>';
     body += '<div class="cf-section"><div class="cf-section-title">Profil</div><div class="cf-grid">';
@@ -702,10 +703,74 @@ function render() {
   }
 }
 
+async function openConsentModal() {
+  const idvu = state.client && state.client.IDVu;
+  if (idvu == null) return;
+  const cl = state.client || {};
+  const ov = doc.createElement('div');
+  ov.style.cssText = 'position:fixed;inset:0;z-index:3000;display:flex;align-items:flex-start;justify-content:center;padding:24px;background:rgba(31,74,133,.45);overflow-y:auto';
+  const modal = doc.createElement('div');
+  modal.style.cssText = 'background:#fff;border-radius:16px;width:100%;max-width:640px;box-shadow:0 30px 80px rgba(31,74,133,.35);margin:auto;position:relative;padding:22px;font-family:inherit;color:#1c2b45';
+  modal.innerHTML = '<div style="color:#7a98c5;padding:24px;text-align:center">Chargement des consentements…</div>';
+  ov.appendChild(modal); doc.body.appendChild(ov);
+  const fermer = function () { try { ov.remove(); } catch (e) {} };
+  ov.addEventListener('mousedown', function (e) { if (e.target === ov) fermer(); });
+
+  let rows = [];
+  try {
+    const r = await ctx.supabase.from('client_consentement').select('*').eq('id_client', Number(idvu));
+    rows = r.data || [];
+  } catch (e) {}
+
+  function find(marque, canal) { return rows.find(function (x) { return (x.marque || null) === marque && x.canal === canal; }); }
+  function fdate(d) { if (!d || String(d).slice(0, 4) === '1900') return '—'; try { return new Date(d).toLocaleDateString('fr-FR'); } catch (e) { return '—'; } }
+  function pastille(row) {
+    let lab, col;
+    if (!row) { lab = '—'; col = '#c9d3e0'; }
+    else if (row.autorise) { lab = 'Consenti'; col = '#2f8f77'; }
+    else if (row.date_decision == null) { lab = 'En attente'; col = '#9fb0c4'; }
+    else { lab = 'Refusé'; col = '#c63a3a'; }
+    return '<span style="display:inline-flex;align-items:center;gap:6px;font-weight:600;font-size:12.5px;color:' + col + '"><span style="width:9px;height:9px;border-radius:50%;background:' + col + '"></span>' + lab + '</span>';
+  }
+  function bloctel(row) { return row && row.autorise ? '<span style="color:#c63a3a;font-weight:700">Inscrit</span>' : '<span style="color:#2f8f77;font-weight:600">Libre</span>'; }
+
+  const canaux = [['emails', 'E-mails'], ['sms', 'SMS'], ['calls', 'Appels'], ['mailings', 'Courriers'], ['newsletters', 'Newsletters'], ['offers_events', 'Offres & événements'], ['reminders', 'Rappels'], ['market_research', 'Études de marché']];
+  const trs = canaux.map(function (c) {
+    return '<tr><td style="padding:7px 0;color:#5a7ba8;font-size:13px">' + c[1] + '</td>'
+      + '<td style="padding:7px 10px">' + pastille(find('toyota', c[0])) + '</td>'
+      + '<td style="padding:7px 10px">' + pastille(find('lexus', c[0])) + '</td></tr>';
+  }).join('');
+
+  const majs = rows.map(function (x) { return x.maj; }).filter(Boolean).sort();
+  const majMax = majs.length ? fdate(majs[majs.length - 1]) : '—';
+
+  modal.innerHTML =
+    '<button type="button" data-consent-close style="position:absolute;top:-12px;right:-12px;width:34px;height:34px;border-radius:50%;border:1.5px solid #e2eaf5;background:#fff;cursor:pointer;color:#7a98c5;font-size:16px;line-height:1;display:flex;align-items:center;justify-content:center;box-shadow:0 2px 8px rgba(31,74,133,.25)">✕</button>'
+    + '<div style="font-weight:800;color:#1f4a87;font-size:16px">Consentements RGPD</div>'
+    + '<div style="color:#9fb0c4;font-size:12px;margin:2px 0 16px">Reflétés de BACS — à jour au ' + majMax + '</div>'
+    + '<div style="display:flex;gap:26px;margin-bottom:16px;padding-bottom:14px;border-bottom:1px solid #eef3fa">'
+    + '<div><div style="font-size:10.5px;text-transform:uppercase;color:#7a98c5;letter-spacing:.04em">Bloctel fixe</div><div style="margin-top:3px">' + bloctel(find(null, 'bloctel_phone')) + '</div></div>'
+    + '<div><div style="font-size:10.5px;text-transform:uppercase;color:#7a98c5;letter-spacing:.04em">Bloctel mobile</div><div style="margin-top:3px">' + bloctel(find(null, 'bloctel_cell')) + '</div></div>'
+    + '</div>'
+    + '<table style="width:100%;border-collapse:collapse">'
+    + '<tr><td></td><th style="text-align:left;font-size:11px;text-transform:uppercase;color:#7a98c5;padding-bottom:6px">Toyota</th><th style="text-align:left;font-size:11px;text-transform:uppercase;color:#7a98c5;padding-bottom:6px">Lexus</th></tr>'
+    + trs
+    + '</table>'
+    + '<div style="display:flex;gap:26px;margin-top:16px;padding-top:14px;border-top:1px solid #eef3fa;font-size:12.5px">'
+    + '<div><div style="font-size:10.5px;text-transform:uppercase;color:#7a98c5">Rétention</div><div style="font-weight:600;margin-top:2px">' + fdate(cl.rgpd_retention_date) + '</div></div>'
+    + '<div><div style="font-size:10.5px;text-transform:uppercase;color:#7a98c5">Anonymisation</div><div style="font-weight:600;margin-top:2px">' + fdate(cl.rgpd_anonymisation_date) + '</div></div>'
+    + '<div><div style="font-size:10.5px;text-transform:uppercase;color:#7a98c5">Maj Bloctel</div><div style="font-weight:600;margin-top:2px">' + fdate(cl.bloctel_maj_date) + '</div></div>'
+    + '</div>'
+    + '<div style="font-size:11px;color:#9fb0c4;margin-top:14px;line-height:1.5">« En attente » : le client n’a pas encore répondu à la demande d’opt-in — ce n’est pas un refus. Consentements gérés dans BACS.</div>';
+  const cbtn = modal.querySelector('[data-consent-close]');
+  if (cbtn) cbtn.addEventListener('click', fermer);
+}
+
 function bindEvents() {
   const root = getRoot();
   if (!root) return;
   root.querySelectorAll('[data-cf-action="enter-edit"]').forEach(el => el.addEventListener('click', enterEdit));
+  root.querySelectorAll('[data-cf-action="show-consent"]').forEach(el => el.addEventListener('click', openConsentModal));
   root.querySelectorAll('[data-cf-action="cancel-edit"]').forEach(el => el.addEventListener('click', cancelEdit));
   root.querySelectorAll('[data-cf-action="save-edit"]').forEach(el => el.addEventListener('click', saveEdit));
   root.querySelectorAll('[data-cf-action="dismiss-duplicate"]').forEach(el => el.addEventListener('click', dismissDuplicate));
