@@ -221,8 +221,7 @@
 
     const bacsUrl = P.bacs_sf_id ? `https://${BACS_DOMAIN}/bacs2/s/quote/${esc(P.bacs_sf_id)}` : null;
     const actions = `
-      ${bacsUrl ? `<a class="pv-btn pv-btn-blue" href="${bacsUrl}" target="_blank" rel="noopener">Ouvrir dans BACS ↗</a>` : ''}
-      <button class="pv-btn pv-btn-ghost" data-act="retour">Retour au kanban</button>`;
+      ${bacsUrl ? `<a class="pv-btn pv-btn-blue" href="${bacsUrl}" target="_blank" rel="noopener">Ouvrir dans BACS ↗</a>` : ''}`;
 
     root.innerHTML = `<style>${CSS}</style><div class="pv-wrap">
       <div class="pv-top">
@@ -249,11 +248,6 @@
       </div>
     </div>`;
 
-    const retour = root.querySelector('[data-act="retour"]');
-    if (retour) retour.addEventListener('click', () => {
-      if (ctx && typeof ctx.onClose === 'function') { ctx.onClose(); return; }
-      try { const w = fwin(); if (w.history && w.history.length > 1) w.history.back(); } catch (e) {}
-    });
   }
 
   // ---- Boot -----------------------------------------------------------------
