@@ -60,7 +60,7 @@ OD.define('kanban', {
   const PATH_LISTE_VO = '/fr/vo-liste';
   const PAGE_LISTE_VO = '188b0f0b-5e80-4a77-a856-26469b08b614';
   // Éditeur VN (reflet BACS) : ouvert en surcouche, chargé comme oropra-doublons (script + global).
-  const PROPALE_VN_URL = 'https://cdn.jsdelivr.net/gh/oropra-apps/one-data-blocs@main/propale-vn.js';
+  const PROPALE_VN_URL = 'https://cdn.jsdelivr.net/gh/oropra-apps/one-data-blocs@6714722292b22ef9d637ee7fbb6b5208626922a3/propale-vn.js';
   function chargerPropaleVN() {
     if (window.oropraPropaleVN) return Promise.resolve();
     if (window.__oropraPropaleVNChargement) return window.__oropraPropaleVNChargement;
