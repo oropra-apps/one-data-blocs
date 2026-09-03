@@ -59,6 +59,17 @@ OD.define('kanban', {
   const PATH_PROPALE_UPDATE = '/fr/propo-vo-update';
   const PATH_LISTE_VO = '/fr/vo-liste';
   const PAGE_LISTE_VO = '188b0f0b-5e80-4a77-a856-26469b08b614';
+  // Éditeur VN (reflet BACS) : ouvert en surcouche, chargé comme oropra-doublons (script + global).
+  const PROPALE_VN_URL = 'https://cdn.jsdelivr.net/gh/oropra-apps/one-data-blocs@main/propale-vn.js';
+  function chargerPropaleVN() {
+    if (window.oropraPropaleVN) return Promise.resolve();
+    if (window.__oropraPropaleVNChargement) return window.__oropraPropaleVNChargement;
+    window.__oropraPropaleVNChargement = new Promise((resolve, reject) => {
+      const sc = document.createElement('script'); sc.src = PROPALE_VN_URL; sc.async = true;
+      sc.onload = () => resolve(); sc.onerror = () => reject(new Error('propale-vn.js introuvable'));
+      document.head.appendChild(sc);
+    }); return window.__oropraPropaleVNChargement;
+  }
 
   function inEditor() { try { return window.self !== window.top; } catch (e) { return true; } }
   function kanGoTo(pageId, path) {
@@ -691,7 +702,37 @@ OD.define('kanban', {
   // ── Navigation : propale update ──────────────────────────────────────────
   function modifPropale(idPropale) {
     try { wwLib.wwVariable.updateValue(VAR_ID_PROPALE, Number(idPropale)); } catch (e) { }
+    const c = findCard(idPropale);
+    if (c && String(c.vn_vo || '').toUpperCase() === 'VN') { ouvrirEditeurVN(idPropale); return; }
     kanGoTo(PAGE_PROPALE_UPDATE, PATH_PROPALE_UPDATE);
+  }
+
+  // Éditeur VN en surcouche : charge propale-vn.js (script + global) et appelle son mount(anchor, ctx).
+  async function ouvrirEditeurVN(idPropale) {
+    const d = doc;
+    const prev = d.getElementById('vn-edit-overlay'); if (prev) prev.remove();
+    const ov = d.createElement('div');
+    ov.id = 'vn-edit-overlay';
+    ov.style.cssText = 'position:fixed;inset:0;z-index:2000;display:flex;align-items:flex-start;justify-content:center;padding:20px;background:rgba(31,74,133,.45);overflow-y:auto';
+    const modal = d.createElement('div');
+    modal.style.cssText = 'background:#fff;border-radius:18px;width:100%;max-width:1220px;box-shadow:0 30px 80px rgba(31,74,133,.35);margin:auto;position:relative;padding:20px';
+    const close = d.createElement('button');
+    close.type = 'button'; close.textContent = '\u2715';
+    close.style.cssText = 'position:absolute;top:12px;right:12px;width:34px;height:34px;border-radius:50%;border:1.5px solid #e2eaf5;background:#fff;cursor:pointer;color:#7a98c5;font-size:15px;z-index:10';
+    const anchor = d.createElement('div');
+    const fermer = () => { try { ov.remove(); } catch (e) {} };
+    close.addEventListener('click', fermer);
+    ov.addEventListener('mousedown', e => { if (e.target === ov) fermer(); });
+    modal.appendChild(close); modal.appendChild(anchor); ov.appendChild(modal); d.body.appendChild(ov);
+    anchor.innerHTML = '<div style="padding:36px;color:#7a98c5;text-align:center">Chargement de la proposition\u2026</div>';
+    try {
+      await chargerPropaleVN();
+      const m = window.oropraPropaleVN;
+      if (!m || !m.mount) throw new Error('module VN indisponible');
+      await m.mount(anchor, Object.assign({}, ctx, { onClose: fermer }));
+    } catch (e) {
+      anchor.innerHTML = '<div style="padding:24px;color:#e24b4a;font-weight:600">Impossible de charger l\'éditeur VN : ' + ((e && e.message) || e) + '</div>';
+    }
   }
 
   // ── Navigation : fiche client onglet P.Com ────────────────────────────────
