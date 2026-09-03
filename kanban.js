@@ -492,6 +492,7 @@ OD.define('kanban', {
 
   function renderCard(c) {
     const vt = c.vn_vo === 'VN' ? 'vn' : (c.vn_vo === 'VO' ? 'vo' : 'na');
+    const vnMulti = (c.vn_vo === 'VN' && c.status === 'draft' && c.nb_versions > 1);
     const j = ageJours(c.maj);
     const isPdf = (c.status === 'propale' || c.status === 'bdc' || c.status === 'win');
     const pdfType = (c.status === 'propale') ? 'propale' : 'bdc';
@@ -509,9 +510,11 @@ OD.define('kanban', {
       h += '<div class="kc-veh"><span class="kc-vdot"></span>' + esc(c.vehicule || c.vin || '—') + (c.vn_vo ? ' <span class="kc-vt">' + esc(c.vn_vo) + '</span>' : '') + '</div>';
     }
 
-    h += '<div class="kc-row"><span class="kc-eur">' + eur(c.montant) + '</span>' + ageBadge(j) + '</div>';
+    h += '<div class="kc-row">' + (vnMulti
+      ? '<span class="kc-eur" style="font-size:12.5px;color:#7a98c5;font-weight:600">' + c.nb_versions + ' propositions</span>'
+      : '<span class="kc-eur">' + eur(c.montant) + '</span>') + ageBadge(j) + '</div>';
 
-    if (c.nb_versions > 1) {
+    if (c.nb_versions > 1 && !vnMulti) {
       const open = state.openVersions === c.id_propale_bdc;
       h += '<button class="kc-vers" data-versions="' + c.id_propale_bdc + '">' + c.nb_versions + ' versions ' + (open ? '▾' : '▸') + '</button>';
       if (open) h += renderVersionList(c);
@@ -701,10 +704,60 @@ OD.define('kanban', {
 
   // ── Navigation : propale update ──────────────────────────────────────────
   function modifPropale(idPropale) {
-    try { wwLib.wwVariable.updateValue(VAR_ID_PROPALE, Number(idPropale)); } catch (e) { }
     const c = findCard(idPropale);
-    if (c && String(c.vn_vo || '').toUpperCase() === 'VN') { ouvrirEditeurVN(idPropale); return; }
+    if (c && String(c.vn_vo || '').toUpperCase() === 'VN') {
+      if (c.status === 'draft' && c.nb_versions > 1) { choisirQuoteVN(idPropale); return; }
+      try { wwLib.wwVariable.updateValue(VAR_ID_PROPALE, Number(idPropale)); } catch (e) { }
+      ouvrirEditeurVN(idPropale); return;
+    }
+    try { wwLib.wwVariable.updateValue(VAR_ID_PROPALE, Number(idPropale)); } catch (e) { }
     kanGoTo(PAGE_PROPALE_UPDATE, PATH_PROPALE_UPDATE);
+  }
+
+  // Plusieurs Quotes dans l'affaire : modale de choix, puis éditeur VN du Quote choisi.
+  async function choisirQuoteVN(idPropale) {
+    let quotes = [];
+    try { const r = await ctx.supabase.rpc('get_affaire_quotes', { p_id_propale_bdc: Number(idPropale) }); quotes = (r && r.data) || []; } catch (e) {}
+    if (quotes.length <= 1) {
+      const only = quotes.length ? quotes[0].id_propale_bdc : idPropale;
+      try { wwLib.wwVariable.updateValue(VAR_ID_PROPALE, Number(only)); } catch (e) {}
+      ouvrirEditeurVN(only); return;
+    }
+    const d = doc;
+    const prev = d.getElementById('vn-choose-overlay'); if (prev) prev.remove();
+    const ov = d.createElement('div');
+    ov.id = 'vn-choose-overlay';
+    ov.style.cssText = 'position:fixed;inset:0;z-index:2000;display:flex;align-items:flex-start;justify-content:center;padding:24px;background:rgba(31,74,133,.45);overflow-y:auto';
+    const fermer = () => { try { ov.remove(); } catch (e) {} };
+    ov.addEventListener('mousedown', e => { if (e.target === ov) fermer(); });
+    const rows = quotes.map(q => {
+      const prix = (q.montant != null && q.montant !== '') ? eur(q.montant) : '—';
+      const img = q.photo
+        ? '<img src="' + esc(q.photo) + '" style="width:88px;height:54px;object-fit:contain;border-radius:8px;background:#eef2f7;flex:0 0 auto" onerror="this.remove()">'
+        : '<div style="width:88px;height:54px;border-radius:8px;background:#eef2f7;flex:0 0 auto"></div>';
+      return '<button type="button" data-vnq="' + q.id_propale_bdc + '" style="display:flex;gap:14px;align-items:center;width:100%;text-align:left;border:1px solid #e3edf9;background:#fff;border-radius:12px;padding:12px 14px;cursor:pointer;font:inherit">'
+        + img
+        + '<div style="flex:1"><div style="font-weight:800;color:#1f2b45">' + esc(q.vehicule || '\u2014') + '</div>'
+        + '<div style="color:#7a98c5;font-size:12.5px;margin-top:2px">' + esc(q.couleur || '') + '</div></div>'
+        + '<div style="font-weight:800;color:#2a5ea9;white-space:nowrap">' + prix + '</div></button>';
+    }).join('');
+    const modal = d.createElement('div');
+    modal.style.cssText = 'background:#fff;border-radius:18px;width:100%;max-width:560px;box-shadow:0 30px 80px rgba(31,74,133,.35);margin:auto;position:relative;padding:20px;font-family:inherit';
+    modal.innerHTML = '<div style="font-weight:800;color:#1f4a87;font-size:15px;margin-bottom:4px">Plusieurs propositions</div>'
+      + '<div style="color:#7a98c5;font-size:13px;margin-bottom:14px">Choisissez la proposition \u00e0 consulter.</div>'
+      + '<div style="display:flex;flex-direction:column;gap:10px">' + rows + '</div>';
+    const close = d.createElement('button');
+    close.type = 'button'; close.textContent = '\u2715';
+    close.style.cssText = 'position:absolute;top:-12px;right:-12px;width:34px;height:34px;border-radius:50%;border:1.5px solid #e2eaf5;background:#fff;cursor:pointer;color:#7a98c5;font-size:16px;line-height:1;display:flex;align-items:center;justify-content:center;box-shadow:0 2px 8px rgba(31,74,133,.25);z-index:20';
+    close.addEventListener('click', fermer);
+    modal.appendChild(close); ov.appendChild(modal); d.body.appendChild(ov);
+    modal.addEventListener('click', e => {
+      const b = e.target.closest('[data-vnq]'); if (!b) return;
+      const chosen = Number(b.getAttribute('data-vnq'));
+      fermer();
+      try { wwLib.wwVariable.updateValue(VAR_ID_PROPALE, chosen); } catch (e2) {}
+      ouvrirEditeurVN(chosen);
+    });
   }
 
   // Éditeur VN en surcouche : charge propale-vn.js (script + global) et appelle son mount(anchor, ctx).
