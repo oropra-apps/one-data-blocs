@@ -718,7 +718,7 @@ OD.define('kanban', {
     modal.style.cssText = 'background:#fff;border-radius:18px;width:100%;max-width:1220px;box-shadow:0 30px 80px rgba(31,74,133,.35);margin:auto;position:relative;padding:20px';
     const close = d.createElement('button');
     close.type = 'button'; close.textContent = '\u2715';
-    close.style.cssText = 'position:absolute;top:12px;right:12px;width:34px;height:34px;border-radius:50%;border:1.5px solid #e2eaf5;background:#fff;cursor:pointer;color:#7a98c5;font-size:15px;z-index:10';
+    close.style.cssText = 'position:absolute;top:-12px;right:-12px;width:34px;height:34px;border-radius:50%;border:1.5px solid #e2eaf5;background:#fff;cursor:pointer;color:#7a98c5;font-size:16px;line-height:1;display:flex;align-items:center;justify-content:center;padding:0;box-shadow:0 2px 8px rgba(31,74,133,.25);z-index:20';
     const anchor = d.createElement('div');
     const fermer = () => { try { ov.remove(); } catch (e) {} };
     close.addEventListener('click', fermer);
@@ -730,6 +730,8 @@ OD.define('kanban', {
       const m = window.oropraPropaleVN;
       if (!m || !m.mount) throw new Error('module VN indisponible');
       await m.mount(anchor, Object.assign({}, ctx, { onClose: fermer }));
+      // Clic sur "Ouvrir dans BACS" (nouvel onglet) : on referme la surcouche.
+      anchor.addEventListener('click', e => { const a = e.target.closest('a[target="_blank"]'); if (a) fermer(); });
     } catch (e) {
       anchor.innerHTML = '<div style="padding:24px;color:#e24b4a;font-weight:600">Impossible de charger l\'éditeur VN : ' + ((e && e.message) || e) + '</div>';
     }
