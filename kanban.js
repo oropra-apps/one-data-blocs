@@ -60,7 +60,7 @@ OD.define('kanban', {
   const PATH_LISTE_VO = '/fr/vo-liste';
   const PAGE_LISTE_VO = '188b0f0b-5e80-4a77-a856-26469b08b614';
   // Éditeur VN (reflet BACS) : ouvert en surcouche, chargé comme oropra-doublons (script + global).
-  const PROPALE_VN_URL = 'https://cdn.jsdelivr.net/gh/oropra-apps/one-data-blocs@6714722292b22ef9d637ee7fbb6b5208626922a3/propale-vn.js';
+  const PROPALE_VN_URL = 'https://cdn.jsdelivr.net/gh/oropra-apps/one-data-blocs@d9068ea41e5bf7964b640c6bd789fa6cdf489695/propale-vn.js';
   function chargerPropaleVN() {
     if (window.oropraPropaleVN) return Promise.resolve();
     if (window.__oropraPropaleVNChargement) return window.__oropraPropaleVNChargement;
@@ -751,7 +751,7 @@ OD.define('kanban', {
     }).join('');
     const modal = d.createElement('div');
     modal.style.cssText = 'background:#fff;border-radius:18px;width:100%;max-width:560px;box-shadow:0 30px 80px rgba(31,74,133,.35);margin:auto;position:relative;padding:20px;font-family:inherit';
-    modal.innerHTML = '<div style="font-weight:800;color:#1f4a87;font-size:15px;margin-bottom:4px">Plusieurs propositions</div>'
+    modal.innerHTML = '<div style="font-weight:800;color:#1f4a87;font-size:15px;margin-bottom:4px">' + quotes.length + ' propositions</div>'
       + '<div style="color:#7a98c5;font-size:13px;margin-bottom:14px">Choisissez la proposition \u00e0 consulter.</div>'
       + '<div style="display:flex;flex-direction:column;gap:10px">' + rows + '</div>';
     const close = d.createElement('button');
