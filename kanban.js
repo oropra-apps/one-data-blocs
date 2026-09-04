@@ -59,6 +59,17 @@ OD.define('kanban', {
   const PATH_PROPALE_UPDATE = '/fr/propo-vo-update';
   const PATH_LISTE_VO = '/fr/vo-liste';
   const PAGE_LISTE_VO = '188b0f0b-5e80-4a77-a856-26469b08b614';
+  // Éditeur VN (reflet BACS) : ouvert en surcouche, chargé comme oropra-doublons.
+  const PROPALE_VN_URL = 'https://cdn.jsdelivr.net/gh/oropra-apps/one-data-blocs@d9068ea41e5bf7964b640c6bd789fa6cdf489695/propale-vn.js';
+  function chargerPropaleVN() {
+    if (window.oropraPropaleVN) return Promise.resolve();
+    if (window.__oropraPropaleVNChargement) return window.__oropraPropaleVNChargement;
+    window.__oropraPropaleVNChargement = new Promise((resolve, reject) => {
+      const sc = document.createElement('script'); sc.src = PROPALE_VN_URL; sc.async = true;
+      sc.onload = () => resolve(); sc.onerror = () => reject(new Error('propale-vn.js introuvable'));
+      document.head.appendChild(sc);
+    }); return window.__oropraPropaleVNChargement;
+  }
 
   function inEditor() { try { return window.self !== window.top; } catch (e) { return true; } }
   function kanGoTo(pageId, path) {
@@ -160,6 +171,7 @@ OD.define('kanban', {
       maj: c.maj || c.updated_at || null,
       rpv_cde: c.rpv_cde != null ? Number(c.rpv_cde) : null,
       nb_versions: c.nb_versions != null ? Number(c.nb_versions) : 1,
+      veh_uniforme: c.veh_uniforme !== false,
       _moving: false
     }));
   }
@@ -482,6 +494,7 @@ OD.define('kanban', {
 
   function renderCard(c) {
     const vt = c.vn_vo === 'VN' ? 'vn' : (c.vn_vo === 'VO' ? 'vo' : 'na');
+    const vnMulti = (c.vn_vo === 'VN' && c.status === 'draft' && c.nb_versions > 1);
     const j = ageJours(c.maj);
     const isPdf = (c.status === 'propale' || c.status === 'bdc' || c.status === 'win');
     const pdfType = (c.status === 'propale') ? 'propale' : 'bdc';
@@ -499,9 +512,11 @@ OD.define('kanban', {
       h += '<div class="kc-veh"><span class="kc-vdot"></span>' + esc(c.vehicule || c.vin || '—') + (c.vn_vo ? ' <span class="kc-vt">' + esc(c.vn_vo) + '</span>' : '') + '</div>';
     }
 
-    h += '<div class="kc-row"><span class="kc-eur">' + eur(c.montant) + '</span>' + ageBadge(j) + '</div>';
+    h += '<div class="kc-row">' + (vnMulti
+      ? '<button type="button" data-vnchoose="' + c.id_propale_bdc + '" style="border:none;background:none;padding:0;font:inherit;cursor:pointer;font-size:12.5px;color:#2a5ea9;font-weight:700">' + c.nb_versions + ' propositions \u25b8</button>'
+      : '<span class="kc-eur">' + eur(c.montant) + '</span>') + ageBadge(j) + '</div>';
 
-    if (c.nb_versions > 1) {
+    if (c.nb_versions > 1 && !vnMulti) {
       const open = state.openVersions === c.id_propale_bdc;
       h += '<button class="kc-vers" data-versions="' + c.id_propale_bdc + '">' + c.nb_versions + ' versions ' + (open ? '▾' : '▸') + '</button>';
       if (open) h += renderVersionList(c);
@@ -509,7 +524,13 @@ OD.define('kanban', {
 
     h += '<div class="kc-actions">';
     if (isPdf) h += '<button class="kc-ic" data-pdf="' + c.id_propale_bdc + ':' + pdfType + '" data-maj="' + esc(c.maj || '') + '" title="PDF">' + ICON_PDF + '</button>';
-    if (c.status === 'propale' || c.status === 'draft') h += '<button class="kc-ic" data-modif="' + c.id_propale_bdc + '" title="Modifier">' + ICON_EDIT + '</button>';
+    if (c.status === 'propale' || c.status === 'draft') {
+      if (c.vn_vo === 'VN') {
+        if (!vnMulti) h += '<button class="kc-ic" data-modif="' + c.id_propale_bdc + '" title="Consulter">' + ICON_SEARCH_VN + '</button>';
+      } else {
+        h += '<button class="kc-ic" data-modif="' + c.id_propale_bdc + '" title="Modifier">' + ICON_EDIT + '</button>';
+      }
+    }
     if (canArchive(c.status)) h += '<button class="kc-ic" data-archive="' + c.id_propale_bdc + '" title="Archiver">' + ICON_TRASH + '</button>';
     h += '<button class="kc-ic kc-move" data-menu="' + c.id_propale_bdc + '" title="Déplacer">' + ICON_MOVE + '</button>';
     h += '</div>';
@@ -691,8 +712,89 @@ OD.define('kanban', {
 
   // ── Navigation : propale update ──────────────────────────────────────────
   function modifPropale(idPropale) {
+    const c = findCard(idPropale);
+    if (c && String(c.vn_vo || '').toUpperCase() === 'VN') {
+      if (c.status === 'draft' && c.nb_versions > 1) { choisirQuoteVN(idPropale); return; }
+      try { wwLib.wwVariable.updateValue(VAR_ID_PROPALE, Number(idPropale)); } catch (e) { }
+      ouvrirEditeurVN(idPropale); return;
+    }
     try { wwLib.wwVariable.updateValue(VAR_ID_PROPALE, Number(idPropale)); } catch (e) { }
     kanGoTo(PAGE_PROPALE_UPDATE, PATH_PROPALE_UPDATE);
+  }
+
+  // Éditeur VN en surcouche : charge propale-vn.js (script + global) et monte le module.
+  async function ouvrirEditeurVN(idPropale) {
+    const d = doc;
+    const prev = d.getElementById('vn-edit-overlay'); if (prev) prev.remove();
+    const ov = d.createElement('div');
+    ov.id = 'vn-edit-overlay';
+    ov.style.cssText = 'position:fixed;inset:0;z-index:2000;display:flex;align-items:flex-start;justify-content:center;padding:20px;background:rgba(31,74,133,.45);overflow-y:auto';
+    const modal = d.createElement('div');
+    modal.style.cssText = 'background:#fff;border-radius:18px;width:100%;max-width:1220px;box-shadow:0 30px 80px rgba(31,74,133,.35);margin:auto;position:relative;padding:20px';
+    const close = d.createElement('button');
+    close.type = 'button'; close.textContent = '\u2715';
+    close.style.cssText = 'position:absolute;top:-12px;right:-12px;width:34px;height:34px;border-radius:50%;border:1.5px solid #e2eaf5;background:#fff;cursor:pointer;color:#7a98c5;font-size:16px;line-height:1;display:flex;align-items:center;justify-content:center;padding:0;box-shadow:0 2px 8px rgba(31,74,133,.25);z-index:20';
+    const anchor = d.createElement('div');
+    const fermer = () => { try { ov.remove(); } catch (e) {} };
+    close.addEventListener('click', fermer);
+    ov.addEventListener('mousedown', e => { if (e.target === ov) fermer(); });
+    modal.appendChild(close); modal.appendChild(anchor); ov.appendChild(modal); d.body.appendChild(ov);
+    anchor.innerHTML = '<div style="padding:36px;color:#7a98c5;text-align:center">Chargement de la proposition\u2026</div>';
+    try {
+      await chargerPropaleVN();
+      const m = window.oropraPropaleVN;
+      if (!m || !m.mount) throw new Error('module VN indisponible');
+      await m.mount(anchor, Object.assign({}, ctx, { onClose: fermer }));
+      anchor.addEventListener('click', e => { const a = e.target.closest('a[target="_blank"]'); if (a) fermer(); });
+    } catch (e) {
+      anchor.innerHTML = '<div style="padding:24px;color:#e24b4a;font-weight:600">Impossible de charger l\'\u00e9diteur VN : ' + ((e && e.message) || e) + '</div>';
+    }
+  }
+
+  // Plusieurs Quotes dans l'affaire : modale de choix, puis éditeur VN du Quote choisi.
+  async function choisirQuoteVN(idPropale) {
+    let quotes = [];
+    try { const r = await ctx.supabase.rpc('get_affaire_quotes', { p_id_propale_bdc: Number(idPropale) }); quotes = (r && r.data) || []; } catch (e) {}
+    if (quotes.length <= 1) {
+      const only = quotes.length ? quotes[0].id_propale_bdc : idPropale;
+      try { wwLib.wwVariable.updateValue(VAR_ID_PROPALE, Number(only)); } catch (e) {}
+      ouvrirEditeurVN(only); return;
+    }
+    const d = doc;
+    const prev = d.getElementById('vn-choose-overlay'); if (prev) prev.remove();
+    const ov = d.createElement('div');
+    ov.id = 'vn-choose-overlay';
+    ov.style.cssText = 'position:fixed;inset:0;z-index:2000;display:flex;align-items:flex-start;justify-content:center;padding:24px;background:rgba(31,74,133,.45);overflow-y:auto';
+    const fermer = () => { try { ov.remove(); } catch (e) {} };
+    ov.addEventListener('mousedown', e => { if (e.target === ov) fermer(); });
+    const rows = quotes.map(q => {
+      const prix = (q.montant != null && q.montant !== '') ? eur(q.montant) : '\u2014';
+      const img = q.photo
+        ? '<img src="' + esc(q.photo) + '" style="width:88px;height:54px;object-fit:contain;border-radius:8px;background:#eef2f7;flex:0 0 auto" onerror="this.remove()">'
+        : '<div style="width:88px;height:54px;border-radius:8px;background:#eef2f7;flex:0 0 auto"></div>';
+      return '<button type="button" data-vnq="' + q.id_propale_bdc + '" style="display:flex;gap:14px;align-items:center;width:100%;text-align:left;border:1px solid #e3edf9;background:#fff;border-radius:12px;padding:12px 14px;cursor:pointer;font:inherit">'
+        + img
+        + '<div style="flex:1"><div style="font-weight:800;color:#1f2b45">' + esc(q.vehicule || '\u2014') + '</div>'
+        + '<div style="color:#7a98c5;font-size:12.5px;margin-top:2px">' + esc(q.couleur || '') + '</div></div>'
+        + '<div style="font-weight:800;color:#2a5ea9;white-space:nowrap">' + prix + '</div></button>';
+    }).join('');
+    const modal = d.createElement('div');
+    modal.style.cssText = 'background:#fff;border-radius:18px;width:100%;max-width:560px;box-shadow:0 30px 80px rgba(31,74,133,.35);margin:auto;position:relative;padding:20px;font-family:inherit';
+    modal.innerHTML = '<div style="font-weight:800;color:#1f4a87;font-size:15px;margin-bottom:4px">' + quotes.length + ' propositions</div>'
+      + '<div style="color:#7a98c5;font-size:13px;margin-bottom:14px">Choisissez la proposition \u00e0 consulter.</div>'
+      + '<div style="display:flex;flex-direction:column;gap:10px">' + rows + '</div>';
+    const close = d.createElement('button');
+    close.type = 'button'; close.textContent = '\u2715';
+    close.style.cssText = 'position:absolute;top:-12px;right:-12px;width:34px;height:34px;border-radius:50%;border:1.5px solid #e2eaf5;background:#fff;cursor:pointer;color:#7a98c5;font-size:16px;line-height:1;display:flex;align-items:center;justify-content:center;padding:0;box-shadow:0 2px 8px rgba(31,74,133,.25);z-index:20';
+    close.addEventListener('click', fermer);
+    modal.appendChild(close); ov.appendChild(modal); d.body.appendChild(ov);
+    modal.addEventListener('click', e => {
+      const b = e.target.closest('[data-vnq]'); if (!b) return;
+      const chosen = Number(b.getAttribute('data-vnq'));
+      fermer();
+      try { wwLib.wwVariable.updateValue(VAR_ID_PROPALE, chosen); } catch (e2) {}
+      ouvrirEditeurVN(chosen);
+    });
   }
 
   // ── Navigation : fiche client onglet P.Com ────────────────────────────────
@@ -2216,6 +2318,8 @@ OD.define('kanban', {
     const pdf = e.target.closest('[data-pdf]');
     if (pdf) { const [id, kind] = pdf.getAttribute('data-pdf').split(':'); pdfDoc(Number(id), kind, pdf.getAttribute('data-maj') || null); return; }
 
+    const vnch = e.target.closest('[data-vnchoose]');
+    if (vnch) { choisirQuoteVN(Number(vnch.getAttribute('data-vnchoose'))); return; }
     const mod = e.target.closest('[data-modif]');
     if (mod) { modifPropale(Number(mod.getAttribute('data-modif'))); return; }
 
@@ -2303,6 +2407,7 @@ OD.define('kanban', {
 
   const ICON_PDF = '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="12" y1="18" x2="12" y2="12"/><polyline points="9 15 12 18 15 15"/></svg>';
   const ICON_EDIT = '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>';
+  const ICON_SEARCH_VN = '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>';
   const ICON_TRASH = '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6M14 11v6"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>';
   const ICON_MOVE = '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="5 9 2 12 5 15"/><polyline points="9 5 12 2 15 5"/><polyline points="15 19 12 22 9 19"/><polyline points="19 9 22 12 19 15"/><line x1="2" y1="12" x2="22" y2="12"/><line x1="12" y1="2" x2="12" y2="22"/></svg>';
 
