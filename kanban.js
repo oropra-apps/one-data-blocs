@@ -198,9 +198,11 @@ OD.define('kanban', {
   }
 
   async function applyBusSite(siteId) {
-    if (perimMode() !== 'chef') return;
     const id = siteId != null ? Number(siteId) : null;
     if (String(state.busSite) === String(id)) return;
+    // Hors mode chef, le sélecteur de site doit AUSSI filtrer les cartes : on
+    // mémorise le site et on recharge (sans toucher à la liste des vendeurs).
+    if (perimMode() !== 'chef') { state.busSite = id; loadData(); return; }
     state.busSite = id; state.vendeurs = null; state.vendeurId = null; state.vendeurName = '';
     state.vendeurSearch = ''; state.selOpen = false; state.openVersions = null; state.versionsData = {};
     if (id == null) { state.cards = []; render(); return; }
