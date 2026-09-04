@@ -2572,7 +2572,15 @@ OD.define('kanban', {
     tries = tries || 0;
     const b = siteBus();
     if (!b) { if (tries < 120) setTimeout(() => bindKanBus(tries + 1), 250); return; }
-    if (!window.__kanBusBound) { window.__kanBusBound = true; try { b.onChange(({ siteId }) => applyBusSite(siteId)); } catch (e) { } }
+    // L'abonnement au sélecteur de site ne se prend qu'une fois, mais le module est
+    // remonté à chaque navigation : on garde un pointeur vers l'instance COURANTE,
+    // sinon l'abonnement continue d'alimenter une instance morte et le kanban ne
+    // réagit plus au changement de site.
+    window.__kanApplyBusSite = applyBusSite;
+    if (!window.__kanBusBound) {
+      window.__kanBusBound = true;
+      try { b.onChange(({ siteId }) => { if (window.__kanApplyBusSite) window.__kanApplyBusSite(siteId); }); } catch (e) { }
+    }
     try { applyBusSite(b.getSiteId()); } catch (e) { }
   })();
 
