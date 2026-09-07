@@ -174,6 +174,7 @@ OD.define('kanban', {
       veh_uniforme: c.veh_uniforme !== false,
       id_affaire_bacs: c.id_affaire_bacs || null,
       bacs_sf_id: c.bacs_sf_id || null,
+      nature: c.nature || null,
       _moving: false
     }));
   }
@@ -498,7 +499,11 @@ OD.define('kanban', {
 
   function renderCard(c) {
     const vt = c.vn_vo === 'VN' ? 'vn' : (c.vn_vo === 'VO' ? 'vo' : 'na');
-    const vnMulti = (c.vn_vo === 'VN' && c.status === 'draft' && c.nb_versions > 1);
+    // Plusieurs documents de meme nature dans l'affaire : on affiche leur nombre
+    // et on ouvre la liste au clic, plutot qu'un contenu arbitraire.
+    const vnMulti = (c.vn_vo === 'VN' && c.nb_versions > 1 &&
+                     (c.nature === 'simulation' || c.nature === 'commande'));
+    const motMulti = (c.nature === 'commande') ? 'commandes' : 'propositions';
     const j = ageJours(c.maj);
     const isPdf = (c.status === 'propale' || c.status === 'bdc' || c.status === 'win');
     const pdfType = (c.status === 'propale') ? 'propale' : 'bdc';
@@ -516,8 +521,12 @@ OD.define('kanban', {
       h += '<div class="kc-veh"><span class="kc-vdot"></span>' + esc(c.vehicule || c.vin || '—') + (c.vn_vo ? ' <span class="kc-vt">' + esc(c.vn_vo) + '</span>' : '') + '</div>';
     }
 
+    // Commandes : la somme a un sens (ventes reelles) et s'affiche a cote du
+    // nombre. Simulations : ce sont des alternatives, aucun total n'est affiche.
     h += '<div class="kc-row">' + (vnMulti
-      ? '<button type="button" data-vnchoose="' + c.id_propale_bdc + '" style="border:none;background:none;padding:0;font:inherit;cursor:pointer;font-size:12.5px;color:#2a5ea9;font-weight:700">' + c.nb_versions + ' propositions \u25b8</button>'
+      ? '<button type="button" data-vnchoose="' + c.id_propale_bdc + '" style="border:none;background:none;padding:0;font:inherit;cursor:pointer;font-size:12.5px;color:#2a5ea9;font-weight:700">'
+          + (c.nature === 'commande' && c.montant != null ? '<span class="kc-eur" style="margin-right:7px">' + eur(c.montant) + '</span>' : '')
+          + c.nb_versions + ' ' + motMulti + ' \u25b8</button>'
       : '<span class="kc-eur">' + eur(c.montant) + '</span>') + ageBadge(j) + '</div>';
 
     if (c.nb_versions > 1 && !vnMulti) {
@@ -980,8 +989,10 @@ OD.define('kanban', {
     }).join('');
     const modal = d.createElement('div');
     modal.style.cssText = 'background:#fff;border-radius:18px;width:100%;max-width:560px;box-shadow:0 30px 80px rgba(31,74,133,.35);margin:auto;position:relative;padding:20px;font-family:inherit';
-    modal.innerHTML = '<div style="font-weight:800;color:#1f4a87;font-size:15px;margin-bottom:4px">' + quotes.length + ' propositions</div>'
-      + '<div style="color:#7a98c5;font-size:13px;margin-bottom:14px">Choisissez la proposition \u00e0 consulter.</div>'
+    const cSrc = findCard(idPropale) || {};
+    const estCmd = (cSrc.nature === 'commande');
+    modal.innerHTML = '<div style="font-weight:800;color:#1f4a87;font-size:15px;margin-bottom:4px">' + quotes.length + (estCmd ? ' commandes' : ' propositions') + '</div>'
+      + '<div style="color:#7a98c5;font-size:13px;margin-bottom:14px">Choisissez ' + (estCmd ? 'la commande' : 'la proposition') + ' \u00e0 consulter.</div>'
       + '<div style="display:flex;flex-direction:column;gap:10px">' + rows + '</div>';
     const close = d.createElement('button');
     close.type = 'button'; close.textContent = '\u2715';
