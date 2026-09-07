@@ -523,11 +523,20 @@ OD.define('kanban', {
 
     // Commandes : la somme a un sens (ventes reelles) et s'affiche a cote du
     // nombre. Simulations : ce sont des alternatives, aucun total n'est affiche.
-    h += '<div class="kc-row">' + (vnMulti
-      ? '<button type="button" data-vnchoose="' + c.id_propale_bdc + '" style="border:none;background:none;padding:0;font:inherit;cursor:pointer;font-size:12.5px;color:#2a5ea9;font-weight:700">'
-          + (c.nature === 'commande' && c.montant != null ? '<span class="kc-eur" style="margin-right:7px">' + eur(c.montant) + '</span>' : '')
-          + c.nb_versions + ' ' + motMulti + ' \u25b8</button>'
-      : '<span class="kc-eur">' + eur(c.montant) + '</span>') + ageBadge(j) + '</div>';
+    // Carte PLURALE : bandeau explicite et cliquable. Carte UNIQUE : le montant.
+    if (vnMulti) {
+      h += '<div class="kc-row" style="align-items:center">'
+        + '<button type="button" data-vnchoose="' + c.id_propale_bdc + '" class="kc-plural">'
+        + '<span class="kc-plural-n">' + c.nb_versions + '</span>'
+        + '<span class="kc-plural-t">' + motMulti + '</span>'
+        + '<span class="kc-plural-go">\u203a</span></button>' + ageBadge(j) + '</div>';
+      if (c.nature === 'commande' && c.montant != null) {
+        h += '<div class="kc-row" style="margin-top:6px"><span class="kc-eur">' + eur(c.montant) + '</span>'
+          + '<span style="font-size:11px;color:#9c9a93;margin-left:7px">total</span></div>';
+      }
+    } else {
+      h += '<div class="kc-row"><span class="kc-eur">' + eur(c.montant) + '</span>' + ageBadge(j) + '</div>';
+    }
 
     if (c.nb_versions > 1 && !vnMulti) {
       const open = state.openVersions === c.id_propale_bdc;
@@ -754,8 +763,35 @@ OD.define('kanban', {
     });
   }
 
-  // Conversion d'une simulation en commande (deplacement vers BDC).
-  async function convertirEnCommande(id, bacsQuoteId) {
+  // Conversion d'une simulation en commande.
+  // Confirmation explicite : la commande est creee chez le constructeur et ne
+  // peut pas etre annulee depuis One Data (seulement abandonnee).
+  function confirmerCommande(libelle) {
+    return new Promise(function (resolve) {
+      const d = doc;
+      const ov = d.createElement('div');
+      ov.style.cssText = 'position:fixed;inset:0;z-index:2800;display:flex;align-items:flex-start;justify-content:center;padding:24px;background:rgba(31,74,133,.45)';
+      const modal = d.createElement('div');
+      modal.style.cssText = 'background:#fff;border-radius:16px;width:100%;max-width:460px;box-shadow:0 30px 80px rgba(31,74,133,.35);margin:auto;padding:22px;font-family:inherit;color:#1c2b45';
+      modal.innerHTML =
+        '<div style="font-weight:800;color:#1f4a87;font-size:15px">Passer en commande</div>'
+        + '<div style="color:#7a98c5;font-size:13px;margin:3px 0 14px">' + esc(libelle || '') + '</div>'
+        + '<div style="font-size:12.5px;color:#5a7ba8;line-height:1.55;margin-bottom:16px">'
+        + 'La commande sera <b>creee dans BACS</b> chez le constructeur. Elle ne pourra pas etre annulee depuis One Data \u2014 seulement abandonnee.</div>'
+        + '<div style="display:flex;gap:9px">'
+        + '<button type="button" data-cf-ok style="flex:1;padding:11px;border:none;border-radius:9px;background:#2a5ea9;color:#fff;font:inherit;font-weight:700;cursor:pointer">Creer la commande</button>'
+        + '<button type="button" data-cf-no style="flex:1;padding:11px;border:1px solid #e3edf9;border-radius:9px;background:#fff;color:#2a5ea9;font:inherit;font-weight:700;cursor:pointer">Annuler</button>'
+        + '</div>';
+      ov.appendChild(modal); d.body.appendChild(ov);
+      const fin = function (v) { try { ov.remove(); } catch (e) {} resolve(v); };
+      modal.querySelector('[data-cf-ok]').addEventListener('click', function () { fin(true); });
+      modal.querySelector('[data-cf-no]').addEventListener('click', function () { fin(false); });
+      ov.addEventListener('mousedown', function (e) { if (e.target === ov) fin(false); });
+    });
+  }
+
+  async function convertirEnCommande(id, bacsQuoteId, libelle) {
+    if (!(await confirmerCommande(libelle))) return false;
     const dispo = await bacsDemander('ping', {}, 8000);
     if (!dispo || (!dispo.ok && dispo.erreur)) { toast(bacsMessage(dispo && dispo.erreur ? dispo.erreur : 'bacs_non_ouvert'), true); return false; }
     toast('Conversion en commande dans BACS...');
@@ -781,7 +817,7 @@ OD.define('kanban', {
     // nous. On ne touche a la carte qu'apres sa confirmation.
     if (to === 'bdc' && c.id_affaire_bacs && c.bacs_sf_id && /^0Q0/.test(String(c.bacs_sf_id))) {
       state.menuFor = null; render();
-      await convertirEnCommande(id, c.bacs_sf_id);
+      await convertirEnCommande(id, c.bacs_sf_id, c.vehicule);
       return;
     }
     if (!canMove(from, to) && to !== 'archived') { toast('Déplacement interdit', true); return; }
@@ -973,24 +1009,42 @@ OD.define('kanban', {
     ov.style.cssText = 'position:fixed;inset:0;z-index:2000;display:flex;align-items:flex-start;justify-content:center;padding:24px;background:rgba(31,74,133,.45);overflow-y:auto';
     const fermer = () => { try { ov.remove(); } catch (e) {} };
     ov.addEventListener('mousedown', e => { if (e.target === ov) fermer(); });
+    const cSrc = findCard(idPropale) || {};
+    const estCmd = (cSrc.nature === 'commande');
     const rows = quotes.map(q => {
       const prix = (q.montant != null && q.montant !== '') ? eur(q.montant) : '\u2014';
       const img = q.photo
-        ? '<img src="' + esc(q.photo) + '" style="width:88px;height:54px;object-fit:contain;border-radius:8px;background:#eef2f7;flex:0 0 auto" onerror="this.remove()">'
-        : '<div style="width:88px;height:54px;border-radius:8px;background:#eef2f7;flex:0 0 auto"></div>';
-      return '<div style="display:flex;gap:10px;align-items:center">'
-        + '<button type="button" data-vnq="' + q.id_propale_bdc + '" style="flex:1;display:flex;gap:14px;align-items:center;text-align:left;border:1px solid #e3edf9;background:#fff;border-radius:12px;padding:12px 14px;cursor:pointer;font:inherit">'
-        + img
-        + '<div style="flex:1"><div style="font-weight:800;color:#1f2b45">' + esc(q.vehicule || '\u2014') + '</div>'
-        + '<div style="color:#7a98c5;font-size:12.5px;margin-top:2px">' + esc(q.couleur || '') + '</div></div>'
-        + '<div style="font-weight:800;color:#2a5ea9;white-space:nowrap">' + prix + '</div></button>'
-        + '<button type="button" title="Abandonner cette proposition" data-vnq-del="' + q.id_propale_bdc + '" data-vnq-sf="' + esc(q.bacs_sf_id || '') + '" data-vnq-lib="' + esc(q.vehicule || '') + '" style="width:38px;height:38px;border-radius:9px;border:1px solid #f0d6d6;background:#fff;color:#d97070;cursor:pointer;flex:0 0 auto">\u2715</button>'
+        ? '<img class="odq-img" src="' + esc(q.photo) + '" onerror="this.className=\'odq-img odq-img-vide\';this.removeAttribute(\'src\')">'
+        : '<span class="odq-img odq-img-vide"></span>';
+      const sf = esc(q.bacs_sf_id || ''), lib = esc(q.vehicule || '');
+      return '<div class="odq-row">'
+        + '<button type="button" data-vnq="' + q.id_propale_bdc + '" class="odq-main">' + img
+        + '<span class="odq-txt"><b>' + (lib || '\u2014') + '</b>'
+        + (q.couleur ? '<i>' + esc(q.couleur) + '</i>' : '<i class="odq-vide">couleur non renseign\u00e9e</i>') + '</span>'
+        + '<span class="odq-prix">' + prix + '</span></button>'
+        + (estCmd ? '' : '<button type="button" class="odq-act odq-cmd" title="Passer en commande" data-vnq-cmd="' + q.id_propale_bdc + '" data-vnq-sf="' + sf + '">\u2192 BDC</button>')
+        + '<button type="button" class="odq-act odq-del" title="Abandonner" data-vnq-del="' + q.id_propale_bdc + '" data-vnq-sf="' + sf + '" data-vnq-lib="' + lib + '">\u2715</button>'
         + '</div>';
     }).join('');
     const modal = d.createElement('div');
-    modal.style.cssText = 'background:#fff;border-radius:18px;width:100%;max-width:560px;box-shadow:0 30px 80px rgba(31,74,133,.35);margin:auto;position:relative;padding:20px;font-family:inherit';
-    const cSrc = findCard(idPropale) || {};
-    const estCmd = (cSrc.nature === 'commande');
+    modal.style.cssText = 'background:#fff;border-radius:18px;width:100%;max-width:600px;box-shadow:0 30px 80px rgba(31,74,133,.35);margin:auto;position:relative;padding:22px;font-family:inherit';
+    if (!doc.getElementById('odq-style')) {
+      const st = doc.createElement('style'); st.id = 'odq-style';
+      st.textContent =
+        '.odq-row{display:flex;gap:8px;align-items:stretch;margin-bottom:2px}' +
+        '.odq-main{flex:1;display:flex;gap:14px;align-items:center;text-align:left;border:1px solid #e3edf9;background:#fff;border-radius:12px;padding:10px 14px;cursor:pointer;font:inherit;transition:.12s}' +
+        '.odq-main:hover{border-color:#2a5ea9;background:#f7faff}' +
+        '.odq-img{width:88px;height:54px;object-fit:contain;border-radius:8px;background:#eef2f7;flex:0 0 auto;display:inline-block}' +
+        '.odq-txt{flex:1;display:flex;flex-direction:column;gap:2px;min-width:0}' +
+        '.odq-txt b{font-weight:800;color:#1f2b45;font-size:14px}' +
+        '.odq-txt i{font-style:normal;color:#7a98c5;font-size:12.5px}' +
+        '.odq-txt i.odq-vide{color:#c3cfdd}' +
+        '.odq-prix{font-weight:800;color:#2a5ea9;white-space:nowrap;font-size:14px}' +
+        '.odq-act{flex:0 0 auto;border-radius:10px;border:1px solid #e3edf9;background:#fff;cursor:pointer;font:inherit;font-weight:700;font-size:12px;transition:.12s}' +
+        '.odq-cmd{width:64px;color:#2f8f77;border-color:#cfe8e0}.odq-cmd:hover{background:#eefaf6;border-color:#2f8f77}' +
+        '.odq-del{width:40px;color:#d97070;border-color:#f0d6d6;font-size:14px}.odq-del:hover{background:#fdf3f3;border-color:#d97070}';
+      doc.head.appendChild(st);
+    }
     modal.innerHTML = '<div style="font-weight:800;color:#1f4a87;font-size:15px;margin-bottom:4px">' + quotes.length + (estCmd ? ' commandes' : ' propositions') + '</div>'
       + '<div style="color:#7a98c5;font-size:13px;margin-bottom:14px">Choisissez ' + (estCmd ? 'la commande' : 'la proposition') + ' \u00e0 consulter.</div>'
       + '<div style="display:flex;flex-direction:column;gap:10px">' + rows + '</div>';
@@ -1000,6 +1054,14 @@ OD.define('kanban', {
     close.addEventListener('click', fermer);
     modal.appendChild(close); ov.appendChild(modal); d.body.appendChild(ov);
     modal.addEventListener('click', e => {
+      const cmd = e.target.closest('[data-vnq-cmd]');
+      if (cmd) {
+        const sfq = cmd.getAttribute('data-vnq-sf');
+        if (!sfq) { toast('Proposition sans identifiant BACS', true); return; }
+        fermer();
+        convertirEnCommande(Number(cmd.getAttribute('data-vnq-cmd')), sfq, cmd.closest('.odq-row').querySelector('.odq-txt b').textContent);
+        return;
+      }
       const del = e.target.closest('[data-vnq-del]');
       if (del) {
         const sf = del.getAttribute('data-vnq-sf');
@@ -2752,6 +2814,10 @@ OD.define('kanban', {
     '#kanban-root .kc-ic{width:28px;height:28px;border-radius:7px;border:1px solid #ece9e1;background:#fff;color:#2a5ea9;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;padding:0;transition:.12s}' +
     '#kanban-root .kc-ic:hover{background:rgba(42,94,169,.08);border-color:#2a5ea9}' +
     '#kanban-root .kc-ic[data-pdf]{color:#d97070}#kanban-root .kc-ic[data-pdf]:hover{background:rgba(217,112,112,.10);border-color:#d97070}' +
+    '#kanban-root .kc-plural{display:inline-flex;align-items:center;gap:7px;border:1px solid #cfe0f4;background:#eef3fa;color:#1f4a87;border-radius:20px;padding:3px 4px;font:inherit;font-size:12.5px;font-weight:700;cursor:pointer;transition:.12s}' +
+    '#kanban-root .kc-plural:hover{background:#e2ecfa;border-color:#2a5ea9}' +
+    '#kanban-root .kc-plural-n{min-width:20px;height:20px;border-radius:50%;background:#2a5ea9;color:#fff;display:inline-flex;align-items:center;justify-content:center;font-size:11.5px}' +
+    '#kanban-root .kc-plural-go{color:#7a98c5;font-size:15px;line-height:1;padding-right:6px}' +
     '#kanban-root .kc-ic[data-archive]{color:#888780}' +
     '#kanban-root .kc-move{margin-left:auto}' +
     '#kanban-root .kc-menu{margin-top:8px;background:#fff;border:1px solid #ece9e1;border-radius:9px;padding:5px;display:flex;flex-direction:column;gap:3px;box-shadow:0 6px 18px rgba(42,94,169,.12)}' +
