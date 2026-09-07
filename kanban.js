@@ -173,6 +173,7 @@ OD.define('kanban', {
       nb_versions: c.nb_versions != null ? Number(c.nb_versions) : 1,
       veh_uniforme: c.veh_uniforme !== false,
       id_affaire_bacs: c.id_affaire_bacs || null,
+      bacs_sf_id: c.bacs_sf_id || null,
       _moving: false
     }));
   }
@@ -692,10 +693,88 @@ OD.define('kanban', {
   }
 
 
+
+  // Abandon d'UNE proposition (simulation), depuis la liste des propositions.
+  // L'affaire reste ouverte : le vendeur peut en refaire une autre. Abandonner
+  // l'affaire est un geste distinct, porté par la corbeille de la carte.
+  async function abandonnerProposition(idPropale, bacsQuoteId, libelle) {
+    const motifs = await chargerMotifs(null);
+    const d = doc;
+    const ov = d.createElement('div');
+    ov.style.cssText = 'position:fixed;inset:0;z-index:2700;display:flex;align-items:flex-start;justify-content:center;padding:24px;background:rgba(31,74,133,.45);overflow-y:auto';
+    const modal = d.createElement('div');
+    modal.style.cssText = 'background:#fff;border-radius:16px;width:100%;max-width:480px;box-shadow:0 30px 80px rgba(31,74,133,.35);margin:auto;position:relative;padding:22px;font-family:inherit;color:#1c2b45';
+    const opts = motifs.map(function (m) { return '<option value="' + esc(m.valeur) + '">' + esc(m.libelle) + '</option>'; }).join('');
+    modal.innerHTML =
+      '<div style="font-weight:800;color:#1f4a87;font-size:15px">Abandonner cette proposition</div>'
+      + '<div style="color:#7a98c5;font-size:13px;margin:3px 0 16px">' + esc(libelle || '') + '</div>'
+      + '<label style="font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:#7a98c5;font-weight:700">Motif</label>'
+      + '<select data-pa-motif style="width:100%;margin:6px 0 14px;padding:10px;border:1px solid #e3edf9;border-radius:9px;font:inherit">' + opts + '</select>'
+      + '<input data-pa-comm placeholder="Commentaire (facultatif)" style="width:100%;margin:0 0 4px;padding:10px;border:1px solid #e3edf9;border-radius:9px;font:inherit">'
+      + '<div style="font-size:11.5px;color:#9fb0c4;margin:12px 0 16px;line-height:1.5">Seule cette proposition sera abandonnee dans BACS. L&#39;affaire reste ouverte.</div>'
+      + '<div style="display:flex;gap:9px">'
+      + '<button type="button" data-pa-ok style="flex:1;padding:11px;border:none;border-radius:9px;background:#e24b4a;color:#fff;font:inherit;font-weight:700;cursor:pointer">Abandonner</button>'
+      + '<button type="button" data-pa-close style="flex:1;padding:11px;border:1px solid #e3edf9;border-radius:9px;background:#fff;color:#2a5ea9;font:inherit;font-weight:700;cursor:pointer">Annuler</button>'
+      + '</div>';
+    ov.appendChild(modal); d.body.appendChild(ov);
+    const fermer = function () { try { ov.remove(); } catch (e) {} };
+    modal.querySelector('[data-pa-close]').addEventListener('click', fermer);
+    ov.addEventListener('mousedown', function (e) { if (e.target === ov) fermer(); });
+
+    const btn = modal.querySelector('[data-pa-ok]');
+    btn.addEventListener('click', async function () {
+      const motif = modal.querySelector('[data-pa-motif]').value;
+      const comm = (modal.querySelector('[data-pa-comm]').value || '').trim() || null;
+      btn.disabled = true; btn.textContent = 'Abandon en cours...';
+      const r = await bacsDemander('abandonner_devis', { quoteId: bacsQuoteId, motif: motif, commentaire: comm });
+      if (!r || !r.ok) {
+        btn.disabled = false; btn.textContent = 'Abandonner';
+        toast(bacsMessage((r && (r.erreur || r.refus)) || 'refus'), true);
+        return;
+      }
+      try {
+        await ctx.supabase.rpc('propale_abandonner', {
+          p_id_propale_bdc: Number(idPropale), p_motif: motif, p_commentaire: comm,
+          p_id_user: state.vendeurId ? Number(state.vendeurId) : null, p_affaire_entiere: false
+        });
+      } catch (e) { /* BACS fait foi : la synchro rattrapera */ }
+      fermer();
+      const ovc = doc.getElementById('vn-choose-overlay'); if (ovc) ovc.remove();
+      toast('Proposition abandonnee dans BACS');
+      await loadData();
+    });
+  }
+
+  // Conversion d'une simulation en commande (deplacement vers BDC).
+  async function convertirEnCommande(id, bacsQuoteId) {
+    const dispo = await bacsDemander('ping', {}, 8000);
+    if (!dispo || (!dispo.ok && dispo.erreur)) { toast(bacsMessage(dispo && dispo.erreur ? dispo.erreur : 'bacs_non_ouvert'), true); return false; }
+    toast('Conversion en commande dans BACS...');
+    const r = await bacsDemander('convertir', { quoteId: bacsQuoteId }, 30000);
+    if (!r || !r.ok) { toast(bacsMessage((r && (r.erreur || r.refus)) || 'refus'), true); return false; }
+    try {
+      await ctx.supabase.rpc('propale_convertie', {
+        p_id_propale_bdc: Number(id), p_order_sf_id: r.orderId || null,
+        p_id_user: state.vendeurId ? Number(state.vendeurId) : null
+      });
+    } catch (e) { /* la commande remontera par la synchronisation */ }
+    toast('Commande creee dans BACS');
+    await loadData();
+    return true;
+  }
+
+
   async function doMove(id, to) {
     const c = findCard(id); if (!c) return;
     const from = c.status;
     if (from === to) return;
+    // Affaire BACS passee en commande : c'est BACS qui cree la commande, pas
+    // nous. On ne touche a la carte qu'apres sa confirmation.
+    if (to === 'bdc' && c.id_affaire_bacs && c.bacs_sf_id && /^0Q0/.test(String(c.bacs_sf_id))) {
+      state.menuFor = null; render();
+      await convertirEnCommande(id, c.bacs_sf_id);
+      return;
+    }
     if (!canMove(from, to) && to !== 'archived') { toast('Déplacement interdit', true); return; }
     const prevStatus = c.status;
     c._moving = true;
@@ -890,11 +969,14 @@ OD.define('kanban', {
       const img = q.photo
         ? '<img src="' + esc(q.photo) + '" style="width:88px;height:54px;object-fit:contain;border-radius:8px;background:#eef2f7;flex:0 0 auto" onerror="this.remove()">'
         : '<div style="width:88px;height:54px;border-radius:8px;background:#eef2f7;flex:0 0 auto"></div>';
-      return '<button type="button" data-vnq="' + q.id_propale_bdc + '" style="display:flex;gap:14px;align-items:center;width:100%;text-align:left;border:1px solid #e3edf9;background:#fff;border-radius:12px;padding:12px 14px;cursor:pointer;font:inherit">'
+      return '<div style="display:flex;gap:10px;align-items:center">'
+        + '<button type="button" data-vnq="' + q.id_propale_bdc + '" style="flex:1;display:flex;gap:14px;align-items:center;text-align:left;border:1px solid #e3edf9;background:#fff;border-radius:12px;padding:12px 14px;cursor:pointer;font:inherit">'
         + img
         + '<div style="flex:1"><div style="font-weight:800;color:#1f2b45">' + esc(q.vehicule || '\u2014') + '</div>'
         + '<div style="color:#7a98c5;font-size:12.5px;margin-top:2px">' + esc(q.couleur || '') + '</div></div>'
-        + '<div style="font-weight:800;color:#2a5ea9;white-space:nowrap">' + prix + '</div></button>';
+        + '<div style="font-weight:800;color:#2a5ea9;white-space:nowrap">' + prix + '</div></button>'
+        + '<button type="button" title="Abandonner cette proposition" data-vnq-del="' + q.id_propale_bdc + '" data-vnq-sf="' + esc(q.bacs_sf_id || '') + '" data-vnq-lib="' + esc(q.vehicule || '') + '" style="width:38px;height:38px;border-radius:9px;border:1px solid #f0d6d6;background:#fff;color:#d97070;cursor:pointer;flex:0 0 auto">\u2715</button>'
+        + '</div>';
     }).join('');
     const modal = d.createElement('div');
     modal.style.cssText = 'background:#fff;border-radius:18px;width:100%;max-width:560px;box-shadow:0 30px 80px rgba(31,74,133,.35);margin:auto;position:relative;padding:20px;font-family:inherit';
@@ -907,6 +989,13 @@ OD.define('kanban', {
     close.addEventListener('click', fermer);
     modal.appendChild(close); ov.appendChild(modal); d.body.appendChild(ov);
     modal.addEventListener('click', e => {
+      const del = e.target.closest('[data-vnq-del]');
+      if (del) {
+        const sf = del.getAttribute('data-vnq-sf');
+        if (!sf) { toast('Proposition sans identifiant BACS', true); return; }
+        abandonnerProposition(Number(del.getAttribute('data-vnq-del')), sf, del.getAttribute('data-vnq-lib'));
+        return;
+      }
       const b = e.target.closest('[data-vnq]'); if (!b) return;
       const chosen = Number(b.getAttribute('data-vnq'));
       fermer();
