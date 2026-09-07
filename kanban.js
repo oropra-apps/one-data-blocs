@@ -554,6 +554,12 @@ OD.define('kanban', {
       }
     }
     if (canArchive(c.status)) h += '<button class="kc-ic" data-archive="' + c.id_propale_bdc + '" title="Archiver">' + ICON_TRASH + '</button>';
+    // Renvoi vers BACS : l'affaire si la carte est plurale (plusieurs documents),
+    // le document lui-meme si elle est unitaire.
+    if (c.id_affaire_bacs || c.bacs_sf_id) {
+      const cible = vnMulti ? c.id_affaire_bacs : (c.bacs_sf_id || c.id_affaire_bacs);
+      if (cible) h += '<button class="kc-ic kc-bacs" data-bacs="' + esc(cible) + '" title="Ouvrir dans BACS">B</button>';
+    }
     h += '<button class="kc-ic kc-move" data-menu="' + c.id_propale_bdc + '" title="Déplacer">' + ICON_MOVE + '</button>';
     h += '</div>';
     if (state.menuFor === c.id_propale_bdc) h += renderMoveMenu(c);
@@ -2608,6 +2614,13 @@ OD.define('kanban', {
     const pdf = e.target.closest('[data-pdf]');
     if (pdf) { const [id, kind] = pdf.getAttribute('data-pdf').split(':'); pdfDoc(Number(id), kind, pdf.getAttribute('data-maj') || null); return; }
 
+    const bacs = e.target.closest('[data-bacs]');
+    if (bacs) {
+      const rid = bacs.getAttribute('data-bacs') || '';
+      const seg = rid.slice(0, 3) === '006' ? 'opportunity' : (rid.slice(0, 3) === '801' ? 'order' : 'quote');
+      try { (wwLib.getFrontWindow ? wwLib.getFrontWindow() : window).open('https://toyota-france.my.site.com/bacs2/s/' + seg + '/' + rid, '_blank', 'noopener'); } catch (err) {}
+      return;
+    }
     const vnch = e.target.closest('[data-vnchoose]');
     if (vnch) { choisirQuoteVN(Number(vnch.getAttribute('data-vnchoose'))); return; }
     const mod = e.target.closest('[data-modif]');
@@ -2823,6 +2836,8 @@ OD.define('kanban', {
     '#kanban-root .kc-plural:hover{background:#e2ecfa;border-color:#2a5ea9}' +
     '#kanban-root .kc-plural-n{min-width:20px;height:20px;border-radius:50%;background:#2a5ea9;color:#fff;display:inline-flex;align-items:center;justify-content:center;font-size:11.5px}' +
     '#kanban-root .kc-plural-go{color:#7a98c5;font-size:15px;line-height:1;padding-right:6px}' +
+    '#kanban-root .kc-bacs{background:#2a5ea9;border-color:#2a5ea9;color:#fff;font-weight:800;font-size:13px;line-height:1}' +
+    '#kanban-root .kc-bacs:hover{background:#1f4a87;border-color:#1f4a87;color:#fff}' +
     '#kanban-root .kc-ic[data-archive]{color:#888780}' +
     '#kanban-root .kc-move{margin-left:auto}' +
     '#kanban-root .kc-menu{margin-top:8px;background:#fff;border:1px solid #ece9e1;border-radius:9px;padding:5px;display:flex;flex-direction:column;gap:3px;box-shadow:0 6px 18px rgba(42,94,169,.12)}' +
