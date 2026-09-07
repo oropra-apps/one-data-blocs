@@ -663,7 +663,7 @@ OD.define('kanban', {
     const ov = d.createElement('div');
     ov.style.cssText = 'position:fixed;inset:0;z-index:2600;display:flex;align-items:flex-start;justify-content:center;padding:24px;background:rgba(31,74,133,.45);overflow-y:auto';
     const modal = d.createElement('div');
-    modal.style.cssText = 'background:#fff;border-radius:16px;width:100%;max-width:520px;box-shadow:0 30px 80px rgba(31,74,133,.35);margin:auto;position:relative;padding:22px;font-family:inherit;color:#1c2b45';
+    modal.style.cssText = 'background:#fff;border-radius:16px;width:100%;max-width:520px;box-shadow:0 30px 80px rgba(31,74,133,.35);margin:auto;position:relative;padding:22px;font-family:inherit;color:#1f2b45';
     modal.innerHTML = '<div style="color:#7a98c5;padding:22px;text-align:center">Chargement des motifs...</div>';
     ov.appendChild(modal); d.body.appendChild(ov);
     const fermer = () => { try { ov.remove(); } catch (e) {} };
@@ -678,13 +678,13 @@ OD.define('kanban', {
       + '<div style="font-weight:800;color:#1f4a87;font-size:16px">Abandonner l&#39;affaire</div>'
       + '<div style="color:#7a98c5;font-size:13px;margin:3px 0 16px">' + esc(c.client || '') + (c.vehicule ? ' \u00b7 ' + esc(c.vehicule) : '') + '</div>'
       + '<label style="font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:#7a98c5;font-weight:700">Motif</label>'
-      + '<select data-ab-motif style="width:100%;margin:6px 0 14px;padding:10px;border:1px solid #e3edf9;border-radius:9px;font:inherit">' + opts + '</select>'
+      + '<select data-ab-motif style="width:100%;margin:6px 0 14px;padding:10px 12px;border:1.5px solid #e3edf9;border-radius:10px;font:inherit;color:#1f4a87;background:#fff;font-weight:600">' + opts + '</select>'
       + '<label style="font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:#7a98c5;font-weight:700">Commentaire</label>'
-      + '<input data-ab-comm placeholder="Precision utile au suivi" style="width:100%;margin:6px 0 4px;padding:10px;border:1px solid #e3edf9;border-radius:9px;font:inherit">'
-      + '<div style="font-size:11.5px;color:#9fb0c4;margin:12px 0 16px;line-height:1.5">L&#39;affaire sera abandonnee dans BACS, puis archivee ici. Ce geste est <b>definitif cote constructeur</b>.</div>'
+      + '<input data-ab-comm placeholder="Pr\u00e9cision utile au suivi" style="width:100%;margin:6px 0 4px;padding:10px 12px;border:1.5px solid #e3edf9;border-radius:10px;font:inherit;color:#1f4a87">'
+      + '<div style="font-size:11.5px;color:#9fb0c4;margin:12px 0 16px;line-height:1.5">L&#39;affaire sera abandonn\u00e9e dans BACS, puis archiv\u00e9e ici. Ce geste est <b>d\u00e9finitif c\u00f4t\u00e9 constructeur</b>.</div>'
       + '<div style="display:flex;gap:9px">'
-      + '<button type="button" data-ab-ok style="flex:1;padding:11px;border:none;border-radius:9px;background:#e24b4a;color:#fff;font:inherit;font-weight:700;cursor:pointer">Abandonner</button>'
-      + '<button type="button" data-ab-close style="flex:1;padding:11px;border:1px solid #e3edf9;border-radius:9px;background:#fff;color:#2a5ea9;font:inherit;font-weight:700;cursor:pointer">Annuler</button>'
+      + '<button type="button" data-ab-ok style="flex:1;height:44px;display:flex;align-items:center;justify-content:center;border:none;border-radius:10px;background:#e24b4a;color:#fff;font:inherit;font-weight:700;cursor:pointer">Abandonner</button>'
+      + '<button type="button" data-ab-close style="flex:1;height:44px;display:flex;align-items:center;justify-content:center;border:1.5px solid #e3edf9;border-radius:10px;background:#fff;color:#2a5ea9;font:inherit;font-weight:700;cursor:pointer">Annuler</button>'
       + '</div>';
 
     modal.querySelectorAll('[data-ab-close]').forEach(function (b) { b.addEventListener('click', fermer); });
@@ -737,12 +737,12 @@ OD.define('kanban', {
       '<div style="font-weight:800;color:#1f4a87;font-size:15px">Abandonner cette proposition</div>'
       + '<div style="color:#7a98c5;font-size:13px;margin:3px 0 16px">' + esc(libelle || '') + '</div>'
       + '<label style="font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:#7a98c5;font-weight:700">Motif</label>'
-      + '<select data-pa-motif style="width:100%;margin:6px 0 14px;padding:10px;border:1px solid #e3edf9;border-radius:9px;font:inherit">' + opts + '</select>'
-      + '<input data-pa-comm placeholder="Commentaire (facultatif)" style="width:100%;margin:0 0 4px;padding:10px;border:1px solid #e3edf9;border-radius:9px;font:inherit">'
-      + '<div style="font-size:11.5px;color:#9fb0c4;margin:12px 0 16px;line-height:1.5">Seule cette proposition sera abandonnee dans BACS. L&#39;affaire reste ouverte.</div>'
+      + '<select data-pa-motif style="width:100%;margin:6px 0 14px;padding:10px 12px;border:1.5px solid #e3edf9;border-radius:10px;font:inherit;color:#1f4a87;background:#fff;font-weight:600">' + opts + '</select>'
+      + '<input data-pa-comm placeholder="Commentaire (facultatif)" style="width:100%;margin:0 0 4px;padding:10px 12px;border:1.5px solid #e3edf9;border-radius:10px;font:inherit;color:#1f4a87">'
+      + '<div style="font-size:11.5px;color:#9fb0c4;margin:12px 0 16px;line-height:1.5">Seule cette proposition sera abandonn\u00e9e dans BACS. L&#39;affaire reste ouverte.</div>'
       + '<div style="display:flex;gap:9px">'
-      + '<button type="button" data-pa-ok style="flex:1;padding:11px;border:none;border-radius:9px;background:#e24b4a;color:#fff;font:inherit;font-weight:700;cursor:pointer">Abandonner</button>'
-      + '<button type="button" data-pa-close style="flex:1;padding:11px;border:1px solid #e3edf9;border-radius:9px;background:#fff;color:#2a5ea9;font:inherit;font-weight:700;cursor:pointer">Annuler</button>'
+      + '<button type="button" data-pa-ok style="flex:1;height:44px;display:flex;align-items:center;justify-content:center;border:none;border-radius:10px;background:#e24b4a;color:#fff;font:inherit;font-weight:700;cursor:pointer">Abandonner</button>'
+      + '<button type="button" data-pa-close style="flex:1;height:44px;display:flex;align-items:center;justify-content:center;border:1.5px solid #e3edf9;border-radius:10px;background:#fff;color:#2a5ea9;font:inherit;font-weight:700;cursor:pointer">Annuler</button>'
       + '</div>';
     ov.appendChild(modal); d.body.appendChild(ov);
     const fermer = function () { try { ov.remove(); } catch (e) {} };
@@ -787,10 +787,10 @@ OD.define('kanban', {
         '<div style="font-weight:800;color:#1f4a87;font-size:15px">Passer en commande</div>'
         + '<div style="color:#7a98c5;font-size:13px;margin:3px 0 14px">' + esc(libelle || '') + '</div>'
         + '<div style="font-size:12.5px;color:#5a7ba8;line-height:1.55;margin-bottom:16px">'
-        + 'La commande sera <b>creee dans BACS</b> chez le constructeur. Elle ne pourra pas etre annulee depuis One Data \u2014 seulement abandonnee.</div>'
+        + 'La commande sera <b>cr\u00e9\u00e9e dans BACS</b> chez le constructeur. Elle ne pourra pas \u00eatre annul\u00e9e depuis One Data \u2014 seulement abandonn\u00e9e.</div>'
         + '<div style="display:flex;gap:9px">'
-        + '<button type="button" data-cf-ok style="flex:1;padding:11px;border:none;border-radius:9px;background:#2a5ea9;color:#fff;font:inherit;font-weight:700;cursor:pointer">Creer la commande</button>'
-        + '<button type="button" data-cf-no style="flex:1;padding:11px;border:1px solid #e3edf9;border-radius:9px;background:#fff;color:#2a5ea9;font:inherit;font-weight:700;cursor:pointer">Annuler</button>'
+        + '<button type="button" data-cf-ok style="flex:1;height:44px;display:flex;align-items:center;justify-content:center;border:none;border-radius:10px;background:#53bda7;color:#fff;font:inherit;font-weight:700;cursor:pointer">Cr\u00e9er la commande</button>'
+        + '<button type="button" data-cf-no style="flex:1;height:44px;display:flex;align-items:center;justify-content:center;border:1.5px solid #e3edf9;border-radius:10px;background:#fff;color:#2a5ea9;font:inherit;font-weight:700;cursor:pointer">Annuler</button>'
         + '</div>';
       ov.appendChild(modal); d.body.appendChild(ov);
       const fin = function (v) { try { ov.remove(); } catch (e) {} resolve(v); };
