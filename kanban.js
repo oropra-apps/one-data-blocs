@@ -817,6 +817,10 @@ OD.define('kanban', {
   // L'affaire reste ouverte : le vendeur peut en refaire une autre. Abandonner
   // l'affaire est un geste distinct, porté par la corbeille de la carte.
   async function abandonnerProposition(idPropale, bacsQuoteId, libelle) {
+    // Une commande n'est pas une simulation : BACS ne l'annule pas par le meme
+    // chemin, et son identifiant commence par 801 la ou un devis commence par
+    // 0Q0. Router sur la nature evite un refus certain.
+    const estCommande = /^801/.test(String(bacsQuoteId || ''));
     const motifs = await chargerMotifs(null);
     const d = doc;
     const ov = d.createElement('div');
@@ -825,12 +829,12 @@ OD.define('kanban', {
     modal.style.cssText = 'background:#fff;border-radius:16px;width:100%;max-width:480px;box-shadow:0 30px 80px rgba(31,74,133,.35);margin:auto;position:relative;padding:22px;font-family:inherit;color:#1c2b45';
     const opts = motifs.map(function (m) { return '<option value="' + esc(m.valeur) + '">' + esc(m.libelle) + '</option>'; }).join('');
     modal.innerHTML =
-      '<div style="font-weight:800;color:#1f4a87;font-size:15px">Abandonner cette proposition</div>'
+      '<div style="font-weight:800;color:#1f4a87;font-size:15px">Abandonner cette ' + (estCommande ? 'commande' : 'proposition') + '</div>'
       + '<div style="color:#7a98c5;font-size:13px;margin:3px 0 16px">' + esc(libelle || '') + '</div>'
       + '<label style="font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:#7a98c5;font-weight:700">Motif</label>'
       + '<select data-pa-motif style="width:100%;margin:6px 0 14px;padding:10px 12px;border:1.5px solid #e3edf9;border-radius:10px;font:inherit;color:#1f4a87;background:#fff;font-weight:600">' + opts + '</select>'
       + '<input data-pa-comm placeholder="Commentaire (facultatif)" style="width:100%;margin:0 0 4px;padding:10px 12px;border:1.5px solid #e3edf9;border-radius:10px;font:inherit;color:#1f4a87">'
-      + '<div style="font-size:11.5px;color:#9fb0c4;margin:12px 0 16px;line-height:1.5">Seule cette proposition sera abandonn\u00e9e dans BACS. L&#39;affaire reste ouverte.</div>'
+      + '<div style="font-size:11.5px;color:#9fb0c4;margin:12px 0 16px;line-height:1.5">Seule cette ' + (estCommande ? 'commande' : 'proposition') + ' sera abandonn\u00e9e dans BACS. L&#39;affaire reste ouverte.</div>'
       + '<div style="display:flex;gap:9px">'
       + '<button type="button" data-pa-ok style="flex:1;height:44px;display:flex;align-items:center;justify-content:center;border:none;border-radius:10px;background:#e24b4a;color:#fff;font:inherit;font-weight:700;cursor:pointer">Abandonner</button>'
       + '<button type="button" data-pa-close style="flex:1;height:44px;display:flex;align-items:center;justify-content:center;border:1.5px solid #e3edf9;border-radius:10px;background:#fff;color:#2a5ea9;font:inherit;font-weight:700;cursor:pointer">Annuler</button>'
@@ -845,7 +849,9 @@ OD.define('kanban', {
       const motif = modal.querySelector('[data-pa-motif]').value;
       const comm = (modal.querySelector('[data-pa-comm]').value || '').trim() || null;
       btn.disabled = true; btn.textContent = 'Abandon en cours...';
-      const r = await bacsDemander('abandonner_devis', { quoteId: bacsQuoteId, motif: motif, commentaire: comm });
+      const r = estCommande
+        ? await bacsDemander('abandonner_commande', { orderId: bacsQuoteId, motif: motif, commentaire: comm })
+        : await bacsDemander('abandonner_devis',    { quoteId: bacsQuoteId, motif: motif, commentaire: comm });
       if (!r || !r.ok) {
         btn.disabled = false; btn.textContent = 'Abandonner';
         toast(bacsMessage((r && (r.erreur || r.refus)) || 'refus'), true);
@@ -859,7 +865,7 @@ OD.define('kanban', {
       } catch (e) { /* BACS fait foi : la synchro rattrapera */ }
       fermer();
       const ovc = doc.getElementById('vn-choose-overlay'); if (ovc) ovc.remove();
-      toast('Proposition abandonnee dans BACS');
+      toast((estCommande ? 'Commande abandonnee' : 'Proposition abandonnee') + ' dans BACS');
       await loadData();
     });
   }
