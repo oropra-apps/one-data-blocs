@@ -645,16 +645,13 @@ OD.define('kanban', {
   }
 
   async function siteBacsDeLAffaire(affaire) {
+    if (!affaire) return null;
     try {
-      const p = await ctx.supabase.from('PROPALE_BDC').select('id_site')
-        .eq('id_affaire_bacs', affaire).not('id_site', 'is', null).limit(1);
-      const idSite = p.data && p.data[0] && p.data[0].id_site;
-      if (idSite == null) return null;
-      const s = await ctx.supabase.from('SITE').select('id_bacs,SITE').eq('ID_SITE', idSite).limit(1);
-      const row = s.data && s.data[0];
-      if (!row || !row.id_bacs) return null;
-      return { id_bacs: row.id_bacs, nom: row.SITE || ('site ' + idSite) };
-    } catch (e) { return null; }
+      const r = await ctx.supabase.rpc('bacs_site_affaire', { p_affaire: affaire });
+      if (r.error) { console.warn('[kanban] site de l affaire illisible', r.error); return null; }
+      const row = (r.data || [])[0];
+      return (row && row.id_bacs) ? { id_bacs: row.id_bacs, nom: row.nom || row.id_bacs } : null;
+    } catch (e) { console.warn('[kanban] site de l affaire illisible', e); return null; }
   }
 
   function modaleBascule(nomSite, message) {
