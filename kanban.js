@@ -635,6 +635,49 @@ OD.define('kanban', {
     });
   }
 
+  // Refus lié au point de vente : BACS n'abandonne une affaire que depuis une
+  // session ouverte sur SON site. On sait basculer (le sélecteur de BACS le fait
+  // par un appel Apex), mais on ne le fait jamais d'office : changer de site
+  // change le contexte de saisie du vendeur, et sa simulation suivante partirait
+  // sur le mauvais point de vente. On le lui propose donc, site nommé.
+  function refusDeSite(err) {
+    return typeof err === 'string' && /point de vente/i.test(err);
+  }
+
+  async function siteBacsDeLAffaire(affaire) {
+    try {
+      const p = await ctx.supabase.from('PROPALE_BDC').select('id_site')
+        .eq('id_affaire_bacs', affaire).not('id_site', 'is', null).limit(1);
+      const idSite = p.data && p.data[0] && p.data[0].id_site;
+      if (idSite == null) return null;
+      const s = await ctx.supabase.from('SITE').select('id_bacs,SITE').eq('ID_SITE', idSite).limit(1);
+      const row = s.data && s.data[0];
+      if (!row || !row.id_bacs) return null;
+      return { id_bacs: row.id_bacs, nom: row.SITE || ('site ' + idSite) };
+    } catch (e) { return null; }
+  }
+
+  function modaleBascule(nomSite, message) {
+    return new Promise(function (resolve) {
+      const d = doc;
+      const ov = d.createElement('div');
+      ov.style.cssText = 'position:fixed;inset:0;z-index:2700;display:flex;align-items:center;justify-content:center;padding:24px;background:rgba(31,74,133,.45)';
+      const m = d.createElement('div');
+      m.style.cssText = 'background:#fff;border-radius:16px;width:100%;max-width:480px;box-shadow:0 30px 80px rgba(31,74,133,.35);padding:22px;font-family:inherit;color:#1f2b45';
+      m.innerHTML = '<div style="font-weight:800;color:#1f4a87;font-size:16px">Mauvais point de vente</div>'
+        + '<div style="color:#7a98c5;font-size:13px;margin:8px 0 16px;line-height:1.5">' + esc(message) + '</div>'
+        + '<div style="display:flex;gap:9px">'
+        + '<button type="button" data-bs-ok style="flex:1;height:44px;border:none;border-radius:10px;background:#2a5ea9;color:#fff;font:inherit;font-weight:700;cursor:pointer">Basculer sur ' + esc(nomSite) + '</button>'
+        + '<button type="button" data-bs-no style="flex:0 0 120px;height:44px;border:1.5px solid #e3edf9;border-radius:10px;background:#fff;color:#2a5ea9;font:inherit;font-weight:700;cursor:pointer">Annuler</button>'
+        + '</div>';
+      ov.appendChild(m); d.body.appendChild(ov);
+      const fin = function (v) { try { ov.remove(); } catch (e) {} resolve(v); };
+      m.querySelector('[data-bs-ok]').addEventListener('click', function () { fin(true); });
+      m.querySelector('[data-bs-no]').addEventListener('click', function () { fin(false); });
+      ov.addEventListener('mousedown', function (e) { if (e.target === ov) fin(false); });
+    });
+  }
+
   function bacsMessage(err) {
     // Message metier renvoye par BACS (regle de gestion) : on l'affiche tel
     // quel, il est ecrit pour le vendeur. Reconnaissable a sa longueur et a
@@ -668,6 +711,30 @@ OD.define('kanban', {
     if (!dispo || (!dispo.ok && dispo.erreur)) {
       toast(bacsMessage(dispo && dispo.erreur ? dispo.erreur : 'bacs_non_ouvert'), true);
       return;
+    }
+
+    // Point de vente : BACS n abandonne une affaire que depuis une session
+    // ouverte sur SON site. On le verifie AVANT de faire choisir un motif, et
+    // on propose la bascule, site nomme. Le vendeur reste l auteur du geste.
+    const cibleSite = await siteBacsDeLAffaire(c.id_affaire_bacs);
+    if (cibleSite) {
+      const etat = await bacsDemander('site_courant', {}, 12000);
+      const actuel = etat && etat.ok && etat.site;
+      if (actuel && actuel.Id && String(actuel.Id) !== String(cibleSite.id_bacs)) {
+        const autorise = !Array.isArray(etat.sites) || !etat.sites.length
+          || etat.sites.some(function (x) { return String(x.Id) === String(cibleSite.id_bacs); });
+        if (!autorise) {
+          toast('Cette affaire depend de ' + cibleSite.nom + ', sur lequel vous n avez pas acces dans BACS.', true);
+          return;
+        }
+        const msg = 'Cette affaire depend de ' + cibleSite.nom + '. Votre session BACS est ouverte sur '
+                  + (actuel.BusinessName || 'un autre point de vente')
+                  + '. BACS refusera l abandon tant que vous n aurez pas bascule.';
+        if (!await modaleBascule(cibleSite.nom, msg)) return;
+        const b = await bacsDemander('site_bascule', { siteId: cibleSite.id_bacs }, 15000);
+        if (!b || !b.ok) { toast(bacsMessage((b && (b.erreur || b.refus)) || 'refus'), true); return; }
+        toast('Point de vente BACS bascule sur ' + cibleSite.nom);
+      }
     }
 
     const d = doc;
@@ -707,7 +774,23 @@ OD.define('kanban', {
       btnOk.disabled = true; btnOk.textContent = 'Abandon en cours...';
 
       console.log('[kanban] abandon demande —', { affaire: affaire, bacs_sf_id: c.bacs_sf_id, objet: c.bacs_object, motif: motif });
-      const r = await bacsDemander('abandonner', { recordId: affaire, motif: motif, commentaire: comm });
+      let r = await bacsDemander('abandonner', { recordId: affaire, motif: motif, commentaire: comm });
+
+      // Refus pour cause de point de vente : on propose la bascule, puis on
+      // relance le meme abandon. Le vendeur reste l auteur du changement.
+      if ((!r || !r.ok) && refusDeSite(r && r.refus)) {
+        const cible = await siteBacsDeLAffaire(affaire);
+        if (cible && await modaleBascule(cible.nom, r.refus)) {
+          btnOk.textContent = 'Bascule en cours...';
+          const b = await bacsDemander('site_bascule', { siteId: cible.id_bacs }, 15000);
+          if (b && b.ok) {
+            btnOk.textContent = 'Abandon en cours...';
+            r = await bacsDemander('abandonner', { recordId: affaire, motif: motif, commentaire: comm });
+          } else {
+            toast(bacsMessage((b && (b.erreur || b.refus)) || 'refus'), true);
+          }
+        }
+      }
       if (!r || !r.ok) {
         btnOk.disabled = false; btnOk.textContent = 'Abandonner';
         toast(bacsMessage((r && (r.erreur || r.refus)) || 'refus'), true);
