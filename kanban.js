@@ -621,6 +621,15 @@ OD.define('kanban', {
 
   async function ouvrirAbandon(id) {
     const c = findCard(id); if (!c) return;
+
+    // Sans onglet BACS, l'abandon ne pourra pas aboutir : on le dit tout de
+    // suite plutot que de faire choisir un motif pour rien.
+    const dispo = await bacsDemander('ping', {}, 8000);
+    if (!dispo || (!dispo.ok && dispo.erreur)) {
+      toast(bacsMessage(dispo && dispo.erreur ? dispo.erreur : 'bacs_non_ouvert'), true);
+      return;
+    }
+
     const d = doc;
     const ov = d.createElement('div');
     ov.style.cssText = 'position:fixed;inset:0;z-index:2600;display:flex;align-items:flex-start;justify-content:center;padding:24px;background:rgba(31,74,133,.45);overflow-y:auto';
@@ -657,6 +666,7 @@ OD.define('kanban', {
       if (!motif) { toast('Choisissez un motif', true); return; }
       btnOk.disabled = true; btnOk.textContent = 'Abandon en cours...';
 
+      console.log('[kanban] abandon demande —', { affaire: affaire, bacs_sf_id: c.bacs_sf_id, objet: c.bacs_object, motif: motif });
       const r = await bacsDemander('abandonner', { recordId: affaire, motif: motif, commentaire: comm });
       if (!r || !r.ok) {
         btnOk.disabled = false; btnOk.textContent = 'Abandonner';
