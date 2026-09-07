@@ -1022,8 +1022,8 @@ OD.define('kanban', {
         + '<span class="odq-txt"><b>' + (lib || '\u2014') + '</b>'
         + (q.couleur ? '<i>' + esc(q.couleur) + '</i>' : '<i class="odq-vide">couleur non renseign\u00e9e</i>') + '</span>'
         + '<span class="odq-prix">' + prix + '</span></button>'
-        + (estCmd ? '' : '<button type="button" class="odq-act odq-cmd" title="Passer en commande" data-vnq-cmd="' + q.id_propale_bdc + '" data-vnq-sf="' + sf + '">\u2192 BDC</button>')
-        + '<button type="button" class="odq-act odq-del" title="Abandonner" data-vnq-del="' + q.id_propale_bdc + '" data-vnq-sf="' + sf + '" data-vnq-lib="' + lib + '">\u2715</button>'
+        + (estCmd ? '' : '<button type="button" class="odq-act odq-cmd" title="Passer en commande" data-vnq-cmd="' + q.id_propale_bdc + '" data-vnq-sf="' + sf + '">' + ICON_CART + '</button>')
+        + '<button type="button" class="odq-act odq-del" title="Abandonner" data-vnq-del="' + q.id_propale_bdc + '" data-vnq-sf="' + sf + '" data-vnq-lib="' + lib + '">' + ICON_X + '</button>'
         + '</div>';
     }).join('');
     const modal = d.createElement('div');
@@ -1040,9 +1040,12 @@ OD.define('kanban', {
         '.odq-txt i{font-style:normal;color:#7a98c5;font-size:12.5px}' +
         '.odq-txt i.odq-vide{color:#c3cfdd}' +
         '.odq-prix{font-weight:800;color:#2a5ea9;white-space:nowrap;font-size:14px}' +
-        '.odq-act{flex:0 0 auto;border-radius:10px;border:1px solid #e3edf9;background:#fff;cursor:pointer;font:inherit;font-weight:700;font-size:12px;transition:.12s}' +
-        '.odq-cmd{width:64px;color:#2f8f77;border-color:#cfe8e0}.odq-cmd:hover{background:#eefaf6;border-color:#2f8f77}' +
-        '.odq-del{width:40px;color:#d97070;border-color:#f0d6d6;font-size:14px}.odq-del:hover{background:#fdf3f3;border-color:#d97070}';
+        '.odq-act{flex:0 0 auto;align-self:center;width:38px;height:38px;border-radius:50%;border:1.5px solid #e3edf9;background:#fff;cursor:pointer;padding:0;display:inline-flex;align-items:center;justify-content:center;line-height:0;transition:.14s}' +
+        '.odq-act svg{display:block}' +
+        '.odq-cmd{color:#53bda7;border-color:#cfe8e0}' +
+        '.odq-cmd:hover{background:#53bda7;border-color:#53bda7;color:#fff;transform:scale(1.06)}' +
+        '.odq-del{color:#d97070;border-color:#f0d6d6}' +
+        '.odq-del:hover{background:#e24b4a;border-color:#e24b4a;color:#fff;transform:scale(1.06)}';
       doc.head.appendChild(st);
     }
     modal.innerHTML = '<div style="font-weight:800;color:#1f4a87;font-size:15px;margin-bottom:4px">' + quotes.length + (estCmd ? ' commandes' : ' propositions') + '</div>'
@@ -1059,7 +1062,7 @@ OD.define('kanban', {
         const sfq = cmd.getAttribute('data-vnq-sf');
         if (!sfq) { toast('Proposition sans identifiant BACS', true); return; }
         fermer();
-        convertirEnCommande(Number(cmd.getAttribute('data-vnq-cmd')), sfq, cmd.closest('.odq-row').querySelector('.odq-txt b').textContent);
+        convertirEnCommande(Number(cmd.getAttribute('data-vnq-cmd')), sfq, (cmd.closest('.odq-row').querySelector('.odq-txt b') || {}).textContent || '');
         return;
       }
       const del = e.target.closest('[data-vnq-del]');
@@ -2694,6 +2697,8 @@ OD.define('kanban', {
 
   const ICON_PDF = '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="12" y1="18" x2="12" y2="12"/><polyline points="9 15 12 18 15 15"/></svg>';
   const ICON_EDIT = '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>';
+  const ICON_CART = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="20" r="1.4"/><circle cx="18" cy="20" r="1.4"/><path d="M2 3h2.2l2.4 11.4a2 2 0 0 0 2 1.6h7.9a2 2 0 0 0 2-1.55L21 8H6"/></svg>';
+  const ICON_X = '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>';
   const ICON_SEARCH_VN = '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>';
   const ICON_TRASH = '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6M14 11v6"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>';
   const ICON_MOVE = '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="5 9 2 12 5 15"/><polyline points="9 5 12 2 15 5"/><polyline points="15 19 12 22 9 19"/><polyline points="19 9 22 12 19 15"/><line x1="2" y1="12" x2="22" y2="12"/><line x1="12" y1="2" x2="12" y2="22"/></svg>';
