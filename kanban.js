@@ -179,6 +179,7 @@ OD.define('kanban', {
       id_affaire_bacs: c.id_affaire_bacs || null,
       bacs_sf_id: c.bacs_sf_id || null,
       nature: c.nature || null,
+      a_commande: c.a_commande === true,
       _moving: false
     }));
   }
@@ -557,7 +558,13 @@ OD.define('kanban', {
         h += '<button class="kc-ic" data-modif="' + c.id_propale_bdc + '" title="Modifier">' + ICON_EDIT + '</button>';
       }
     }
-    if (canArchive(c.status)) h += '<button class="kc-ic" data-archive="' + c.id_propale_bdc + '" title="Archiver">' + ICON_TRASH + '</button>';
+    // Une affaire qui porte deja une commande ne peut pas etre abandonnee dans
+    // BACS : on retire la corbeille de la carte plutot que d'exposer un geste
+    // voue a l'echec. Les corbeilles de chaque simulation restent, elles,
+    // disponibles dans le detail.
+    const abandonPossible = !(c.nature === 'simulation' && c.a_commande);
+    if (canArchive(c.status) && abandonPossible)
+      h += '<button class="kc-ic" data-archive="' + c.id_propale_bdc + '" title="Archiver">' + ICON_TRASH + '</button>';
     // Renvoi vers BACS : l'affaire si la carte est plurale (plusieurs documents),
     // le document lui-meme si elle est unitaire.
     if (c.id_affaire_bacs || c.bacs_sf_id) {
@@ -629,8 +636,12 @@ OD.define('kanban', {
   }
 
   function bacsMessage(err) {
+    // Message metier renvoye par BACS (regle de gestion) : on l'affiche tel
+    // quel, il est ecrit pour le vendeur. Reconnaissable a sa longueur et a
+    // l'absence de code technique.
+    if (typeof err === 'string' && err.length > 40 && !/^[\[{]/.test(err)) return err;
     if (err === 'bacs_non_ouvert') return "Ouvrez BACS dans un onglet et connectez-vous, puis reessayez.";
-    if (err === 'bacs_non_pret') return "L'onglet BACS n'est pas encore charge. Patientez puis reessayez.";
+    if (err === 'bacs_non_pret') return "L'onglet BACS ne repond pas. Ouvrez-le, laissez la page se charger, puis reessayez.";
     if (err === 'extension_absente' || err === 'extension_indisponible') return "Le pont BACS n'est pas actif sur ce poste.";
     if (err === 'delai_depasse') return "BACS n'a pas repondu a temps. L'affaire n'a pas ete modifiee.";
     return "BACS a refuse l'abandon : " + err;
