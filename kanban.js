@@ -139,6 +139,10 @@ OD.define('kanban', {
     } else {
       if (state.busSite == null || state.vendeurId == null) { state.cards = []; state.loading = false; state.error = null; render(); return; }
     }
+    // Sans site connu, on n'interroge pas : une requete sans filtre renverrait
+    // les affaires de TOUS les sites (constate au premier chargement, avant que
+    // le selecteur de la topnav ait publie sa valeur).
+    if (state.busSite == null) { state.cards = []; state.loading = false; state.error = null; render(); return; }
     if (state.loading) return;
     state.loading = true; state.error = null; render();
     try {
@@ -2892,7 +2896,15 @@ OD.define('kanban', {
       window.__kanBusBound = true;
       try { b.onChange(({ siteId }) => { if (window.__kanApplyBusSite) window.__kanApplyBusSite(siteId); }); } catch (e) { }
     }
-    try { applyBusSite(b.getSiteId()); } catch (e) { }
+    // Le bus peut ne pas encore avoir de site au montage : on attend sa valeur
+    // plutot que de charger sans filtre.
+    (function attendreSite(essais) {
+      essais = essais || 0;
+      let id = null;
+      try { id = b.getSiteId(); } catch (e) { }
+      if (id != null) { applyBusSite(id); return; }
+      if (essais < 120) setTimeout(function () { attendreSite(essais + 1); }, 250);
+    })();
   })();
 
 }
