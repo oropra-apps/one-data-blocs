@@ -172,6 +172,7 @@ OD.define('kanban', {
       rpv_cde: c.rpv_cde != null ? Number(c.rpv_cde) : null,
       nb_versions: c.nb_versions != null ? Number(c.nb_versions) : 1,
       veh_uniforme: c.veh_uniforme !== false,
+      id_affaire_bacs: c.id_affaire_bacs || null,
       _moving: false
     }));
   }
@@ -575,6 +576,111 @@ OD.define('kanban', {
       await loadData();
     } catch (e) { console.error('[kanban] setAsPropale', e); const pc = findCard(state.openVersions); toast(await humanErrorAsync(e, pc && pc.vin), true); }
   }
+
+
+  // ── Abandon d'une affaire BACS ──────────────────────────────────────────
+  // Règle : le kanban et BACS doivent toujours dire la même chose. On n'archive
+  // donc RIEN tant que BACS n'a pas confirmé l'abandon. Un refus, ou l'absence
+  // d'onglet BACS, laisse la carte strictement inchangée.
+  function bacsDemander(action, params, delaiMs) {
+    return new Promise((resolve) => {
+      const id = 'od_' + Date.now() + '_' + Math.random().toString(16).slice(2);
+      const w = (wwLib.getFrontWindow && wwLib.getFrontWindow()) || window;
+      const fin = (r) => { try { w.removeEventListener('message', ecoute); } catch (e) {} clearTimeout(t); resolve(r); };
+      const ecoute = (e) => {
+        const m = e.data;
+        if (!m || !m.__od_bacs_result || m.id !== id) return;
+        fin(m);
+      };
+      w.addEventListener('message', ecoute);
+      const t = setTimeout(() => fin({ ok: false, erreur: 'delai_depasse' }), delaiMs || 25000);
+      try { w.postMessage({ __od_bacs: true, id: id, action: action, params: params || {} }, '*'); }
+      catch (e) { fin({ ok: false, erreur: 'extension_absente' }); }
+    });
+  }
+
+  function bacsMessage(err) {
+    if (err === 'bacs_non_ouvert') return "Ouvrez BACS dans un onglet et connectez-vous, puis reessayez.";
+    if (err === 'bacs_non_pret') return "L'onglet BACS n'est pas encore charge. Patientez puis reessayez.";
+    if (err === 'extension_absente' || err === 'extension_indisponible') return "Le pont BACS n'est pas actif sur ce poste.";
+    if (err === 'delai_depasse') return "BACS n'a pas repondu a temps. L'affaire n'a pas ete modifiee.";
+    return "BACS a refuse l'abandon : " + err;
+  }
+
+  async function chargerMotifs(recordId) {
+    if (recordId) {
+      const r = await bacsDemander('motifs', { recordId: recordId }, 12000);
+      if (r && r.ok && Array.isArray(r.motifs) && r.motifs.length) return r.motifs;
+    }
+    try {
+      const q = await ctx.supabase.from('bacs_motif_abandon')
+        .select('valeur,libelle').eq('actif', true).order('ordre');
+      return (q.data || []).map(m => ({ valeur: m.valeur, libelle: m.libelle }));
+    } catch (e) { return []; }
+  }
+
+  async function ouvrirAbandon(id) {
+    const c = findCard(id); if (!c) return;
+    const d = doc;
+    const ov = d.createElement('div');
+    ov.style.cssText = 'position:fixed;inset:0;z-index:2600;display:flex;align-items:flex-start;justify-content:center;padding:24px;background:rgba(31,74,133,.45);overflow-y:auto';
+    const modal = d.createElement('div');
+    modal.style.cssText = 'background:#fff;border-radius:16px;width:100%;max-width:520px;box-shadow:0 30px 80px rgba(31,74,133,.35);margin:auto;position:relative;padding:22px;font-family:inherit;color:#1c2b45';
+    modal.innerHTML = '<div style="color:#7a98c5;padding:22px;text-align:center">Chargement des motifs...</div>';
+    ov.appendChild(modal); d.body.appendChild(ov);
+    const fermer = () => { try { ov.remove(); } catch (e) {} };
+    ov.addEventListener('mousedown', function (e) { if (e.target === ov) fermer(); });
+
+    const affaire = c.id_affaire_bacs || null;
+    const motifs = await chargerMotifs(affaire);
+    const opts = motifs.map(function (m) { return '<option value="' + esc(m.valeur) + '">' + esc(m.libelle) + '</option>'; }).join('');
+
+    modal.innerHTML =
+      '<button type="button" data-ab-close style="position:absolute;top:-12px;right:-12px;width:34px;height:34px;border-radius:50%;border:1.5px solid #e2eaf5;background:#fff;cursor:pointer;color:#7a98c5;font-size:16px;line-height:1;display:flex;align-items:center;justify-content:center;padding:0;box-shadow:0 2px 8px rgba(31,74,133,.25)">\u2715</button>'
+      + '<div style="font-weight:800;color:#1f4a87;font-size:16px">Abandonner l&#39;affaire</div>'
+      + '<div style="color:#7a98c5;font-size:13px;margin:3px 0 16px">' + esc(c.client || '') + (c.vehicule ? ' \u00b7 ' + esc(c.vehicule) : '') + '</div>'
+      + '<label style="font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:#7a98c5;font-weight:700">Motif</label>'
+      + '<select data-ab-motif style="width:100%;margin:6px 0 14px;padding:10px;border:1px solid #e3edf9;border-radius:9px;font:inherit">' + opts + '</select>'
+      + '<label style="font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:#7a98c5;font-weight:700">Commentaire</label>'
+      + '<input data-ab-comm placeholder="Precision utile au suivi" style="width:100%;margin:6px 0 4px;padding:10px;border:1px solid #e3edf9;border-radius:9px;font:inherit">'
+      + '<div style="font-size:11.5px;color:#9fb0c4;margin:12px 0 16px;line-height:1.5">L&#39;affaire sera abandonnee dans BACS, puis archivee ici. Ce geste est <b>definitif cote constructeur</b>.</div>'
+      + '<div style="display:flex;gap:9px">'
+      + '<button type="button" data-ab-ok style="flex:1;padding:11px;border:none;border-radius:9px;background:#e24b4a;color:#fff;font:inherit;font-weight:700;cursor:pointer">Abandonner</button>'
+      + '<button type="button" data-ab-close style="flex:1;padding:11px;border:1px solid #e3edf9;border-radius:9px;background:#fff;color:#2a5ea9;font:inherit;font-weight:700;cursor:pointer">Annuler</button>'
+      + '</div>';
+
+    modal.querySelectorAll('[data-ab-close]').forEach(function (b) { b.addEventListener('click', fermer); });
+    const btnOk = modal.querySelector('[data-ab-ok]');
+    btnOk.addEventListener('click', async function () {
+      const motif = modal.querySelector('[data-ab-motif]').value;
+      const comm = (modal.querySelector('[data-ab-comm]').value || '').trim() || null;
+      if (!motif) { toast('Choisissez un motif', true); return; }
+      btnOk.disabled = true; btnOk.textContent = 'Abandon en cours...';
+
+      const r = await bacsDemander('abandonner', { recordId: affaire, motif: motif, commentaire: comm });
+      if (!r || !r.ok) {
+        btnOk.disabled = false; btnOk.textContent = 'Abandonner';
+        toast(bacsMessage((r && (r.erreur || r.refus)) || 'refus'), true);
+        return;
+      }
+      try {
+        const q = await ctx.supabase.rpc('propale_abandonner', {
+          p_id_propale_bdc: Number(id), p_motif: motif, p_commentaire: comm,
+          p_id_user: state.vendeurId ? Number(state.vendeurId) : null
+        });
+        if (q.error) throw q.error;
+        fermer();
+        state.cards = (state.cards || []).filter(function (x) { return x.id_propale_bdc !== Number(id); });
+        render();
+        toast('Affaire abandonnee dans BACS et archivee');
+      } catch (e) {
+        fermer();
+        toast("Abandon enregistre dans BACS, mais l'archivage One Data a echoue.", true);
+        await loadData();
+      }
+    });
+  }
+
 
   async function doMove(id, to) {
     const c = findCard(id); if (!c) return;
@@ -2315,7 +2421,14 @@ OD.define('kanban', {
     if (go) { const [id, to] = go.getAttribute('data-go').split(':'); doMove(Number(id), to); return; }
 
     const arch = e.target.closest('[data-archive]');
-    if (arch) { doMove(Number(arch.getAttribute('data-archive')), 'archived'); return; }
+    if (arch) {
+      const idA = Number(arch.getAttribute('data-archive'));
+      const cA = findCard(idA);
+      // Affaire venue de BACS : l'archivage vaut abandon et doit etre repercute
+      // chez le constructeur. Les autres affaires gardent l'archivage simple.
+      if (cA && cA.id_affaire_bacs) { ouvrirAbandon(idA); return; }
+      doMove(idA, 'archived'); return;
+    }
 
     const pdf = e.target.closest('[data-pdf]');
     if (pdf) { const [id, kind] = pdf.getAttribute('data-pdf').split(':'); pdfDoc(Number(id), kind, pdf.getAttribute('data-maj') || null); return; }
