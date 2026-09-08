@@ -145,6 +145,15 @@ OD.define('pcom', {
           }
         }
         b.site = b.docs[0] && b.docs[0].site;
+        // La corbeille d'une affaire n'apparaît que si aucune de ses commandes
+        // n'est vivante — règle du kanban : BACS refuse d'abandonner une
+        // affaire qui en porte une. Et seulement dans le périmètre du vendeur.
+        const cmdVivante = b.docs.some(function (d) {
+          return d.nature === 'commande' && !d.archived && d.status !== 'lose';
+        });
+        const vivants = b.docs.filter(function (d) { return !d.archived && d.status !== 'lose'; });
+        b.peutAbandonner = !!b.affaire && vivants.length > 0 && !cmdVivante
+          && vivants.every(function (d) { return d.peut_agir; });
         // Une affaire à document unique n'a rien à cacher : elle s'ouvre seule.
         if (b.docs.length === 1 && S.ouverts[b.affaire] === undefined) S.ouverts[b.affaire] = true;
         b.vendeur = b.docs[0] && b.docs[0].vendeur;
@@ -159,6 +168,9 @@ OD.define('pcom', {
     // mêmes objets doivent se ressembler.
     const I_PDF = '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="12" y1="18" x2="12" y2="12"/><polyline points="9 15 12 18 15 15"/></svg>';
     const I_EDIT = '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>';
+    const I_CART = '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="20" r="1.4"/><circle cx="18" cy="20" r="1.4"/><path d="M2 3h2.2l2.4 11.4a2 2 0 0 0 2 1.6h7.9a2 2 0 0 0 2-1.55L21 8H6"/></svg>';
+    const I_X = '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>';
+    const I_TRASH = '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6M14 11v6"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>';
     const I_CHEV = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>';
 
     function css() {
@@ -170,12 +182,12 @@ OD.define('pcom', {
 '#pcom-root .pc-chip.on{background:#2a5ea9;color:#fff;border-color:#2a5ea9}' +
 '#pcom-root .pc-sect{font-size:11px;font-weight:800;letter-spacing:.07em;text-transform:uppercase;color:#888780;margin:0 0 10px}' +
 '#pcom-root .pc-sec{margin:0 0 24px}' +
-'#pcom-root .pc-bloc{background:#fff;border:0.5px solid #ece9e1;border-left:3px solid #cfcdc5;border-radius:10px;margin-bottom:10px;overflow:hidden;transition:box-shadow .12s}' +
+'#pcom-root .pc-bloc{position:relative;background:#fff;border:0.5px solid #ece9e1;border-left:3px solid #cfcdc5;border-radius:10px;margin-bottom:10px;overflow:hidden;transition:box-shadow .12s}' +
 '#pcom-root .pc-bloc:hover{box-shadow:0 4px 14px rgba(42,94,169,.10)}' +
 '#pcom-root .pc-bloc.vt-vn{border-left-color:#53bda7}' +
 '#pcom-root .pc-bloc.vt-vo{border-left-color:#fac055}' +
 '#pcom-root .pc-bloc.hist{opacity:.68}' +
-'#pcom-root .pc-tete{display:flex;align-items:center;gap:10px;padding:11px 14px;cursor:pointer;background:#fbfaf7;border:none;width:100%;text-align:left;font:inherit}' +
+'#pcom-root .pc-tete{padding-right:56px;display:flex;align-items:center;gap:10px;padding:11px 14px;cursor:pointer;background:#fbfaf7;border:none;width:100%;text-align:left;font:inherit}' +
 '#pcom-root .pc-tete:hover{background:#f7f6f2}' +
 '#pcom-root .pc-tete .chev{color:#b4b2a9;display:inline-flex;transition:transform .15s}' +
 '#pcom-root .pc-tete.ouv .chev{transform:rotate(90deg)}' +
@@ -204,6 +216,11 @@ OD.define('pcom', {
 '#pcom-root .pc-st.bdc{background:rgba(42,94,169,.14);color:#2a5ea9}' +
 '#pcom-root .pc-st.win{background:rgba(83,189,167,.20);color:#2c7a68}' +
 '#pcom-root .pc-st.lose{background:rgba(217,112,112,.16);color:#b23433}' +
+'#pcom-root .pc-act.cmd{color:#53bda7;border-color:#cfe8e0}' +
+'#pcom-root .pc-act.cmd:hover{background:#53bda7;border-color:#53bda7;color:#fff}' +
+'#pcom-root .pc-act.del{color:#d97070;border-color:#f0d6d6}' +
+'#pcom-root .pc-act.del:hover{background:#e24b4a;border-color:#e24b4a;color:#fff}' +
+'#pcom-root .pc-tete .pc-act{width:32px;height:32px}' +
 '#pcom-root .pc-vide{padding:30px;text-align:center;color:#b4b2a9;font-size:13px;border:1px dashed #ece9e1;border-radius:10px}' +
 '#pcom-root .pc-err{padding:12px 14px;border-radius:10px;background:rgba(217,112,112,.14);color:#b23433;font-size:13px}' +
 '</style>';
@@ -237,6 +254,21 @@ OD.define('pcom', {
       if (p.bacs_sf_id) {
         actions += '<a class="pc-act" href="' + PC_BACS_BASE + '/detail/' + esc(p.bacs_sf_id) +
                    '" target="_blank" rel="noopener" title="Ouvrir dans BACS">B</a>';
+      }
+      // Gestes BACS, aux mêmes conditions que le kanban : le document doit
+      // venir du constructeur, être vivant, et relever du périmètre du
+      // vendeur — c'est ce que « peut_agir » calcule déjà (sa propre affaire,
+      // ou celle d'un vendeur dont il a la charge).
+      const lib = (p.vehicule || '') + (p.couleur ? ' · ' + p.couleur : '');
+      if (p.peut_agir && p.bacs_sf_id && !p.archived && p.status !== 'lose' && p.status !== 'win') {
+        if (p.nature === 'simulation') {
+          actions += '<button type="button" class="pc-act cmd" data-pccmd="' + p.id_propale_bdc +
+                     '" data-pcsf="' + esc(p.bacs_sf_id) + '" data-pclib="' + esc(lib) +
+                     '" title="Passer en commande">' + I_CART + '</button>';
+        }
+        actions += '<button type="button" class="pc-act del" data-pcabdoc="' + p.id_propale_bdc +
+                   '" data-pcsf="' + esc(p.bacs_sf_id) + '" data-pclib="' + esc(lib) +
+                   '" title="Abandonner">' + I_X + '</button>';
       }
 
       const l = LIB_STATUT[p.status] || { txt: p.status || '—', cls: 'draft' };
@@ -287,6 +319,11 @@ OD.define('pcom', {
           '<span class="cpt">' + cpt.join(' · ') + '</span>' +
           (b.montant != null ? '<span class="mnt">' + eur(b.montant) + '</span>' : '') +
         '</button>' +
+        (b.peutAbandonner
+          ? '<button type="button" class="pc-act del" style="position:absolute;top:12px;right:12px" ' +
+            'data-pcabaff="' + esc(b.affaire) + '" data-pcid="' + b.docs[0].id_propale_bdc + '" ' +
+            'data-pclib="' + esc(b.vehicule || '') + '" title="Abandonner l\'affaire">' + I_TRASH + '</button>'
+          : '') +
         (ouvert ? '<div class="pc-list">' + b.docs.map(ligneDoc).join('') + '</div>' : '') +
       '</div>';
     }
@@ -394,6 +431,266 @@ OD.define('pcom', {
       } finally { done(); }
     }
 
+    // ─── Gestes BACS ───────────────────────────────────────────────────────
+    // ⚠ CE BLOC EST LE JUMEAU DE CELUI DU KANBAN (kanban.js). Tout correctif
+    // portant sur l'abandon, la conversion ou le contrôle de point de vente
+    // doit être appliqué AUX DEUX. Ils écrivent chez le constructeur, et un
+    // défaut corrigé d'un seul côté ne se voit pas — c'est exactement ainsi que
+    // l'envoi multi-frames a créé deux commandes réelles le 08/09.
+
+    function toast(msg, err) {
+      const d = doc;
+      const t = d.createElement('div');
+      t.style.cssText = 'position:fixed;left:50%;bottom:26px;transform:translateX(-50%);z-index:3000;' +
+        'padding:12px 18px;border-radius:11px;font:inherit;font-size:13px;font-weight:600;color:#fff;' +
+        'box-shadow:0 10px 30px rgba(31,74,133,.28);max-width:min(560px,92vw);' +
+        'background:' + (err ? '#8d4a55' : '#2a5ea9');
+      t.textContent = msg;
+      d.body.appendChild(t);
+      setTimeout(function () { try { t.remove(); } catch (e) {} }, err ? 7000 : 3500);
+    }
+
+    // Le kanban ne peut pas parler à BACS : il n'en a ni la session ni le
+    // contexte. Tout passe par le pont posé par l'extension sur la page.
+    function bacsDemander(action, params, delaiMs) {
+      return new Promise(function (resolve) {
+        const id = 'od_' + Date.now() + '_' + Math.random().toString(16).slice(2);
+        const w = (wwLib.getFrontWindow && wwLib.getFrontWindow()) || window;
+        const fin = function (r) { try { w.removeEventListener('message', ecoute); } catch (e) {} clearTimeout(t); resolve(r); };
+        const ecoute = function (e) {
+          const m = e.data;
+          if (!m || !m.__od_bacs_result || m.id !== id) return;
+          fin(m);
+        };
+        w.addEventListener('message', ecoute);
+        const t = setTimeout(function () { fin({ ok: false, erreur: 'delai_depasse' }); }, delaiMs || 25000);
+        try { w.postMessage({ __od_bacs: true, id: id, action: action, params: params || {} }, '*'); }
+        catch (e) { fin({ ok: false, erreur: 'extension_absente' }); }
+      });
+    }
+
+    function bacsMessage(err) {
+      // Message métier renvoyé par BACS : on l'affiche tel quel, il est écrit
+      // pour le vendeur. Reconnaissable à sa longueur et à l'absence de code.
+      if (typeof err === 'string' && err.length > 40 && !/^[\[{]/.test(err)) return err;
+      if (err === 'bacs_non_ouvert') return "Ouvrez BACS dans un onglet et connectez-vous, puis réessayez.";
+      if (err === 'bacs_non_pret') return "L'onglet BACS ne répond pas. Ouvrez-le, laissez la page se charger, puis réessayez.";
+      if (err === 'extension_absente' || err === 'extension_indisponible') return "Le pont BACS n'est pas actif sur ce poste.";
+      if (err === 'delai_depasse') return "BACS n'a pas répondu à temps. Rien n'a été modifié.";
+      return "BACS a refusé : " + err;
+    }
+
+    function refusDeSite(err) { return typeof err === 'string' && /point de vente/i.test(err); }
+
+    async function siteBacsDeLAffaire(affaire) {
+      if (!affaire) return null;
+      try {
+        const r = await ctx.supabase.rpc('bacs_site_affaire', { p_affaire: affaire });
+        if (r.error) { console.warn('[pcom] site de l affaire illisible', r.error); return null; }
+        const row = (r.data || [])[0];
+        return (row && row.id_bacs) ? { id_bacs: row.id_bacs, nom: row.nom || row.id_bacs } : null;
+      } catch (e) { console.warn('[pcom] site de l affaire illisible', e); return null; }
+    }
+
+    function modaleBascule(nomSite, message) {
+      return new Promise(function (resolve) {
+        const d = doc;
+        const ov = d.createElement('div');
+        ov.style.cssText = 'position:fixed;inset:0;z-index:2700;display:flex;align-items:center;justify-content:center;padding:24px;background:rgba(31,74,133,.45)';
+        const m = d.createElement('div');
+        m.style.cssText = 'background:#fff;border-radius:16px;width:100%;max-width:480px;box-shadow:0 30px 80px rgba(31,74,133,.35);padding:22px;font-family:inherit;color:#1f2b45';
+        m.innerHTML = '<div style="font-weight:800;color:#1f4a87;font-size:16px">Mauvais point de vente</div>' +
+          '<div style="color:#7a98c5;font-size:13px;margin:8px 0 16px;line-height:1.5">' + esc(message) + '</div>' +
+          '<div style="display:flex;gap:9px">' +
+          '<button type="button" data-bs-ok style="flex:1;height:44px;border:none;border-radius:10px;background:#2a5ea9;color:#fff;font:inherit;font-weight:700;cursor:pointer">Basculer sur ' + esc(nomSite) + '</button>' +
+          '<button type="button" data-bs-no style="flex:0 0 120px;height:44px;border:1.5px solid #e3edf9;border-radius:10px;background:#fff;color:#2a5ea9;font:inherit;font-weight:700;cursor:pointer">Annuler</button>' +
+          '</div>';
+        ov.appendChild(m); d.body.appendChild(ov);
+        const fin = function (v) { try { ov.remove(); } catch (e) {} resolve(v); };
+        m.querySelector('[data-bs-ok]').addEventListener('click', function () { fin(true); });
+        m.querySelector('[data-bs-no]').addEventListener('click', function () { fin(false); });
+        ov.addEventListener('mousedown', function (e) { if (e.target === ov) fin(false); });
+      });
+    }
+
+    async function chargerMotifs(recordId) {
+      if (recordId) {
+        const r = await bacsDemander('motifs', { recordId: recordId }, 12000);
+        if (r && r.ok && Array.isArray(r.motifs) && r.motifs.length) return r.motifs;
+      }
+      try {
+        const q = await ctx.supabase.from('bacs_motif_abandon')
+          .select('valeur,libelle').eq('actif', true).order('ordre');
+        return (q.data || []).map(function (m) { return { valeur: m.valeur, libelle: m.libelle }; });
+      } catch (e) { return []; }
+    }
+
+    // Le point de vente est vérifié AVANT de faire choisir un motif : BACS
+    // n'abandonne une affaire que depuis une session ouverte sur son site.
+    async function verifierPointDeVente(affaire) {
+      const cible = await siteBacsDeLAffaire(affaire);
+      if (!cible) return true;
+      const etat = await bacsDemander('site_courant', {}, 12000);
+      const actuel = etat && etat.ok && etat.site;
+      if (!actuel || !actuel.Id || String(actuel.Id) === String(cible.id_bacs)) return true;
+      const autorise = !Array.isArray(etat.sites) || !etat.sites.length ||
+        etat.sites.some(function (x) { return String(x.Id) === String(cible.id_bacs); });
+      if (!autorise) {
+        toast('Cette affaire dépend de ' + cible.nom + ', sur lequel vous n\'avez pas accès dans BACS.', true);
+        return false;
+      }
+      const msg = 'Cette affaire dépend de ' + cible.nom + '. Votre session BACS est ouverte sur ' +
+                  (actuel.BusinessName || 'un autre point de vente') +
+                  '. BACS refusera l\'abandon tant que vous n\'aurez pas basculé.';
+      if (!await modaleBascule(cible.nom, msg)) return false;
+      const b = await bacsDemander('site_bascule', { siteId: cible.id_bacs }, 15000);
+      if (!b || !b.ok) { toast(bacsMessage((b && (b.erreur || b.refus)) || 'refus'), true); return false; }
+      toast('Point de vente BACS basculé sur ' + cible.nom);
+      return true;
+    }
+
+    // Modale de motif, commune à l'abandon d'une affaire et d'un document.
+    function modaleMotif(titre, sousTitre, note, motifs) {
+      return new Promise(function (resolve) {
+        const d = doc;
+        const ov = d.createElement('div');
+        ov.style.cssText = 'position:fixed;inset:0;z-index:2700;display:flex;align-items:flex-start;justify-content:center;padding:24px;background:rgba(31,74,133,.45);overflow-y:auto';
+        const m = d.createElement('div');
+        m.style.cssText = 'background:#fff;border-radius:16px;width:100%;max-width:500px;box-shadow:0 30px 80px rgba(31,74,133,.35);margin:auto;padding:22px;font-family:inherit;color:#1f2b45';
+        const opts = motifs.map(function (x) { return '<option value="' + esc(x.valeur) + '">' + esc(x.libelle) + '</option>'; }).join('');
+        m.innerHTML =
+          '<div style="font-weight:800;color:#1f4a87;font-size:16px">' + esc(titre) + '</div>' +
+          '<div style="color:#7a98c5;font-size:13px;margin:3px 0 16px">' + esc(sousTitre || '') + '</div>' +
+          '<label style="font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:#7a98c5;font-weight:700">Motif</label>' +
+          '<select data-ab-motif style="width:100%;margin:6px 0 14px;padding:10px 12px;border:1.5px solid #e3edf9;border-radius:10px;font:inherit;color:#1f4a87;background:#fff;font-weight:600">' + opts + '</select>' +
+          '<input data-ab-comm placeholder="Commentaire (facultatif)" style="width:100%;margin:0 0 4px;padding:10px 12px;border:1.5px solid #e3edf9;border-radius:10px;font:inherit;color:#1f4a87">' +
+          '<div style="font-size:11.5px;color:#9fb0c4;margin:12px 0 16px;line-height:1.5">' + note + '</div>' +
+          '<div style="display:flex;gap:9px">' +
+          '<button type="button" data-ab-ok style="flex:1;height:44px;border:none;border-radius:10px;background:#e24b4a;color:#fff;font:inherit;font-weight:700;cursor:pointer">Abandonner</button>' +
+          '<button type="button" data-ab-no style="flex:1;height:44px;border:1.5px solid #e3edf9;border-radius:10px;background:#fff;color:#2a5ea9;font:inherit;font-weight:700;cursor:pointer">Annuler</button>' +
+          '</div>';
+        ov.appendChild(m); d.body.appendChild(ov);
+        const fin = function (v) { try { ov.remove(); } catch (e) {} resolve(v); };
+        m.querySelector('[data-ab-no]').addEventListener('click', function () { fin(null); });
+        ov.addEventListener('mousedown', function (e) { if (e.target === ov) fin(null); });
+        m.querySelector('[data-ab-ok]').addEventListener('click', function () {
+          const motif = m.querySelector('[data-ab-motif]').value;
+          if (!motif) return;
+          const btn = m.querySelector('[data-ab-ok]');
+          btn.disabled = true; btn.textContent = 'Abandon en cours…';
+          fin({ motif: motif, commentaire: (m.querySelector('[data-ab-comm]').value || '').trim() || null, fermer: fin });
+        });
+      });
+    }
+
+    // Abandon de l'AFFAIRE : emporte ses simulations. Rien n'est archivé dans
+    // One Data tant que BACS n'a pas confirmé.
+    async function abandonnerAffaire(affaire, idPropale, libelle) {
+      const dispo = await bacsDemander('ping', {}, 8000);
+      if (!dispo || (!dispo.ok && dispo.erreur)) {
+        toast(bacsMessage(dispo && dispo.erreur ? dispo.erreur : 'bacs_non_ouvert'), true); return;
+      }
+      if (!await verifierPointDeVente(affaire)) return;
+      const motifs = await chargerMotifs(affaire);
+      const rep = await modaleMotif("Abandonner l'affaire", libelle,
+        "L&#39;affaire sera abandonnée dans BACS, puis archivée ici. Ce geste est <b>définitif côté constructeur</b>.",
+        motifs);
+      if (!rep) return;
+
+      let r = await bacsDemander('abandonner', { recordId: affaire, motif: rep.motif, commentaire: rep.commentaire });
+      if ((!r || !r.ok) && refusDeSite(r && r.refus)) {
+        const cible = await siteBacsDeLAffaire(affaire);
+        if (cible && await modaleBascule(cible.nom, r.refus)) {
+          const b = await bacsDemander('site_bascule', { siteId: cible.id_bacs }, 15000);
+          if (b && b.ok) r = await bacsDemander('abandonner', { recordId: affaire, motif: rep.motif, commentaire: rep.commentaire });
+          else toast(bacsMessage((b && (b.erreur || b.refus)) || 'refus'), true);
+        }
+      }
+      rep.fermer(null);
+      if (!r || !r.ok) { toast(bacsMessage((r && (r.erreur || r.refus)) || 'refus'), true); return; }
+      try {
+        await ctx.supabase.rpc('propale_abandonner', {
+          p_id_propale_bdc: Number(idPropale), p_motif: rep.motif,
+          p_commentaire: rep.commentaire, p_id_user: getViewerId()
+        });
+      } catch (e) { /* BACS fait foi : la synchronisation rattrapera */ }
+      toast('Affaire abandonnée dans BACS et archivée');
+      await PC_load();
+    }
+
+    // Abandon d'UN document. L'affaire reste ouverte, même s'il s'agissait de
+    // sa dernière simulation.
+    async function abandonnerDocument(idPropale, sfId, libelle) {
+      const estCommande = /^801/.test(String(sfId || ''));
+      const dispo = await bacsDemander('ping', {}, 8000);
+      if (!dispo || (!dispo.ok && dispo.erreur)) {
+        toast(bacsMessage(dispo && dispo.erreur ? dispo.erreur : 'bacs_non_ouvert'), true); return;
+      }
+      const motifs = await chargerMotifs(null);
+      const rep = await modaleMotif(
+        'Abandonner cette ' + (estCommande ? 'commande' : 'proposition'), libelle,
+        'Seule cette ' + (estCommande ? 'commande' : 'proposition') + " sera abandonnée dans BACS. L&#39;affaire reste ouverte.",
+        motifs);
+      if (!rep) return;
+      const r = estCommande
+        ? await bacsDemander('abandonner_commande', { orderId: sfId, motif: rep.motif, commentaire: rep.commentaire })
+        : await bacsDemander('abandonner_devis',    { quoteId: sfId, motif: rep.motif, commentaire: rep.commentaire });
+      rep.fermer(null);
+      if (!r || !r.ok) { toast(bacsMessage((r && (r.erreur || r.refus)) || 'refus'), true); return; }
+      try {
+        await ctx.supabase.rpc('propale_abandonner', {
+          p_id_propale_bdc: Number(idPropale), p_motif: rep.motif, p_commentaire: rep.commentaire,
+          p_id_user: getViewerId(), p_affaire_entiere: false
+        });
+      } catch (e) { /* BACS fait foi */ }
+      toast((estCommande ? 'Commande abandonnée' : 'Proposition abandonnée') + ' dans BACS');
+      await PC_load();
+    }
+
+    // Conversion : confirmation explicite, la commande est créée chez le
+    // constructeur et ne pourra qu'être abandonnée, jamais annulée.
+    function confirmerCommande(libelle) {
+      return new Promise(function (resolve) {
+        const d = doc;
+        const ov = d.createElement('div');
+        ov.style.cssText = 'position:fixed;inset:0;z-index:2800;display:flex;align-items:center;justify-content:center;padding:24px;background:rgba(31,74,133,.45)';
+        const m = d.createElement('div');
+        m.style.cssText = 'background:#fff;border-radius:16px;width:100%;max-width:460px;box-shadow:0 30px 80px rgba(31,74,133,.35);padding:22px;font-family:inherit;color:#1c2b45';
+        m.innerHTML =
+          '<div style="font-weight:800;color:#1f4a87;font-size:15px">Passer en commande</div>' +
+          '<div style="color:#7a98c5;font-size:13px;margin:3px 0 14px">' + esc(libelle || '') + '</div>' +
+          '<div style="font-size:12.5px;color:#5a7ba8;line-height:1.55;margin-bottom:16px">' +
+          'La commande sera <b>créée dans BACS</b> chez le constructeur. Elle ne pourra pas être annulée depuis One Data — seulement abandonnée.</div>' +
+          '<div style="display:flex;gap:9px">' +
+          '<button type="button" data-cf-ok style="flex:1;height:44px;border:none;border-radius:10px;background:#53bda7;color:#fff;font:inherit;font-weight:700;cursor:pointer">Créer la commande</button>' +
+          '<button type="button" data-cf-no style="flex:1;height:44px;border:1.5px solid #e3edf9;border-radius:10px;background:#fff;color:#2a5ea9;font:inherit;font-weight:700;cursor:pointer">Annuler</button>' +
+          '</div>';
+        ov.appendChild(m); d.body.appendChild(ov);
+        const fin = function (v) { try { ov.remove(); } catch (e) {} resolve(v); };
+        m.querySelector('[data-cf-ok]').addEventListener('click', function () { fin(true); });
+        m.querySelector('[data-cf-no]').addEventListener('click', function () { fin(false); });
+        ov.addEventListener('mousedown', function (e) { if (e.target === ov) fin(false); });
+      });
+    }
+
+    async function convertirEnCommande(idPropale, sfId, libelle) {
+      if (!(await confirmerCommande(libelle))) return;
+      const dispo = await bacsDemander('ping', {}, 8000);
+      if (!dispo || (!dispo.ok && dispo.erreur)) {
+        toast(bacsMessage(dispo && dispo.erreur ? dispo.erreur : 'bacs_non_ouvert'), true); return;
+      }
+      toast('Conversion en commande dans BACS…');
+      const r = await bacsDemander('convertir', { quoteId: sfId }, 30000);
+      if (!r || !r.ok) { toast(bacsMessage((r && (r.erreur || r.refus)) || 'refus'), true); return; }
+      try {
+        await ctx.supabase.rpc('propale_convertie', {
+          p_id_propale_bdc: Number(idPropale), p_order_sf_id: r.orderId || null, p_id_user: getViewerId()
+        });
+      } catch (e) { /* la commande remontera par la synchronisation */ }
+      toast('Commande créée dans BACS');
+      await PC_load();
+    }
+
     // ─── Routeur ───────────────────────────────────────────────────────────
     function PC_route(e) {
       if (!e.target.closest('#pcom-root')) return;
@@ -405,6 +702,24 @@ OD.define('pcom', {
       if (aff) { const k = aff.getAttribute('data-pcaff'); S.ouverts[k] = !S.ouverts[k]; PC_render(); return; }
       const mod = e.target.closest('[data-pcmod]');
       if (mod) { PC_modif(Number(mod.getAttribute('data-pcmod'))); return; }
+      const cmd = e.target.closest('[data-pccmd]');
+      if (cmd) {
+        convertirEnCommande(Number(cmd.getAttribute('data-pccmd')),
+          cmd.getAttribute('data-pcsf'), cmd.getAttribute('data-pclib') || '');
+        return;
+      }
+      const abd = e.target.closest('[data-pcabdoc]');
+      if (abd) {
+        abandonnerDocument(Number(abd.getAttribute('data-pcabdoc')),
+          abd.getAttribute('data-pcsf'), abd.getAttribute('data-pclib') || '');
+        return;
+      }
+      const aba = e.target.closest('[data-pcabaff]');
+      if (aba) {
+        abandonnerAffaire(aba.getAttribute('data-pcabaff'),
+          Number(aba.getAttribute('data-pcid')), aba.getAttribute('data-pclib') || '');
+        return;
+      }
       const pdf = e.target.closest('[data-pcpdf]');
       if (pdf) {
         const v = pdf.getAttribute('data-pcpdf'); const parts = v.split(':');
