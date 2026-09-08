@@ -41,7 +41,7 @@ OD.define('pcom', {
     const PC_BACS_BASE           = 'https://toyota-france.my.site.com/bacs2/s';
     const PC_MOIS_RECENTS        = 12;
 
-    const S = { idClient: null, rows: null, loading: false, error: null, frise: false, morts: {}, ouv: {} };
+    const S = { idClient: null, rows: null, loading: false, error: null, frise: false, morts: {}, ouv: {}, fVnVo: 'tous', fEtat: 'tous' };
 
     // ─── Utilitaires ───────────────────────────────────────────────────────
     const esc = (s) => (s == null ? '' : String(s))
@@ -181,6 +181,12 @@ OD.define('pcom', {
       return '<style>' +
 '#pcom-root{font-family:inherit;color:#1f2b45}' +
 '#pcom-root *{box-sizing:border-box}' +
+'#pcom-root .flt{display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-bottom:10px}' +
+'#pcom-root .flt .sep{width:1px;height:20px;background:#ece9e1;margin:0 4px}' +
+'#pcom-root .chip{border:1.5px solid #e3edf9;background:#fff;color:#2a5ea9;border-radius:999px;padding:5px 13px;font:inherit;font-size:12px;font-weight:700;cursor:pointer;transition:.12s}' +
+'#pcom-root .chip:hover{border-color:#2a5ea9}' +
+'#pcom-root .chip.on{background:#2a5ea9;color:#fff;border-color:#2a5ea9}' +
+'#pcom-root .chip .n{opacity:.65;font-weight:700;margin-left:5px}' +
 '#pcom-root .res{display:flex;gap:18px;flex-wrap:wrap;align-items:baseline;padding:0 2px 12px;font-size:12.5px;color:#888780}' +
 '#pcom-root .res b{font-size:15px;font-weight:800;color:#1c2b45}' +
 '#pcom-root .liste{border:0.5px solid #ece9e1;border-radius:12px;overflow:hidden;background:#fff}' +
@@ -190,12 +196,12 @@ OD.define('pcom', {
 '#pcom-root .li.vn .ln{border-left-color:#53bda7}#pcom-root .li.vo .ln{border-left-color:#fac055}' +
 '#pcom-root .li.close .ln{background:#fcfbf9}' +
 '#pcom-root .ln .ph{width:52px;height:36px;flex:0 0 auto;border-radius:6px;background:#f4f2ed;object-fit:contain;display:block}' +
-'#pcom-root .ln .id{flex:1 1 40%;min-width:0}' +
+'#pcom-root .ln .id{flex:1 1 40%;min-width:0;display:flex;flex-direction:column;gap:2px}' +
 '#pcom-root .ln .veh{font-size:13.5px;font-weight:800;color:#1c2b45;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}' +
 '#pcom-root .ln .qui{font-size:11.5px;color:#a8a69e;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin-top:1px}' +
 '#pcom-root .ln .ctx{flex:1 1 30%;min-width:0;font-size:11.5px;color:#888780;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}' +
 '#pcom-root .ln .ctx .froid{color:#8a6410;font-weight:700}' +
-'#pcom-root .ln .chf{flex:0 0 auto;text-align:right;min-width:96px}' +
+'#pcom-root .ln .chf{flex:0 0 auto;text-align:right;min-width:96px;display:flex;flex-direction:column;align-items:flex-end;gap:3px}' +
 '#pcom-root .ln .mnt{font-size:14px;font-weight:800;color:#1c2b45;white-space:nowrap;line-height:1.15}' +
 '#pcom-root .ln .frch{font-size:11.5px;color:#a8a69e;white-space:nowrap}' +
 '#pcom-root .ln .chev{flex:0 0 auto;color:#c9c6bd;transition:transform .15s;display:inline-flex}' +
@@ -212,7 +218,7 @@ OD.define('pcom', {
 '#pcom-root .v.mort{opacity:.52}' +
 '#pcom-root .v .phw{position:relative;display:block}' +
 '#pcom-root .v .ph{width:100%;height:42px;border-radius:6px;background:#f4f2ed;object-fit:contain;display:block}' +
-'#pcom-root .v .stt{position:absolute;top:3px;left:3px;font-size:9.5px;font-weight:800;padding:1px 6px;border-radius:5px;background:rgba(255,255,255,.92);color:#5a6b80;box-shadow:0 0 0 0.5px rgba(0,0,0,.06)}' +
+'#pcom-root .v .stt{position:absolute;top:3px;left:3px;font-size:9.5px;font-weight:800;padding:1px 6px;border-radius:5px;background:rgba(255,255,255,.92);color:#5a6b80;box-shadow:0 0 0 0.5px rgba(31,43,69,.10)}' +
 '#pcom-root .v .stt.bdc{color:#2a5ea9}#pcom-root .v .stt.win{color:#2c7a68}#pcom-root .v .stt.lose{color:#b23433}' +
 '#pcom-root .v .stt.propale{color:#8a6410}' +
 '#pcom-root .v .coul{font-size:11.5px;font-weight:700;color:#1f2b45;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}' +
@@ -352,7 +358,7 @@ OD.define('pcom', {
             (a.montant != null
               ? '<span class="mnt">' + eur(a.montant) + '</span>'
               : (a.min != null ? '<span class="frch">dès ' + eur(a.min) + '</span>' : '')) +
-            '<br><span class="et ' + a.etat.cle + '">' + esc(a.etat.txt) + '</span>' +
+            '<span class="et ' + a.etat.cle + '">' + esc(a.etat.txt) + '</span>' +
           '</span>' +
           '<span class="chev">' + I_CHEV + '</span>' +
         '</button>' +
@@ -413,21 +419,50 @@ OD.define('pcom', {
         root.innerHTML = css() + '<div class="vide">Aucune affaire commerciale pour ce client.</div>';
         return;
       }
-      const recentes = affaires.filter(recente);
-      const anciennes = affaires.filter(function (a) { return !recente(a); });
+      // Filtres : la nature du véhicule et l'état de l'affaire. Ils portent sur
+      // les affaires, pas sur les documents — c'est l'affaire qui est l'objet.
+      const cadre = affaires.filter(function (a) {
+        return (S.fVnVo === 'tous' || a.vn_vo === S.fVnVo)
+            && (S.fEtat === 'tous' || a.etat.cle === S.fEtat);
+      });
+      const compteVnVo = function (v) {
+        return affaires.filter(function (a) { return v === 'tous' || a.vn_vo === v; }).length;
+      };
+      const compteEtat = function (v) {
+        return affaires.filter(function (a) {
+          return (S.fVnVo === 'tous' || a.vn_vo === S.fVnVo) && (v === 'tous' || a.etat.cle === v);
+        }).length;
+      };
+      const puce = function (attr, val, txt, n) {
+        return '<button type="button" class="chip' + ((attr === 'vnvo' ? S.fVnVo : S.fEtat) === val ? ' on' : '') +
+               '" data-f' + attr + '="' + val + '">' + esc(txt) +
+               (n != null ? '<span class="n">' + n + '</span>' : '') + '</button>';
+      };
+      const filtres = '<div class="flt">' +
+        puce('vnvo', 'tous', 'Tous') + puce('vnvo', 'VN', 'VN', compteVnVo('VN')) + puce('vnvo', 'VO', 'VO', compteVnVo('VO')) +
+        '<span class="sep"></span>' +
+        puce('etat', 'tous', 'Toutes') +
+        puce('etat', 'cours', 'En cours', compteEtat('cours')) +
+        puce('etat', 'bdc', 'Commandées', compteEtat('bdc')) +
+        puce('etat', 'win', 'Vendues', compteEtat('win')) +
+        puce('etat', 'lose', 'Abandonnées', compteEtat('lose')) +
+      '</div>';
+
+      const recentes = cadre.filter(recente);
+      const anciennes = cadre.filter(function (a) { return !recente(a); });
 
       // Bandeau de synthèse : ce qu'un vendeur veut savoir avant de lire le
       // détail — combien d'affaires vivantes, combien elles engagent, et la
       // plus figée d'entre elles.
-      const enCours = affaires.filter(function (a) { return a.etat.cle === 'cours'; });
-      const engage = affaires.reduce(function (t, a) {
+      const enCours = cadre.filter(function (a) { return a.etat.cle === 'cours'; });
+      const engage = cadre.reduce(function (t, a) {
         return t + ((a.etat.cle === 'bdc' || a.etat.cle === 'win') ? (a.montant || 0) : 0);
       }, 0);
       const dormante = enCours.reduce(function (p, a) {
         return (!p || String(a.maj || '') < String(p.maj || '')) ? a : p;
       }, null);
       const res = '<div class="res">' +
-        '<span><b>' + affaires.length + '</b> affaire' + (affaires.length > 1 ? 's' : '') + '</span>' +
+        '<span><b>' + cadre.length + '</b> affaire' + (cadre.length > 1 ? 's' : '') + '</span>' +
         (enCours.length ? '<span><b>' + enCours.length + '</b> en cours</span>' : '') +
         (engage ? '<span><b>' + eur(engage) + '</b> engagés</span>' : '') +
         (dormante && depuis(dormante.maj)
@@ -436,7 +471,8 @@ OD.define('pcom', {
           : '') +
       '</div>';
 
-      root.innerHTML = css() + res +
+      root.innerHTML = css() + filtres + res +
+        (cadre.length ? '' : '<div class="vide">Aucune affaire ne correspond à ce filtre.</div>') +
         '<div class="liste">' + recentes.map(affaireHtml).join('') + '</div>' +
         friseHtml(anciennes);
     }
@@ -764,6 +800,10 @@ OD.define('pcom', {
       if (!e.target.closest('#pcom-root')) return;
       const f = e.target.closest('[data-frise]');
       if (f) { S.frise = !S.frise; PC_render(); return; }
+      const fv = e.target.closest('[data-fvnvo]');
+      if (fv) { S.fVnVo = fv.getAttribute('data-fvnvo'); PC_render(); return; }
+      const fe = e.target.closest('[data-fetat]');
+      if (fe) { S.fEtat = fe.getAttribute('data-fetat'); PC_render(); return; }
       const ou = e.target.closest('[data-ouv]');
       if (ou) { const k = ou.getAttribute('data-ouv'); S.ouv[k] = !S.ouv[k]; PC_render(); return; }
       const mo = e.target.closest('[data-morts]');
