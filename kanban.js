@@ -563,8 +563,15 @@ OD.define('kanban', {
     // voue a l'echec. Les corbeilles de chaque simulation restent, elles,
     // disponibles dans le detail.
     const abandonPossible = !(c.nature === 'simulation' && c.a_commande);
-    if (canArchive(c.status) && abandonPossible)
-      h += '<button class="kc-ic" data-archive="' + c.id_propale_bdc + '" title="Archiver">' + ICON_TRASH + '</button>';
+    // Carte de COMMANDE unitaire : la corbeille abandonne la commande, pas
+    // l'affaire — BACS refuse d'abandonner une affaire qui en porte une, et
+    // l'affaire doit rester ouverte. Sur une carte plurale, ce sont les croix
+    // de la liste qui tranchent, une commande a la fois.
+    const cmdUnitaire = (c.nature === 'commande' && !!c.bacs_sf_id
+                         && /^801/.test(String(c.bacs_sf_id)) && Number(c.nb_versions || 1) <= 1);
+    if ((canArchive(c.status) && abandonPossible) || cmdUnitaire)
+      h += '<button class="kc-ic" data-archive="' + c.id_propale_bdc + '" title="'
+         + (cmdUnitaire ? 'Abandonner la commande' : 'Archiver') + '">' + ICON_TRASH + '</button>';
     // Renvoi vers BACS : l'affaire si la carte est plurale (plusieurs documents),
     // le document lui-meme si elle est unitaire.
     if (c.id_affaire_bacs || c.bacs_sf_id) {
@@ -2706,6 +2713,11 @@ OD.define('kanban', {
     if (arch) {
       const idA = Number(arch.getAttribute('data-archive'));
       const cA = findCard(idA);
+      // Une commande s'abandonne seule : l'affaire lui survit, et BACS n'aurait
+      // de toute facon pas accepte l'abandon de l'affaire qui la porte.
+      if (cA && cA.nature === 'commande' && cA.bacs_sf_id && /^801/.test(String(cA.bacs_sf_id))) {
+        abandonnerProposition(idA, cA.bacs_sf_id, cA.vehicule); return;
+      }
       // Affaire venue de BACS : l'archivage vaut abandon et doit etre repercute
       // chez le constructeur. Les autres affaires gardent l'archivage simple.
       if (cA && cA.id_affaire_bacs) { ouvrirAbandon(idA); return; }
