@@ -72,16 +72,12 @@ OD.define('pcom', {
     // Une simulation BACS est un « brouillon » côté base ; c'est le mot du
     // constructeur qui parle au vendeur, pas celui du schéma.
     const LIB_STATUT = {
-      draft:   { txt: 'Simulation', cls: 'gris' },
-      propale: { txt: 'Proposition', cls: 'bleu' },
-      bdc:     { txt: 'Commande',    cls: 'indigo' },
-      win:     { txt: 'Vendu',       cls: 'vert' },
-      lose:    { txt: 'Abandonné',   cls: 'rouge' }
+      draft:   { txt: 'Simulation' },
+      propale: { txt: 'Proposition' },
+      bdc:     { txt: 'Commande' },
+      win:     { txt: 'Vendu' },
+      lose:    { txt: 'Abandonné' }
     };
-    function badgeStatut(p) {
-      const l = LIB_STATUT[p.status] || { txt: p.status || '—', cls: 'gris' };
-      return '<span class="pc-b ' + l.cls + '">' + esc(l.txt) + '</span>';
-    }
     function libNature(p) {
       if (p.nature === 'commande') return 'Commande';
       if (p.nature === 'simulation') return 'Simulation';
@@ -127,6 +123,8 @@ OD.define('pcom', {
         const noms = Object.keys(vehs);
         b.vehicule = noms.length === 1 ? noms[0] : (noms.length ? 'Plusieurs modèles' : null);
         b.site = b.docs[0] && b.docs[0].site;
+        // Une affaire à document unique n'a rien à cacher : elle s'ouvre seule.
+        if (b.docs.length === 1 && S.ouverts[b.affaire] === undefined) S.ouverts[b.affaire] = true;
         b.vendeur = b.docs[0] && b.docs[0].vendeur;
       });
       blocs.sort(function (x, y) { return String(y.maj || '').localeCompare(String(x.maj || '')); });
@@ -134,100 +132,132 @@ OD.define('pcom', {
     }
 
     // ─── Rendu ─────────────────────────────────────────────────────────────
+    // La langue visuelle est celle du kanban : mêmes couleurs, mêmes rayons,
+    // mêmes boutons ronds, même vignette véhicule. Deux écrans qui montrent les
+    // mêmes objets doivent se ressembler.
+    const I_PDF = '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="12" y1="18" x2="12" y2="12"/><polyline points="9 15 12 18 15 15"/></svg>';
+    const I_EDIT = '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>';
+    const I_CHEV = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>';
+
     function css() {
       return '<style>' +
 '#pcom-root{font-family:inherit;color:#1f2b45}' +
-'#pcom-root .pc-bar{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:14px}' +
-'#pcom-root .pc-chip{border:1.5px solid #e3edf9;background:#fff;color:#2a5ea9;border-radius:999px;padding:6px 14px;font:inherit;font-size:13px;font-weight:600;cursor:pointer}' +
+'#pcom-root .pc-bar{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:16px}' +
+'#pcom-root .pc-chip{border:1.5px solid #e3edf9;background:#fff;color:#2a5ea9;border-radius:999px;padding:7px 16px;font:inherit;font-size:13px;font-weight:700;cursor:pointer;transition:.12s}' +
+'#pcom-root .pc-chip:hover{border-color:#2a5ea9}' +
 '#pcom-root .pc-chip.on{background:#2a5ea9;color:#fff;border-color:#2a5ea9}' +
-'#pcom-root .pc-sec{margin:0 0 22px}' +
-'#pcom-root .pc-sect{font-size:12px;font-weight:800;letter-spacing:.06em;text-transform:uppercase;color:#7a98c5;margin:0 0 9px}' +
-'#pcom-root .pc-bloc{border:1px solid #e8eef7;border-radius:13px;background:#fff;margin-bottom:10px;overflow:hidden}' +
-'#pcom-root .pc-bloc.hist{opacity:.72}' +
-'#pcom-root .pc-tete{display:flex;align-items:center;gap:12px;padding:12px 14px;cursor:pointer;background:#f7fafd}' +
-'#pcom-root .pc-tete .veh{font-weight:700;flex:1;min-width:0}' +
-'#pcom-root .pc-tete .cpt{font-size:12px;color:#7a98c5}' +
-'#pcom-root .pc-tete .mnt{font-weight:800}' +
-'#pcom-root .pc-doc{display:flex;align-items:center;gap:12px;padding:11px 14px;border-top:1px solid #f0f4fa}' +
-'#pcom-root .pc-doc .col{min-width:0}' +
-'#pcom-root .pc-doc .nat{font-weight:700;font-size:13px}' +
-'#pcom-root .pc-doc .det{font-size:12px;color:#7a98c5;margin-top:2px}' +
-'#pcom-root .pc-doc .grow{flex:1;min-width:0}' +
-'#pcom-root .pc-doc .num{font-weight:800;white-space:nowrap}' +
-'#pcom-root .pc-b{display:inline-block;font-size:11px;font-weight:800;padding:3px 9px;border-radius:999px;white-space:nowrap}' +
-'#pcom-root .pc-b.gris{background:#eef2f7;color:#5a6b85}' +
-'#pcom-root .pc-b.bleu{background:#e7f0fc;color:#2a5ea9}' +
-'#pcom-root .pc-b.indigo{background:#e6e9fb;color:#3b45a8}' +
-'#pcom-root .pc-b.vert{background:#e3f5ef;color:#1c8367}' +
-'#pcom-root .pc-b.rouge{background:#fdeaea;color:#b3403f}' +
-'#pcom-root .pc-ic{width:32px;height:32px;border:1.5px solid #e3edf9;border-radius:9px;background:#fff;color:#2a5ea9;cursor:pointer;font:inherit;font-size:13px;font-weight:700}' +
-'#pcom-root .pc-ic:disabled{opacity:.45;cursor:default}' +
-'#pcom-root .pc-vide{padding:26px;text-align:center;color:#7a98c5;border:1px dashed #e3edf9;border-radius:13px}' +
-'#pcom-root .pc-err{padding:12px 14px;border-radius:10px;background:#fdeaea;color:#b3403f;font-size:13px}' +
+'#pcom-root .pc-sect{font-size:11px;font-weight:800;letter-spacing:.07em;text-transform:uppercase;color:#888780;margin:0 0 10px}' +
+'#pcom-root .pc-sec{margin:0 0 24px}' +
+'#pcom-root .pc-bloc{background:#fff;border:0.5px solid #ece9e1;border-left:3px solid #cfcdc5;border-radius:10px;margin-bottom:10px;overflow:hidden;transition:box-shadow .12s}' +
+'#pcom-root .pc-bloc:hover{box-shadow:0 4px 14px rgba(42,94,169,.10)}' +
+'#pcom-root .pc-bloc.vt-vn{border-left-color:#53bda7}' +
+'#pcom-root .pc-bloc.vt-vo{border-left-color:#fac055}' +
+'#pcom-root .pc-bloc.hist{opacity:.68}' +
+'#pcom-root .pc-tete{display:flex;align-items:center;gap:10px;padding:11px 14px;cursor:pointer;background:#fbfaf7;border:none;width:100%;text-align:left;font:inherit}' +
+'#pcom-root .pc-tete:hover{background:#f7f6f2}' +
+'#pcom-root .pc-tete .chev{color:#b4b2a9;display:inline-flex;transition:transform .15s}' +
+'#pcom-root .pc-tete.ouv .chev{transform:rotate(90deg)}' +
+'#pcom-root .pc-tete .veh{font-weight:800;font-size:14px;color:#1c2b45;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}' +
+'#pcom-root .pc-tete .cpt{font-size:11px;font-weight:700;color:#888780;background:#f7f6f2;border-radius:6px;padding:3px 9px;white-space:nowrap}' +
+'#pcom-root .pc-tete .mnt{font-size:14px;font-weight:800;color:#1c2b45;white-space:nowrap}' +
+'#pcom-root .pc-list{display:flex;flex-direction:column;gap:8px;padding:10px 12px}' +
+'#pcom-root .pc-row{display:flex;gap:8px;align-items:stretch}' +
+'#pcom-root .pc-main{flex:1;display:flex;gap:14px;align-items:center;text-align:left;border:1px solid #e3edf9;background:#fff;border-radius:12px;padding:10px 14px;font:inherit;min-width:0}' +
+'#pcom-root .pc-img{width:88px;height:54px;object-fit:contain;border-radius:8px;background:#eef2f7;flex:0 0 auto;display:inline-block}' +
+'#pcom-root .pc-txt{flex:1;display:flex;flex-direction:column;gap:3px;min-width:0}' +
+'#pcom-root .pc-txt b{font-weight:800;color:#1f2b45;font-size:14px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}' +
+'#pcom-root .pc-txt i{font-style:normal;color:#7a98c5;font-size:12.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}' +
+'#pcom-root .pc-txt i.vide{color:#c3cfdd}' +
+'#pcom-root .pc-meta{font-size:11px;color:#b4b2a9;display:flex;gap:7px;flex-wrap:wrap}' +
+'#pcom-root .pc-prix{font-weight:800;color:#2a5ea9;white-space:nowrap;font-size:14px;align-self:center}' +
+'#pcom-root .pc-act{flex:0 0 auto;align-self:center;width:38px;height:38px;border-radius:50%;border:1.5px solid #e3edf9;background:#fff;color:#2a5ea9;cursor:pointer;padding:0;display:inline-flex;align-items:center;justify-content:center;line-height:0;transition:.14s;text-decoration:none;font:inherit;font-weight:800;font-size:12px}' +
+'#pcom-root .pc-act:hover{background:#2a5ea9;border-color:#2a5ea9;color:#fff;transform:scale(1.06)}' +
+'#pcom-root .pc-act:disabled{opacity:.4;cursor:default;transform:none;background:#fff;color:#2a5ea9}' +
+'#pcom-root .pc-st{font-size:10px;font-weight:800;border-radius:5px;padding:2px 8px;text-transform:uppercase;letter-spacing:.02em;align-self:center;white-space:nowrap}' +
+'#pcom-root .pc-st.draft{background:#e7ebf0;color:#5a6b80}' +
+'#pcom-root .pc-st.propale{background:rgba(250,192,85,.28);color:#8a6410}' +
+'#pcom-root .pc-st.bdc{background:rgba(42,94,169,.14);color:#2a5ea9}' +
+'#pcom-root .pc-st.win{background:rgba(83,189,167,.20);color:#2c7a68}' +
+'#pcom-root .pc-st.lose{background:rgba(217,112,112,.16);color:#b23433}' +
+'#pcom-root .pc-vide{padding:30px;text-align:center;color:#b4b2a9;font-size:13px;border:1px dashed #ece9e1;border-radius:10px}' +
+'#pcom-root .pc-err{padding:12px 14px;border-radius:10px;background:rgba(217,112,112,.14);color:#b23433;font-size:13px}' +
 '</style>';
     }
 
+    function vignette(p) {
+      return p.photo
+        ? '<img class="pc-img" src="' + esc(p.photo) + '" alt="" ' +
+          'onerror="this.removeAttribute(\'src\')">'
+        : '<span class="pc-img"></span>';
+    }
+
     function ligneDoc(p) {
-      const det = [];
-      if (p.couleur) det.push(esc(p.couleur));
-      if (p.motorisation) det.push(esc(p.motorisation));
-      if (p.vin) det.push(esc(p.vin));
-      det.push(fmtDate(p.created_at));
-      if (p.vendeur) det.push(esc(p.vendeur));
-      if (p.site) det.push(esc(p.site));
-      if (p.motif_abandon) det.push('abandon : ' + esc(p.motif_abandon));
+      const meta = [fmtDate(p.created_at)];
+      if (p.motorisation) meta.push(esc(p.motorisation));
+      if (p.vin) meta.push(esc(p.vin));
+      if (p.vendeur) meta.push(esc(p.vendeur));
+      if (p.site) meta.push(esc(p.site));
+      if (p.motif_abandon) meta.push('abandon : ' + esc(p.motif_abandon));
 
       let actions = '';
+      if (p.peut_agir && p.status === 'propale' && p.vn_vo !== 'VN') {
+        actions += '<button type="button" class="pc-act" data-pcmod="' + p.id_propale_bdc +
+                   '" title="Modifier">' + I_EDIT + '</button>';
+      }
       if (p.peut_agir) {
-        if (p.status === 'propale' && p.vn_vo !== 'VN') {
-          actions += '<button class="pc-ic" data-pcmod="' + p.id_propale_bdc + '" title="Modifier">✎</button>';
-        }
-        actions += '<button class="pc-ic" data-pcpdf="' + p.id_propale_bdc + ':' + esc(p.status) +
-                   '" data-pcmaj="' + esc(p.updated_at || '') + '" title="Document PDF">PDF</button>';
+        actions += '<button type="button" class="pc-act" data-pcpdf="' + p.id_propale_bdc + ':' +
+                   esc(p.status) + '" data-pcmaj="' + esc(p.updated_at || '') +
+                   '" title="Document PDF">' + I_PDF + '</button>';
       }
       if (p.bacs_sf_id) {
-        actions += '<a class="pc-ic" style="display:inline-flex;align-items:center;justify-content:center;text-decoration:none" ' +
-                   'href="' + PC_BACS_BASE + '/detail/' + esc(p.bacs_sf_id) + '" target="_blank" ' +
-                   'title="Ouvrir dans BACS">B</a>';
+        actions += '<a class="pc-act" href="' + PC_BACS_BASE + '/detail/' + esc(p.bacs_sf_id) +
+                   '" target="_blank" rel="noopener" title="Ouvrir dans BACS">B</a>';
       }
 
-      return '<div class="pc-doc">' +
-        '<div class="col grow">' +
-          '<div class="nat">' + esc(libNature(p)) +
-            (p.vehicule ? ' · ' + esc(p.vehicule) : '') + '</div>' +
-          '<div class="det">' + det.join(' · ') + '</div>' +
+      const l = LIB_STATUT[p.status] || { txt: p.status || '—', cls: 'draft' };
+      return '<div class="pc-row">' +
+        '<div class="pc-main">' + vignette(p) +
+          '<span class="pc-txt">' +
+            '<b>' + esc(libNature(p)) + (p.vehicule ? ' · ' + esc(p.vehicule) : '') + '</b>' +
+            (p.couleur ? '<i>' + esc(p.couleur) + '</i>'
+                       : '<i class="vide">couleur non renseignée</i>') +
+            '<span class="pc-meta">' + meta.map(function (m) { return '<span>' + m + '</span>'; }).join('') + '</span>' +
+          '</span>' +
+          '<span class="pc-prix">' + eur(p.montant_affiche) + '</span>' +
         '</div>' +
-        '<div class="num">' + eur(p.montant_affiche) + '</div>' +
-        badgeStatut(p) +
-        '<div style="display:flex;gap:6px">' + actions + '</div>' +
+        '<span class="pc-st ' + esc(p.status || 'draft') + '">' + esc(l.txt) + '</span>' +
+        actions +
       '</div>';
     }
 
+    function classeVt(docs) {
+      const t = String((docs[0] && docs[0].vn_vo) || '').toUpperCase();
+      return t === 'VN' ? ' vt-vn' : (t === 'VO' ? ' vt-vo' : '');
+    }
+
     function blocHtml(b, sec) {
-      // Un document seul n'a pas d'en-tête : il se suffit.
-      if (b.seul) {
-        return '<div class="pc-bloc' + (sec === 'histoire' ? ' hist' : '') + '">' +
-               ligneDoc(b.docs[0]) + '</div>';
-      }
-      const ouvert = !!S.ouverts[b.affaire] || b.docs.length === 1;
+      const cls = 'pc-bloc' + classeVt(b.docs) + (sec === 'histoire' ? ' hist' : '');
+      // Un document isolé se suffit : pas d'en-tête à déplier pour une ligne.
+      if (b.seul) return '<div class="' + cls + '"><div class="pc-list">' + ligneDoc(b.docs[0]) + '</div></div>';
+
+      const ouvert = !!S.ouverts[b.affaire];
       const cpt = [];
       if (b.nbSim) cpt.push(b.nbSim + ' simulation' + (b.nbSim > 1 ? 's' : ''));
       if (b.nbCmd) cpt.push(b.nbCmd + ' commande' + (b.nbCmd > 1 ? 's' : ''));
-      return '<div class="pc-bloc' + (sec === 'histoire' ? ' hist' : '') + '">' +
-        '<div class="pc-tete" data-pcaff="' + esc(b.affaire) + '">' +
-          '<span style="color:#7a98c5">' + (ouvert ? '▾' : '▸') + '</span>' +
+      return '<div class="' + cls + '">' +
+        '<button type="button" class="pc-tete' + (ouvert ? ' ouv' : '') + '" data-pcaff="' + esc(b.affaire) + '">' +
+          '<span class="chev">' + I_CHEV + '</span>' +
           '<span class="veh">' + esc(b.vehicule || 'Affaire ' + b.affaire) + '</span>' +
           '<span class="cpt">' + cpt.join(' · ') + '</span>' +
           (b.montant != null ? '<span class="mnt">' + eur(b.montant) + '</span>' : '') +
-        '</div>' +
-        (ouvert ? b.docs.map(ligneDoc).join('') : '') +
+        '</button>' +
+        (ouvert ? '<div class="pc-list">' + b.docs.map(ligneDoc).join('') + '</div>' : '') +
       '</div>';
     }
 
     function sectionHtml(titre, blocs, sec) {
       if (!blocs.length) return '';
-      return '<div class="pc-sec"><p class="pc-sect">' + esc(titre) +
-             ' — ' + blocs.length + '</p>' +
+      return '<div class="pc-sec"><p class="pc-sect">' + esc(titre) + ' — ' + blocs.length + '</p>' +
              blocs.map(function (b) { return blocHtml(b, sec); }).join('') + '</div>';
     }
 
@@ -244,13 +274,13 @@ OD.define('pcom', {
 
       const barre = '<div class="pc-bar">' +
         ['tous', 'VN', 'VO'].map(function (v) {
-          return '<button class="pc-chip' + (S.fVnVo === v ? ' on' : '') + '" data-pcvnvo="' + v + '">' +
-                 (v === 'tous' ? 'Tous' : v) + '</button>';
+          return '<button type="button" class="pc-chip' + (S.fVnVo === v ? ' on' : '') +
+                 '" data-pcvnvo="' + v + '">' + (v === 'tous' ? 'Tous' : v) + '</button>';
         }).join('') +
         '<span style="flex:1"></span>' +
         (parSec.histoire.length
-          ? '<button class="pc-chip' + (S.histoire ? ' on' : '') + '" data-pchist>' +
-            'Historique (' + parSec.histoire.length + ')</button>'
+          ? '<button type="button" class="pc-chip' + (S.histoire ? ' on' : '') + '" data-pchist>' +
+            'Historique · ' + parSec.histoire.length + '</button>'
           : '') +
       '</div>';
 
