@@ -41,7 +41,7 @@ OD.define('pcom', {
     const PC_BACS_BASE           = 'https://toyota-france.my.site.com/bacs2/s';
     const PC_MOIS_RECENTS        = 12;
 
-    const S = { idClient: null, rows: null, loading: false, error: null, frise: false };
+    const S = { idClient: null, rows: null, loading: false, error: null, frise: false, morts: {} };
 
     // ─── Utilitaires ───────────────────────────────────────────────────────
     const esc = (s) => (s == null ? '' : String(s))
@@ -174,37 +174,37 @@ OD.define('pcom', {
       return '<style>' +
 '#pcom-root{font-family:inherit;color:#1f2b45}' +
 '#pcom-root *{box-sizing:border-box}' +
-'#pcom-root .aff{position:relative;background:#fff;border:0.5px solid #ece9e1;border-left:3px solid #cfcdc5;border-radius:12px;padding:16px 18px;margin-bottom:12px}' +
+'#pcom-root .aff{position:relative;background:#fff;border:0.5px solid #ece9e1;border-left:3px solid #cfcdc5;border-radius:12px;padding:12px 14px;margin-bottom:9px}' +
 '#pcom-root .aff.vn{border-left-color:#53bda7}#pcom-root .aff.vo{border-left-color:#fac055}' +
 '#pcom-root .aff.close{background:#fcfbf9}' +
-'#pcom-root .hd{display:flex;align-items:flex-start;gap:14px;margin-bottom:12px;padding-right:38px}' +
+'#pcom-root .hd{display:flex;align-items:center;gap:12px;margin-bottom:8px;padding-right:34px}' +
 '#pcom-root .hd .idt{flex:1;min-width:0}' +
-'#pcom-root .hd .veh{font-size:16px;font-weight:800;color:#1c2b45;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}' +
-'#pcom-root .hd .qui{font-size:12.5px;color:#888780;margin-top:3px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}' +
+'#pcom-root .hd .veh{font-size:15px;font-weight:800;color:#1c2b45;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}' +
+'#pcom-root .hd .qui{font-size:12px;color:#888780;margin-top:1px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}' +
 '#pcom-root .hd .chf{flex:0 0 auto;text-align:right;display:flex;flex-direction:column;align-items:flex-end;gap:4px}' +
-'#pcom-root .hd .mnt{font-size:19px;font-weight:800;color:#1c2b45;white-space:nowrap;line-height:1.1}' +
+'#pcom-root .hd .mnt{font-size:17px;font-weight:800;color:#1c2b45;white-space:nowrap;line-height:1.1}' +
 '#pcom-root .hd .frch{font-size:12.5px;color:#888780;white-space:nowrap}' +
 '#pcom-root .et{font-size:11px;font-weight:800;border-radius:6px;padding:2px 9px;white-space:nowrap}' +
 '#pcom-root .et.cours{background:#e7ebf0;color:#5a6b80}' +
 '#pcom-root .et.bdc{background:rgba(42,94,169,.14);color:#2a5ea9}' +
 '#pcom-root .et.win{background:rgba(83,189,167,.22);color:#2c7a68}' +
 '#pcom-root .et.lose{background:rgba(217,112,112,.16);color:#b23433}' +
-'#pcom-root .meta{display:flex;align-items:center;gap:8px;flex-wrap:wrap;font-size:12px;color:#888780;border-top:0.5px solid #f2f0ea;border-bottom:0.5px solid #f2f0ea;padding:9px 0;margin-bottom:12px}' +
+'#pcom-root .meta{display:flex;align-items:center;gap:7px;flex-wrap:wrap;font-size:11.5px;color:#888780;border-top:0.5px solid #f2f0ea;padding:7px 0 8px;margin-bottom:9px}' +
 '#pcom-root .meta .sep{color:#dbd8d0}' +
 '#pcom-root .meta .froid{color:#8a6410;font-weight:700}' +
-'#pcom-root .vers{display:grid;grid-template-columns:repeat(auto-fill,minmax(146px,1fr));gap:9px}' +
-'#pcom-root .v{border:0.5px solid #ece9e1;border-radius:10px;padding:9px;display:flex;flex-direction:column;gap:5px;min-width:0;background:#fff}' +
-'#pcom-root .v.pris{border:1.5px solid #53bda7;padding:8.5px}' +
+'#pcom-root .vers{display:grid;grid-template-columns:repeat(auto-fill,minmax(118px,1fr));gap:7px}' +
+'#pcom-root .v{border:0.5px solid #ece9e1;border-radius:9px;padding:7px;display:flex;flex-direction:column;gap:3px;min-width:0;background:#fff}' +
+'#pcom-root .v.pris{border:1.5px solid #53bda7;padding:6.5px}' +
 '#pcom-root .v.mort{opacity:.52}' +
-'#pcom-root .v .ph{width:100%;height:54px;border-radius:7px;background:#f4f2ed;object-fit:contain;display:block}' +
-'#pcom-root .v .coul{font-size:12px;font-weight:700;color:#1f2b45;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}' +
-'#pcom-root .v .prix{font-size:14px;font-weight:800;color:#1c2b45;line-height:1.1}' +
-'#pcom-root .v .note{font-size:11px;font-weight:700;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}' +
+'#pcom-root .v .ph{width:100%;height:42px;border-radius:6px;background:#f4f2ed;object-fit:contain;display:block}' +
+'#pcom-root .v .coul{font-size:11.5px;font-weight:700;color:#1f2b45;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}' +
+'#pcom-root .v .prix{font-size:13px;font-weight:800;color:#1c2b45;line-height:1.15}' +
+'#pcom-root .v .note{font-size:10.5px;font-weight:700;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}' +
 '#pcom-root .v .note.pris{color:#2c7a68}#pcom-root .v .note.mort{color:#b23433}' +
 '#pcom-root .v .note.plus{color:#8a6410}#pcom-root .v .note.moins{color:#2c7a68}' +
 '#pcom-root .v .note.egal{color:#b4b2a9}' +
-'#pcom-root .v .barre{display:flex;gap:5px;flex-wrap:wrap;margin-top:1px}' +
-'#pcom-root .b{width:27px;height:27px;flex:0 0 auto;border-radius:50%;border:1.5px solid #e3edf9;background:#fff;color:#2a5ea9;cursor:pointer;padding:0;display:inline-flex;align-items:center;justify-content:center;line-height:0;transition:.14s;text-decoration:none}' +
+'#pcom-root .v .barre{display:flex;gap:4px;flex-wrap:wrap;margin-top:2px}' +
+'#pcom-root .b{width:24px;height:24px;flex:0 0 auto;border-radius:50%;border:1.5px solid #e3edf9;background:#fff;color:#2a5ea9;cursor:pointer;padding:0;display:inline-flex;align-items:center;justify-content:center;line-height:0;transition:.14s;text-decoration:none}' +
 '#pcom-root .b svg{display:block}' +
 '#pcom-root .b:hover{background:#2a5ea9;border-color:#2a5ea9;color:#fff}' +
 '#pcom-root .b:disabled{opacity:.4;cursor:default;background:#fff;color:#2a5ea9}' +
@@ -212,7 +212,9 @@ OD.define('pcom', {
 '#pcom-root .b.cmd:hover{background:#53bda7;border-color:#53bda7;color:#fff}' +
 '#pcom-root .b.del{color:#d97070;border-color:#f0d6d6}' +
 '#pcom-root .b.del:hover{background:#e24b4a;border-color:#e24b4a;color:#fff}' +
-'#pcom-root .jeter{position:absolute;top:15px;right:16px;width:30px;height:30px}' +
+'#pcom-root .jeter{position:absolute;top:11px;right:12px;width:28px;height:28px}' +
+'#pcom-root .plier{background:none;border:none;font:inherit;font-size:11.5px;font-weight:700;color:#b23433;cursor:pointer;padding:0;text-decoration:underline}' +
+'#pcom-root .plier:hover{color:#8a2a2a}' +
 '#pcom-root .frise{margin-top:6px}' +
 '#pcom-root .fbtn{width:100%;border:0.5px dashed #ddd9cf;background:#fbfaf7;border-radius:10px;padding:11px;font:inherit;font-size:13px;font-weight:700;color:#888780;cursor:pointer}' +
 '#pcom-root .fbtn:hover{border-color:#b4b2a9;color:#5f5e5a}' +
@@ -259,11 +261,14 @@ OD.define('pcom', {
                      '" title="Modifier">' + I_EDIT + '</button>';
         }
       }
-      if (peutAgir(d)) {
+      // PDF et lien BACS n'ont d'intérêt que sur ce qui compte : la version
+      // retenue, ou un document seul. Les mettre partout noyait la carte.
+      const enVue = pris || a.docs.length === 1;
+      if (peutAgir(d) && enVue) {
         actions += '<button type="button" class="b" data-pdf="' + d.id_propale_bdc + ':' + esc(d.status) +
                    '" data-maj="' + esc(d.updated_at || '') + '" title="Document PDF">' + I_PDF + '</button>';
       }
-      if (d.bacs_sf_id) {
+      if (d.bacs_sf_id && enVue) {
         actions += '<a class="b" href="' + PC_BACS_BASE + '/detail/' + esc(d.bacs_sf_id) +
                    '" target="_blank" rel="noopener" title="Ouvrir dans BACS">' + I_BACS + '</a>';
       }
@@ -296,6 +301,12 @@ OD.define('pcom', {
       const jetable = !!a.affaire && a.vivants.length > 0 && !a.commandes.length
         && !a.vendus.length && a.vivants.every(peutAgir);
 
+      // Les versions abandonnées comptent pour la mémoire de la négociation,
+      // pas pour le suivi du jour : repliées, mais à un clic.
+      const abandonnees = a.docs.filter(function (d) { return mort(d) && !(a.retenu && d.id_propale_bdc === a.retenu.id_propale_bdc); });
+      const deplie = !!S.morts[a.cle];
+      const visibles = deplie ? a.docs : a.docs.filter(function (d) { return abandonnees.indexOf(d) === -1; });
+
       return '<div class="aff ' + (a.vn_vo === 'VN' ? 'vn' : (a.vn_vo === 'VO' ? 'vo' : '')) +
              ((a.etat.cle === 'lose' || a.etat.cle === 'win') ? ' close' : '') + '">' +
         (jetable ? '<button type="button" class="b del jeter" data-abaff="' + esc(a.affaire) +
@@ -317,8 +328,13 @@ OD.define('pcom', {
         '<div class="meta">' +
           meta.map(function (m) { return '<span>' + esc(m) + '</span>'; }).join('<span class="sep">·</span>') +
           (froid ? '<span class="sep">·</span><span class="froid">' + esc(froid) + '</span>' : '') +
+          (abandonnees.length
+            ? '<span class="sep">·</span><button type="button" class="plier" data-morts="' + esc(a.cle) + '">' +
+              (deplie ? 'masquer les abandons' : abandonnees.length + ' abandonnée' + (abandonnees.length > 1 ? 's' : '')) +
+              '</button>'
+            : '') +
         '</div>' +
-        '<div class="vers">' + a.docs.map(function (d) { return versionHtml(d, a); }).join('') + '</div>' +
+        '<div class="vers">' + visibles.map(function (d) { return versionHtml(d, a); }).join('') + '</div>' +
       '</div>';
     }
 
@@ -686,6 +702,8 @@ OD.define('pcom', {
       if (!e.target.closest('#pcom-root')) return;
       const f = e.target.closest('[data-frise]');
       if (f) { S.frise = !S.frise; PC_render(); return; }
+      const mo = e.target.closest('[data-morts]');
+      if (mo) { const k = mo.getAttribute('data-morts'); S.morts[k] = !S.morts[k]; PC_render(); return; }
       const c = e.target.closest('[data-cmd]');
       if (c) { convertirEnCommande(Number(c.getAttribute('data-cmd')), c.getAttribute('data-sf'), c.getAttribute('data-lib') || ''); return; }
       const ad = e.target.closest('[data-abd]');
