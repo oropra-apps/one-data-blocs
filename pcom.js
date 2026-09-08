@@ -1,395 +1,376 @@
-// PCOM — module One Data (OD.define) v1 (Lot B)
+// PCOM — module One Data (OD.define) v2
 /* ============================================================================
-   P.COMMERCIALES — Tableau des propositions/BDC d'un client (fiche client)
-   - RPC get_propales_client(p_id_client, p_viewer_id_user)
-   - Colonnes : N°, Date, Réseau, Affaire, Site, Vendeur, VN/VO, VIN, Montant,
-     Type paiement, Financement, Statut, Actions
-   - Filtres : chips Statut, chips VN/VO, sélection imbriquée Réseau>Affaire>Site
-   - Actions (si peut_agir) : Modifier (si status='propale') + PDF (cache/génération)
-   Stack : WeWeb + Supabase. À coller dans un composant Code de l'onglet.
+   P.COMMERCIALES — documents commerciaux d'un client, dans sa fiche.
+
+   Réécrit le 08/09/2026 pour accueillir ce qui vient de BACS. La version
+   précédente listait les documents à plat, excluait les brouillons — donc
+   TOUTES les simulations BACS — et n'affichait du véhicule que son VIN, qu'un
+   VN n'a pas encore.
+
+   Ce que le module montre désormais :
+   - un bloc par OPPORTUNITÉ BACS, avec ses simulations et ses commandes ;
+     un document sans opportunité (VO saisi dans One Data) garde sa ligne ;
+   - trois sections : en cours, conclu, et l'historique des abandons, replié ;
+   - le véhicule et sa couleur, le montant APRÈS remise, comme le kanban.
+
+   RPC : get_propales_client(p_id_client, p_viewer_id_user)
    ============================================================================ */
 OD.define('pcom', {
   mount(__anchor, ctx) {
     __anchor.id = 'pcom-root';
-  const doc = __anchor.ownerDocument || document;
+    const doc = __anchor.ownerDocument || document;
 
-  // ─── CONSTANTES À RENSEIGNER ───────────────────────────────────────────────
-  // Variable WeWeb contenant l'OBJET client courant (son champ IDVu = l'id client) :
-  const PC_VAR_CLIENT = '55490583-c88b-4748-916e-4d203db07742';
-  const PC_VAR_CACHE  = '20ec044e-28cb-4f1e-9d3d-362f3e6c3f38'; // variable objet PCOM (cache persistant)
-  // Collection du user connecté (USERCONNECTED) :
-  // Navigation propale update (réutilisé des bilatérales) :
-  const PC_PAGE_PROPALE_UPDATE = 'efb6187d-2330-4392-86ed-bc5ad2489fed';
-  const PC_VAR_ID_PROPALE      = 'aac565e9-ad32-4f81-bf8d-adb611322e62';
-  // PDF (Edge Function + templates + bucket) :
-  const PC_PDF_EDGE_FN    = 'generate-document';
-  const PC_TPL_PROPOSITION  = 'a8a39792-b795-4a07-92a2-8bd307ec105b';
-  const PC_TPL_BON_COMMANDE = 'a440bca0-e10a-4549-a11b-f4ad512b010d';
-  const PC_PDF_BUCKET     = 'commercial-documents';
+    // ─── Constantes ────────────────────────────────────────────────────────
+    const PC_VAR_CLIENT          = '55490583-c88b-4748-916e-4d203db07742';
+    const PC_PAGE_PROPALE_UPDATE = 'efb6187d-2330-4392-86ed-bc5ad2489fed';
+    const PC_VAR_ID_PROPALE      = 'aac565e9-ad32-4f81-bf8d-adb611322e62';
+    const PC_PDF_EDGE_FN         = 'generate-document';
+    const PC_TPL_PROPOSITION     = 'a8a39792-b795-4a07-92a2-8bd307ec105b';
+    const PC_TPL_BON_COMMANDE    = 'a440bca0-e10a-4549-a11b-f4ad512b010d';
+    const PC_PDF_BUCKET          = 'commercial-documents';
+    // Lien vers BACS : ouvre l'opportunité ou le document chez le constructeur.
+    const PC_BACS_BASE           = 'https://toyota-france.my.site.com/bacs2/s';
 
-  // ─── ÉTAT ──────────────────────────────────────────────────────────────────
-  // ─── ÉTAT (hydraté depuis la variable WeWeb pour survivre aux destructions de DOM) ──
-  function PC_readCache(){
-    try { const v = wwLib.wwVariable.getValue(PC_VAR_CACHE); return (v && typeof v==='object') ? v : null; }
-    catch(e){ return null; }
-  }
-  function PC_writeCache(){ /* cache WeWeb retiré (variable supprimée du projet) : l'état en mémoire (S) suffit */ }
-  const _cache = PC_readCache();
-  const S = {
-    idClient: (_cache && _cache.idClient!=null) ? _cache.idClient : null,
-    rows: (_cache && Array.isArray(_cache.rows)) ? _cache.rows : null,
-    loading: false, error: null,
-    fStatus: (_cache && _cache.fStatus) ? _cache.fStatus : 'tous',
-    fVnVo:   (_cache && _cache.fVnVo)   ? _cache.fVnVo   : 'tous',
-    fReseau: (_cache && _cache.fReseau) ? _cache.fReseau : '',
-    fAffaire:(_cache && _cache.fAffaire)? _cache.fAffaire: '',
-    fSite:   (_cache && _cache.fSite)   ? _cache.fSite   : ''
-  };
+    const S = {
+      idClient: null, rows: null, loading: false, error: null,
+      fVnVo: 'tous',          // tous | VN | VO
+      histoire: false,        // l'historique est replié par défaut
+      ouverts: {}             // opportunités dépliées
+    };
 
-  // ─── HELPERS ─────────────────────────────────────────────────────────────
-  function esc(s){ return (s==null?'':String(s)).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
-  function eur(n){ if(n==null||n==='') return '—'; const v=Number(n); if(isNaN(v)) return '—'; return new Intl.NumberFormat('fr-FR').format(Math.round(v))+' €'; }
-  function fmtDate(d){ if(!d) return '—'; const dt=new Date(String(d).replace(' ','T'));
-    return String(dt.getDate()).padStart(2,'0')+'/'+String(dt.getMonth()+1).padStart(2,'0')+'/'+dt.getFullYear(); }
-
-  function getViewerId(){
-    try { const row = ((wwLib.getFrontWindow && wwLib.getFrontWindow()) || window).oropraUser;
-      return row && (row.ID_User!=null ? Number(row.ID_User) : null);
-    } catch(e){ console.error('[pcom] viewer', e); return null; }
-  }
-  function getIdClient(){
-    try {
-      const cli = wwLib.wwVariable.getValue(PC_VAR_CLIENT);
-      const idvu = cli && (cli.IDVu!=null ? cli.IDVu : (cli['IDVu']));
-      return idvu!=null ? Number(idvu) : null;
+    // ─── Helpers ───────────────────────────────────────────────────────────
+    const esc = (s) => (s == null ? '' : String(s))
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+    function eur(n) {
+      if (n == null || n === '') return '—';
+      const v = Number(n); if (isNaN(v)) return '—';
+      return new Intl.NumberFormat('fr-FR').format(Math.round(v)) + ' €';
     }
-    catch(e){ console.error('[pcom] id_client', e); return null; }
-  }
+    function fmtDate(d) {
+      if (!d) return '—';
+      const dt = new Date(String(d).replace(' ', 'T'));
+      if (isNaN(dt.getTime())) return '—';
+      return String(dt.getDate()).padStart(2, '0') + '/' +
+             String(dt.getMonth() + 1).padStart(2, '0') + '/' + dt.getFullYear();
+    }
+    function getViewerId() {
+      try {
+        const row = ((wwLib.getFrontWindow && wwLib.getFrontWindow()) || window).oropraUser;
+        return row && (row.ID_User != null ? Number(row.ID_User) : null);
+      } catch (e) { console.error('[pcom] viewer', e); return null; }
+    }
+    function getIdClient() {
+      try {
+        const v = wwLib.wwVariable.getValue(PC_VAR_CLIENT);
+        if (v == null) return null;
+        if (typeof v === 'object') return v.IDVu != null ? Number(v.IDVu) : null;
+        return Number(v);
+      } catch (e) { console.error('[pcom] client', e); return null; }
+    }
 
-  // ─── CHARGEMENT ────────────────────────────────────────────────────────────
-  async function PC_load(force){
-    if(S.loading) return;
-    const idClient = getIdClient();
-    const viewer = getViewerId();
-    if(idClient==null || isNaN(idClient)){ S.error='Client introuvable.'; PC_render(); return; }
-    if(S.idClient!==idClient){ S.idClient=idClient; S.rows=null; }
-    if(S.rows!==null && !force){ PC_render(); return; }
-    S.loading=true; S.error=null;
-    if(S.rows===null) PC_render();
-    try {
-      const supabase = ctx.supabase;
-      const { data, error } = await supabase.rpc('get_propales_client', {
-        p_id_client: idClient, p_viewer_id_user: viewer
+    // ─── Vocabulaire d'affichage ───────────────────────────────────────────
+    // Une simulation BACS est un « brouillon » côté base ; c'est le mot du
+    // constructeur qui parle au vendeur, pas celui du schéma.
+    const LIB_STATUT = {
+      draft:   { txt: 'Simulation', cls: 'gris' },
+      propale: { txt: 'Proposition', cls: 'bleu' },
+      bdc:     { txt: 'Commande',    cls: 'indigo' },
+      win:     { txt: 'Vendu',       cls: 'vert' },
+      lose:    { txt: 'Abandonné',   cls: 'rouge' }
+    };
+    function badgeStatut(p) {
+      const l = LIB_STATUT[p.status] || { txt: p.status || '—', cls: 'gris' };
+      return '<span class="pc-b ' + l.cls + '">' + esc(l.txt) + '</span>';
+    }
+    function libNature(p) {
+      if (p.nature === 'commande') return 'Commande';
+      if (p.nature === 'simulation') return 'Simulation';
+      return (p.vn_vo === 'VO') ? 'Proposition VO' : 'Proposition';
+    }
+
+    // ─── Répartition en sections ───────────────────────────────────────────
+    // L'abandon prime sur le statut : un document archivé appartient à
+    // l'historique, quel que soit l'état où il a été laissé.
+    function section(p) {
+      if (p.archived || p.status === 'lose') return 'histoire';
+      if (p.status === 'win') return 'conclu';
+      return 'cours';
+    }
+
+    // ─── Regroupement par opportunité ──────────────────────────────────────
+    // Une opportunité BACS peut porter plusieurs simulations ET plusieurs
+    // commandes. On la présente comme un bloc ; ce qui n'en vient pas — un VO
+    // saisi dans One Data — reste une ligne à part entière.
+    function grouper(rows) {
+      const blocs = [], parAffaire = {};
+      rows.forEach(function (p) {
+        if (!p.id_affaire_bacs) { blocs.push({ seul: true, docs: [p] }); return; }
+        let b = parAffaire[p.id_affaire_bacs];
+        if (!b) {
+          b = { seul: false, affaire: p.id_affaire_bacs, docs: [] };
+          parAffaire[p.id_affaire_bacs] = b; blocs.push(b);
+        }
+        b.docs.push(p);
       });
-      if(error) throw error;
-      S.rows = Array.isArray(data) ? data : [];
-      PC_writeCache();
-    } catch(e){
-      console.error('[pcom] load', e);
-      S.error = (e && e.message) ? e.message : String(e);
-    } finally {
-      S.loading=false; PC_render();
+      blocs.forEach(function (b) {
+        b.docs.sort(function (x, y) { return String(y.created_at).localeCompare(String(x.created_at)); });
+        b.maj = b.docs[0] && b.docs[0].created_at;
+        b.nbSim = b.docs.filter(function (d) { return d.nature === 'simulation'; }).length;
+        b.nbCmd = b.docs.filter(function (d) { return d.nature === 'commande'; }).length;
+        // Le montant d'un bloc n'a de sens que pour des ventes réelles : on
+        // somme les commandes, jamais des propositions alternatives.
+        b.montant = b.nbCmd ? b.docs.filter(function (d) { return d.nature === 'commande'; })
+                                    .reduce(function (t, d) { return t + (Number(d.montant_affiche) || 0); }, 0)
+                            : null;
+        const vehs = {};
+        b.docs.forEach(function (d) { if (d.vehicule) vehs[d.vehicule] = 1; });
+        const noms = Object.keys(vehs);
+        b.vehicule = noms.length === 1 ? noms[0] : (noms.length ? 'Plusieurs modèles' : null);
+        b.site = b.docs[0] && b.docs[0].site;
+        b.vendeur = b.docs[0] && b.docs[0].vendeur;
+      });
+      blocs.sort(function (x, y) { return String(y.maj || '').localeCompare(String(x.maj || '')); });
+      return blocs;
     }
-  }
 
-  // ─── FILTRES (chips + sélection imbriquée) ───────────────────────────────
-  function uniqueSorted(arr){ return [...new Set(arr.filter(Boolean))].sort((a,b)=>String(a).localeCompare(String(b),'fr')); }
+    // ─── Rendu ─────────────────────────────────────────────────────────────
+    function css() {
+      return '<style>' +
+'#pcom-root{font-family:inherit;color:#1f2b45}' +
+'#pcom-root .pc-bar{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:14px}' +
+'#pcom-root .pc-chip{border:1.5px solid #e3edf9;background:#fff;color:#2a5ea9;border-radius:999px;padding:6px 14px;font:inherit;font-size:13px;font-weight:600;cursor:pointer}' +
+'#pcom-root .pc-chip.on{background:#2a5ea9;color:#fff;border-color:#2a5ea9}' +
+'#pcom-root .pc-sec{margin:0 0 22px}' +
+'#pcom-root .pc-sect{font-size:12px;font-weight:800;letter-spacing:.06em;text-transform:uppercase;color:#7a98c5;margin:0 0 9px}' +
+'#pcom-root .pc-bloc{border:1px solid #e8eef7;border-radius:13px;background:#fff;margin-bottom:10px;overflow:hidden}' +
+'#pcom-root .pc-bloc.hist{opacity:.72}' +
+'#pcom-root .pc-tete{display:flex;align-items:center;gap:12px;padding:12px 14px;cursor:pointer;background:#f7fafd}' +
+'#pcom-root .pc-tete .veh{font-weight:700;flex:1;min-width:0}' +
+'#pcom-root .pc-tete .cpt{font-size:12px;color:#7a98c5}' +
+'#pcom-root .pc-tete .mnt{font-weight:800}' +
+'#pcom-root .pc-doc{display:flex;align-items:center;gap:12px;padding:11px 14px;border-top:1px solid #f0f4fa}' +
+'#pcom-root .pc-doc .col{min-width:0}' +
+'#pcom-root .pc-doc .nat{font-weight:700;font-size:13px}' +
+'#pcom-root .pc-doc .det{font-size:12px;color:#7a98c5;margin-top:2px}' +
+'#pcom-root .pc-doc .grow{flex:1;min-width:0}' +
+'#pcom-root .pc-doc .num{font-weight:800;white-space:nowrap}' +
+'#pcom-root .pc-b{display:inline-block;font-size:11px;font-weight:800;padding:3px 9px;border-radius:999px;white-space:nowrap}' +
+'#pcom-root .pc-b.gris{background:#eef2f7;color:#5a6b85}' +
+'#pcom-root .pc-b.bleu{background:#e7f0fc;color:#2a5ea9}' +
+'#pcom-root .pc-b.indigo{background:#e6e9fb;color:#3b45a8}' +
+'#pcom-root .pc-b.vert{background:#e3f5ef;color:#1c8367}' +
+'#pcom-root .pc-b.rouge{background:#fdeaea;color:#b3403f}' +
+'#pcom-root .pc-ic{width:32px;height:32px;border:1.5px solid #e3edf9;border-radius:9px;background:#fff;color:#2a5ea9;cursor:pointer;font:inherit;font-size:13px;font-weight:700}' +
+'#pcom-root .pc-ic:disabled{opacity:.45;cursor:default}' +
+'#pcom-root .pc-vide{padding:26px;text-align:center;color:#7a98c5;border:1px dashed #e3edf9;border-radius:13px}' +
+'#pcom-root .pc-err{padding:12px 14px;border-radius:10px;background:#fdeaea;color:#b3403f;font-size:13px}' +
+'</style>';
+    }
 
-  function filteredRows(){
-    let r = S.rows || [];
-    if(S.fStatus!=='tous') r = r.filter(x=>x.status===S.fStatus);
-    if(S.fVnVo!=='tous')   r = r.filter(x=>(x.vn_vo||'').toUpperCase()===S.fVnVo);
-    if(S.fReseau)  r = r.filter(x=>(x.reseau||'')===S.fReseau);
-    if(S.fAffaire) r = r.filter(x=>(x.affaire||'')===S.fAffaire);
-    if(S.fSite)    r = r.filter(x=>(x.site||'')===S.fSite);
-    return r;
-  }
+    function ligneDoc(p) {
+      const det = [];
+      if (p.couleur) det.push(esc(p.couleur));
+      if (p.motorisation) det.push(esc(p.motorisation));
+      if (p.vin) det.push(esc(p.vin));
+      det.push(fmtDate(p.created_at));
+      if (p.vendeur) det.push(esc(p.vendeur));
+      if (p.site) det.push(esc(p.site));
+      if (p.motif_abandon) det.push('abandon : ' + esc(p.motif_abandon));
 
-  // Listes imbriquées : affaires dépendent du réseau choisi ; sites de l'affaire
-  function reseauxList(){ return uniqueSorted((S.rows||[]).map(x=>x.reseau)); }
-  function affairesList(){
-    let base = S.rows||[];
-    if(S.fReseau) base = base.filter(x=>(x.reseau||'')===S.fReseau);
-    return uniqueSorted(base.map(x=>x.affaire));
-  }
-  function sitesList(){
-    let base = S.rows||[];
-    if(S.fReseau)  base = base.filter(x=>(x.reseau||'')===S.fReseau);
-    if(S.fAffaire) base = base.filter(x=>(x.affaire||'')===S.fAffaire);
-    return uniqueSorted(base.map(x=>x.site));
-  }
+      let actions = '';
+      if (p.peut_agir) {
+        if (p.status === 'propale' && p.vn_vo !== 'VN') {
+          actions += '<button class="pc-ic" data-pcmod="' + p.id_propale_bdc + '" title="Modifier">✎</button>';
+        }
+        actions += '<button class="pc-ic" data-pcpdf="' + p.id_propale_bdc + ':' + esc(p.status) +
+                   '" data-pcmaj="' + esc(p.updated_at || '') + '" title="Document PDF">PDF</button>';
+      }
+      if (p.bacs_sf_id) {
+        actions += '<a class="pc-ic" style="display:inline-flex;align-items:center;justify-content:center;text-decoration:none" ' +
+                   'href="' + PC_BACS_BASE + '/detail/' + esc(p.bacs_sf_id) + '" target="_blank" ' +
+                   'title="Ouvrir dans BACS">B</a>';
+      }
 
-  // ─── RENDU ───────────────────────────────────────────────────────────────
-  function chip(active, val, label, count){
-    const on = active===val;
-    return '<button class="pc-chip'+(on?' on':'')+'" data-pcchip="'+esc(val)+'">'+esc(label)+
-      (count!=null?'<span class="pc-cn">'+count+'</span>':'')+'</button>';
-  }
+      return '<div class="pc-doc">' +
+        '<div class="col grow">' +
+          '<div class="nat">' + esc(libNature(p)) +
+            (p.vehicule ? ' · ' + esc(p.vehicule) : '') + '</div>' +
+          '<div class="det">' + det.join(' · ') + '</div>' +
+        '</div>' +
+        '<div class="num">' + eur(p.montant_affiche) + '</div>' +
+        badgeStatut(p) +
+        '<div style="display:flex;gap:6px">' + actions + '</div>' +
+      '</div>';
+    }
 
-  function statusBadge(st){
-    const map = { propale:['Propale','prop'], bdc:['BDC','bdc'], win:['Vendu','win'], lose:['Abandon','aband'] };
-    const m = map[st] || [st||'—','autre'];
-    return '<span class="pc-badge '+m[1]+'">'+esc(m[0])+'</span>';
-  }
+    function blocHtml(b, sec) {
+      // Un document seul n'a pas d'en-tête : il se suffit.
+      if (b.seul) {
+        return '<div class="pc-bloc' + (sec === 'histoire' ? ' hist' : '') + '">' +
+               ligneDoc(b.docs[0]) + '</div>';
+      }
+      const ouvert = !!S.ouverts[b.affaire] || b.docs.length === 1;
+      const cpt = [];
+      if (b.nbSim) cpt.push(b.nbSim + ' simulation' + (b.nbSim > 1 ? 's' : ''));
+      if (b.nbCmd) cpt.push(b.nbCmd + ' commande' + (b.nbCmd > 1 ? 's' : ''));
+      return '<div class="pc-bloc' + (sec === 'histoire' ? ' hist' : '') + '">' +
+        '<div class="pc-tete" data-pcaff="' + esc(b.affaire) + '">' +
+          '<span style="color:#7a98c5">' + (ouvert ? '▾' : '▸') + '</span>' +
+          '<span class="veh">' + esc(b.vehicule || 'Affaire ' + b.affaire) + '</span>' +
+          '<span class="cpt">' + cpt.join(' · ') + '</span>' +
+          (b.montant != null ? '<span class="mnt">' + eur(b.montant) + '</span>' : '') +
+        '</div>' +
+        (ouvert ? b.docs.map(ligneDoc).join('') : '') +
+      '</div>';
+    }
 
-  function PC_render(){
-    const all = doc.querySelectorAll('#pcom-root');
-    for(let i=1;i<all.length;i++){ all[i].remove(); } // sécurité anti-doublon
-    const root = all[0];
-    if(!root) return;
-    let body = '';
-    if(S.loading || (S.rows===null && !S.error)){ body = '<div class="pc-load">Chargement des propositions…</div>'; }
-    else if(S.error){ body = '<div class="pc-err">Erreur : '+esc(S.error)+'</div>'; }
-    else {
-      const rows = filteredRows();
-      // ── Barre de filtres
-      const all = S.rows||[];
-      const stCount = st => all.filter(x=>x.status===st).length;
-      let filters = '<div class="pc-filters">';
-      // Statut
-      filters += '<div class="pc-fgroup"><span class="pc-flabel">Statut</span>'+
-        chip(S.fStatus,'tous','Tous',all.length)+
-        chip(S.fStatus,'propale','Propales',stCount('propale'))+
-        chip(S.fStatus,'bdc','BDC',stCount('bdc'))+
-        chip(S.fStatus,'win','Wins',stCount('win'))+
-        chip(S.fStatus,'lose','Abandons',stCount('lose'))+'</div>';
-      // VN/VO
-      const vnCount = all.filter(x=>(x.vn_vo||'').toUpperCase()==='VN').length;
-      const voCount = all.filter(x=>(x.vn_vo||'').toUpperCase()==='VO').length;
-      filters += '<div class="pc-fgroup"><span class="pc-flabel">Type</span>'+
-        chip(S.fVnVo,'tous','Tous',all.length)+
-        chip(S.fVnVo,'VN','VN',vnCount)+
-        chip(S.fVnVo,'VO','VO',voCount)+'</div>';
-      filters += '</div>';
-      // Sélection imbriquée Réseau > Affaire > Site (selects)
-      const opt = (list,sel)=> '<option value="">Tous</option>'+list.map(v=>'<option value="'+esc(v)+'"'+(sel===v?' selected':'')+'>'+esc(v)+'</option>').join('');
-      filters += '<div class="pc-cascade">'+
-        '<label>Réseau <select data-pcsel="reseau">'+opt(reseauxList(),S.fReseau)+'</select></label>'+
-        '<label>Affaire <select data-pcsel="affaire">'+opt(affairesList(),S.fAffaire)+'</select></label>'+
-        '<label>Site <select data-pcsel="site">'+opt(sitesList(),S.fSite)+'</select></label>'+
-        (S.fReseau||S.fAffaire||S.fSite||S.fStatus!=='tous'||S.fVnVo!=='tous'
-          ? '<button class="pc-reset" data-pcreset>Réinitialiser</button>' : '')+
+    function sectionHtml(titre, blocs, sec) {
+      if (!blocs.length) return '';
+      return '<div class="pc-sec"><p class="pc-sect">' + esc(titre) +
+             ' — ' + blocs.length + '</p>' +
+             blocs.map(function (b) { return blocHtml(b, sec); }).join('') + '</div>';
+    }
+
+    function PC_render() {
+      const root = doc.getElementById('pcom-root'); if (!root) return;
+      if (S.loading && !S.rows) { root.innerHTML = css() + '<div class="pc-vide">Chargement…</div>'; return; }
+      if (S.error) { root.innerHTML = css() + '<div class="pc-err">' + esc(S.error) + '</div>'; return; }
+      const rows = (S.rows || []).filter(function (p) {
+        return S.fVnVo === 'tous' || String(p.vn_vo || '').toUpperCase() === S.fVnVo;
+      });
+
+      const parSec = { cours: [], conclu: [], histoire: [] };
+      rows.forEach(function (p) { parSec[section(p)].push(p); });
+
+      const barre = '<div class="pc-bar">' +
+        ['tous', 'VN', 'VO'].map(function (v) {
+          return '<button class="pc-chip' + (S.fVnVo === v ? ' on' : '') + '" data-pcvnvo="' + v + '">' +
+                 (v === 'tous' ? 'Tous' : v) + '</button>';
+        }).join('') +
+        '<span style="flex:1"></span>' +
+        (parSec.histoire.length
+          ? '<button class="pc-chip' + (S.histoire ? ' on' : '') + '" data-pchist>' +
+            'Historique (' + parSec.histoire.length + ')</button>'
+          : '') +
       '</div>';
 
-      // ── Tableau
-      let table = '';
-      if(!rows.length){ table = '<div class="pc-empty">Aucune proposition pour ces filtres.</div>'; }
-      else {
-        table = '<div class="pc-tablewrap"><table class="pc-table"><thead><tr>'+
-          '<th>N°</th><th class="ac">Actions</th><th>Date</th><th>Vendeur</th>'+
-          '<th>Type</th><th>VIN</th><th class="ar">Montant</th><th>Paiement</th><th>Financement</th>'+
-          '<th>Statut</th><th>Réseau</th><th>Affaire</th><th>Site</th></tr></thead><tbody>';
-        rows.forEach(p=>{
-          const fin = [p.type_financement, p.organisme_financement].filter(Boolean).join(' · ') || '—';
-          // Actions visibles seulement si peut_agir. PDF toujours à la même position ;
-          // emplacement Modifier réservé (présent si propale, sinon espace vide) pour alignement.
-          let actions = '';
-          if(p.peut_agir){
-            const pdfBtn = '<button class="pc-act pc-pdf" data-pcpdf="'+p.id_propale_bdc+':'+(p.status||'')+'" data-pcmaj="'+(p.updated_at||'')+'" title="PDF">'+PC_PDF_SVG+'</button>';
-            const modBtn = (p.status==='propale')
-              ? '<button class="pc-act pc-mod" data-pcmod="'+p.id_propale_bdc+'" title="Modifier la propale">'+PC_EDIT_SVG+'</button>'
-              : '<span class="pc-act-spacer"></span>';
-            actions = '<div class="pc-actions">'+pdfBtn+modBtn+'</div>';
-          } else {
-            actions = '<span class="pc-noact" title="Action réservée au vendeur créateur et à sa hiérarchie">—</span>';
-          }
-          table += '<tr>'+
-            '<td class="mono">'+esc(p.id_propale_bdc)+'</td>'+
-            '<td class="ac">'+actions+'</td>'+
-            '<td>'+fmtDate(p.created_at)+'</td>'+
-            '<td>'+esc(p.vendeur||'—')+'</td>'+
-            '<td>'+esc((p.vn_vo||'—').toUpperCase())+'</td>'+
-            '<td class="mono vin">'+esc(p.vin||'—')+'</td>'+
-            '<td class="ar">'+eur(p.montant)+'</td>'+
-            '<td>'+esc(p.type_paiement||'—')+'</td>'+
-            '<td>'+esc(fin)+'</td>'+
-            '<td>'+statusBadge(p.status)+'</td>'+
-            '<td>'+esc(p.reseau||'—')+'</td>'+
-            '<td>'+esc(p.affaire||'—')+'</td>'+
-            '<td>'+esc(p.site||'—')+'</td>'+
-          '</tr>';
-        });
-        table += '</tbody></table></div>';
-      }
+      let corps = sectionHtml('En cours', grouper(parSec.cours), 'cours') +
+                  sectionHtml('Conclu', grouper(parSec.conclu), 'conclu') +
+                  (S.histoire ? sectionHtml('Historique', grouper(parSec.histoire), 'histoire') : '');
+      if (!corps) corps = '<div class="pc-vide">Aucun document commercial pour ce client.</div>';
 
-      body = '<div class="pc-head"><div class="pc-title">Propositions commerciales</div>'+
-             '<div class="pc-sub">'+rows.length+' document'+(rows.length>1?'s':'')+(rows.length!==all.length?(' sur '+all.length):'')+'</div></div>'+
-             filters + table;
+      root.innerHTML = css() + barre + corps;
     }
-    root.innerHTML = PC_STYLE + body;
-  }
 
-  // ─── ACTIONS ───────────────────────────────────────────────────────────────
-  function PC_modif(idPropale){
-    try { wwLib.wwVariable.updateValue(PC_VAR_ID_PROPALE, Number(idPropale)); }
-    catch(e){ console.error('[pcom] updateValue', e); }
-    try { wwLib.wwApp.goTo(PC_PAGE_PROPALE_UPDATE); }
-    catch(e){ console.error('[pcom] goTo', e); }
-  }
+    // ─── Chargement ────────────────────────────────────────────────────────
+    async function PC_load() {
+      const id = getIdClient(); const viewer = getViewerId();
+      if (id == null) { S.error = 'Client introuvable.'; PC_render(); return; }
+      S.idClient = id; S.loading = true; S.error = null; PC_render();
+      try {
+        const { data, error } = await ctx.supabase
+          .rpc('get_propales_client', { p_id_client: id, p_viewer_id_user: viewer });
+        if (error) throw error;
+        S.rows = Array.isArray(data) ? data : [];
+      } catch (e) {
+        console.error('[pcom] chargement', e);
+        S.error = 'Chargement impossible : ' + ((e && e.message) ? e.message : e);
+      } finally { S.loading = false; PC_render(); }
+    }
 
-  // PDF : propale = régénère (modifiable) si périmé ; bdc/win = cache via trace.
-  // updated_at fiable en prod -> comparaison de dates.
-  async function PC_pdf(idPropale, status, majIso){
-    const supabase = ctx.supabase;
-    const isPropale = (status==='propale');
-    const type = isPropale ? 'proposition_commerciale' : 'bon_de_commande';
-    const templateId = isPropale ? PC_TPL_PROPOSITION : PC_TPL_BON_COMMANDE;
-    const btn = doc.querySelector('[data-pcpdf="'+idPropale+':'+status+'"]');
-    if(btn){ btn.disabled=true; btn.style.opacity='.5'; }
-    const open = (url)=>{ try { wwLib.getFrontWindow().open(url,'_blank'); } catch(e){ window.open(url,'_blank'); } };
-    const done = ()=>{ if(btn){ btn.disabled=false; btn.style.opacity=''; } };
-    const generer = async ()=>{
-      const { data: gen, error: gErr } = await supabase.functions.invoke(PC_PDF_EDGE_FN, {
-        body: { id_propale_bdc: idPropale, template_id: templateId, type: type }
-      });
-      if(gErr) throw gErr;
-      if(gen && gen.ok && gen.signed_url){ open(gen.signed_url); }
-      else { throw new Error(gen && gen.error ? gen.error : 'Génération PDF échouée'); }
-    };
-    try {
-      const { data: docs, error: qErr } = await supabase
-        .from('generated_documents').select('storage_path, ready_at')
-        .eq('id_propale_bdc', idPropale).eq('type', type).eq('status','ready')
-        .order('ready_at',{ascending:false}).limit(1);
-      if(qErr) throw qErr;
-      if(docs && docs.length && docs[0].storage_path){
-        const pdfTime = docs[0].ready_at ? new Date(docs[0].ready_at).getTime() : 0;
-        const majTime = majIso ? new Date(String(majIso).replace(' ','T')).getTime() : 0;
-        if(pdfTime >= majTime){
-          const { data: signed, error: sErr } = await supabase.storage
-            .from(PC_PDF_BUCKET).createSignedUrl(docs[0].storage_path, 3600);
-          if(!sErr && signed && signed.signedUrl){ open(signed.signedUrl); return; }
+    // ─── Actions ───────────────────────────────────────────────────────────
+    function PC_modif(idPropale) {
+      try { wwLib.wwVariable.updateValue(PC_VAR_ID_PROPALE, idPropale); }
+      catch (e) { console.error('[pcom] updateValue', e); }
+      try { wwLib.wwApp.goTo(PC_PAGE_PROPALE_UPDATE); }
+      catch (e) { console.error('[pcom] goTo', e); }
+    }
+
+    // PDF : un document figé (commande, vendu) est servi depuis le cache tant
+    // qu'il est plus récent que la dernière modification ; une proposition,
+    // modifiable, est régénérée.
+    async function PC_pdf(idPropale, status, majIso) {
+      const supabase = ctx.supabase;
+      const isPropale = (status === 'propale' || status === 'draft');
+      const type = isPropale ? 'proposition_commerciale' : 'bon_de_commande';
+      const templateId = isPropale ? PC_TPL_PROPOSITION : PC_TPL_BON_COMMANDE;
+      const btn = doc.querySelector('[data-pcpdf="' + idPropale + ':' + status + '"]');
+      if (btn) { btn.disabled = true; }
+      const open = (url) => { try { wwLib.getFrontWindow().open(url, '_blank'); } catch (e) { window.open(url, '_blank'); } };
+      const done = () => { if (btn) { btn.disabled = false; } };
+      const generer = async () => {
+        const { data: gen, error: gErr } = await supabase.functions.invoke(PC_PDF_EDGE_FN, {
+          body: { id_propale_bdc: idPropale, template_id: templateId, type: type }
+        });
+        if (gErr) throw gErr;
+        if (gen && gen.ok && gen.signed_url) open(gen.signed_url);
+        else throw new Error(gen && gen.error ? gen.error : 'Génération PDF échouée');
+      };
+      try {
+        const { data: docs, error: qErr } = await supabase
+          .from('generated_documents').select('storage_path, ready_at')
+          .eq('id_propale_bdc', idPropale).eq('type', type).eq('status', 'ready')
+          .order('ready_at', { ascending: false }).limit(1);
+        if (qErr) throw qErr;
+        if (docs && docs.length && docs[0].storage_path) {
+          const pdfTime = docs[0].ready_at ? new Date(docs[0].ready_at).getTime() : 0;
+          const majTime = majIso ? new Date(String(majIso).replace(' ', 'T')).getTime() : 0;
+          if (pdfTime >= majTime) {
+            const { data: signed, error: sErr } = await supabase.storage
+              .from(PC_PDF_BUCKET).createSignedUrl(docs[0].storage_path, 3600);
+            if (!sErr && signed && signed.signedUrl) { open(signed.signedUrl); return; }
+          }
         }
+        await generer();
+      } catch (e) {
+        console.error('[pcom] pdf', e);
+        alert('Impossible de générer le PDF : ' + ((e && e.message) ? e.message : e));
+      } finally { done(); }
+    }
+
+    // ─── Routeur ───────────────────────────────────────────────────────────
+    function PC_route(e) {
+      if (!e.target.closest('#pcom-root')) return;
+      const vnvo = e.target.closest('[data-pcvnvo]');
+      if (vnvo) { S.fVnVo = vnvo.getAttribute('data-pcvnvo'); PC_render(); return; }
+      const hist = e.target.closest('[data-pchist]');
+      if (hist) { S.histoire = !S.histoire; PC_render(); return; }
+      const aff = e.target.closest('[data-pcaff]');
+      if (aff) { const k = aff.getAttribute('data-pcaff'); S.ouverts[k] = !S.ouverts[k]; PC_render(); return; }
+      const mod = e.target.closest('[data-pcmod]');
+      if (mod) { PC_modif(Number(mod.getAttribute('data-pcmod'))); return; }
+      const pdf = e.target.closest('[data-pcpdf]');
+      if (pdf) {
+        const v = pdf.getAttribute('data-pcpdf'); const parts = v.split(':');
+        PC_pdf(Number(parts[0]), parts[1], pdf.getAttribute('data-pcmaj') || null);
       }
-      await generer();
-    } catch(e){
-      console.error('[pcom] pdf', e);
-      alert('Impossible de générer le PDF : '+((e&&e.message)?e.message:e));
-    } finally { done(); }
-  }
+    }
 
-  // ─── ROUTEUR (capture) ───────────────────────────────────────────────────
-  function PC_route(e){
-    const root = e.target.closest('#pcom-root'); if(!root) return;
-    const chipEl = e.target.closest('[data-pcchip]');
-    if(chipEl){ const v=chipEl.getAttribute('data-pcchip');
-      const grp = chipEl.closest('.pc-fgroup');
-      const label = grp && grp.querySelector('.pc-flabel') ? grp.querySelector('.pc-flabel').textContent : '';
-      if(label.indexOf('Statut')>=0) S.fStatus=v; else S.fVnVo=v;
-      PC_writeCache(); PC_render(); return; }
-    const reset = e.target.closest('[data-pcreset]');
-    if(reset){ S.fStatus='tous'; S.fVnVo='tous'; S.fReseau=''; S.fAffaire=''; S.fSite=''; PC_writeCache(); PC_render(); return; }
-    const mod = e.target.closest('[data-pcmod]');
-    if(mod){ PC_modif(Number(mod.getAttribute('data-pcmod'))); return; }
-    const pdf = e.target.closest('[data-pcpdf]');
-    if(pdf){ const v=pdf.getAttribute('data-pcpdf'); const [pid,st]=v.split(':'); const maj=pdf.getAttribute('data-pcmaj')||null; PC_pdf(Number(pid), st, maj); return; }
-  }
-  function PC_change(e){
-    const sel = e.target.closest('[data-pcsel]'); if(!sel) return;
-    if(!e.target.closest('#pcom-root')) return;
-    const which = sel.getAttribute('data-pcsel'); const val = sel.value;
-    if(which==='reseau'){ S.fReseau=val; S.fAffaire=''; S.fSite=''; }   // reset des niveaux inférieurs
-    else if(which==='affaire'){ S.fAffaire=val; S.fSite=''; }
-    else if(which==='site'){ S.fSite=val; }
-    PC_writeCache(); PC_render();
-  }
+    // Anti-accumulation : un module remonté ne doit pas laisser derrière lui
+    // l'écouteur de sa vie précédente.
+    if (window.__pcomClickHandler) doc.removeEventListener('click', window.__pcomClickHandler, true);
+    window.__pcomClickHandler = PC_route;
+    doc.addEventListener('click', PC_route, true);
 
-  // Anti-accumulation : on retire les anciens listeners (d'une exécution précédente
-  // de l'IIFE) avant d'attacher les nouveaux. Les références sont stockées sur window.
-  if(window.__pcomClickHandler){ doc.removeEventListener('click', window.__pcomClickHandler, true); }
-  if(window.__pcomChangeHandler){ doc.removeEventListener('change', window.__pcomChangeHandler, true); }
-  window.__pcomClickHandler = PC_route;
-  window.__pcomChangeHandler = PC_change;
-  doc.addEventListener('click', PC_route, true);
-  doc.addEventListener('change', PC_change, true);
+    // La variable WeWeb qui porte le client n'est pas toujours prête au
+    // montage : on retente brièvement plutôt que d'afficher une erreur à un
+    // vendeur dont la fiche est en train de s'ouvrir.
+    let essais = 0;
+    (function boot() {
+      if (getIdClient() != null) { PC_load(); return; }
+      if (essais++ < 30) { setTimeout(boot, 150); return; }   // ~4,5 s
+      PC_load();                                              // affichera l'erreur
+    })();
 
-  // ─── SVG ───────────────────────────────────────────────────────────────────
-  const PC_PDF_SVG='<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="12" y1="18" x2="12" y2="12"/><polyline points="9 15 12 18 15 15"/></svg>';
-  const PC_EDIT_SVG='<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>';
+    // Rechargement manuel, appelé au retour de la page de modification.
+    window.__pcomReload = function () { PC_load(); };
 
-  // ─── STYLE ─────────────────────────────────────────────────────────────────
-  const PC_STYLE = '<style>'+
-  '#pcom-root{font-family:"Nunito Sans",sans-serif;color:#2c2c2a;padding:0 4px}'+
-  '#pcom-root .pc-head{display:flex;align-items:baseline;gap:10px;margin-bottom:10px}'+
-  '#pcom-root .pc-title{font-size:17px;font-weight:800;color:#2a5ea9}'+
-  '#pcom-root .pc-sub{font-size:13px;color:#888780}'+
-  '#pcom-root .pc-load,#pcom-root .pc-err,#pcom-root .pc-empty{padding:26px;text-align:center;color:#888780;font-size:14px}'+
-  '#pcom-root .pc-err{color:#a32d2d}'+
-  '#pcom-root .pc-filters{display:flex;flex-wrap:wrap;gap:18px;margin-bottom:10px}'+
-  '#pcom-root .pc-fgroup{display:flex;align-items:center;gap:6px;flex-wrap:wrap}'+
-  '#pcom-root .pc-flabel{font-size:11px;font-weight:700;color:#888780;text-transform:uppercase;letter-spacing:.04em;margin-right:2px}'+
-  '#pcom-root .pc-chip{border:1px solid #e3e0d8;background:#fff;border-radius:999px;padding:4px 11px;font-family:inherit;font-size:12px;font-weight:600;color:#5f5e5a;cursor:pointer;display:inline-flex;align-items:center;gap:5px;transition:.12s}'+
-  '#pcom-root .pc-chip:hover{border-color:#acc5e4}'+
-  '#pcom-root .pc-chip.on{background:#2a5ea9;border-color:#2a5ea9;color:#fff}'+
-  '#pcom-root .pc-cn{background:rgba(0,0,0,.08);border-radius:999px;padding:0 6px;font-size:11px;font-weight:700}'+
-  '#pcom-root .pc-chip.on .pc-cn{background:rgba(255,255,255,.25)}'+
-  '#pcom-root .pc-cascade{display:flex;flex-wrap:wrap;gap:12px;align-items:flex-end;margin-bottom:14px}'+
-  '#pcom-root .pc-cascade label{display:flex;flex-direction:column;font-size:11px;font-weight:700;color:#888780;text-transform:uppercase;letter-spacing:.04em;gap:3px}'+
-  '#pcom-root .pc-cascade select{font-family:inherit;font-size:13px;font-weight:500;color:#2c2c2a;border:1px solid #e3e0d8;border-radius:8px;padding:6px 10px;background:#fff;min-width:150px;cursor:pointer}'+
-  '#pcom-root .pc-cascade select:focus{outline:none;border-color:#2a5ea9}'+
-  '#pcom-root .pc-reset{border:none;background:none;color:#2a5ea9;font-family:inherit;font-size:12px;font-weight:700;cursor:pointer;text-decoration:underline;padding:7px 0}'+
-  '#pcom-root .pc-tablewrap{overflow-x:auto;border:1px solid #eceae3;border-radius:12px}'+
-  '#pcom-root .pc-table{width:100%;border-collapse:collapse;font-size:13px}'+
-  '#pcom-root .pc-table thead th{background:#acc5e4;color:#2a5ea9;text-align:left;padding:9px 12px;font-size:11px;font-weight:700;letter-spacing:.03em;text-transform:uppercase;white-space:nowrap;position:sticky;top:0}'+
-  '#pcom-root .pc-table th.ar,#pcom-root .pc-table td.ar{text-align:right}'+
-  '#pcom-root .pc-table th.ac,#pcom-root .pc-table td.ac{text-align:center}'+
-  '#pcom-root .pc-table tbody td{padding:9px 12px;border-top:1px solid #f1efe8;white-space:nowrap;color:#3a3a37}'+
-  '#pcom-root .pc-table tbody tr:hover{background:#f8faf9}'+
-  '#pcom-root .pc-table .mono{font-variant-numeric:tabular-nums;color:#5f5e5a}'+
-  '#pcom-root .pc-table .vin{font-size:11px;letter-spacing:.02em}'+
-  '#pcom-root .pc-badge{display:inline-block;border-radius:999px;padding:2px 10px;font-size:11px;font-weight:700}'+
-  '#pcom-root .pc-badge.prop{background:#eaf1fb;color:#2a5ea9}'+
-  '#pcom-root .pc-badge.bdc{background:#fff1d6;color:#c08a1c}'+
-  '#pcom-root .pc-badge.win{background:#e1f5ee;color:#0f6e56}'+
-  '#pcom-root .pc-badge.aband{background:#fdeaea;color:#c0392b}'+
-  '#pcom-root .pc-badge.autre{background:#f1efe8;color:#5f5e5a}'+
-  '#pcom-root .pc-actions{display:inline-flex;align-items:center;gap:4px;justify-content:flex-start}'+
-  '#pcom-root .pc-act{width:30px;height:30px;border-radius:8px;border:1px solid #ece9e1;background:#fff;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;padding:0;flex-shrink:0;transition:.12s;vertical-align:middle}'+
-  '#pcom-root .pc-act-spacer{width:30px;height:30px;flex-shrink:0;display:inline-block}'+
-  '#pcom-root .pc-pdf{color:#e24b4a}#pcom-root .pc-pdf:hover{background:#fdeaea;border-color:#e24b4a}'+
-  '#pcom-root .pc-mod{color:#2a5ea9}#pcom-root .pc-mod:hover{background:rgba(42,94,169,.10);border-color:#2a5ea9}'+
-  '#pcom-root .pc-noact{color:#c9c6bd}'+
-  '@media (max-width:560px){'+
-    '#pcom-root .pc-filters{gap:12px}'+
-    '#pcom-root .pc-cascade{gap:10px}'+
-    '#pcom-root .pc-cascade label{flex:1 1 100%}'+
-    '#pcom-root .pc-cascade select{min-width:0;width:100%}'+
-    '#pcom-root .pc-table thead th,#pcom-root .pc-table tbody td{padding:8px 10px}'+
-  '}'+
-  '</style>';
-
-  // ─── BOOT ────────────────────────────────────────────────────────────────
-  // Supprime d'éventuels doublons de #pcom-root (si le boot a tourné plusieurs fois)
-  function PC_dedupe(){
-    const all = doc.querySelectorAll('#pcom-root');
-    for(let i=1;i<all.length;i++){ all[i].remove(); } // ne garde que le premier
-    return all[0] || null;
-  }
-
-  function PC_boot(){
-    // Attendre que le div de l'embed (#pcom-root) ET la variable client + Supabase soient prêts.
-    let tries = 0;
-    const tryBoot = ()=>{
-      const root = PC_dedupe(); // récupère le 1er #pcom-root et purge les doublons
-      const ready = root && (getIdClient()!=null) && wwLib.wwPlugins && wwLib.wwPlugins.supabase && ctx.supabase;
-      if(ready){ PC_render(); PC_load(); return; }
-      if(tries++ < 30){ setTimeout(tryBoot, 150); return; } // ~4.5s max
-      if(root){ PC_render(); PC_load(); } // dernier essai (affichera l'erreur si besoin)
+    return {
+      destroy() {
+        try { doc.removeEventListener('click', PC_route, true); } catch (e) {}
+        if (window.__pcomClickHandler === PC_route) window.__pcomClickHandler = null;
+        if (window.__pcomReload) window.__pcomReload = null;
+      }
     };
-    tryBoot();
   }
-  // Expose un rechargement manuel (ex. après retour de la page propale update)
-  window.__pcomReload = function(){ PC_dedupe(); PC_load(true); };
-
-  // Re-render si le #pcom-root présent est un conteneur vide (re)monté par WeWeb au retour d'onglet.
-  function PC_needsRender(){
-    const root = __anchor;
-    if(!root) return false;
-    return !root.querySelector('.pc-head, .pc-load, .pc-err, .pc-empty');
-  }
-  // self-boot/observer retiré (loader)
-
-  // Premier lancement immédiat.
-  PC_boot();
-}
 });
