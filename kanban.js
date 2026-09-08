@@ -551,10 +551,13 @@ OD.define('kanban', {
 
     h += '<div class="kc-actions">';
     if (isPdf) h += '<button class="kc-ic" data-pdf="' + c.id_propale_bdc + ':' + pdfType + '" data-maj="' + esc(c.maj || '') + '" title="PDF">' + ICON_PDF + '</button>';
-    if (c.status === 'propale' || c.status === 'draft') {
+    // La consultation vaut aussi pour une COMMANDE : c'est le document qu'on a
+    // le plus de raisons de relire. En VN elle reste une lecture — le
+    // configurateur est chez le constructeur, One Data reflete.
+    if (c.status === 'propale' || c.status === 'draft' || c.status === 'bdc') {
       if (c.vn_vo === 'VN') {
         if (!vnMulti) h += '<button class="kc-ic" data-modif="' + c.id_propale_bdc + '" title="Consulter">' + ICON_SEARCH_VN + '</button>';
-      } else {
+      } else if (c.status !== 'bdc') {
         h += '<button class="kc-ic" data-modif="' + c.id_propale_bdc + '" title="Modifier">' + ICON_EDIT + '</button>';
       }
     }
