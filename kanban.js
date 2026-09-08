@@ -93,7 +93,8 @@ OD.define('kanban', {
   function canArchive(status) { return status === 'draft' || status === 'propale'; }
 
   const COLS = [
-    { key: 'draft', label: 'Brouillon' },
+    // Libellé d'affichage seulement : le statut reste 'draft' en base.
+    { key: 'draft', label: 'Simulations' },
     { key: 'propale', label: 'Propale' },
     { key: 'bdc', label: 'BDC' },
     { key: 'win', label: 'Gagné' },
