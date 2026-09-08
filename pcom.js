@@ -118,10 +118,32 @@ OD.define('pcom', {
         b.montant = b.nbCmd ? b.docs.filter(function (d) { return d.nature === 'commande'; })
                                     .reduce(function (t, d) { return t + (Number(d.montant_affiche) || 0); }, 0)
                             : null;
-        const vehs = {};
-        b.docs.forEach(function (d) { if (d.vehicule) vehs[d.vehicule] = 1; });
-        const noms = Object.keys(vehs);
-        b.vehicule = noms.length === 1 ? noms[0] : (noms.length ? 'Plusieurs modèles' : null);
+        // Identifier l'affaire, plutôt que constater qu'elle est hétérogène.
+        // Un libellé unique s'impose ; sinon une famille commune — cinq
+        // finitions d'Aygo X restent une Aygo X ; sinon le véhicule le plus
+        // représenté, avec le nombre des autres.
+        const compte = function (cle) {
+          const m = {};
+          b.docs.forEach(function (d) { const v = d[cle]; if (v) m[v] = (m[v] || 0) + 1; });
+          return m;
+        };
+        const parVeh = compte('vehicule'), noms = Object.keys(parVeh);
+        if (noms.length === 1) {
+          b.vehicule = noms[0];
+        } else if (!noms.length) {
+          b.vehicule = null;
+        } else {
+          const parFam = compte('famille'), fams = Object.keys(parFam);
+          const marques = Object.keys(compte('marque'));
+          if (fams.length === 1) {
+            b.vehicule = (marques.length === 1 ? marques[0] + ' ' : '') + fams[0];
+            b.versions = b.docs.length;
+          } else {
+            const majoritaire = noms.reduce(function (a, n) { return parVeh[n] > parVeh[a] ? n : a; }, noms[0]);
+            b.vehicule = majoritaire;
+            b.autres = b.docs.length - parVeh[majoritaire];
+          }
+        }
         b.site = b.docs[0] && b.docs[0].site;
         // Une affaire à document unique n'a rien à cacher : elle s'ouvre seule.
         if (b.docs.length === 1 && S.ouverts[b.affaire] === undefined) S.ouverts[b.affaire] = true;
@@ -157,7 +179,10 @@ OD.define('pcom', {
 '#pcom-root .pc-tete:hover{background:#f7f6f2}' +
 '#pcom-root .pc-tete .chev{color:#b4b2a9;display:inline-flex;transition:transform .15s}' +
 '#pcom-root .pc-tete.ouv .chev{transform:rotate(90deg)}' +
-'#pcom-root .pc-tete .veh{font-weight:800;font-size:14px;color:#1c2b45;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}' +
+'#pcom-root .pc-tete .ident{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px}' +
+'#pcom-root .pc-tete .veh{font-weight:800;font-size:14px;color:#1c2b45;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}' +
+'#pcom-root .pc-tete .veh .nuance{font-weight:700;font-size:11px;color:#888780;background:#f2f1ec;border-radius:5px;padding:1px 7px;margin-left:6px}' +
+'#pcom-root .pc-tete .situe{font-size:11.5px;color:#b4b2a9;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}' +
 '#pcom-root .pc-tete .cpt{font-size:11px;font-weight:700;color:#888780;background:#f7f6f2;border-radius:6px;padding:3px 9px;white-space:nowrap}' +
 '#pcom-root .pc-tete .mnt{font-size:14px;font-weight:800;color:#1c2b45;white-space:nowrap}' +
 '#pcom-root .pc-list{display:flex;flex-direction:column;gap:8px;padding:10px 12px}' +
@@ -244,10 +269,21 @@ OD.define('pcom', {
       const cpt = [];
       if (b.nbSim) cpt.push(b.nbSim + ' simulation' + (b.nbSim > 1 ? 's' : ''));
       if (b.nbCmd) cpt.push(b.nbCmd + ' commande' + (b.nbCmd > 1 ? 's' : ''));
+
+      // Le titre nomme le véhicule ; la ligne du dessous situe l'affaire —
+      // qui l'a ouverte, où, et quand. C'est ce qui permet de la reconnaître.
+      let titre = esc(b.vehicule || 'Affaire sans véhicule');
+      if (b.versions) titre += ' <span class="nuance">' + b.versions + ' versions</span>';
+      else if (b.autres) titre += ' <span class="nuance">+ ' + b.autres + ' autre' + (b.autres > 1 ? 's' : '') + '</span>';
+      const situe = [b.vendeur, b.site, fmtDate(b.maj)].filter(Boolean).map(esc).join(' · ');
+
       return '<div class="' + cls + '">' +
         '<button type="button" class="pc-tete' + (ouvert ? ' ouv' : '') + '" data-pcaff="' + esc(b.affaire) + '">' +
           '<span class="chev">' + I_CHEV + '</span>' +
-          '<span class="veh">' + esc(b.vehicule || 'Affaire ' + b.affaire) + '</span>' +
+          '<span class="ident">' +
+            '<span class="veh">' + titre + '</span>' +
+            '<span class="situe">' + situe + '</span>' +
+          '</span>' +
           '<span class="cpt">' + cpt.join(' · ') + '</span>' +
           (b.montant != null ? '<span class="mnt">' + eur(b.montant) + '</span>' : '') +
         '</button>' +
