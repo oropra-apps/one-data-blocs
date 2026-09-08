@@ -179,54 +179,54 @@ OD.define('pcom', {
     // ─── Styles ────────────────────────────────────────────────────────────
     function css() {
       return '<style>' +
-'#pcom-root{font-family:inherit;color:#1f2b45}' +
+'#pcom-root{font-family:inherit;color:#1f4a87}' +
 '#pcom-root *{box-sizing:border-box}' +
 '#pcom-root .flt{display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-bottom:10px}' +
-'#pcom-root .flt .sep{width:1px;height:20px;background:#ece9e1;margin:0 4px}' +
+'#pcom-root .flt .sep{width:1px;height:20px;background:#e3edf9;margin:0 4px}' +
 '#pcom-root .chip{border:1.5px solid #e3edf9;background:#fff;color:#2a5ea9;border-radius:999px;padding:5px 13px;font:inherit;font-size:12px;font-weight:700;cursor:pointer;transition:.12s}' +
 '#pcom-root .chip:hover{border-color:#2a5ea9}' +
 '#pcom-root .chip.on{background:#2a5ea9;color:#fff;border-color:#2a5ea9}' +
 '#pcom-root .chip .n{opacity:.65;font-weight:700;margin-left:5px}' +
-'#pcom-root .res{display:flex;gap:18px;flex-wrap:wrap;align-items:baseline;padding:0 2px 12px;font-size:12.5px;color:#888780}' +
-'#pcom-root .res b{font-size:15px;font-weight:800;color:#1c2b45}' +
-'#pcom-root .liste{border:0.5px solid #ece9e1;border-radius:12px;overflow:hidden;background:#fff}' +
-'#pcom-root .li{border-top:0.5px solid #f2f0ea}#pcom-root .li:first-child{border-top:none}' +
+'#pcom-root .res{display:flex;gap:18px;flex-wrap:wrap;align-items:baseline;padding:0 2px 12px;font-size:12.5px;color:#7a98c5}' +
+'#pcom-root .res b{font-size:15px;font-weight:800;color:#1f4a87}' +
+'#pcom-root .liste{border:0.5px solid #e3edf9;border-radius:12px;overflow:hidden;background:#fff}' +
+'#pcom-root .li{border-top:0.5px solid #eef4fb}#pcom-root .li:first-child{border-top:none}' +
 '#pcom-root .ln{display:flex;align-items:center;gap:12px;padding:9px 12px;cursor:pointer;background:none;border:none;width:100%;text-align:left;font:inherit;border-left:3px solid transparent}' +
-'#pcom-root .ln:hover{background:#fbfaf7}' +
+'#pcom-root .ln:hover{background:#f7faff}' +
 '#pcom-root .li.vn .ln{border-left-color:#53bda7}#pcom-root .li.vo .ln{border-left-color:#fac055}' +
-'#pcom-root .li.close .ln{background:#fcfbf9}' +
-'#pcom-root .ln .ph{width:52px;height:36px;flex:0 0 auto;border-radius:6px;background:#f4f2ed;object-fit:contain;display:block}' +
+'#pcom-root .li.close .ln{background:#f9fbff}' +
+'#pcom-root .ln .ph{width:52px;height:36px;flex:0 0 auto;border-radius:6px;background:#eef4fb;object-fit:contain;display:block}' +
 '#pcom-root .ln .id{flex:1 1 40%;min-width:0;display:flex;flex-direction:column;gap:2px}' +
-'#pcom-root .ln .veh{font-size:13.5px;font-weight:800;color:#1c2b45;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}' +
-'#pcom-root .ln .qui{font-size:11.5px;color:#a8a69e;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin-top:1px}' +
-'#pcom-root .ln .ctx{flex:1 1 30%;min-width:0;font-size:11.5px;color:#888780;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}' +
+'#pcom-root .ln .veh{font-size:13.5px;font-weight:800;color:#1f4a87;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}' +
+'#pcom-root .ln .qui{font-size:11.5px;color:#9fb0c4;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin-top:1px}' +
+'#pcom-root .ln .ctx{flex:1 1 30%;min-width:0;font-size:11.5px;color:#7a98c5;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}' +
 '#pcom-root .ln .ctx .froid{color:#8a6410;font-weight:700}' +
 '#pcom-root .ln .chf{flex:0 0 auto;text-align:right;min-width:96px;display:flex;flex-direction:column;align-items:flex-end;gap:3px}' +
-'#pcom-root .ln .mnt{font-size:14px;font-weight:800;color:#1c2b45;white-space:nowrap;line-height:1.15}' +
-'#pcom-root .ln .frch{font-size:11.5px;color:#a8a69e;white-space:nowrap}' +
-'#pcom-root .ln .chev{flex:0 0 auto;color:#c9c6bd;transition:transform .15s;display:inline-flex}' +
+'#pcom-root .ln .mnt{font-size:14px;font-weight:800;color:#1f4a87;white-space:nowrap;line-height:1.15}' +
+'#pcom-root .ln .frch{font-size:11.5px;color:#9fb0c4;white-space:nowrap}' +
+'#pcom-root .ln .chev{flex:0 0 auto;color:#b5c8e0;transition:transform .15s;display:inline-flex}' +
 '#pcom-root .li.ouv .ln .chev{transform:rotate(90deg)}' +
 '#pcom-root .et{font-size:10.5px;font-weight:800;border-radius:5px;padding:2px 7px;white-space:nowrap;display:inline-block}' +
-'#pcom-root .et.cours{background:#e7ebf0;color:#5a6b80}' +
+'#pcom-root .et.cours{background:#eaf1fb;color:#5a7ba8}' +
 '#pcom-root .et.bdc{background:rgba(42,94,169,.14);color:#2a5ea9}' +
 '#pcom-root .et.win{background:rgba(83,189,167,.22);color:#2c7a68}' +
 '#pcom-root .et.lose{background:rgba(217,112,112,.16);color:#b23433}' +
-'#pcom-root .det{padding:2px 12px 12px 67px;background:#fbfaf7}' +
+'#pcom-root .det{padding:2px 12px 12px 67px;background:#f7faff}' +
 '#pcom-root .vers{display:grid;grid-template-columns:repeat(auto-fill,minmax(118px,1fr));gap:7px}' +
-'#pcom-root .v{border:0.5px solid #ece9e1;border-radius:9px;padding:7px;display:flex;flex-direction:column;gap:3px;min-width:0;background:#fff}' +
+'#pcom-root .v{border:0.5px solid #e3edf9;border-radius:9px;padding:7px;display:flex;flex-direction:column;gap:3px;min-width:0;background:#fff}' +
 '#pcom-root .v.pris{border:1.5px solid #53bda7;padding:6.5px}' +
 '#pcom-root .v.mort{opacity:.52}' +
 '#pcom-root .v .phw{position:relative;display:block}' +
-'#pcom-root .v .ph{width:100%;height:42px;border-radius:6px;background:#f4f2ed;object-fit:contain;display:block}' +
-'#pcom-root .v .stt{position:absolute;top:3px;left:3px;font-size:9.5px;font-weight:800;padding:1px 6px;border-radius:5px;background:rgba(255,255,255,.92);color:#5a6b80;box-shadow:0 0 0 0.5px rgba(31,43,69,.10)}' +
+'#pcom-root .v .ph{width:100%;height:42px;border-radius:6px;background:#eef4fb;object-fit:contain;display:block}' +
+'#pcom-root .v .stt{position:absolute;top:3px;left:3px;font-size:9.5px;font-weight:800;padding:1px 6px;border-radius:5px;background:rgba(255,255,255,.92);color:#5a7ba8;box-shadow:0 0 0 0.5px rgba(31,43,69,.10)}' +
 '#pcom-root .v .stt.bdc{color:#2a5ea9}#pcom-root .v .stt.win{color:#2c7a68}#pcom-root .v .stt.lose{color:#b23433}' +
 '#pcom-root .v .stt.propale{color:#8a6410}' +
-'#pcom-root .v .coul{font-size:11.5px;font-weight:700;color:#1f2b45;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}' +
-'#pcom-root .v .prix{font-size:13px;font-weight:800;color:#1c2b45;line-height:1.15}' +
+'#pcom-root .v .coul{font-size:11.5px;font-weight:700;color:#1f4a87;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}' +
+'#pcom-root .v .prix{font-size:13px;font-weight:800;color:#1f4a87;line-height:1.15}' +
 '#pcom-root .v .note{font-size:10.5px;font-weight:700;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}' +
 '#pcom-root .v .note.pris{color:#2c7a68}#pcom-root .v .note.mort{color:#b23433}' +
 '#pcom-root .v .note.plus{color:#8a6410}#pcom-root .v .note.moins{color:#2c7a68}' +
-'#pcom-root .v .note.egal{color:#b4b2a9}' +
+'#pcom-root .v .note.egal{color:#9fb0c4}' +
 '#pcom-root .v .barre{display:flex;gap:4px;flex-wrap:wrap;margin-top:2px}' +
 '#pcom-root .b{width:24px;height:24px;flex:0 0 auto;border-radius:50%;border:1.5px solid #e3edf9;background:#fff;color:#2a5ea9;cursor:pointer;padding:0;display:inline-flex;align-items:center;justify-content:center;line-height:0;transition:.14s;text-decoration:none}' +
 '#pcom-root .b svg{display:block}' +
@@ -236,18 +236,18 @@ OD.define('pcom', {
 '#pcom-root .b.cmd:hover{background:#53bda7;border-color:#53bda7;color:#fff}' +
 '#pcom-root .b.del{color:#d97070;border-color:#f0d6d6}' +
 '#pcom-root .b.del:hover{background:#e24b4a;border-color:#e24b4a;color:#fff}' +
-'#pcom-root .outils{display:flex;align-items:center;gap:10px;margin-bottom:8px;font-size:11.5px;color:#888780}' +
+'#pcom-root .outils{display:flex;align-items:center;gap:10px;margin-bottom:8px;font-size:11.5px;color:#7a98c5}' +
 '#pcom-root .plier{background:none;border:none;font:inherit;font-size:11.5px;font-weight:700;color:#b23433;cursor:pointer;padding:0;text-decoration:underline}' +
-'#pcom-root .plier:hover{color:#8a2a2a}' +
+'#pcom-root .plier:hover{color:#b23433}' +
 '#pcom-root .frise{margin-top:10px}' +
-'#pcom-root .fbtn{width:100%;border:0.5px dashed #ddd9cf;background:#fbfaf7;border-radius:10px;padding:10px;font:inherit;font-size:12.5px;font-weight:700;color:#888780;cursor:pointer}' +
-'#pcom-root .fbtn:hover{border-color:#b4b2a9;color:#5f5e5a}' +
-'#pcom-root .mois{font-size:11px;font-weight:800;letter-spacing:.06em;text-transform:uppercase;color:#b4b2a9;margin:14px 0 5px}' +
-'#pcom-root .fl{display:flex;align-items:center;gap:11px;padding:7px 12px;border-left:2px solid #ece9e1;margin-left:6px}' +
+'#pcom-root .fbtn{width:100%;border:0.5px dashed #cfe0f2;background:#f7faff;border-radius:10px;padding:10px;font:inherit;font-size:12.5px;font-weight:700;color:#7a98c5;cursor:pointer}' +
+'#pcom-root .fbtn:hover{border-color:#9fb0c4;color:#2a5ea9}' +
+'#pcom-root .mois{font-size:11px;font-weight:800;letter-spacing:.06em;text-transform:uppercase;color:#9fb0c4;margin:14px 0 5px}' +
+'#pcom-root .fl{display:flex;align-items:center;gap:11px;padding:7px 12px;border-left:2px solid #e3edf9;margin-left:6px}' +
 '#pcom-root .fl .fveh{flex:1;min-width:0;font-size:12.5px;font-weight:700;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}' +
-'#pcom-root .fl .fdet{font-size:11px;color:#b4b2a9;white-space:nowrap}' +
+'#pcom-root .fl .fdet{font-size:11px;color:#9fb0c4;white-space:nowrap}' +
 '#pcom-root .fl .fmnt{font-size:12.5px;font-weight:800;white-space:nowrap}' +
-'#pcom-root .vide{padding:30px;text-align:center;color:#b4b2a9;font-size:13px;border:0.5px dashed #ece9e1;border-radius:12px}' +
+'#pcom-root .vide{padding:30px;text-align:center;color:#9fb0c4;font-size:13px;border:0.5px dashed #e3edf9;border-radius:12px}' +
 '#pcom-root .err{padding:12px 14px;border-radius:10px;background:rgba(217,112,112,.14);color:#b23433;font-size:13px}' +
 '</style>';
     }
@@ -602,7 +602,7 @@ OD.define('pcom', {
         const ov = d.createElement('div');
         ov.style.cssText = 'position:fixed;inset:0;z-index:2700;display:flex;align-items:center;justify-content:center;padding:24px;background:rgba(31,74,133,.45)';
         const m = d.createElement('div');
-        m.style.cssText = 'background:#fff;border-radius:16px;width:100%;max-width:480px;box-shadow:0 30px 80px rgba(31,74,133,.35);padding:22px;font-family:inherit;color:#1f2b45';
+        m.style.cssText = 'background:#fff;border-radius:16px;width:100%;max-width:480px;box-shadow:0 30px 80px rgba(31,74,133,.35);padding:22px;font-family:inherit;color:#1f4a87';
         m.innerHTML = '<div style="font-weight:800;color:#1f4a87;font-size:16px">Mauvais point de vente</div>' +
           '<div style="color:#7a98c5;font-size:13px;margin:8px 0 16px;line-height:1.5">' + esc(message) + '</div>' +
           '<div style="display:flex;gap:9px">' +
@@ -660,7 +660,7 @@ OD.define('pcom', {
         const ov = d.createElement('div');
         ov.style.cssText = 'position:fixed;inset:0;z-index:2700;display:flex;align-items:flex-start;justify-content:center;padding:24px;background:rgba(31,74,133,.45);overflow-y:auto';
         const m = d.createElement('div');
-        m.style.cssText = 'background:#fff;border-radius:16px;width:100%;max-width:500px;box-shadow:0 30px 80px rgba(31,74,133,.35);margin:auto;padding:22px;font-family:inherit;color:#1f2b45';
+        m.style.cssText = 'background:#fff;border-radius:16px;width:100%;max-width:500px;box-shadow:0 30px 80px rgba(31,74,133,.35);margin:auto;padding:22px;font-family:inherit;color:#1f4a87';
         const opts = motifs.map(function (x) { return '<option value="' + esc(x.valeur) + '">' + esc(x.libelle) + '</option>'; }).join('');
         m.innerHTML =
           '<div style="font-weight:800;color:#1f4a87;font-size:16px">' + esc(titre) + '</div>' +
@@ -759,7 +759,7 @@ OD.define('pcom', {
         const ov = d.createElement('div');
         ov.style.cssText = 'position:fixed;inset:0;z-index:2800;display:flex;align-items:center;justify-content:center;padding:24px;background:rgba(31,74,133,.45)';
         const m = d.createElement('div');
-        m.style.cssText = 'background:#fff;border-radius:16px;width:100%;max-width:460px;box-shadow:0 30px 80px rgba(31,74,133,.35);padding:22px;font-family:inherit;color:#1c2b45';
+        m.style.cssText = 'background:#fff;border-radius:16px;width:100%;max-width:460px;box-shadow:0 30px 80px rgba(31,74,133,.35);padding:22px;font-family:inherit;color:#1f4a87';
         m.innerHTML =
           '<div style="font-weight:800;color:#1f4a87;font-size:15px">Passer en commande</div>' +
           '<div style="color:#7a98c5;font-size:13px;margin:3px 0 14px">' + esc(libelle || '') + '</div>' +
