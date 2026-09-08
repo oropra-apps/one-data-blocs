@@ -89,6 +89,12 @@ OD.define('pcom', {
       } catch (e) { return null; }
     }
     const peutAgir = (d) => !!d.peut_agir;
+    const LIB_STATUT = { draft: 'Simulation', propale: 'Proposition', bdc: 'Commande',
+                         win: 'Vendu', lose: 'Abandonné' };
+    function libStatut(d) {
+      if (d.archived && d.status !== 'lose') return 'Archivé';
+      return LIB_STATUT[d.status] || d.status || '—';
+    }
     const mort = (d) => !!d.archived || d.status === 'lose';
 
     const I_PDF = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="12" y1="18" x2="12" y2="12"/><polyline points="9 15 12 18 15 15"/></svg>';
@@ -196,7 +202,11 @@ OD.define('pcom', {
 '#pcom-root .v{border:0.5px solid #ece9e1;border-radius:9px;padding:7px;display:flex;flex-direction:column;gap:3px;min-width:0;background:#fff}' +
 '#pcom-root .v.pris{border:1.5px solid #53bda7;padding:6.5px}' +
 '#pcom-root .v.mort{opacity:.52}' +
+'#pcom-root .v .phw{position:relative;display:block}' +
 '#pcom-root .v .ph{width:100%;height:42px;border-radius:6px;background:#f4f2ed;object-fit:contain;display:block}' +
+'#pcom-root .v .stt{position:absolute;top:3px;left:3px;font-size:9.5px;font-weight:800;letter-spacing:.02em;padding:1px 6px;border-radius:5px;background:rgba(255,255,255,.92);color:#5a6b80;box-shadow:0 0 0 0.5px rgba(0,0,0,.06)}' +
+'#pcom-root .v .stt.bdc{color:#2a5ea9}#pcom-root .v .stt.win{color:#2c7a68}#pcom-root .v .stt.lose{color:#b23433}' +
+'#pcom-root .v .stt.propale{color:#8a6410}' +
 '#pcom-root .v .coul{font-size:11.5px;font-weight:700;color:#1f2b45;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}' +
 '#pcom-root .v .prix{font-size:13px;font-weight:800;color:#1c2b45;line-height:1.15}' +
 '#pcom-root .v .note{font-size:10.5px;font-weight:700;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}' +
@@ -273,9 +283,12 @@ OD.define('pcom', {
                    '" target="_blank" rel="noopener" title="Ouvrir dans BACS">' + I_BACS + '</a>';
       }
 
-      const img = d.photo
-        ? '<img class="ph" src="' + esc(d.photo) + '" alt="" onerror="this.style.visibility=\'hidden\'">'
-        : '<span class="ph"></span>';
+      const img = '<span class="phw">' +
+        (d.photo
+          ? '<img class="ph" src="' + esc(d.photo) + '" alt="" onerror="this.style.visibility=\'hidden\'">'
+          : '<span class="ph"></span>') +
+        '<span class="stt ' + esc(d.status || '') + '">' + esc(libStatut(d)) + '</span>' +
+      '</span>';
 
       return '<div class="v' + (pris ? ' pris' : '') + (estMort ? ' mort' : '') + '">' +
         img +
