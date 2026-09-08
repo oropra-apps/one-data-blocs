@@ -41,7 +41,7 @@ OD.define('pcom', {
     const PC_BACS_BASE           = 'https://toyota-france.my.site.com/bacs2/s';
     const PC_MOIS_RECENTS        = 12;
 
-    const S = { idClient: null, rows: null, loading: false, error: null, frise: false, morts: {} };
+    const S = { idClient: null, rows: null, loading: false, error: null, frise: false, morts: {}, ouv: {} };
 
     // ─── Utilitaires ───────────────────────────────────────────────────────
     const esc = (s) => (s == null ? '' : String(s))
@@ -102,6 +102,7 @@ OD.define('pcom', {
     const I_CART = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="20" r="1.4"/><circle cx="18" cy="20" r="1.4"/><path d="M2 3h2.2l2.4 11.4a2 2 0 0 0 2 1.6h7.9a2 2 0 0 0 2-1.55L21 8H6"/></svg>';
     const I_X = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>';
     const I_TRASH = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6M14 11v6"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>';
+    const I_CHEV = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>';
     const I_BACS = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>';
 
     // ─── Construction des affaires ─────────────────────────────────────────
@@ -180,31 +181,38 @@ OD.define('pcom', {
       return '<style>' +
 '#pcom-root{font-family:inherit;color:#1f2b45}' +
 '#pcom-root *{box-sizing:border-box}' +
-'#pcom-root .aff{position:relative;background:#fff;border:0.5px solid #ece9e1;border-left:3px solid #cfcdc5;border-radius:12px;padding:12px 14px;margin-bottom:9px}' +
-'#pcom-root .aff.vn{border-left-color:#53bda7}#pcom-root .aff.vo{border-left-color:#fac055}' +
-'#pcom-root .aff.close{background:#fcfbf9}' +
-'#pcom-root .hd{display:flex;align-items:center;gap:12px;margin-bottom:8px;padding-right:34px}' +
-'#pcom-root .hd .idt{flex:1;min-width:0}' +
-'#pcom-root .hd .veh{font-size:15px;font-weight:800;color:#1c2b45;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}' +
-'#pcom-root .hd .qui{font-size:12px;color:#888780;margin-top:1px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}' +
-'#pcom-root .hd .chf{flex:0 0 auto;text-align:right;display:flex;flex-direction:column;align-items:flex-end;gap:4px}' +
-'#pcom-root .hd .mnt{font-size:17px;font-weight:800;color:#1c2b45;white-space:nowrap;line-height:1.1}' +
-'#pcom-root .hd .frch{font-size:12.5px;color:#888780;white-space:nowrap}' +
-'#pcom-root .et{font-size:11px;font-weight:800;border-radius:6px;padding:2px 9px;white-space:nowrap}' +
+'#pcom-root .res{display:flex;gap:18px;flex-wrap:wrap;align-items:baseline;padding:0 2px 12px;font-size:12.5px;color:#888780}' +
+'#pcom-root .res b{font-size:15px;font-weight:800;color:#1c2b45}' +
+'#pcom-root .liste{border:0.5px solid #ece9e1;border-radius:12px;overflow:hidden;background:#fff}' +
+'#pcom-root .li{border-top:0.5px solid #f2f0ea}#pcom-root .li:first-child{border-top:none}' +
+'#pcom-root .ln{display:flex;align-items:center;gap:12px;padding:9px 12px;cursor:pointer;background:none;border:none;width:100%;text-align:left;font:inherit;border-left:3px solid transparent}' +
+'#pcom-root .ln:hover{background:#fbfaf7}' +
+'#pcom-root .li.vn .ln{border-left-color:#53bda7}#pcom-root .li.vo .ln{border-left-color:#fac055}' +
+'#pcom-root .li.close .ln{background:#fcfbf9}' +
+'#pcom-root .ln .ph{width:52px;height:36px;flex:0 0 auto;border-radius:6px;background:#f4f2ed;object-fit:contain;display:block}' +
+'#pcom-root .ln .id{flex:1 1 40%;min-width:0}' +
+'#pcom-root .ln .veh{font-size:13.5px;font-weight:800;color:#1c2b45;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}' +
+'#pcom-root .ln .qui{font-size:11.5px;color:#a8a69e;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin-top:1px}' +
+'#pcom-root .ln .ctx{flex:1 1 30%;min-width:0;font-size:11.5px;color:#888780;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}' +
+'#pcom-root .ln .ctx .froid{color:#8a6410;font-weight:700}' +
+'#pcom-root .ln .chf{flex:0 0 auto;text-align:right;min-width:96px}' +
+'#pcom-root .ln .mnt{font-size:14px;font-weight:800;color:#1c2b45;white-space:nowrap;line-height:1.15}' +
+'#pcom-root .ln .frch{font-size:11.5px;color:#a8a69e;white-space:nowrap}' +
+'#pcom-root .ln .chev{flex:0 0 auto;color:#c9c6bd;transition:transform .15s;display:inline-flex}' +
+'#pcom-root .li.ouv .ln .chev{transform:rotate(90deg)}' +
+'#pcom-root .et{font-size:10.5px;font-weight:800;border-radius:5px;padding:2px 7px;white-space:nowrap;display:inline-block}' +
 '#pcom-root .et.cours{background:#e7ebf0;color:#5a6b80}' +
 '#pcom-root .et.bdc{background:rgba(42,94,169,.14);color:#2a5ea9}' +
 '#pcom-root .et.win{background:rgba(83,189,167,.22);color:#2c7a68}' +
 '#pcom-root .et.lose{background:rgba(217,112,112,.16);color:#b23433}' +
-'#pcom-root .meta{display:flex;align-items:center;gap:7px;flex-wrap:wrap;font-size:11.5px;color:#888780;border-top:0.5px solid #f2f0ea;padding:7px 0 8px;margin-bottom:9px}' +
-'#pcom-root .meta .sep{color:#dbd8d0}' +
-'#pcom-root .meta .froid{color:#8a6410;font-weight:700}' +
+'#pcom-root .det{padding:2px 12px 12px 67px;background:#fbfaf7}' +
 '#pcom-root .vers{display:grid;grid-template-columns:repeat(auto-fill,minmax(118px,1fr));gap:7px}' +
 '#pcom-root .v{border:0.5px solid #ece9e1;border-radius:9px;padding:7px;display:flex;flex-direction:column;gap:3px;min-width:0;background:#fff}' +
 '#pcom-root .v.pris{border:1.5px solid #53bda7;padding:6.5px}' +
 '#pcom-root .v.mort{opacity:.52}' +
 '#pcom-root .v .phw{position:relative;display:block}' +
 '#pcom-root .v .ph{width:100%;height:42px;border-radius:6px;background:#f4f2ed;object-fit:contain;display:block}' +
-'#pcom-root .v .stt{position:absolute;top:3px;left:3px;font-size:9.5px;font-weight:800;letter-spacing:.02em;padding:1px 6px;border-radius:5px;background:rgba(255,255,255,.92);color:#5a6b80;box-shadow:0 0 0 0.5px rgba(0,0,0,.06)}' +
+'#pcom-root .v .stt{position:absolute;top:3px;left:3px;font-size:9.5px;font-weight:800;padding:1px 6px;border-radius:5px;background:rgba(255,255,255,.92);color:#5a6b80;box-shadow:0 0 0 0.5px rgba(0,0,0,.06)}' +
 '#pcom-root .v .stt.bdc{color:#2a5ea9}#pcom-root .v .stt.win{color:#2c7a68}#pcom-root .v .stt.lose{color:#b23433}' +
 '#pcom-root .v .stt.propale{color:#8a6410}' +
 '#pcom-root .v .coul{font-size:11.5px;font-weight:700;color:#1f2b45;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}' +
@@ -222,18 +230,18 @@ OD.define('pcom', {
 '#pcom-root .b.cmd:hover{background:#53bda7;border-color:#53bda7;color:#fff}' +
 '#pcom-root .b.del{color:#d97070;border-color:#f0d6d6}' +
 '#pcom-root .b.del:hover{background:#e24b4a;border-color:#e24b4a;color:#fff}' +
-'#pcom-root .jeter{position:absolute;top:11px;right:12px;width:28px;height:28px}' +
+'#pcom-root .outils{display:flex;align-items:center;gap:10px;margin-bottom:8px;font-size:11.5px;color:#888780}' +
 '#pcom-root .plier{background:none;border:none;font:inherit;font-size:11.5px;font-weight:700;color:#b23433;cursor:pointer;padding:0;text-decoration:underline}' +
 '#pcom-root .plier:hover{color:#8a2a2a}' +
-'#pcom-root .frise{margin-top:6px}' +
-'#pcom-root .fbtn{width:100%;border:0.5px dashed #ddd9cf;background:#fbfaf7;border-radius:10px;padding:11px;font:inherit;font-size:13px;font-weight:700;color:#888780;cursor:pointer}' +
+'#pcom-root .frise{margin-top:10px}' +
+'#pcom-root .fbtn{width:100%;border:0.5px dashed #ddd9cf;background:#fbfaf7;border-radius:10px;padding:10px;font:inherit;font-size:12.5px;font-weight:700;color:#888780;cursor:pointer}' +
 '#pcom-root .fbtn:hover{border-color:#b4b2a9;color:#5f5e5a}' +
-'#pcom-root .mois{font-size:11px;font-weight:800;letter-spacing:.06em;text-transform:uppercase;color:#b4b2a9;margin:16px 0 6px}' +
-'#pcom-root .fl{display:flex;align-items:center;gap:11px;padding:9px 13px;border-left:2px solid #ece9e1;margin-left:6px}' +
-'#pcom-root .fl .fveh{flex:1;min-width:0;font-size:13px;font-weight:700;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}' +
-'#pcom-root .fl .fdet{font-size:11.5px;color:#b4b2a9;white-space:nowrap}' +
-'#pcom-root .fl .fmnt{font-size:13px;font-weight:800;white-space:nowrap}' +
-'#pcom-root .vide{padding:34px;text-align:center;color:#b4b2a9;font-size:13px;border:0.5px dashed #ece9e1;border-radius:12px}' +
+'#pcom-root .mois{font-size:11px;font-weight:800;letter-spacing:.06em;text-transform:uppercase;color:#b4b2a9;margin:14px 0 5px}' +
+'#pcom-root .fl{display:flex;align-items:center;gap:11px;padding:7px 12px;border-left:2px solid #ece9e1;margin-left:6px}' +
+'#pcom-root .fl .fveh{flex:1;min-width:0;font-size:12.5px;font-weight:700;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}' +
+'#pcom-root .fl .fdet{font-size:11px;color:#b4b2a9;white-space:nowrap}' +
+'#pcom-root .fl .fmnt{font-size:12.5px;font-weight:800;white-space:nowrap}' +
+'#pcom-root .vide{padding:30px;text-align:center;color:#b4b2a9;font-size:13px;border:0.5px dashed #ece9e1;border-radius:12px}' +
 '#pcom-root .err{padding:12px 14px;border-radius:10px;background:rgba(217,112,112,.14);color:#b23433;font-size:13px}' +
 '</style>';
     }
@@ -299,55 +307,73 @@ OD.define('pcom', {
       '</div>';
     }
 
-    // ─── Une affaire ───────────────────────────────────────────────────────
+    // ─── Une affaire, en une ligne ─────────────────────────────────────────
+    // Une ligne par affaire, dépliable. La ligne suffit au balayage : véhicule,
+    // qui et où, ce qui reste à faire, combien, où on en est. Le comparateur de
+    // versions — l'apport de cet écran — ne s'ouvre que si on le demande.
     function affaireHtml(a) {
-      const meta = [];
-      meta.push(a.docs.length + (a.docs.length > 1 ? ' documents' : ' document'));
-      const nSim = a.docs.filter(function (d) { return d.nature === 'simulation'; }).length;
-      if (nSim > 1) meta.push(nSim + ' versions explorées');
-      if (a.min != null && a.max != null && a.max > a.min) meta.push('de ' + eur(a.min) + ' à ' + eur(a.max));
-      const froid = (a.etat.cle === 'cours') ? depuis(a.maj) : null;
+      const abandonnees = a.docs.filter(function (d) {
+        return mort(d) && !(a.retenu && d.id_propale_bdc === a.retenu.id_propale_bdc);
+      });
+      const deplie = !!S.morts[a.cle];
+      const visibles = deplie ? a.docs : a.docs.filter(function (d) { return abandonnees.indexOf(d) === -1; });
+      const ouvert = !!S.ouv[a.cle];
 
-      // La corbeille abandonne l'affaire entière. Elle disparaît dès qu'une
-      // commande vit : BACS refuserait, et le geste juste devient l'abandon de
-      // la commande elle-même.
       const jetable = !!a.affaire && a.vivants.length > 0 && !a.commandes.length
         && !a.vendus.length && a.vivants.every(peutAgir);
 
-      // Les versions abandonnées comptent pour la mémoire de la négociation,
-      // pas pour le suivi du jour : repliées, mais à un clic.
-      const abandonnees = a.docs.filter(function (d) { return mort(d) && !(a.retenu && d.id_propale_bdc === a.retenu.id_propale_bdc); });
-      const deplie = !!S.morts[a.cle];
-      const visibles = deplie ? a.docs : a.docs.filter(function (d) { return abandonnees.indexOf(d) === -1; });
+      // La vignette de la ligne : la version retenue, sinon la plus récente
+      // qui ait une photo.
+      const vedette = a.retenu || a.docs.filter(function (d) { return d.photo; }).pop() || a.docs[a.docs.length - 1];
+      const img = (vedette && vedette.photo)
+        ? '<img class="ph" src="' + esc(vedette.photo) + '" alt="" onerror="this.style.visibility=\'hidden\'">'
+        : '<span class="ph"></span>';
 
-      return '<div class="aff ' + (a.vn_vo === 'VN' ? 'vn' : (a.vn_vo === 'VO' ? 'vo' : '')) +
-             ((a.etat.cle === 'lose' || a.etat.cle === 'win') ? ' close' : '') + '">' +
-        (jetable ? '<button type="button" class="b del jeter" data-abaff="' + esc(a.affaire) +
-                   '" data-id="' + a.docs[0].id_propale_bdc + '" data-lib="' + esc(a.vehicule || '') +
-                   '" title="Abandonner l\'affaire">' + I_TRASH + '</button>' : '') +
-        '<div class="hd">' +
-          '<span class="idt">' +
+      // Le contexte : ce qui aide à décider, pas ce qui décrit.
+      const ctx = [];
+      const nSim = a.docs.filter(function (d) { return d.nature === 'simulation'; }).length;
+      if (a.docs.length > 1) ctx.push(a.docs.length + ' documents');
+      if (nSim > 1) ctx.push(nSim + ' versions');
+      if (a.min != null && a.max != null && a.max > a.min) ctx.push(eur(a.min) + ' – ' + eur(a.max));
+      const froid = (a.etat.cle === 'cours') ? depuis(a.maj) : null;
+
+      return '<div class="li ' + (a.vn_vo === 'VN' ? 'vn' : (a.vn_vo === 'VO' ? 'vo' : '')) +
+             ((a.etat.cle === 'lose' || a.etat.cle === 'win') ? ' close' : '') + (ouvert ? ' ouv' : '') + '">' +
+        '<button type="button" class="ln" data-ouv="' + esc(a.cle) + '">' +
+          img +
+          '<span class="id">' +
             '<span class="veh">' + esc(a.vehicule || 'Affaire sans véhicule') + '</span>' +
-            '<span class="qui">' + [a.vendeur, a.site, 'ouverte le ' + jour(a.ouverte)]
-              .filter(Boolean).map(esc).join(' · ') + '</span>' +
+            '<span class="qui">' + [a.vendeur, a.site, jour(a.ouverte)].filter(Boolean).map(esc).join(' · ') + '</span>' +
+          '</span>' +
+          '<span class="ctx">' + ctx.map(esc).join(' · ') +
+            (froid ? (ctx.length ? ' · ' : '') + '<span class="froid">' + esc(froid) + '</span>' : '') +
           '</span>' +
           '<span class="chf">' +
             (a.montant != null
               ? '<span class="mnt">' + eur(a.montant) + '</span>'
-              : (a.min != null ? '<span class="frch">à partir de ' + eur(a.min) + '</span>' : '')) +
-            '<span class="et ' + a.etat.cle + '">' + esc(a.etat.txt) + '</span>' +
+              : (a.min != null ? '<span class="frch">dès ' + eur(a.min) + '</span>' : '')) +
+            '<br><span class="et ' + a.etat.cle + '">' + esc(a.etat.txt) + '</span>' +
           '</span>' +
-        '</div>' +
-        '<div class="meta">' +
-          meta.map(function (m) { return '<span>' + esc(m) + '</span>'; }).join('<span class="sep">·</span>') +
-          (froid ? '<span class="sep">·</span><span class="froid">' + esc(froid) + '</span>' : '') +
-          (abandonnees.length
-            ? '<span class="sep">·</span><button type="button" class="plier" data-morts="' + esc(a.cle) + '">' +
-              (deplie ? 'masquer les abandons' : abandonnees.length + ' abandonnée' + (abandonnees.length > 1 ? 's' : '')) +
-              '</button>'
-            : '') +
-        '</div>' +
-        '<div class="vers">' + visibles.map(function (d) { return versionHtml(d, a); }).join('') + '</div>' +
+          '<span class="chev">' + I_CHEV + '</span>' +
+        '</button>' +
+        (ouvert
+          ? '<div class="det">' +
+              '<div class="outils">' +
+                (abandonnees.length
+                  ? '<button type="button" class="plier" data-morts="' + esc(a.cle) + '">' +
+                    (deplie ? 'masquer les abandons' : abandonnees.length + ' abandonnée' + (abandonnees.length > 1 ? 's' : '')) +
+                    '</button>'
+                  : '') +
+                '<span style="flex:1"></span>' +
+                (jetable
+                  ? '<button type="button" class="b del" data-abaff="' + esc(a.affaire) +
+                    '" data-id="' + a.docs[0].id_propale_bdc + '" data-lib="' + esc(a.vehicule || '') +
+                    '" title="Abandonner l\'affaire">' + I_TRASH + '</button>'
+                  : '') +
+              '</div>' +
+              '<div class="vers">' + visibles.map(function (d) { return versionHtml(d, a); }).join('') + '</div>' +
+            '</div>'
+          : '') +
       '</div>';
     }
 
@@ -389,7 +415,30 @@ OD.define('pcom', {
       }
       const recentes = affaires.filter(recente);
       const anciennes = affaires.filter(function (a) { return !recente(a); });
-      root.innerHTML = css() + recentes.map(affaireHtml).join('') + friseHtml(anciennes);
+
+      // Bandeau de synthèse : ce qu'un vendeur veut savoir avant de lire le
+      // détail — combien d'affaires vivantes, combien elles engagent, et la
+      // plus figée d'entre elles.
+      const enCours = affaires.filter(function (a) { return a.etat.cle === 'cours'; });
+      const engage = affaires.reduce(function (t, a) {
+        return t + ((a.etat.cle === 'bdc' || a.etat.cle === 'win') ? (a.montant || 0) : 0);
+      }, 0);
+      const dormante = enCours.reduce(function (p, a) {
+        return (!p || String(a.maj || '') < String(p.maj || '')) ? a : p;
+      }, null);
+      const res = '<div class="res">' +
+        '<span><b>' + affaires.length + '</b> affaire' + (affaires.length > 1 ? 's' : '') + '</span>' +
+        (enCours.length ? '<span><b>' + enCours.length + '</b> en cours</span>' : '') +
+        (engage ? '<span><b>' + eur(engage) + '</b> engagés</span>' : '') +
+        (dormante && depuis(dormante.maj)
+          ? '<span>plus ancienne sans mouvement : <b>' + esc(dormante.vehicule || '—') + '</b>, ' +
+            esc(depuis(dormante.maj)) + '</span>'
+          : '') +
+      '</div>';
+
+      root.innerHTML = css() + res +
+        '<div class="liste">' + recentes.map(affaireHtml).join('') + '</div>' +
+        friseHtml(anciennes);
     }
 
     // ─── Chargement ────────────────────────────────────────────────────────
@@ -715,6 +764,8 @@ OD.define('pcom', {
       if (!e.target.closest('#pcom-root')) return;
       const f = e.target.closest('[data-frise]');
       if (f) { S.frise = !S.frise; PC_render(); return; }
+      const ou = e.target.closest('[data-ouv]');
+      if (ou) { const k = ou.getAttribute('data-ouv'); S.ouv[k] = !S.ouv[k]; PC_render(); return; }
       const mo = e.target.closest('[data-morts]');
       if (mo) { const k = mo.getAttribute('data-morts'); S.morts[k] = !S.morts[k]; PC_render(); return; }
       const c = e.target.closest('[data-cmd]');
