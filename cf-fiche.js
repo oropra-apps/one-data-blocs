@@ -30,9 +30,24 @@ const userConnected = ((wwLib.getFrontWindow && wwLib.getFrontWindow()) || windo
 const viewerId = userConnected.ID_User;
 
 function readVar(id) { try { return wwLib.wwVariable.getValue(id); } catch (e) { return null; } }
-const lookup = Array.isArray(readVar(LOOKUP_VAR_ID)) ? readVar(LOOKUP_VAR_ID) : [];
-const civilitesP = lookup.filter(x => x.multivu === 0);
-const typesS = lookup.filter(x => x.multivu === 1);
+// La liste des civilités et des types de société vit désormais dans la base
+// (ref_type_client) : la variable WeWeb qui la portait a été supprimée, et le
+// module se retrouvait avec des listes déroulantes vides — création de client
+// impossible, la civilité étant obligatoire. Chargement au montage ; ces listes
+// ne servent qu'à l'ouverture d'un formulaire, bien après.
+let civilitesP = [], typesS = [];
+const chargementTypes = (async () => {
+  try {
+    const { data, error } = await ctx.supabase
+      .from('ref_type_client')
+      .select('code,libelle,libelle_court,multivu,ordre')
+      .eq('actif', true)
+      .order('multivu').order('ordre');
+    if (error) { console.warn('[types] lecture impossible :', error.message); return; }
+    civilitesP = (data || []).filter(x => x.multivu === 0);
+    typesS     = (data || []).filter(x => x.multivu === 1);
+  } catch (e) { console.warn('[types] lecture impossible :', e && e.message); }
+})();
 const npaiOptionsRaw = readVar(NPAI_VAR_ID);
 const npaiOptions = Array.isArray(npaiOptionsRaw) && npaiOptionsRaw.length ? npaiOptionsRaw : ['Aucun', 'NPAI', 'Décédé'];
 
