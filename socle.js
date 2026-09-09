@@ -414,8 +414,8 @@ const HOST_MAP = {
                 '<div style="font-weight:800;font-size:16px">Mauvais point de vente</div>' +
                 '<div style="color:#7a98c5;font-size:13px;margin:8px 0 16px;line-height:1.5">' + esc(msg) + '</div>' +
                 '<div style="display:flex;gap:9px">' +
-                '<button type="button" data-ok style="flex:1;height:44px;border:none;border-radius:10px;background:#2a5ea9;color:#fff;font:inherit;font-weight:700;cursor:pointer">Basculer sur ' + esc(nomSite) + '</button>' +
-                '<button type="button" data-no style="flex:0 0 120px;height:44px;border:1.5px solid #e3edf9;border-radius:10px;background:#fff;color:#2a5ea9;font:inherit;font-weight:700;cursor:pointer">Annuler</button></div>',
+                '<button type="button" data-ok style="flex:1;height:44px;border:none;border-radius:10px;background:#2a5ea9;color:#fff;font:inherit;font-weight:700;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;text-align:center;line-height:1.2;">Basculer sur ' + esc(nomSite) + '</button>' +
+                '<button type="button" data-no style="flex:0 0 120px;height:44px;border:1.5px solid #e3edf9;border-radius:10px;background:#fff;color:#2a5ea9;font:inherit;font-weight:700;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;text-align:center;line-height:1.2;">Annuler</button></div>',
                 (m, fin) => {
                     m.querySelector('[data-ok]').addEventListener('click', () => fin(true));
                     m.querySelector('[data-no]').addEventListener('click', () => fin(false));
@@ -439,12 +439,12 @@ const HOST_MAP = {
                 '<div style="font-weight:800;font-size:16px">' + esc(titre) + '</div>' +
                 '<div style="color:#7a98c5;font-size:13px;margin:3px 0 16px">' + esc(sousTitre || '') + '</div>' +
                 '<label style="font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:#7a98c5;font-weight:700">Motif</label>' +
-                '<select data-motif style="width:100%;margin:6px 0 14px;padding:10px 12px;border:1.5px solid #e3edf9;border-radius:10px;font:inherit;color:#1f4a87;background:#fff;font-weight:600">' + opts + '</select>' +
-                '<input data-comm placeholder="Commentaire (facultatif)" style="width:100%;margin:0 0 4px;padding:10px 12px;border:1.5px solid #e3edf9;border-radius:10px;font:inherit;color:#1f4a87">' +
+                '<select data-motif style="width:100%;margin:6px 0 14px;padding:10px 12px;border:1.5px solid #e3edf9;border-radius:10px;font:inherit;color:#1f4a87;background:#fff;font-weight:600;text-align:left">' + opts + '</select>' +
+                '<input data-comm placeholder="Commentaire (facultatif)" style="width:100%;margin:0 0 4px;padding:10px 12px;border:1.5px solid #e3edf9;border-radius:10px;font:inherit;color:#1f4a87;text-align:left">' +
                 '<div style="font-size:11.5px;color:#9fb0c4;margin:12px 0 16px;line-height:1.5">' + note + '</div>' +
                 '<div style="display:flex;gap:9px">' +
-                '<button type="button" data-ok style="flex:1;height:44px;border:none;border-radius:10px;background:#e24b4a;color:#fff;font:inherit;font-weight:700;cursor:pointer">Abandonner</button>' +
-                '<button type="button" data-no style="flex:1;height:44px;border:1.5px solid #e3edf9;border-radius:10px;background:#fff;color:#2a5ea9;font:inherit;font-weight:700;cursor:pointer">Annuler</button></div>',
+                '<button type="button" data-ok style="flex:1;height:44px;border:none;border-radius:10px;background:#e24b4a;color:#fff;font:inherit;font-weight:700;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;text-align:center;line-height:1.2;">Abandonner</button>' +
+                '<button type="button" data-no style="flex:1;height:44px;border:1.5px solid #e3edf9;border-radius:10px;background:#fff;color:#2a5ea9;font:inherit;font-weight:700;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;text-align:center;line-height:1.2;">Annuler</button></div>',
                 (m, fin) => {
                     m.querySelector('[data-no]').addEventListener('click', () => fin(null));
                     m.querySelector('[data-ok]').addEventListener('click', () => {
@@ -551,8 +551,8 @@ const HOST_MAP = {
                 '<div style="font-size:12.5px;color:#5a7ba8;line-height:1.55;margin-bottom:16px">' +
                 'La commande sera <b>créée dans BACS</b> chez le constructeur. Elle ne pourra pas être annulée depuis One Data — seulement abandonnée.</div>' +
                 '<div style="display:flex;gap:9px">' +
-                '<button type="button" data-ok style="flex:1;height:44px;border:none;border-radius:10px;background:#53bda7;color:#fff;font:inherit;font-weight:700;cursor:pointer">Créer la commande</button>' +
-                '<button type="button" data-no style="flex:1;height:44px;border:1.5px solid #e3edf9;border-radius:10px;background:#fff;color:#2a5ea9;font:inherit;font-weight:700;cursor:pointer">Annuler</button></div>',
+                '<button type="button" data-ok style="flex:1;height:44px;border:none;border-radius:10px;background:#53bda7;color:#fff;font:inherit;font-weight:700;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;text-align:center;line-height:1.2;">Créer la commande</button>' +
+                '<button type="button" data-no style="flex:1;height:44px;border:1.5px solid #e3edf9;border-radius:10px;background:#fff;color:#2a5ea9;font:inherit;font-weight:700;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;text-align:center;line-height:1.2;">Annuler</button></div>',
                 (m, fin) => {
                     m.querySelector('[data-ok]').addEventListener('click', () => fin(true));
                     m.querySelector('[data-no]').addEventListener('click', () => fin(false));
