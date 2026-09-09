@@ -2668,6 +2668,9 @@ OD.define('kanban', {
     '#kanban-root .kc-veh-link{background:none;border:none;padding:0;font:inherit;font-size:12px;color:#888780;cursor:pointer;text-align:left}' +
     '#kanban-root .kc-veh-link:hover{color:#fac055;text-decoration:underline}' +
     '#kanban-root .kc-ctype{font-size:10px;font-weight:700;color:#888780;background:#f7f6f2;border-radius:5px;padding:1px 6px}' +
+    '#kanban-root .kc-photo{position:relative;margin:8px 0 2px;border-radius:9px;overflow:hidden;background:#eef4fb;line-height:0}' +
+    '#kanban-root .kc-photo img{width:100%;height:92px;object-fit:contain;display:block}' +
+    '#kanban-root .kc-photo-c{position:absolute;left:6px;bottom:6px;font-size:10.5px;font-weight:800;color:#1f4a87;background:rgba(255,255,255,.92);border-radius:5px;padding:2px 7px;line-height:1.4;max-width:calc(100% - 12px);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}' +
     '#kanban-root .kc-veh{font-size:12px;color:#888780;margin:3px 0 8px;display:flex;align-items:center;gap:6px}' +
     '#kanban-root .kc-vdot{width:7px;height:7px;border-radius:50%;background:#cfcdc5;flex-shrink:0}' +
     '#kanban-root .vt-vn .kc-vdot{background:#53bda7}#kanban-root .vt-vo .kc-vdot{background:#fac055}' +
