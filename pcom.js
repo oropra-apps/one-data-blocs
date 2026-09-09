@@ -536,263 +536,43 @@ OD.define('pcom', {
     }
 
     // ─── Gestes BACS ───────────────────────────────────────────────────────
-    // ⚠ CE BLOC EST LE JUMEAU DE CELUI DU KANBAN (kanban.js). Tout correctif
-    // portant sur l'abandon, la conversion ou le contrôle de point de vente
-    // doit être appliqué AUX DEUX. Ils écrivent chez le constructeur, et un
-    // défaut corrigé d'un seul côté ne se voit pas — c'est exactement ainsi que
-    // l'envoi multi-frames a créé deux commandes réelles le 08/09.
-
+    // Ils vivent dans le socle (OD.bacs) : une seule implémentation pour le
+    // kanban et pour cette page. Ce sont des écritures irréversibles chez le
+    // constructeur ; les avoir en double, c'était accepter qu'un correctif
+    // n'aille qu'à un endroit.
     function toast(msg, err) {
-      const d = doc;
-      const t = d.createElement('div');
+      const t = doc.createElement('div');
       t.style.cssText = 'position:fixed;left:50%;bottom:26px;transform:translateX(-50%);z-index:3000;' +
         'padding:12px 18px;border-radius:11px;font:inherit;font-size:13px;font-weight:600;color:#fff;' +
         'box-shadow:0 10px 30px rgba(31,74,133,.28);max-width:min(560px,92vw);' +
         'background:' + (err ? '#8d4a55' : '#2a5ea9');
       t.textContent = msg;
-      d.body.appendChild(t);
+      doc.body.appendChild(t);
       setTimeout(function () { try { t.remove(); } catch (e) {} }, err ? 7000 : 3500);
     }
 
-    // Le kanban ne peut pas parler à BACS : il n'en a ni la session ni le
-    // contexte. Tout passe par le pont posé par l'extension sur la page.
-    function bacsDemander(action, params, delaiMs) {
-      return new Promise(function (resolve) {
-        const id = 'od_' + Date.now() + '_' + Math.random().toString(16).slice(2);
-        const w = (wwLib.getFrontWindow && wwLib.getFrontWindow()) || window;
-        const fin = function (r) { try { w.removeEventListener('message', ecoute); } catch (e) {} clearTimeout(t); resolve(r); };
-        const ecoute = function (e) {
-          const m = e.data;
-          if (!m || !m.__od_bacs_result || m.id !== id) return;
-          fin(m);
-        };
-        w.addEventListener('message', ecoute);
-        const t = setTimeout(function () { fin({ ok: false, erreur: 'delai_depasse' }); }, delaiMs || 25000);
-        try { w.postMessage({ __od_bacs: true, id: id, action: action, params: params || {} }, '*'); }
-        catch (e) { fin({ ok: false, erreur: 'extension_absente' }); }
-      });
+    function gestes() {
+      const g = window.OD && window.OD.bacs;
+      if (!g) { toast("Les gestes BACS ne sont pas disponibles : rechargez la page.", true); return null; }
+      return g;
     }
 
-    function bacsMessage(err) {
-      // Message métier renvoyé par BACS : on l'affiche tel quel, il est écrit
-      // pour le vendeur. Reconnaissable à sa longueur et à l'absence de code.
-      if (typeof err === 'string' && err.length > 40 && !/^[\[{]/.test(err)) return err;
-      if (err === 'bacs_non_ouvert') return "Ouvrez BACS dans un onglet et connectez-vous, puis réessayez.";
-      if (err === 'bacs_non_pret') return "L'onglet BACS ne répond pas. Ouvrez-le, laissez la page se charger, puis réessayez.";
-      if (err === 'extension_absente' || err === 'extension_indisponible') return "Le pont BACS n'est pas actif sur ce poste.";
-      if (err === 'delai_depasse') return "BACS n'a pas répondu à temps. Rien n'a été modifié.";
-      return "BACS a refusé : " + err;
-    }
-
-    function refusDeSite(err) { return typeof err === 'string' && /point de vente/i.test(err); }
-
-    async function siteBacsDeLAffaire(affaire) {
-      if (!affaire) return null;
-      try {
-        const r = await ctx.supabase.rpc('bacs_site_affaire', { p_affaire: affaire });
-        if (r.error) { console.warn('[pcom] site de l affaire illisible', r.error); return null; }
-        const row = (r.data || [])[0];
-        return (row && row.id_bacs) ? { id_bacs: row.id_bacs, nom: row.nom || row.id_bacs } : null;
-      } catch (e) { console.warn('[pcom] site de l affaire illisible', e); return null; }
-    }
-
-    function modaleBascule(nomSite, message) {
-      return new Promise(function (resolve) {
-        const d = doc;
-        const ov = d.createElement('div');
-        ov.style.cssText = 'position:fixed;inset:0;z-index:2700;display:flex;align-items:center;justify-content:center;padding:24px;background:rgba(31,74,133,.45)';
-        const m = d.createElement('div');
-        m.style.cssText = 'background:#fff;border-radius:16px;width:100%;max-width:480px;box-shadow:0 30px 80px rgba(31,74,133,.35);padding:22px;font-family:inherit;color:#1f4a87';
-        m.innerHTML = '<div style="font-weight:800;color:#1f4a87;font-size:16px">Mauvais point de vente</div>' +
-          '<div style="color:#7a98c5;font-size:13px;margin:8px 0 16px;line-height:1.5">' + esc(message) + '</div>' +
-          '<div style="display:flex;gap:9px">' +
-          '<button type="button" data-bs-ok style="flex:1;height:44px;border:none;border-radius:10px;background:#2a5ea9;color:#fff;font:inherit;font-weight:700;cursor:pointer">Basculer sur ' + esc(nomSite) + '</button>' +
-          '<button type="button" data-bs-no style="flex:0 0 120px;height:44px;border:1.5px solid #e3edf9;border-radius:10px;background:#fff;color:#2a5ea9;font:inherit;font-weight:700;cursor:pointer">Annuler</button>' +
-          '</div>';
-        ov.appendChild(m); d.body.appendChild(ov);
-        const fin = function (v) { try { ov.remove(); } catch (e) {} resolve(v); };
-        m.querySelector('[data-bs-ok]').addEventListener('click', function () { fin(true); });
-        m.querySelector('[data-bs-no]').addEventListener('click', function () { fin(false); });
-        ov.addEventListener('mousedown', function (e) { if (e.target === ov) fin(false); });
-      });
-    }
-
-    async function chargerMotifs(recordId) {
-      if (recordId) {
-        const r = await bacsDemander('motifs', { recordId: recordId }, 12000);
-        if (r && r.ok && Array.isArray(r.motifs) && r.motifs.length) return r.motifs;
-      }
-      try {
-        const q = await ctx.supabase.from('bacs_motif_abandon')
-          .select('valeur,libelle').eq('actif', true).order('ordre');
-        return (q.data || []).map(function (m) { return { valeur: m.valeur, libelle: m.libelle }; });
-      } catch (e) { return []; }
-    }
-
-    // Le point de vente est vérifié AVANT de faire choisir un motif : BACS
-    // n'abandonne une affaire que depuis une session ouverte sur son site.
-    async function verifierPointDeVente(affaire) {
-      const cible = await siteBacsDeLAffaire(affaire);
-      if (!cible) return true;
-      const etat = await bacsDemander('site_courant', {}, 12000);
-      const actuel = etat && etat.ok && etat.site;
-      if (!actuel || !actuel.Id || String(actuel.Id) === String(cible.id_bacs)) return true;
-      const autorise = !Array.isArray(etat.sites) || !etat.sites.length ||
-        etat.sites.some(function (x) { return String(x.Id) === String(cible.id_bacs); });
-      if (!autorise) {
-        toast('Cette affaire dépend de ' + cible.nom + ', sur lequel vous n\'avez pas accès dans BACS.', true);
-        return false;
-      }
-      const msg = 'Cette affaire dépend de ' + cible.nom + '. Votre session BACS est ouverte sur ' +
-                  (actuel.BusinessName || 'un autre point de vente') +
-                  '. BACS refusera l\'abandon tant que vous n\'aurez pas basculé.';
-      if (!await modaleBascule(cible.nom, msg)) return false;
-      const b = await bacsDemander('site_bascule', { siteId: cible.id_bacs }, 15000);
-      if (!b || !b.ok) { toast(bacsMessage((b && (b.erreur || b.refus)) || 'refus'), true); return false; }
-      toast('Point de vente BACS basculé sur ' + cible.nom);
-      return true;
-    }
-
-    // Modale de motif, commune à l'abandon d'une affaire et d'un document.
-    function modaleMotif(titre, sousTitre, note, motifs) {
-      return new Promise(function (resolve) {
-        const d = doc;
-        const ov = d.createElement('div');
-        ov.style.cssText = 'position:fixed;inset:0;z-index:2700;display:flex;align-items:flex-start;justify-content:center;padding:24px;background:rgba(31,74,133,.45);overflow-y:auto';
-        const m = d.createElement('div');
-        m.style.cssText = 'background:#fff;border-radius:16px;width:100%;max-width:500px;box-shadow:0 30px 80px rgba(31,74,133,.35);margin:auto;padding:22px;font-family:inherit;color:#1f4a87';
-        const opts = motifs.map(function (x) { return '<option value="' + esc(x.valeur) + '">' + esc(x.libelle) + '</option>'; }).join('');
-        m.innerHTML =
-          '<div style="font-weight:800;color:#1f4a87;font-size:16px">' + esc(titre) + '</div>' +
-          '<div style="color:#7a98c5;font-size:13px;margin:3px 0 16px">' + esc(sousTitre || '') + '</div>' +
-          '<label style="font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:#7a98c5;font-weight:700">Motif</label>' +
-          '<select data-ab-motif style="width:100%;margin:6px 0 14px;padding:10px 12px;border:1.5px solid #e3edf9;border-radius:10px;font:inherit;color:#1f4a87;background:#fff;font-weight:600">' + opts + '</select>' +
-          '<input data-ab-comm placeholder="Commentaire (facultatif)" style="width:100%;margin:0 0 4px;padding:10px 12px;border:1.5px solid #e3edf9;border-radius:10px;font:inherit;color:#1f4a87">' +
-          '<div style="font-size:11.5px;color:#9fb0c4;margin:12px 0 16px;line-height:1.5">' + note + '</div>' +
-          '<div style="display:flex;gap:9px">' +
-          '<button type="button" data-ab-ok style="flex:1;height:44px;border:none;border-radius:10px;background:#e24b4a;color:#fff;font:inherit;font-weight:700;cursor:pointer">Abandonner</button>' +
-          '<button type="button" data-ab-no style="flex:1;height:44px;border:1.5px solid #e3edf9;border-radius:10px;background:#fff;color:#2a5ea9;font:inherit;font-weight:700;cursor:pointer">Annuler</button>' +
-          '</div>';
-        ov.appendChild(m); d.body.appendChild(ov);
-        const fin = function (v) { try { ov.remove(); } catch (e) {} resolve(v); };
-        m.querySelector('[data-ab-no]').addEventListener('click', function () { fin(null); });
-        ov.addEventListener('mousedown', function (e) { if (e.target === ov) fin(null); });
-        m.querySelector('[data-ab-ok]').addEventListener('click', function () {
-          const motif = m.querySelector('[data-ab-motif]').value;
-          if (!motif) return;
-          const btn = m.querySelector('[data-ab-ok]');
-          btn.disabled = true; btn.textContent = 'Abandon en cours…';
-          fin({ motif: motif, commentaire: (m.querySelector('[data-ab-comm]').value || '').trim() || null, fermer: fin });
-        });
-      });
-    }
-
-    // Abandon de l'AFFAIRE : emporte ses simulations. Rien n'est archivé dans
-    // One Data tant que BACS n'a pas confirmé.
     async function abandonnerAffaire(affaire, idPropale, libelle) {
-      const dispo = await bacsDemander('ping', {}, 8000);
-      if (!dispo || (!dispo.ok && dispo.erreur)) {
-        toast(bacsMessage(dispo && dispo.erreur ? dispo.erreur : 'bacs_non_ouvert'), true); return;
-      }
-      if (!await verifierPointDeVente(affaire)) return;
-      const motifs = await chargerMotifs(affaire);
-      const rep = await modaleMotif("Abandonner l'affaire", libelle,
-        "L&#39;affaire sera abandonnée dans BACS, puis archivée ici. Ce geste est <b>définitif côté constructeur</b>.",
-        motifs);
-      if (!rep) return;
-
-      let r = await bacsDemander('abandonner', { recordId: affaire, motif: rep.motif, commentaire: rep.commentaire });
-      if ((!r || !r.ok) && refusDeSite(r && r.refus)) {
-        const cible = await siteBacsDeLAffaire(affaire);
-        if (cible && await modaleBascule(cible.nom, r.refus)) {
-          const b = await bacsDemander('site_bascule', { siteId: cible.id_bacs }, 15000);
-          if (b && b.ok) r = await bacsDemander('abandonner', { recordId: affaire, motif: rep.motif, commentaire: rep.commentaire });
-          else toast(bacsMessage((b && (b.erreur || b.refus)) || 'refus'), true);
-        }
-      }
-      rep.fermer(null);
-      if (!r || !r.ok) { toast(bacsMessage((r && (r.erreur || r.refus)) || 'refus'), true); return; }
-      try {
-        await ctx.supabase.rpc('propale_abandonner', {
-          p_id_propale_bdc: Number(idPropale), p_motif: rep.motif,
-          p_commentaire: rep.commentaire, p_id_user: getViewerId()
-        });
-      } catch (e) { /* BACS fait foi : la synchronisation rattrapera */ }
-      toast('Affaire abandonnée dans BACS et archivée');
-      await PC_load();
+      const g = gestes(); if (!g) return;
+      const r = await g.abandonnerAffaire({ affaire: affaire, idPropale: idPropale, libelle: libelle, toast: toast });
+      if (r && r.ok) await PC_load();
     }
 
-    // Abandon d'UN document. L'affaire reste ouverte, même s'il s'agissait de
-    // sa dernière simulation.
     async function abandonnerDocument(idPropale, sfId, libelle) {
-      const estCommande = /^801/.test(String(sfId || ''));
-      const dispo = await bacsDemander('ping', {}, 8000);
-      if (!dispo || (!dispo.ok && dispo.erreur)) {
-        toast(bacsMessage(dispo && dispo.erreur ? dispo.erreur : 'bacs_non_ouvert'), true); return;
-      }
-      const motifs = await chargerMotifs(null);
-      const rep = await modaleMotif(
-        'Abandonner cette ' + (estCommande ? 'commande' : 'proposition'), libelle,
-        'Seule cette ' + (estCommande ? 'commande' : 'proposition') + " sera abandonnée dans BACS. L&#39;affaire reste ouverte.",
-        motifs);
-      if (!rep) return;
-      const r = estCommande
-        ? await bacsDemander('abandonner_commande', { orderId: sfId, motif: rep.motif, commentaire: rep.commentaire })
-        : await bacsDemander('abandonner_devis',    { quoteId: sfId, motif: rep.motif, commentaire: rep.commentaire });
-      rep.fermer(null);
-      if (!r || !r.ok) { toast(bacsMessage((r && (r.erreur || r.refus)) || 'refus'), true); return; }
-      try {
-        await ctx.supabase.rpc('propale_abandonner', {
-          p_id_propale_bdc: Number(idPropale), p_motif: rep.motif, p_commentaire: rep.commentaire,
-          p_id_user: getViewerId(), p_affaire_entiere: false
-        });
-      } catch (e) { /* BACS fait foi */ }
-      toast((estCommande ? 'Commande abandonnée' : 'Proposition abandonnée') + ' dans BACS');
-      await PC_load();
-    }
-
-    // Conversion : confirmation explicite, la commande est créée chez le
-    // constructeur et ne pourra qu'être abandonnée, jamais annulée.
-    function confirmerCommande(libelle) {
-      return new Promise(function (resolve) {
-        const d = doc;
-        const ov = d.createElement('div');
-        ov.style.cssText = 'position:fixed;inset:0;z-index:2800;display:flex;align-items:center;justify-content:center;padding:24px;background:rgba(31,74,133,.45)';
-        const m = d.createElement('div');
-        m.style.cssText = 'background:#fff;border-radius:16px;width:100%;max-width:460px;box-shadow:0 30px 80px rgba(31,74,133,.35);padding:22px;font-family:inherit;color:#1f4a87';
-        m.innerHTML =
-          '<div style="font-weight:800;color:#1f4a87;font-size:15px">Passer en commande</div>' +
-          '<div style="color:#7a98c5;font-size:13px;margin:3px 0 14px">' + esc(libelle || '') + '</div>' +
-          '<div style="font-size:12.5px;color:#5a7ba8;line-height:1.55;margin-bottom:16px">' +
-          'La commande sera <b>créée dans BACS</b> chez le constructeur. Elle ne pourra pas être annulée depuis One Data — seulement abandonnée.</div>' +
-          '<div style="display:flex;gap:9px">' +
-          '<button type="button" data-cf-ok style="flex:1;height:44px;border:none;border-radius:10px;background:#53bda7;color:#fff;font:inherit;font-weight:700;cursor:pointer">Créer la commande</button>' +
-          '<button type="button" data-cf-no style="flex:1;height:44px;border:1.5px solid #e3edf9;border-radius:10px;background:#fff;color:#2a5ea9;font:inherit;font-weight:700;cursor:pointer">Annuler</button>' +
-          '</div>';
-        ov.appendChild(m); d.body.appendChild(ov);
-        const fin = function (v) { try { ov.remove(); } catch (e) {} resolve(v); };
-        m.querySelector('[data-cf-ok]').addEventListener('click', function () { fin(true); });
-        m.querySelector('[data-cf-no]').addEventListener('click', function () { fin(false); });
-        ov.addEventListener('mousedown', function (e) { if (e.target === ov) fin(false); });
-      });
+      const g = gestes(); if (!g) return;
+      const r = await g.abandonnerDocument({ idPropale: idPropale, sfId: sfId, libelle: libelle, toast: toast });
+      if (r && r.ok) await PC_load();
     }
 
     async function convertirEnCommande(idPropale, sfId, libelle) {
-      if (!(await confirmerCommande(libelle))) return;
-      const dispo = await bacsDemander('ping', {}, 8000);
-      if (!dispo || (!dispo.ok && dispo.erreur)) {
-        toast(bacsMessage(dispo && dispo.erreur ? dispo.erreur : 'bacs_non_ouvert'), true); return;
-      }
-      toast('Conversion en commande dans BACS…');
-      const r = await bacsDemander('convertir', { quoteId: sfId }, 30000);
-      if (!r || !r.ok) { toast(bacsMessage((r && (r.erreur || r.refus)) || 'refus'), true); return; }
-      try {
-        await ctx.supabase.rpc('propale_convertie', {
-          p_id_propale_bdc: Number(idPropale), p_order_sf_id: r.orderId || null, p_id_user: getViewerId()
-        });
-      } catch (e) { /* la commande remontera par la synchronisation */ }
-      toast('Commande créée dans BACS');
-      await PC_load();
+      const g = gestes(); if (!g) return;
+      const r = await g.convertir({ idPropale: idPropale, sfId: sfId, libelle: libelle, toast: toast });
+      if (r && r.ok) await PC_load();
     }
 
     // ─── Routeur ───────────────────────────────────────────────────────────
