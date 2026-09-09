@@ -46,6 +46,11 @@ const chargementTypes = (async () => {
     if (error) { console.warn('[types] lecture impossible :', error.message); return; }
     civilitesP = (data || []).filter(x => x.multivu === 0);
     typesS     = (data || []).filter(x => x.multivu === 1);
+    // L'onglet Fiche client est celui affiché par défaut : son formulaire est
+    // déjà dessiné quand la réponse arrive, avec des listes vides. On le
+    // redessine, sans quoi le type d'une société reste sur « Sélectionner »
+    // alors que la fiche en porte un.
+    try { if (typeof render === 'function') render(); } catch (e) {}
   } catch (e) { console.warn('[types] lecture impossible :', e && e.message); }
 })();
 const npaiOptionsRaw = readVar(NPAI_VAR_ID);
