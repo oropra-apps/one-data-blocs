@@ -76,6 +76,9 @@ OD.define('client-search', {
       if (error) { console.warn('[types] lecture impossible :', error.message); return; }
       civilitesP = (data || []).filter(x => x.multivu === 0);
       typesS     = (data || []).filter(x => x.multivu === 1);
+      // Le formulaire peut déjà être dessiné avec des listes vides : on le
+      // redessine à l'arrivée de la réponse.
+      try { if (typeof render === 'function') render(); } catch (e) {}
     } catch (e) { console.warn('[types] lecture impossible :', e && e.message); }
   })();
   const npaiOptionsRaw = readVar(NPAI_VAR_ID);
