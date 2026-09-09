@@ -650,6 +650,7 @@ OD.define('topnav', {
 '.od-arb-x{width:32px;height:32px;border-radius:8px;border:none;background:none;color:#7a98c5;font-size:20px;cursor:pointer;flex:0 0 auto}.od-arb-x:hover{background:#f7f9fc;color:#1F4A85}' +
 '.od-arb-load{padding:50px 24px;text-align:center;color:#7a98c5;font-size:13.5px}' +
 '.od-arb-erru{margin:12px 22px 0;padding:10px 14px;background:#fcebeb;border:1px solid #f3d4d4;color:#e24b4a;border-radius:10px;font-size:12.5px;font-weight:600}' +
+'.od-arb-info{margin:12px 22px 0;padding:10px 14px;background:#eef4fb;border:1px solid #e3edf9;color:#2a5ea9;border-radius:10px;font-size:12.5px;font-weight:600}' +
 '.od-arb-ruban{display:flex;align-items:center;gap:12px;padding:11px 22px;background:#f7f9fc;border-bottom:1px solid #e8eef7;font-size:12px;color:#7a98c5;font-weight:600}' +
 '.od-arb-ruban .reste{color:#1F4A85;font-weight:800;font-size:14px}' +
 '.od-arb-jauge{flex:1 1 auto;height:6px;border-radius:99px;background:#e8eef7;overflow:hidden}.od-arb-jauge i{display:block;height:100%;background:#53bda7;border-radius:99px;transition:width .4s cubic-bezier(.3,.8,.3,1)}' +
@@ -1005,6 +1006,11 @@ OD.define('topnav', {
       const res = await sb.rpc('client_arbitrer', params);
       if (res.error) throw res.error;
       __arbData = res.data;
+      // La base peut refuser sans lever d'erreur : ligne deja traitee par un
+      // autre vendeur, par exemple. Sans ce controle, le refus passait pour une
+      // reussite, la carte se fermait et on redirigeait vers la fiche comme si
+      // quelque chose avait ete ecrit.
+      if (__arbData && __arbData.ok === false) throw new Error(__arbData.motif || 'Action refusee.');
     } catch (e) {
       ARB.busy = false;
       // afficher l'erreur sans perdre la carte
@@ -1013,8 +1019,26 @@ OD.define('topnav', {
       return;
     }
 
+    // Un ecart peut avoir disparu entre l'affichage et la validation : une autre
+    // remontee a corrige la fiche entre-temps. La base ne l'ecrase pas et le dit
+    // par decision='sans_objet'. On l'annonce plutot que de feindre une fusion.
+    if (action === 'fusion' && __arbData && __arbData.decision === 'sans_objet') {
+      arbInfo(__arbData.motif || 'La fiche a ete mise a jour entre-temps : plus aucun ecart a trancher.');
+      ARB.rej++;
+      if (carte) carte.classList.add(anim);
+      setTimeout(function () {
+        ARB.i++; ARB.detail = null; ARB.choix = {}; ARB.survivant = 'a'; ARB.busy = false;
+        arbRender();
+      }, 430);
+      return;
+    }
+
     // Validation (fusion / application) -> redirection vers la fiche client mise a jour.
     if (action === 'fusion') {
+      // Des champs ont pu etre ecartes parce qu'ils ne divergeaient plus.
+      if (__arbData && Array.isArray(__arbData.ecartes) && __arbData.ecartes.length) {
+        arbInfo('Champs deja a jour, non modifies : ' + __arbData.ecartes.join(', ') + '.');
+      }
       ARB.fus++;
       const cid = (__arbData && (__arbData.id_client != null ? __arbData.id_client : __arbData.survivant)) || (d.a && d.a.idvu);
       arbClose();
@@ -1027,6 +1051,17 @@ OD.define('topnav', {
       ARB.i++; ARB.detail = null; ARB.choix = {}; ARB.survivant = 'a'; ARB.busy = false;
       arbRender();
     }, 430);
+  }
+
+  // Information neutre, la ou od-arb-erru signale un echec.
+  function arbInfo(msg) {
+    const box = doc.getElementById('od-arb');
+    if (!box) { console.log('[arbitrage]', msg); return; }
+    const w = doc.createElement('div');
+    w.className = 'od-arb-info';
+    w.textContent = msg;
+    box.prepend(w);
+    setTimeout(function () { try { w.remove(); } catch (e) {} }, 6000);
   }
 
   const I_ARB = {
