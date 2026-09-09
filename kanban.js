@@ -520,6 +520,16 @@ OD.define('kanban', {
     const cliName = esc(c.client || ('Client #' + (c.id_client || '?')));
     h += '<div class="kc-cli">' + (c.id_client != null ? '<button type="button" class="kc-cli-link" data-fiche="' + c.id_client + '" title="Ouvrir la fiche client — Propositions commerciales">' + cliName + '</button>' : '<span>' + cliName + '</span>') + (c.client_type ? '<span class="kc-ctype">' + (c.client_type === 'societe' ? 'Société' : 'Particulier') + '</span>' : '') + '</div>';
 
+    // Vignette du vehicule, sur les cartes UNITAIRES seulement : une carte
+    // plurale renvoie a sa liste, ou chaque version porte deja la sienne, et y
+    // montrer celle d'une version au hasard serait trompeur.
+    if (!vnMulti && c.photo) {
+      h += '<div class="kc-photo"><img src="' + esc(c.photo) + '" alt="" loading="lazy" '
+        + 'onerror="this.parentNode.style.display=\'none\'">'
+        + (c.couleur ? '<span class="kc-photo-c">' + esc(c.couleur) + '</span>' : '')
+        + '</div>';
+    }
+
     // Véhicule — cliquable si VO (ouvre la fiche VO)
     if (c.vn_vo === 'VO' && c.vin) {
       h += '<div class="kc-veh"><span class="kc-vdot"></span><button type="button" class="kc-veh-link" data-vin="' + esc(c.vin) + '" title="Ouvrir la fiche VO">' + esc(c.vehicule || c.vin || '—') + '</button> <span class="kc-vt">VO</span></div>';
