@@ -18,7 +18,7 @@
 // ============================================================================
 OD.define('retours', {
   mount(__anchor, ctx) {
-    const VERSION = 2;   // v2 : masqué sur la page de connexion (ancre 'auth')
+    const VERSION = 3;   // v3 : lanceur = le O Oropra ; notice centrée sur l'intérêt de participer
     const W = window;
     const prev = W.__OD_RETOURS__;
     if (prev && prev.v === VERSION && document.getElementById('od-retours')) return;
@@ -102,6 +102,7 @@ OD.define('retours', {
       flou: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M9.5 9.3a2.6 2.6 0 1 1 3.6 2.4c-.7.3-1.1.9-1.1 1.7v.4M12 17h.01"/></svg>',
       idee: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 18h6M10 21h4M12 3a6 6 0 0 0-3.6 10.8c.7.6 1.1 1.3 1.1 2.2h5c0-.9.4-1.6 1.1-2.2A6 6 0 0 0 12 3z"/></svg>',
       aime: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 20s-7.5-4.6-7.5-10.2A4.2 4.2 0 0 1 12 7.3a4.2 4.2 0 0 1 7.5 2.5C19.5 15.4 12 20 12 20z"/></svg>',
+      o: '<svg viewBox="0 0 100 100" aria-hidden="true"><circle cx="50" cy="50" r="31" fill="none" stroke="#32AFA4" stroke-width="18"/><circle class="q" cx="50" cy="50" r="31" fill="none" stroke="#F8BA36" stroke-width="18" stroke-dasharray="48.695 194.779"/></svg>',
       bulle: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 5.5h16v10.5H10l-6 4.5z"/><path d="M8.5 10.5h7"/></svg>',
       x: '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>',
       micro: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5.5 11a6.5 6.5 0 0 0 13 0M12 17.5V21"/></svg>',
@@ -128,12 +129,18 @@ button{font:inherit;cursor:pointer;border:0;background:none;color:inherit;paddin
 button:focus-visible,textarea:focus-visible{outline:2px solid #1F4A85;outline-offset:2px}
 [hidden]{display:none!important}
 
-.lg{position:fixed;right:0;top:var(--y,62%);transform:translateY(-50%);display:flex;flex-direction:column;align-items:center;gap:8px;width:34px;padding:12px 0 14px;background:#1F4A85;color:#fff;border-radius:10px 0 0 10px;box-shadow:-3px 6px 18px rgba(20,48,90,.28);touch-action:none;user-select:none;transition:width .15s ease,background-color .15s ease}
-.lg:hover{width:40px;background:#183d70}
-.lg.glisse{cursor:grabbing;transition:none}
-.lg svg{width:18px;height:18px;flex:none}
-.lg span{writing-mode:vertical-rl;transform:rotate(180deg);font-size:13px;font-weight:700;white-space:nowrap}
-.bd{position:absolute;top:-7px;left:-7px;min-width:19px;height:19px;padding:0 5px;border-radius:10px;background:#D92D20;color:#fff;font-size:11px;font-weight:800;line-height:19px;text-align:center;box-shadow:0 0 0 2px #fff}
+.lg{position:fixed;right:10px;top:var(--y,62%);width:46px;height:46px;transform:translateY(-50%);border-radius:50%;touch-action:none;user-select:none;-webkit-tap-highlight-color:transparent}
+.lg svg{display:block;width:100%;height:100%;filter:drop-shadow(0 3px 7px rgba(20,48,90,.30));transition:transform .18s ease}
+.lg:hover svg,.lg:focus-visible svg{transform:scale(1.08)}
+.lg:focus-visible{outline-offset:3px}
+.lg.glisse{cursor:grabbing}
+.lg.glisse svg{transition:none}
+.lg.tour svg{animation:tour .9s cubic-bezier(.3,.7,.2,1)}
+@keyframes tour{to{transform:rotate(360deg)}}
+.etiq{position:absolute;right:calc(100% + 8px);top:50%;padding:5px 11px;border-radius:999px;background:#14305A;color:#fff;font-size:12.5px;font-weight:800;white-space:nowrap;pointer-events:none;opacity:0;transform:translate(6px,-50%);transition:opacity .15s ease,transform .15s ease}
+.lg:hover .etiq,.lg:focus-visible .etiq{opacity:1;transform:translate(0,-50%)}
+.lg.glisse .etiq{opacity:0}
+.bd{position:absolute;top:-4px;left:-4px;min-width:19px;height:19px;padding:0 5px;border-radius:10px;background:#D92D20;color:#fff;font-size:11px;font-weight:800;line-height:19px;text-align:center;box-shadow:0 0 0 2px #fff}
 
 .pn{position:fixed;right:0;top:50%;width:380px;max-height:min(680px,calc(100vh - 24px));display:flex;flex-direction:column;background:#fff;color:#14305A;border-radius:16px 0 0 16px;box-shadow:-12px 20px 54px rgba(20,48,90,.26);transform:translate(104%,-50%);visibility:hidden;transition:transform .24s cubic-bezier(.2,.8,.2,1),visibility 0s linear .24s}
 .pn.ouvert{transform:translate(0,-50%);visibility:visible;transition:transform .24s cubic-bezier(.2,.8,.2,1)}
@@ -254,7 +261,7 @@ textarea:focus{border-color:#1F4A85;outline:none}
     hote.style.cssText = 'position:fixed;top:0;left:0;width:0;height:0;z-index:2147482000;';
     const R = hote.attachShadow({ mode: 'open' });
     R.innerHTML = `<style>${CSS}</style>
-<button class="lg" type="button" hidden aria-label="Donner un avis sur One Data" title="Un bug, une question, une idée ?">${I.bulle}<span>Un avis ?</span><b class="bd" hidden></b></button>
+<button class="lg" type="button" hidden aria-label="Donner un avis sur One Data">${I.o}<span class="etiq">Un avis ?</span><b class="bd" hidden></b></button>
 <section class="pn" role="dialog" aria-labelledby="od-r-titre">
   <div class="hd"><div><h2 id="od-r-titre">Ton avis</h2><p class="ec"></p></div><button class="x" type="button" data-a="fermer" aria-label="Fermer">${I.x}</button></div>
   <div class="tb" role="tablist">
@@ -350,7 +357,9 @@ textarea:focus{border-color:#1F4A85;outline:none}
     minuter(majVisibilite, 700);
 
     function majBadge(n) {
+      const avant = nonLus;
       nonLus = Math.max(0, Number(n) || 0);
+      if (nonLus > avant) { lanceur.classList.remove('tour'); void lanceur.offsetWidth; lanceur.classList.add('tour'); }
       badgeLanceur.hidden = nonLus === 0;
       badgeLanceur.textContent = nonLus > 9 ? '9+' : String(nonLus);
       badgeOnglet.hidden = nonLus === 0;
@@ -799,8 +808,8 @@ textarea:focus{border-color:#1F4A85;outline:none}
         noticePlanifiee = false;
         if (noticeVue() || !utilisateur() || ouvert || carte) return;
         afficherCarte('notice', `<h3>One Data s'améliore avec toi</h3>
-          <p>Pour repérer ce qui bloque, One Data mesure les écrans ouverts, les temps de chargement et les erreurs. Jamais le contenu de tes fiches ni de tes saisies.</p>
-          <p>Un souci, une idée ? Utilise la languette « Un avis ? » sur le bord droit de l'écran.</p>
+          <p>Un bug, un écran pas clair, une idée ? Ton avis fait directement évoluer l'outil que tu utilises chaque jour. Chaque retour est lu, et la réponse arrive ici même.</p>
+          <p>Deux clics suffisent : touche le O Oropra au bord de l'écran, choisis, envoie.</p>
           <div class="act"><button type="button" class="bt" data-a="notice-ok">Compris</button></div>`);
       }, 3500);
       nettoyages.push(() => clearTimeout(t));
