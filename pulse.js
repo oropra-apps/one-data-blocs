@@ -17,7 +17,7 @@
 // ============================================================================
 OD.define('pulse', {
   mount(__anchor, ctx) {
-    const VERSION = 1;
+    const VERSION = 2;   // v2 : rien n'est mesuré sur la page de connexion (ancre 'auth')
     const W = window;
     const prev = W.__OD_PULSE__;
     if (prev && prev.v === VERSION) return;          // persistant : une instance par onglet
@@ -46,7 +46,10 @@ OD.define('pulse', {
     const emettre = (evt, d) => { (abonnes[evt] || []).forEach(cb => { try { cb(d); } catch (e) { console.error('[pulse] abonné', evt, e); } }); };
 
     /* ------------------------------------------------------------ identité */
-    const utilisateur = () => { try { return OD.getUser ? OD.getUser() : null; } catch (e) { return null; } };
+    // Page de connexion (module 'auth' à l'écran) = hors application, même si une
+    // session Supabase encore valide fait remonter un utilisateur : on ne mesure rien.
+    const surConnexion = () => !!document.querySelector('[data-od-module="auth"]');
+    const utilisateur = () => { try { return !surConnexion() && OD.getUser ? OD.getUser() : null; } catch (e) { return null; } };
     const uidDe = (u) => (u ? String(u.auth_uid || u.ID_User) : null);
     let dernierJeton = null;
     async function jeton() {
@@ -105,7 +108,7 @@ OD.define('pulse', {
     const erreursRecentes = [];
     function pousser(e) {
       const ev = Object.assign({ ts: new Date().toISOString(), page: pageCourante }, e);
-      if (!COUPE) {
+      if (!COUPE && !surConnexion()) {
         file.push(ev);
         if (file.length > 1200) file.splice(0, file.length - 1200);
         if (file.length >= 150) planifierEnvoi(0);
@@ -120,6 +123,7 @@ OD.define('pulse', {
       .replace(/\/\d{3,}/g, '/:n')
       .slice(0, 160);
     let pageCourante = chemin();
+    let derniereVue = { page: null, ts: 0 };   // anti-doublon de vue de page
     let derniereActivite = Date.now();
     let actifAccumule = 0;
 
@@ -135,7 +139,7 @@ OD.define('pulse', {
       viderActif();
       const de = pageCourante;
       pageCourante = p;
-      if (utilisateur()) pousser({ type: 'page', page: p, props: { de } });
+      if (utilisateur()) { pousser({ type: 'page', page: p, props: { de } }); derniereVue = { page: p, ts: Date.now() }; }
       emettre('page', { page: p, de });
     }
     const marquerActivite = () => { derniereActivite = Date.now(); };
@@ -347,8 +351,8 @@ OD.define('pulse', {
       minuterie = setTimeout(() => envoyer(false), delai == null ? FLUSH_MS : delai);
     }
 
-    async function envoyer(final) {
-      const u = utilisateur();
+    async function envoyer(final, uForce) {
+      const u = uForce || utilisateur();
       if (!u || COUPE) { if (!final) planifierEnvoi(); return; }
       viderActif();
       viderApi();
@@ -401,15 +405,31 @@ OD.define('pulse', {
     ecouter(W, 'pagehide', () => { viderActif(); viderApi(); envoyer(true); });
 
     // Changement d'utilisateur dans le même onglet (déconnexion / reconnexion)
+    let uPrecedent = null;
     const veille = setInterval(() => {
       const u = utilisateur();
       const uid = uidDe(u);
       if (uid !== uidPrecedent) {
-        if (uidPrecedent && dernierJeton) envoyer(true);
+        // Les gestes en attente partent sous l'identité qui les a produits,
+        // jamais sous celle de la personne suivante.
+        if (uPrecedent) {
+          if (dernierJeton) { viderActif(); viderApi(); envoyer(true, uPrecedent); }
+          file.length = 0;
+        }
         uidPrecedent = uid;
+        uPrecedent = u;
         session = null;
         try { sessionStorage.removeItem(SKEY); } catch (e) {}
-        if (uid) { jeton(); pousser({ type: 'page', page: pageCourante, props: { de: null } }); emettre('utilisateur', u); planifierEnvoi(3000); }
+        if (uid) {
+          jeton();
+          surveillerPage();   // rattrape une navigation pas encore détectée
+          if (!(derniereVue.page === pageCourante && Date.now() - derniereVue.ts < 5000)) {
+            pousser({ type: 'page', page: pageCourante, props: { de: null } });
+            derniereVue = { page: pageCourante, ts: Date.now() };
+          }
+          emettre('utilisateur', u);
+          planifierEnvoi(3000);
+        }
       }
     }, 1000);
     nettoyages.push(() => clearInterval(veille));
