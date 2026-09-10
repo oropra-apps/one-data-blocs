@@ -18,7 +18,7 @@
 // ============================================================================
 OD.define('retours', {
   mount(__anchor, ctx) {
-    const VERSION = 1;
+    const VERSION = 2;   // v2 : masqué sur la page de connexion (ancre 'auth')
     const W = window;
     const prev = W.__OD_RETOURS__;
     if (prev && prev.v === VERSION && document.getElementById('od-retours')) return;
@@ -33,7 +33,10 @@ OD.define('retours', {
     const ecouter = (cible, type, fn, opts) => { cible.addEventListener(type, fn, opts); nettoyages.push(() => cible.removeEventListener(type, fn, opts)); };
     const minuter = (fn, ms) => { const id = setInterval(fn, ms); nettoyages.push(() => clearInterval(id)); return id; };
     const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-    const utilisateur = () => { try { return OD.getUser ? OD.getUser() : null; } catch (e) { return null; } };
+    // Page de connexion (module 'auth' à l'écran) : ni languette, ni notice, ni sondage,
+    // même si une session encore valide fait remonter un utilisateur.
+    const surConnexion = () => !!document.querySelector('[data-od-module="auth"]');
+    const utilisateur = () => { try { return !surConnexion() && OD.getUser ? OD.getUser() : null; } catch (e) { return null; } };
     const uidDe = (u) => (u ? String(u.auth_uid || u.ID_User) : null);
 
     /* ------------------------------------------------------------ lien avec pulse */
@@ -64,7 +67,7 @@ OD.define('retours', {
         P.on('sondage', s => recevoirSondage(s)),
         P.on('rage', d => proposerSignalement('rage', d)),
         P.on('erreur', d => { if (d && d.genre === 'montage') proposerSignalement('erreur', d); }),
-        P.on('page', () => { dernierePage = Date.now(); }),
+        P.on('page', () => { dernierePage = Date.now(); majVisibilite(); }),
         P.on('utilisateur', () => majVisibilite()),
       );
       LOG('branché sur pulse');
@@ -344,7 +347,7 @@ textarea:focus{border-color:#1F4A85;outline:none}
       if (!visible) { if (ouvert) fermer(); masquerCarte(); }
       else planifierNotice();
     }
-    minuter(majVisibilite, 1500);
+    minuter(majVisibilite, 700);
 
     function majBadge(n) {
       nonLus = Math.max(0, Number(n) || 0);
