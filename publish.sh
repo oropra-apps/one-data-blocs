@@ -96,7 +96,10 @@ fi
 
 # Garde-fou : le fichier a-t-il réellement changé ?
 # (« rien de neuf à committer » = tu republies l'ancien code sous un nouveau nom)
-if git diff --quiet -- "$FILE" && git diff --cached --quiet -- "$FILE"; then
+# Un fichier NOUVEAU (jamais committé) n'a pas de diff : sans ce test, il était
+# pris pour « identique » et le premier publish d'un module échouait.
+if git ls-files --error-unmatch -- "$FILE" >/dev/null 2>&1 \
+   && git diff --quiet -- "$FILE" && git diff --cached --quiet -- "$FILE"; then
   if [ "$REPUBLISH" != "1" ]; then
     echo "❌ $FILE est identique à la version committée : il n'y a rien à publier."
     echo "   Soit ton correctif n'est pas enregistré (vérifie : grep -n '<ton correctif>' $FILE),"
