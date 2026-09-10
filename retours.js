@@ -18,7 +18,7 @@
 // ============================================================================
 OD.define('retours', {
   mount(__anchor, ctx) {
-    const VERSION = 3;   // v3 : lanceur = le O Oropra ; notice centrée sur l'intérêt de participer
+    const VERSION = 4;   // v4 : « Montrer l'endroit » nomme la zone désignée (titre du bloc, colonne, champ, type)
     const W = window;
     const prev = W.__OD_RETOURS__;
     if (prev && prev.v === VERSION && document.getElementById('od-retours')) return;
@@ -570,6 +570,113 @@ textarea:focus{border-color:#1F4A85;outline:none}
 
     /* ------------------------------------------------------------ montrer l'endroit */
     const INTER = 'button, a[href], [role="button"], [role="tab"], [role="menuitem"], [role="option"], input, select, textarea, label, summary, [data-od-track]';
+    // ---- nommer la zone désignée, sans jamais reprendre de nom de personne
+    const texteDe = (n) => ((n && n.textContent) || '').replace(/\s+/g, ' ').trim();
+    function libelleSur(t, max) {
+      if (!t || t.length < 2 || t.length > max) return null;
+      if (/@|\d{5,}|\b\d{2}[ .-]\d{2}[ .-]\d{2}\b|[A-Z]{2}-?\d{3}-?[A-Z]{2}/.test(t)) return null;   // email, n°, téléphone, immat
+      const mots = t.split(' ').filter(m => m.length > 2);
+      const capitales = mots.filter(m => /^[A-ZÀ-Ý][a-zà-ÿ'’-]/.test(m)).length;
+      if (capitales >= 2 && capitales === mots.length) return null;                   // « Jean Dupont »
+      if (/^[A-ZÀ-Ý\s'’-]+$/.test(t) && t.includes(' ')) return null;                 // « DUPONT JEAN »
+      return t;
+    }
+    function libellePropre(el) {
+      const track = el.closest('[data-od-track]');
+      if (track) return track.getAttribute('data-od-track').slice(0, 60);
+      for (const a of ['aria-label', 'title', 'placeholder', 'alt']) {
+        const v = libelleSur((el.getAttribute(a) || '').trim(), 50);
+        if (v) return v;
+      }
+      if (/^(INPUT|SELECT|TEXTAREA)$/.test(el.tagName)) {
+        const lab = (el.labels && el.labels[0]) || el.closest('label');
+        const v = lab && libelleSur(texteDe(lab), 50);
+        if (v) return v;
+      }
+      if (el.matches('button, a[href], [role="button"], [role="tab"], [role="menuitem"], [role="option"], summary, label, option')) {
+        return libelleSur(texteDe(el), 40);
+      }
+      return null;
+    }
+    const TITRES = [
+      'h1, h2, h3, h4, h5, h6, [role="heading"], legend, caption',
+      '[class*="title"], [class*="titre"], [class$="-t"], [class*="-t "]',
+      '[class*="header"], [class*="entete"], [class$="-h"], [class*="-h "]',
+    ];
+    function titreContexte(el, stop) {
+      let anc = el;
+      for (let k = 0; anc && anc !== document.body && k < 12; k++) {
+        for (const sel of TITRES) {
+          let liste = [];
+          try { liste = anc.querySelectorAll(sel); } catch (e) {}
+          for (const m of liste) {
+            if (m.closest('#od-retours')) continue;
+            const avant = m.contains(el) || (m.compareDocumentPosition(el) & Node.DOCUMENT_POSITION_FOLLOWING);
+            if (!avant) continue;
+            // Le titre doit coiffer le bloc de l'élément : son premier ancêtre qui
+            // contient l'élément est `anc`, à 3 niveaux au plus. Sinon c'est le titre
+            // d'un bloc voisin (autre carte), qu'on ne doit pas emprunter.
+            if (!m.contains(el)) {
+              let prof = 0, b = m;
+              while (b && b !== anc && !b.contains(el)) { b = b.parentElement; prof++; }
+              if (b !== anc || prof > 3) continue;
+            }
+            const v = libelleSur(texteDe(m), 60);
+            if (v) return v;
+            return null;   // le titre du bloc est un nom de personne : on n'en cherche pas un autre plus haut
+          }
+        }
+        if (anc === stop) break;
+        anc = anc.parentElement;
+      }
+      return null;
+    }
+    function colonne(el) {
+      const cell = el.closest('td, th');
+      const table = cell && cell.closest('table');
+      if (!table) return null;
+      if (cell.tagName === 'TH') return libelleSur(texteDe(cell), 40);
+      const tete = (table.tHead && table.tHead.rows[0]) || table.querySelector('tr');
+      const th = tete && tete.cells[cell.cellIndex];
+      return th && th !== cell ? libelleSur(texteDe(th), 40) : null;
+    }
+    function genre(el) {
+      const t = el.tagName;
+      if (el.closest('canvas, svg')) return 'graphique';
+      if (t === 'IMG') return 'image';
+      if (el.closest('td')) return 'cellule de tableau';
+      if (el.closest('tr')) return 'ligne de tableau';
+      if (t === 'TABLE') return 'tableau';
+      if (t === 'INPUT' || t === 'TEXTAREA') return 'champ de saisie';
+      if (t === 'SELECT') return 'liste déroulante';
+      if (el.closest('button, [role="button"]')) return 'bouton';
+      if (el.closest('a[href]')) return 'lien';
+      if (el.closest('li')) return 'élément de liste';
+      return null;
+    }
+    const cacheNoms = new WeakMap();
+    function nommerZone(el) {
+      if (!el || el.nodeType !== 1) return null;
+      if (cacheNoms.has(el)) return cacheNoms.get(el);
+      const hote = el.closest('[data-od-module]');
+      const ecran = hote ? libelleModule(hote.getAttribute('data-od-module')) : null;
+      let nom = null;
+      try {
+        const propre = libellePropre(el);
+        const titre = titreContexte(el, hote);
+        const col = colonne(el);
+        const g = genre(el);
+        const precision = (propre && propre !== titre) ? propre : col ? `colonne ${col}` : g;
+        if (titre && precision) nom = `${titre} : ${precision}`;
+        else if (titre) nom = titre;
+        else if (propre) nom = ecran ? `${ecran} : ${propre}` : propre;
+        else if (precision) nom = ecran ? `${ecran} : ${precision}` : precision.replace(/^./, c => c.toUpperCase());
+      } catch (e) {}
+      nom = (nom || (ecran ? `Zone ${ecran}` : 'Élément désigné')).slice(0, 90);
+      cacheNoms.set(el, nom);
+      return nom;
+    }
+
     let pick = null;
     function cibleSous(x, y) {
       let el = document.elementFromPoint(x, y);
@@ -608,8 +715,7 @@ textarea:focus{border-color:#1F4A85;outline:none}
         pkz.style.width = (r.width + 6) + 'px';
         pkz.style.height = (r.height + 6) + 'px';
         pkz.classList.toggle('bas', r.top < 34);
-        let d = null; try { d = Pz().decrire(el); } catch (x) {}
-        pkl.textContent = (d && d.libelle) || (d && d.module ? `Zone ${libelleModule(d.module)}` : 'Cet élément');
+        pkl.textContent = nommerZone(el);
       };
       const surMouvement = (e) => { if (dansWidget(e)) return; surligner(cibleSous(e.clientX, e.clientY)); };
       const bloquer = (e) => { if (dansWidget(e)) return; e.preventDefault(); e.stopImmediatePropagation(); };
@@ -617,7 +723,8 @@ textarea:focus{border-color:#1F4A85;outline:none}
         if (!el) return;
         let d = null;
         try { d = Pz().decrire(el); } catch (x) {}
-        if (d) br.cible = { module: d.module || null, libelle: d.libelle || null, selecteur: d.selecteur || null, cible: d.cible || d.selecteur || null, rect: d.rect || null };
+        const nom = nommerZone(el);
+        if (d) br.cible = { module: d.module || null, libelle: nom, selecteur: d.selecteur || null, cible: d.selecteur ? `${nom} ‹${d.selecteur}›` : nom, rect: d.rect || null };
         finPick();
       };
       const surClic = (e) => { if (dansWidget(e)) return; bloquer(e); if (e.detail !== 0 || e.pointerType === 'mouse' || !e.pointerType) choisir(cibleSous(e.clientX, e.clientY) || courant); };
@@ -970,6 +1077,7 @@ textarea:focus{border-color:#1F4A85;outline:none}
       ouvrir: (humeur) => { reinitialiser(); if (humeur && HUM[humeur]) choisirHumeur(humeur); ouvrir('avis'); },
       fermer: () => fermer(),
       mesRetours: () => ouvrir('mes'),
+      nommer: (el) => nommerZone(el),     // diagnostic console : OD.retours.nommer($0)
       detruire() { nettoyages.splice(0).forEach(f => { try { f(); } catch (e) {} }); },
     };
     OD.retours = api;
