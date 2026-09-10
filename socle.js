@@ -8,6 +8,10 @@
 //  Si pas de session : on monte quand même (la page login s'affiche).
 //  Rapatrie la résolution utilisateur (ex-bloc « User connecté », supprimé).
 //  Expose window.oropraLoadUser (rappelé par auth.js après login).
+//  v25 : modules AMBIANTS (pulse, retours) — sans ancre WeWeb. Le socle leur
+//  pose une ancre invisible en fin de <body>, uniquement si le registre les
+//  sert au tenant (resolve_tenant_modules). Activer / couper chez un client =
+//  épingler / désépingler le module, rien d'autre. Expose OD.cp.url.
 // ============================================================================
 (async function odBootstrap() {
     const CP_URL  = 'https://lerofucjmfrrduohnwet.supabase.co';
@@ -586,6 +590,7 @@ const HOST_MAP = {
     OD.manifest = OD.manifest || {};
     OD._loading = OD._loading || {};
     OD.define = (key, def) => { OD.modules[key] = def; };
+    OD.cp = OD.cp || { url: CP_URL };
 
     try {
         const list = await cpRpc('resolve_tenant_modules', { p_tenant_id: tenant.id });
@@ -656,7 +661,27 @@ const HOST_MAP = {
         // (bus de site, badges, abonnements) -> montés UNE fois pour toute la
         // session, jamais re-montés en navigation.
         'site-bus', 'delco-badge', 'notif-badge',
+        // Modules ambiants (ancre posée par le socle, voir poserAmbiants).
+        'pulse', 'retours',
     ]);
+
+    // Modules AMBIANTS : aucune ancre dans WeWeb. Le socle en pose une, invisible,
+    // pour chaque module ambiant présent dans le manifeste du tenant. L'ordre
+    // compte : pulse (télémétrie, API OD.pulse) avant retours (widget d'avis).
+    OD.AMBIANTS = OD.AMBIANTS || ['pulse', 'retours'];
+    const poserAmbiants = () => {
+        if (!document.body) return;
+        OD.AMBIANTS.forEach(key => {
+            if (!OD.manifest[key]) return;
+            if (document.querySelector(`[data-od-module="${key}"][data-od-ambiant]`)) return;
+            const a = document.createElement('div');
+            a.setAttribute('data-od-module', key);
+            a.setAttribute('data-od-ambiant', '1');
+            a.setAttribute('aria-hidden', 'true');
+            a.style.display = 'none';
+            document.body.appendChild(a);
+        });
+    };
 
     // À CHAQUE navigation SPA : WeWeb réutilise les nœuds d'ancre avec leur drapeau
     // data-od-mounted et un contenu figé. On efface le drapeau des ancres NON
@@ -697,11 +722,13 @@ const HOST_MAP = {
     }
 
     // ===================== 6 — Montage + navigation SPA =====================
+    poserAmbiants();
     OD.mountAll();
 
-    // (a) Nouvelles ancres qui apparaissent (débounce léger).
+    // (a) Nouvelles ancres qui apparaissent (débounce léger). Les ancres
+    //     ambiantes sont re-posées si un re-rendu les a fait disparaître.
     let t;
-    new MutationObserver(() => { clearTimeout(t); t = setTimeout(OD.mountAll, 50); })
+    new MutationObserver(() => { clearTimeout(t); t = setTimeout(() => { poserAmbiants(); OD.mountAll(); }, 50); })
         .observe(document.body, { childList: true, subtree: true });
 
     // (b) Navigation SPA → re-montage des ancres de page. On ne réagit QUE si le
