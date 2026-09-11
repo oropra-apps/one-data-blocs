@@ -17,7 +17,8 @@
 // ============================================================================
 OD.define('pulse', {
   mount(__anchor, ctx) {
-    const VERSION = 3;   // v3 : actions métier déduites des écritures réussies (catalogue ACTIONS)
+    const VERSION = 4;   // v4 : écran principal = module monté occupant la plus grande surface visible
+                         // v3 : actions métier déduites des écritures réussies (catalogue ACTIONS)
                          // v2 : rien n'est mesuré sur la page de connexion (ancre 'auth')
     const W = window;
     const prev = W.__OD_PULSE__;
@@ -524,6 +525,29 @@ OD.define('pulse', {
     }
 
     /* ------------------------------------------------------------ API publique */
+    // Écran principal : parmi les modules montés non persistants, celui dont l'ancre
+    // occupe la plus grande surface visible. Les accessoires (visites guidées,
+    // tutoriels…) ne sont retenus qu'à défaut de tout autre module.
+    const ACCESSOIRES = new Set(['tours', 'tutos', 'likes', 'onboarding']);
+    function ecranPrincipal() {
+      const pers = OD.persistent || new Set();
+      let meilleur = null, score = -Infinity;
+      for (const el of document.querySelectorAll('[data-od-module][data-od-mounted]')) {
+        const k = el.getAttribute('data-od-module');
+        if (!k || MODULES_MUETS.has(k) || pers.has(k)) continue;
+        let s = 0;
+        try {
+          const r = el.getBoundingClientRect();
+          const l = Math.max(0, Math.min(r.right, innerWidth) - Math.max(r.left, 0));
+          const h = Math.max(0, Math.min(r.bottom, innerHeight) - Math.max(r.top, 0));
+          s = l * h;
+        } catch (e) {}
+        if (ACCESSOIRES.has(k)) s = -1e9 + s;
+        if (s > score) { score = s; meilleur = k; }
+      }
+      return meilleur;
+    }
+
     function contexte() {
       const versions = {};
       try { Object.keys(OD.manifest || {}).forEach(k => { versions[k] = OD.manifest[k].label; }); } catch (e) {}
@@ -534,6 +558,7 @@ OD.define('pulse', {
         page: pageCourante,
         url_hote: location.host,
         modules_affiches: [...new Set(monte)],
+        ecran: ecranPrincipal(),
         appareil: appareil(),
         versions,
         fil: fil.slice(-25),
@@ -554,6 +579,7 @@ OD.define('pulse', {
       contexte,
       sessionId: () => { const u = utilisateur(); return u ? sessionCourante(uidDe(u)).id : null; },
       page: () => pageCourante,
+      ecranPrincipal,
       track(nom, props) {
         if (!nom) return;
         const p = {};
@@ -561,10 +587,7 @@ OD.define('pulse', {
           const v = props[k]; if (['string', 'number', 'boolean'].includes(typeof v)) p[k] = v;
         });
         let module = typeof props === 'object' && props && typeof props.module === 'string' ? props.module : null;
-        if (!module) {
-          const pers = OD.persistent || new Set();
-          module = (contexte().modules_affiches || []).find(k => !pers.has(k)) || null;
-        }
+        if (!module) module = ecranPrincipal();
         pousser({ type: 'metier', cible: String(nom).slice(0, 80), module, props: p });
       },
       sondageAffiche(oui) { sondageEnCours = !!oui; },
