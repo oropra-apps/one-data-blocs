@@ -170,7 +170,7 @@ OD.define('auth', {
     '.oa-brand{flex:1 1 46%;position:relative;display:flex;flex-direction:column;justify-content:center;padding:56px;color:#fff;overflow:hidden;background:linear-gradient(140deg,#1F4A85 0%,#2a5ea9 55%,#3f78c9 100%)}' +
     '.oa-brand::after{content:"";position:absolute;inset:0;background-image:radial-gradient(circle at 20% 30%,rgba(255,255,255,.10) 0,transparent 40%),radial-gradient(circle at 80% 70%,rgba(255,255,255,.08) 0,transparent 45%);pointer-events:none}' +
     '.oa-brand-in{position:relative;z-index:1;max-width:440px}' +
-    '.oa-logo{height:104px;width:auto;max-width:280px;object-fit:contain;background:#fff;border-radius:18px;padding:14px 18px;box-shadow:0 10px 30px rgba(0,0,0,.18)}' +
+    '.oa-logo{height:132px;width:auto;max-width:300px;object-fit:contain;display:block}' +
     '.oa-gname{font-size:30px;font-weight:800;letter-spacing:.4px;margin:26px 0 10px;line-height:1.15}' +
     '.oa-tag{font-size:16px;color:#dbe7fb;font-weight:500;line-height:1.5}' +
     '.oa-brand-foot{position:absolute;bottom:26px;left:56px;right:56px;z-index:1;font-size:12px;color:#bdd2f2}' +
@@ -197,7 +197,7 @@ OD.define('auth', {
     '.oa-spin{display:inline-block;width:16px;height:16px;border:2px solid rgba(255,255,255,.5);border-top-color:#fff;border-radius:50%;animation:oa-spin .7s linear infinite}' +
     '@keyframes oa-spin{to{transform:rotate(360deg)}}' +
     '.oa-hint{font-size:12px;color:#8aa3c3;margin:-8px 0 16px}' +
-    '@media(max-width:860px){.oa-brand{display:none}.oa-pane{flex:1;background:#eef2f8}.oa-card-logo{display:flex;flex-direction:column;align-items:center;gap:14px;margin-bottom:24px;text-align:center}.oa-card-logo img{height:84px;width:auto;object-fit:contain;background:#fff;border-radius:14px;padding:10px 14px;box-shadow:0 8px 22px rgba(31,74,133,.14)}.oa-card-logo .g{font-size:18px;font-weight:800;color:#1F4A85}}' +
+    '@media(max-width:860px){.oa-brand{display:none}.oa-pane{flex:1;background:#eef2f8}.oa-card-logo{display:flex;flex-direction:column;align-items:center;gap:14px;margin-bottom:24px;text-align:center}.oa-card-logo img{height:104px;width:auto;object-fit:contain;display:block}.oa-card-logo .g{font-size:18px;font-weight:800;color:#1F4A85}}' +
     '</style>';
 
   const IC_MAIL = '<svg class="oa-ic" width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="m22 7-10 6L2 7"/></svg>';
