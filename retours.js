@@ -18,7 +18,8 @@
 // ============================================================================
 OD.define('retours', {
   mount(__anchor, ctx) {
-    const VERSION = 4;   // v4 : « Montrer l'endroit » nomme la zone désignée (titre du bloc, colonne, champ, type)
+    const VERSION = 5;   // v5 : écran courant fourni par pulse (plus grande surface visible, accessoires exclus)
+                         // v4 : « Montrer l'endroit » nomme la zone désignée (titre du bloc, colonne, champ, type)
     const W = window;
     const prev = W.__OD_RETOURS__;
     if (prev && prev.v === VERSION && document.getElementById('od-retours')) return;
@@ -92,9 +93,12 @@ OD.define('retours', {
       onboarding: 'Onboarding',
     };
     const libelleModule = (k) => (k ? (MODULES[k] || k.replace(/-/g, ' ').replace(/^./, c => c.toUpperCase())) : null);
+    const ACCESSOIRES = new Set(['tours', 'tutos', 'likes', 'onboarding']);
     const modulePrincipal = (liste) => {
+      try { const e = Pz().ecranPrincipal && Pz().ecranPrincipal(); if (e) return e; } catch (x) {}
       const pers = OD.persistent || new Set();
-      return (liste || []).find(k => k && !pers.has(k) && k !== 'pulse' && k !== 'retours') || null;
+      const candidats = (liste || []).filter(k => k && !pers.has(k) && k !== 'pulse' && k !== 'retours');
+      return candidats.find(k => !ACCESSOIRES.has(k)) || candidats[0] || null;
     };
 
     const I = {
