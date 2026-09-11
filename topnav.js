@@ -251,7 +251,7 @@ OD.define('topnav', {
 .od-bar{width:100%}
 .od-bar-inner{display:flex;align-items:center;gap:8px;padding:9px var(--od-gutter);position:relative;max-width:var(--od-maxw);margin:0 auto}
 .od-logo{display:flex;align-items:center;gap:8px;cursor:pointer;flex:0 0 auto;margin-right:14px;font-weight:800;font-size:21px;color:#1F4A85;letter-spacing:-.5px}
-.od-logo-img{height:32px;width:auto;max-width:min(150px,42vw);display:block}
+.od-logo-img{height:44px;width:auto;max-width:min(190px,46vw);object-fit:contain;display:block}
 .od-menus{display:flex;align-items:center;justify-content:center;flex-wrap:wrap;gap:6px;flex:1 1 auto;min-width:0}
 .od-m{position:relative}
 .od-m>button{display:flex;align-items:center;gap:6px;background:none;border:none;cursor:pointer;font:inherit;font-size:14px;font-weight:600;color:#1F4A85;padding:10px 18px;border-radius:9px;transition:background .15s,color .15s;white-space:nowrap}
@@ -343,7 +343,7 @@ OD.define('topnav', {
 @media (max-width:560px){
   .od-bar-inner{padding:7px 11px}
   .od-sub-inner{padding:7px 11px;flex-wrap:wrap}
-  .od-logo-img{height:27px}
+  .od-logo-img{height:34px}
   .od-avatar{width:30px;height:30px;font-size:12px}
   /* barre 2 empilée : client en haut, sélecteur de site dessous -> jamais de débordement */
   .od-client{flex:1 1 100%;min-width:0}
