@@ -17,7 +17,8 @@
 // ============================================================================
 OD.define('pulse', {
   mount(__anchor, ctx) {
-    const VERSION = 2;   // v2 : rien n'est mesuré sur la page de connexion (ancre 'auth')
+    const VERSION = 3;   // v3 : actions métier déduites des écritures réussies (catalogue ACTIONS)
+                         // v2 : rien n'est mesuré sur la page de connexion (ancre 'auth')
     const W = window;
     const prev = W.__OD_PULSE__;
     if (prev && prev.v === VERSION) return;          // persistant : une instance par onglet
@@ -287,6 +288,89 @@ OD.define('pulse', {
       ecouter(performance, 'resourcetimingbufferfull', () => { try { performance.clearResourceTimings(); } catch (e) {} });
     } catch (e) { LOG('PerformanceObserver indisponible'); }
 
+    /* ------------------------------------------------------------ actions métier */
+    // Déduites des écritures RÉUSSIES vers la base du client : aucun module à
+    // modifier. Le socle (v26+) fait passer le client Supabase par window.fetch,
+    // que l'on enveloppe ici ; les appels fetch directs des modules sont vus aussi.
+    // Clé d'action = vocabulaire partagé avec le cockpit (libellés côté cockpit).
+    const ACTIONS = [
+      { k: 'affaire_deplacee',     rpc: ['move_propale'] },
+      { k: 'propale_creee',        table: 'PROPALE_BDC', m: ['POST'] },
+      { k: 'propale_modifiee',     table: 'PROPALE_BDC', m: ['PATCH'] },
+      { k: 'propale_convertie',    rpc: ['propale_convertie'] },
+      { k: 'propale_abandonnee',   rpc: ['propale_abandonner'] },
+      { k: 'bdc_vn_importe',       rpc: ['commit_import_bdc_vn'] },
+      { k: 'client_cree',          rpc: ['client_creer'] },
+      { k: 'client_modifie',       table: 'CLIENT', m: ['PATCH'] },
+      { k: 'entreprise_rattachee', rpc: ['attach_entreprise'] },
+      { k: 'doublon_signale',      rpc: ['client_signaler_doublon'] },
+      { k: 'doublon_arbitre',      rpc: ['client_arbitrer'] },
+      { k: 'rapport_saisi',        table: 'RAPPORT_VENDEUR', m: ['POST'] },
+      { k: 'appel_passe',          fn: ['voip-end-call'] },
+      { k: 'sms_envoye',           fn: ['sms-send'] },
+      { k: 'whatsapp_envoye',      fn: ['wa-send-text', 'wa-send-audio', 'wa-send-attachment'] },
+      { k: 'email_envoye',         fn: ['email-send'], rpc: ['enqueue_email'] },
+      { k: 'rdv_cree',             rpc: ['create_rdv_client'] },
+      { k: 'rdv_modifie',          rpc: ['update_rdv_client'] },
+      { k: 'rdv_supprime',         rpc: ['delete_rdv_client'] },
+      { k: 'creneau_cree',         rpc: ['create_creneau'] },
+      { k: 'lead_reaffecte',       rpc: ['lead_reaffecter'] },
+      { k: 'cycle_consulte',       rpc: ['cycle_consulter'] },
+      { k: 'alerte_traitee',       rpc: ['notif_ignorer_rpv', 'notif_ignorer_orphelin', 'notif_ignorer_cycle', 'agent_signal_mark'] },
+      { k: 'campagne_creee',       rpc: ['creer_campagne_sollicitation'] },
+      { k: 'bilaterale_creee',     rpc: ['create_bilaterale'] },
+      { k: 'bilaterale_realisee',  rpc: ['realiser_bilaterale_complet'] },
+      { k: 'bilaterale_modifiee',  rpc: ['update_bilaterale'] },
+      { k: 'objectif_modifie',     table: 'OBJECTIF', m: ['PATCH', 'POST'] },
+      { k: 'stock_vo_mis_a_jour',  table: 'CLIENT_STOCK', m: ['PATCH', 'POST'] },
+      { k: 'photo_vo_ajoutee',     fn: ['vo-photos-confirm-upload', 'vo-photos-upload'] },
+      { k: 'affiche_vo_generee',   fn: ['generate-vo-poster'] },
+      { k: 'delco_question',       fn: ['agent-orchestrator'] },
+      { k: 'delco_pdf',            fn: ['delco-pdf'] },
+      { k: 'export_excel',         fn: ['export-xslx'] },
+      { k: 'admin_utilisateur',    fn: ['admin-create-user', 'admin-update-user', 'admin-deactivate-user', 'admin-delete-user', 'admin-reset-password',
+                                        'admin-user-site-upsert', 'admin-user-site-delete', 'admin-user-perimeter-set', 'admin-user-subordinates-attach'] },
+    ];
+    const INDEX_ACTIONS = new Map();
+    for (const a of ACTIONS) {
+      (a.rpc || []).forEach(n => INDEX_ACTIONS.set('rpc:' + n, a.k));
+      (a.fn || []).forEach(n => INDEX_ACTIONS.set('fn:' + n, a.k));
+      if (a.table) a.m.forEach(m => INDEX_ACTIONS.set(`table:${a.table}:${m}`, a.k));
+    }
+    function actionDe(url, methode) {
+      let u; try { u = new URL(url, location.href); } catch (e) { return null; }
+      if (!hotes.has(u.host)) return null;
+      const ep = pointDAcces(u.pathname);
+      if (!ep) return null;
+      if (ep.startsWith('table:')) return INDEX_ACTIONS.get(`${ep}:${methode}`) || null;
+      return INDEX_ACTIONS.get(ep) || null;
+    }
+    const dernierParAction = new Map();
+    function noterAction(k, via) {
+      const now = Date.now();
+      if (now - (dernierParAction.get(k) || 0) < 1500) return;   // boucles d'écriture : une action, pas dix
+      dernierParAction.set(k, now);
+      try { api_publique.track(k, { via }); } catch (e) { /* API pas encore prête : action ignorée */ }
+    }
+    if (typeof W.fetch === 'function' && !W.fetch.__odPulse) {
+      const fetchOrigine = W.fetch;
+      const enveloppe = function (entree, init) {
+        const promesse = fetchOrigine.apply(this, arguments);
+        try {
+          const url = typeof entree === 'string' ? entree : (entree && entree.url) || String(entree || '');
+          const methode = String((init && init.method) || (entree && typeof entree === 'object' && entree.method) || 'GET').toUpperCase();
+          if (methode !== 'GET' && methode !== 'HEAD' && methode !== 'OPTIONS') {
+            const k = actionDe(url, methode);
+            if (k) promesse.then(r => { if (r && r.ok && utilisateur()) noterAction(k, pointDAcces(new URL(url, location.href).pathname)); }).catch(() => {});
+          }
+        } catch (e) { /* l'observation ne doit jamais gêner la requête */ }
+        return promesse;
+      };
+      enveloppe.__odPulse = true;
+      W.fetch = enveloppe;
+      nettoyages.push(() => { if (W.fetch === enveloppe) W.fetch = fetchOrigine; });
+    }
+
     function viderApi() {
       for (const ep of Object.keys(api)) {
         const a = api[ep];
@@ -476,7 +560,12 @@ OD.define('pulse', {
         if (props && typeof props === 'object') Object.keys(props).slice(0, 8).forEach(k => {
           const v = props[k]; if (['string', 'number', 'boolean'].includes(typeof v)) p[k] = v;
         });
-        pousser({ type: 'metier', cible: String(nom).slice(0, 80), props: p });
+        let module = typeof props === 'object' && props && typeof props.module === 'string' ? props.module : null;
+        if (!module) {
+          const pers = OD.persistent || new Set();
+          module = (contexte().modules_affiches || []).find(k => !pers.has(k)) || null;
+        }
+        pousser({ type: 'metier', cible: String(nom).slice(0, 80), module, props: p });
       },
       sondageAffiche(oui) { sondageEnCours = !!oui; },
       envoyerMaintenant: () => envoyer(false),
