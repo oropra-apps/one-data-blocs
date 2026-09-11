@@ -8,6 +8,9 @@
 //  Si pas de session : on monte quand même (la page login s'affiche).
 //  Rapatrie la résolution utilisateur (ex-bloc « User connecté », supprimé).
 //  Expose window.oropraLoadUser (rappelé par auth.js après login).
+//  v26 : le client Supabase délègue ses requêtes à window.fetch AU MOMENT de
+//  l'appel (et non au fetch capturé à sa création) : pulse peut ainsi observer
+//  les écritures réussies et en déduire les actions métier, sans toucher aux modules.
 //  v25 : modules AMBIANTS (pulse, retours) — sans ancre WeWeb. Le socle leur
 //  pose une ancre invisible en fin de <body>, uniquement si le registre les
 //  sert au tenant (resolve_tenant_modules). Activer / couper chez un client =
@@ -95,7 +98,8 @@ const HOST_MAP = {
 
         const { createClient } = await import('https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm');
         sb = createClient(tenant.supabase_url, tenant.supabase_anon_key,
-                          { auth: { persistSession: true, autoRefreshToken: true } });
+                          { auth: { persistSession: true, autoRefreshToken: true },
+                            global: { fetch: (...args) => window.fetch(...args) } });
 
         if (carried?.access_token && carried?.refresh_token) {
             try { await sb.auth.setSession({ access_token: carried.access_token, refresh_token: carried.refresh_token }); }
