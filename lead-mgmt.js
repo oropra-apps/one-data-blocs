@@ -355,6 +355,60 @@ const LM_ROLE_CSS = `
   padding:11px 15px; border-radius:0 5px 5px 0; font-size:12px; color:#7a5a12; margin:16px 0 0; }
 `;
 
+
+const LM_REGLES_CSS = `
+/* --- Regles d'attribution : bouton du fil + modale ---------- */
+#lead-mgmt-root .v2-regles-b { background:var(--blue-bg); border:1px solid var(--border);
+  color:var(--blue); border-radius:8px; padding:5px 11px; font-size:11px; font-weight:700;
+  cursor:pointer; margin-left:auto; white-space:nowrap; }
+#lead-mgmt-root .v2-regles-b:hover { background:var(--blue); color:#fff; }
+#lead-mgmt-root .rg-ovl { position:fixed; inset:0; background:rgba(20,40,70,.42); z-index:900; }
+#lead-mgmt-root .rg-mod { position:fixed; z-index:901; top:50%; left:50%;
+  transform:translate(-50%,-50%); width:720px; max-width:94vw; max-height:90vh;
+  background:var(--card); border-radius:14px; box-shadow:0 24px 70px -18px rgba(20,40,70,.45);
+  display:flex; flex-direction:column; overflow:hidden; }
+#lead-mgmt-root .rg-h { padding:15px 20px; border-bottom:1px solid var(--border);
+  display:flex; align-items:flex-start; gap:12px; }
+#lead-mgmt-root .rg-h b { font-size:15px; }
+#lead-mgmt-root .rg-h .n { font-size:11px; color:var(--text-mut); margin-top:3px; line-height:1.5; }
+#lead-mgmt-root .rg-x { margin-left:auto; background:none; border:none; font-size:22px;
+  line-height:1; color:var(--text-mut); cursor:pointer; padding:0 4px; }
+#lead-mgmt-root .rg-b { padding:14px 20px 18px; overflow-y:auto; flex:1; }
+#lead-mgmt-root .rg-sec { margin-bottom:16px; }
+#lead-mgmt-root .rg-sec > .t { font-size:10px; text-transform:uppercase; letter-spacing:.07em;
+  color:var(--text-mut); font-weight:700; margin-bottom:7px; }
+#lead-mgmt-root .rg-opt { display:flex; align-items:flex-start; gap:9px; padding:8px 10px;
+  border:1px solid var(--border); border-radius:9px; margin-bottom:6px; cursor:pointer;
+  font-size:12px; line-height:1.5; }
+#lead-mgmt-root .rg-opt.on { border-color:var(--blue); background:var(--blue-bg); }
+#lead-mgmt-root .rg-opt input { margin-top:2px; flex:0 0 auto; }
+#lead-mgmt-root .rg-opt .d { display:block; color:var(--text-mut); font-size:11px; margin-top:2px; }
+#lead-mgmt-root .rg-num { display:flex; align-items:center; gap:8px; font-size:12px;
+  margin:8px 0 0 28px; color:var(--text-mut); }
+#lead-mgmt-root .rg-num input { width:64px; padding:4px 7px; border:1px solid var(--border);
+  border-radius:6px; font:inherit; font-size:12px; color:var(--text); }
+#lead-mgmt-root .rg-tab { width:100%; border-collapse:collapse; font-size:12px; }
+#lead-mgmt-root .rg-tab th { text-align:left; font-size:10px; text-transform:uppercase;
+  letter-spacing:.06em; color:var(--text-mut); padding:5px 8px; border-bottom:1px solid var(--border); }
+#lead-mgmt-root .rg-tab td { padding:6px 8px; border-bottom:1px solid var(--border); }
+#lead-mgmt-root .rg-tab tr.suiv td { background:var(--blue-bg); font-weight:700; }
+#lead-mgmt-root .rg-tab tr.exclu td { color:var(--text-mut); text-decoration:line-through; }
+#lead-mgmt-root .rg-tab .rg-ex { background:none; border:1px solid var(--border); border-radius:6px;
+  padding:2px 8px; font-size:11px; cursor:pointer; color:var(--text-mut); }
+#lead-mgmt-root .rg-tab .rg-ex:hover { border-color:var(--blue); color:var(--blue); }
+#lead-mgmt-root .rg-note { background:#fdf6e6; border-left:3px solid #b8851a; padding:9px 13px;
+  border-radius:0 5px 5px 0; font-size:11px; color:#7a5a12; line-height:1.55; margin-top:8px; }
+#lead-mgmt-root .rg-f { padding:11px 20px; border-top:1px solid var(--border); display:flex;
+  gap:9px; align-items:center; }
+#lead-mgmt-root .rg-f .msg { font-size:11px; color:var(--text-mut); flex:1; }
+#lead-mgmt-root .rg-f button { padding:8px 16px; border-radius:8px; font:inherit; font-size:12px;
+  font-weight:700; cursor:pointer; border:1px solid var(--border); background:var(--card);
+  color:var(--text); }
+#lead-mgmt-root .rg-f button.ok { background:var(--blue); border-color:var(--blue); color:#fff; }
+#lead-mgmt-root .rg-f button[disabled] { opacity:.5; cursor:default; }
+@media(max-width:620px){ #lead-mgmt-root .rg-mod { width:100%; max-height:96vh; } }
+`;
+
 const LM_V2_CSS = `
 /* --- Fil de périmètre ------------------------------------- */
 #lead-mgmt-root .v2-fil { display:flex; align-items:center; gap:6px; flex-wrap:wrap;
@@ -928,6 +982,7 @@ styleEl.textContent = `
 
 ${LM_SLA_CSS}
 ${LM_ROLE_CSS}
+${LM_REGLES_CSS}
 ${LM_V2_CSS}
 `;
 doc.head.appendChild(styleEl);
@@ -3546,7 +3601,253 @@ function v2Fil() {
   // Le sélecteur de dates est CELUI DU MODULE (state.period, calendrier
   // deux clics) : une seule mécanique de période dans toute la page.
   h += '<span class="v2-per">' + renderPeriodBar() + '</span>';
+  // Le parametrage vit LA, dans la barre de perimetre : le chef regle les
+  // regles a l endroit meme ou il en constate les effets, et le perimetre
+  // courant repond deja a « pour quel site ? ».
+  if (PEUT_PARAMETRER) {
+    h += '<button type="button" class="v2-regles-b" data-rgouvrir="1">'
+      + 'Règles d\'attribution</button>';
+  }
   h += '</div>';
+  return h;
+}
+
+
+// --- REGLES D'ATTRIBUTION -----------------------------------
+// Le tour de role n'est plus une regle du code : le management la pose,
+// pour SON perimetre. La modale montre en direct le classement des
+// vendeurs, pour que le chef voie EXACTEMENT ce que la machine deciderait.
+const PEUT_PARAMETRER = [ROLE_ADMIN, ROLE_DIRECTEUR, ROLE_CHEF_VENTES,
+  ROLE_DIR_PLAQUE, ROLE_DIR_MARQUE, ROLE_DIR_GROUPE].indexOf(userRole) >= 0;
+// La regle par defaut du groupe releve de la direction : un chef des ventes
+// regle SON site, pas celui des autres.
+const PEUT_PARAMETRER_DEFAUT = [ROLE_ADMIN, ROLE_DIRECTEUR,
+  ROLE_DIR_PLAQUE, ROLE_DIR_MARQUE, ROLE_DIR_GROUPE].indexOf(userRole) >= 0;
+
+const RG_REPARTITION = [
+  { k:'charge', l:'Au moins chargé',
+    d:'Le vendeur qui a le moins de leads en cours. Répartition la plus égale.' },
+  { k:'sequentiel', l:'Tour de rôle séquentiel',
+    d:'Chacun son tour, dans l\u2019ordre : le dernier servi repasse en queue.' },
+  { k:'conversion', l:'Au meilleur taux de conversion',
+    d:'Le plus performant d\u2019abord, la charge départageant ensuite.' }
+];
+
+// Quel SITE la modale parametre-t-elle ? Le fil d Ariane repond deja :
+// au niveau site on prend ce site, au niveau vendeur celui de son site,
+// au-dessus il n y a pas de site unique -> regle par defaut du groupe.
+function reglesSiteCourant() {
+  const v = state.v2 || {};
+  if (v.niveau === 'site') return Number(v.cle);
+  if (v.niveau === 'vendeur') {
+    const e = (dataEquipe || []).find(x => Number(x.id_user) === Number(v.cle));
+    if (e && e.id_site != null) return Number(e.id_site);
+  }
+  return null;
+}
+
+let rgEtat = null;   // { idSite, regles, vendeurs, msg, enCours, charge }
+
+function rgNomSite(idSite) {
+  if (idSite == null) return 'Tous les sites (règle par défaut)';
+  const s = (dataSites || []).find(x => Number(x.id_site) === Number(idSite));
+  return (s && s.nom_site) || ('Site ' + idSite);
+}
+
+async function ouvrirRegles() {
+  const idSite = reglesSiteCourant();
+  if (idSite == null && !PEUT_PARAMETRER_DEFAUT) {
+    // Un chef des ventes au-dessus de son site : on ne le laisse pas croire
+    // qu il va regler le groupe. On le renvoie a SON site.
+    rgEtat = { idSite:null, regles:null, vendeurs:[], charge:false, refus:true };
+    renderAll();
+    return;
+  }
+  rgEtat = { idSite, regles:null, vendeurs:[], msg:'', enCours:false, charge:true };
+  renderAll();
+  try {
+    const { data, error } = await sb.rpc('lead_regles', { p_id_site: idSite });
+    if (error) throw error;
+    rgEtat.regles = Array.isArray(data) ? data[0] : data;
+    if (idSite != null) {
+      const r2 = await sb.rpc('lead_classement_vendeurs', { p_id_site: idSite, p_vn_vo: null });
+      if (!r2.error) rgEtat.vendeurs = r2.data || [];
+    }
+  } catch (e) {
+    rgEtat.msg = 'Lecture impossible : ' + (e.message || e);
+  }
+  rgEtat.charge = false;
+  renderAll();
+}
+
+function fermerRegles() { rgEtat = null; renderAll(); }
+
+async function enregistrerRegles() {
+  if (!rgEtat || !rgEtat.regles) return;
+  rgEtat.enCours = true; rgEtat.msg = 'Enregistrement…'; renderAll();
+  const r = rgEtat.regles;
+  try {
+    const { error } = await sb.rpc('lead_regles_enregistrer', {
+      p_regles: {
+        id_site: rgEtat.idSite,
+        mode: r.mode,
+        priorite_cycle: !!r.priorite_cycle,
+        vendeur_habituel: !!r.vendeur_habituel,
+        vendeur_habituel_mois: Number(r.vendeur_habituel_mois) || 12,
+        repartition: r.repartition,
+        conversion_mois: Number(r.conversion_mois) || 6,
+        conversion_min_leads: Number(r.conversion_min_leads) || 20,
+        filtre_vn_vo: !!r.filtre_vn_vo
+      }
+    });
+    if (error) throw error;
+    rgEtat.msg = 'Règles enregistrées.';
+    // Le classement change avec la regle : on le relit pour que l ecran
+    // montre la nouvelle decision, pas l ancienne.
+    if (rgEtat.idSite != null) {
+      const r2 = await sb.rpc('lead_classement_vendeurs',
+        { p_id_site: rgEtat.idSite, p_vn_vo: null });
+      if (!r2.error) rgEtat.vendeurs = r2.data || [];
+    }
+  } catch (e) {
+    rgEtat.msg = 'Refus : ' + (e.message || e);
+  }
+  rgEtat.enCours = false; renderAll();
+}
+
+async function basculerExclusion(idUser, exclu) {
+  if (!rgEtat || rgEtat.idSite == null) return;
+  rgEtat.enCours = true; renderAll();
+  try {
+    const { error } = await sb.rpc('lead_exclusion_poser', {
+      p_id_site: rgEtat.idSite, p_id_user: Number(idUser),
+      p_motif: exclu ? null : 'Écarté depuis le lead management',
+      p_du: null, p_au: null, p_retirer: !!exclu
+    });
+    if (error) throw error;
+    const r2 = await sb.rpc('lead_classement_vendeurs',
+      { p_id_site: rgEtat.idSite, p_vn_vo: null });
+    if (!r2.error) rgEtat.vendeurs = r2.data || [];
+    rgEtat.msg = '';
+  } catch (e) {
+    rgEtat.msg = 'Refus : ' + (e.message || e);
+  }
+  rgEtat.enCours = false; renderAll();
+}
+
+function rgOpt(champ, valeur, libelle, desc, type) {
+  const r = rgEtat.regles, coche = (type === 'radio') ? (r[champ] === valeur) : !!r[champ];
+  return '<label class="rg-opt' + (coche ? ' on' : '') + '">'
+    + '<input type="' + (type || 'checkbox') + '"' + (coche ? ' checked' : '')
+    + ' data-rgc="' + champ + '" data-rgv="' + escapeHtml(String(valeur)) + '"'
+    + (type === 'radio' ? ' name="rg-' + champ + '"' : '') + '>'
+    + '<span><b>' + escapeHtml(libelle) + '</b>'
+    + (desc ? '<span class="d">' + escapeHtml(desc) + '</span>' : '') + '</span></label>';
+}
+
+function rgNum(champ, libelle, min, max) {
+  return '<div class="rg-num"><span>' + escapeHtml(libelle) + '</span>'
+    + '<input type="number" min="' + min + '" max="' + max + '" value="'
+    + (rgEtat.regles[champ] == null ? '' : rgEtat.regles[champ])
+    + '" data-rgn="' + champ + '"></div>';
+}
+
+function renderRegles() {
+  if (!rgEtat) return '';
+  let h = '<div class="rg-ovl" data-rgfermer="1"></div><div class="rg-mod">';
+
+  if (rgEtat.refus) {
+    return h + '<div class="rg-h"><div><b>Regles d attribution</b>'
+      + '<div class="n">Descendez jusqu\u2019à un site pour régler ses règles. '
+      + 'La règle valable pour tout le groupe relève de la direction.</div></div>'
+      + '<button type="button" class="rg-x" data-rgfermer="1">&times;</button></div>'
+      + '<div class="rg-f"><span class="msg"></span>'
+      + '<button type="button" data-rgfermer="1">Fermer</button></div></div>';
+  }
+
+  h += '<div class="rg-h"><div><b>Règles d\u2019attribution &middot; '
+    + escapeHtml(rgNomSite(rgEtat.idSite)) + '</b>'
+    + '<div class="n">Ces règles décident à quel vendeur part un lead entrant. '
+    + 'Elles ne touchent pas aux leads déjà attribués.</div></div>'
+    + '<button type="button" class="rg-x" data-rgfermer="1">&times;</button></div>'
+    + '<div class="rg-b">';
+
+  if (rgEtat.charge || !rgEtat.regles) {
+    h += '<div class="lm-empty" style="padding:30px;font-size:12px">'
+      + '<span class="lm-spin"></span>Lecture des règles…</div>';
+    return h + '</div><div class="rg-f"><span class="msg">'
+      + escapeHtml(rgEtat.msg || '') + '</span>'
+      + '<button type="button" data-rgfermer="1">Fermer</button></div></div>';
+  }
+
+  h += '<div class="rg-sec"><div class="t">Comment les leads sont attribués</div>'
+    + rgOpt('mode', 'auto', 'Automatiquement',
+        'Chaque lead part vers un vendeur dès son arrivée.', 'radio')
+    + rgOpt('mode', 'manuel', 'À la main',
+        'Les leads arrivent dans « À attribuer » et vous les répartissez vous-même.', 'radio')
+    + '</div>';
+
+  h += '<div class="rg-sec"><div class="t">À qui en priorité</div>'
+    + rgOpt('priorite_cycle', true, 'Au vendeur qui suit déjà le client',
+        'Si un dossier est ouvert pour ce client sur ce site, le lead revient à celui qui le suit.')
+    + rgOpt('vendeur_habituel', true, 'A son vendeur habituel',
+        'Celui qui a eu un contact sortant avec ce client sur la période ci-dessous.')
+    + rgNum('vendeur_habituel_mois', 'Sur les', 1, 60) + '</div>';
+
+  h += '<div class="rg-sec"><div class="t">Sinon, comment répartir</div>'
+    + RG_REPARTITION.map(o => rgOpt('repartition', o.k, o.l, o.d, 'radio')).join('');
+  if (rgEtat.regles.repartition === 'conversion') {
+    h += rgNum('conversion_mois', 'Conversion mesurée sur les derniers mois :', 1, 36)
+      + rgNum('conversion_min_leads', 'À partir de combien de leads :', 1, 500)
+      + '<div class="rg-note">Sous ce nombre de leads, le taux d\u2019un vendeur n\u2019est pas '
+      + 'calculé et il est classé à la charge : un vendeur à 2 leads dont 2 vendus '
+      + 'afficherait 100 % et prendrait tout le flux. La charge départage toujours '
+      + 'en second, pour qu\u2019un seul vendeur ne sature pas.</div>';
+  }
+  h += rgOpt('filtre_vn_vo', true, 'Respecter la spécialité VN / VO',
+        'Un lead sur un véhicule d\u2019occasion ne part qu\u2019à un vendeur VO.')
+    + '</div>';
+
+  if (rgEtat.idSite != null) {
+    h += '<div class="rg-sec"><div class="t">Qui recevrait le prochain lead</div>';
+    if (!rgEtat.vendeurs.length) {
+      h += '<div class="lm-empty" style="padding:18px;font-size:12px">Aucun vendeur '
+        + 'rattaché à ce site. Les leads resteront visibles, sans destinataire.</div>';
+    } else {
+      h += '<table class="rg-tab"><tr><th>Vendeur</th><th>Leads en cours</th>'
+        + '<th>Conversion</th><th></th></tr>';
+      let premier = true;
+      rgEtat.vendeurs.forEach(v => {
+        const ex = !!v.exclu, suiv = !ex && premier;
+        if (!ex) premier = false;
+        h += '<tr class="' + (ex ? 'exclu' : (suiv ? 'suiv' : '')) + '">'
+          + '<td>' + escapeHtml(v.nom || ('Vendeur ' + v.id_user))
+          + (suiv ? ' &larr; le suivant' : '') + '</td>'
+          + '<td>' + (v.charge == null ? '—' : v.charge) + '</td>'
+          + '<td>' + (v.conversion == null
+              ? '<span style="color:var(--text-mut)">pas assez de leads</span>'
+              : v.conversion + ' %') + '</td>'
+          + '<td style="text-align:right"><button type="button" class="rg-ex" '
+          + 'data-rgex="' + v.id_user + '" data-rgexo="' + (ex ? '1' : '0') + '">'
+          + (ex ? 'Réintégrer' : 'Écarter') + '</button></td></tr>';
+      });
+      h += '</table><div class="rg-note">Un vendeur écarté ne reçoit plus de nouveau '
+        + 'lead, mais conserve ceux qu\u2019il a déjà. À utiliser pour un congé ou une '
+        + 'formation.</div>';
+    }
+    h += '</div>';
+  }
+
+  h += '<div class="rg-sec"><div class="t">Non modifiable</div>'
+    + '<div class="rg-note">Quand un même client redépose une demande sur le même site '
+    + 'en moins de 24 heures, elle repart au vendeur qui a déjà la première. Ce n\u2019est '
+    + 'pas une politique commerciale mais une protection : sans elle, deux vendeurs de '
+    + 'la même concession rappellent le même client.</div></div>';
+
+  h += '</div><div class="rg-f"><span class="msg">' + escapeHtml(rgEtat.msg || '') + '</span>'
+    + '<button type="button" data-rgfermer="1">Fermer</button>'
+    + '<button type="button" class="ok" data-rgok="1"'
+    + (rgEtat.enCours ? ' disabled' : '') + '>Enregistrer</button></div></div>';
   return h;
 }
 
@@ -4255,6 +4556,7 @@ function renderAll() {
   if (V.vue === 'campagnes')    html += v2Campagnes() + v2Panneau();
   else if (V.vue === 'rapport') html += v2Rapport() + v2Panneau();
   else                          html += v2Mur() + v2Panneau();
+  html += renderRegles();
 
   root.innerHTML = html;
   const __tBind = performance.now();
@@ -4352,6 +4654,39 @@ async function selectVendeurCible(idUser) {
 
 // --- 15. Bindings -------------------------------------------
 function bindEvents() {
+  // --- Regles d attribution : ouverture, saisie, enregistrement --
+  root.querySelectorAll('[data-rgouvrir]').forEach(el => {
+    el.addEventListener('click', ev => { ev.stopPropagation(); ouvrirRegles(); });
+  });
+  root.querySelectorAll('[data-rgfermer]').forEach(el => {
+    el.addEventListener('click', () => fermerRegles());
+  });
+  // La saisie ne part PAS en base a chaque frappe : elle alimente l etat
+  // local, et « Enregistrer » fait le seul appel. Sinon un clic sur une
+  // option enverrait une regle a moitie choisie.
+  root.querySelectorAll('[data-rgc]').forEach(el => {
+    el.addEventListener('change', () => {
+      if (!rgEtat || !rgEtat.regles) return;
+      const c = el.getAttribute('data-rgc'), v = el.getAttribute('data-rgv');
+      rgEtat.regles[c] = (el.type === 'radio') ? v : el.checked;
+      rgEtat.msg = ''; renderAll();
+    });
+  });
+  root.querySelectorAll('[data-rgn]').forEach(el => {
+    el.addEventListener('change', () => {
+      if (!rgEtat || !rgEtat.regles) return;
+      rgEtat.regles[el.getAttribute('data-rgn')] = Number(el.value);
+      rgEtat.msg = '';
+    });
+  });
+  root.querySelectorAll('[data-rgex]').forEach(el => {
+    el.addEventListener('click', () => basculerExclusion(
+      el.getAttribute('data-rgex'), el.getAttribute('data-rgexo') === '1'));
+  });
+  root.querySelectorAll('[data-rgok]').forEach(el => {
+    el.addEventListener('click', () => enregistrerRegles());
+  });
+
   // --- Refonte v2 : fil de périmètre, bascule, descente ---------
   root.querySelectorAll('.v2-vues button[data-v2vue]').forEach(el => {
     el.addEventListener('click', () => {
