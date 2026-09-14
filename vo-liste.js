@@ -256,36 +256,33 @@ OD.define('vo-liste', {
       + '.vf-photo-item img{width:100%;height:100%;object-fit:cover;display:block}'
       // APV
       + '.vf-apv-empty{padding:40px;text-align:center;color:#9bb3d1;font-size:13px;font-weight:600}'
-      // Trois reperes, pas trois cartes identiques : la valeur porte, le
-      // libelle et la note restent discrets.
       + '.vf-apv-kpis{display:grid;grid-template-columns:repeat(3,1fr);gap:1px;background:#e8eef7;border:1px solid #e8eef7;border-radius:10px;overflow:hidden;margin-bottom:20px}'
       + '.vf-apv-kpi{background:#fff;padding:13px 15px}'
       + '.vf-apv-kpi-lbl{font-size:11.5px;color:#8ba3c0;font-weight:600;margin-bottom:5px}'
-      + '.vf-apv-kpi-val{font-size:21px;font-weight:800;line-height:1.1;font-variant-numeric:tabular-nums}'
+      + '.vf-apv-kpi-val{font-size:21px;font-weight:800;line-height:1.1;color:#1F4A85;font-variant-numeric:tabular-nums}'
       + '.vf-apv-kpi-note{font-size:11.5px;color:#a8bcd4;margin-top:3px}'
-      // En-tete sobre plutot qu'un bandeau bleu plein : le tableau se lit
-      // mieux quand rien ne rivalise avec les montants.
       + '.vf-apv-table{width:100%;border-collapse:collapse;font-size:12.5px;table-layout:fixed}'
       + '.vf-apv-table th{color:#54678a;font-weight:600;padding:0 10px 7px;text-align:left;font-size:11.5px;border-bottom:1.5px solid #d7e2f0}'
       + '.vf-apv-table td{padding:9px 10px;border-bottom:1px solid #f0f4fa;vertical-align:top}'
       + '.vf-apv-table tbody tr:hover td{background:#f9fbfe}'
-      + '.vf-apv-table .c-date{width:84px;white-space:nowrap;color:#54678a;font-variant-numeric:tabular-nums}'
+      + '.vf-apv-table .c-date{width:82px;white-space:nowrap;color:#54678a;font-variant-numeric:tabular-nums}'
       + '.vf-apv-table .c-ref{width:150px}'
-      + '.vf-apv-table .c-num{width:96px;text-align:right;color:#54678a;font-variant-numeric:tabular-nums;white-space:nowrap}'
+      + '.vf-apv-table .c-num{width:98px;text-align:right;color:#54678a;font-variant-numeric:tabular-nums;white-space:nowrap}'
       + '.vf-apv-table .c-tot{color:#1F4A85;font-weight:700}'
-      + '.vf-apv-table .c-desc{color:#2e4260;line-height:1.45;min-height:2px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}'
+      + '.vf-apv-table .c-desc{color:#2e4260}'
       + '.vf-apv-or{display:block;font-weight:600;color:#2e4260;font-variant-numeric:tabular-nums}'
       + '.vf-apv-fact{display:block;font-size:11px;color:#8ba3c0;font-variant-numeric:tabular-nums;margin-top:1px}'
       + '.vf-apv-nonfact{display:block;font-size:11px;color:#c08b5a;margin-top:1px}'
-      + '.vf-apv-cat{display:inline-block;margin-top:3px;background:#eef4fc;color:#2a5ea9;font-size:10px;font-weight:700;padding:1px 6px;border-radius:999px}'
       + '.vf-apv-zero{color:#c8d5e5}'
-      // Separateur d'annee : rend la chronologie lisible sans ajouter de
-      // chrome, et donne le cumul annuel au passage.
+      + '.vf-apv-seul{color:#2e4260}'
+      // Prestations repliees : une ligne sobre, la liste complete au clic.
+      + '.vf-apv-det summary{cursor:pointer;color:#2a5ea9;font-weight:600;list-style:none;display:inline-flex;align-items:center;gap:5px}'
+      + '.vf-apv-det summary::-webkit-details-marker{display:none}'
+      + '.vf-apv-det summary::before{content:"";width:0;height:0;border-left:4px solid currentColor;border-top:3.5px solid transparent;border-bottom:3.5px solid transparent;transition:transform .12s}'
+      + '.vf-apv-det[open] summary::before{transform:rotate(90deg)}'
+      + '.vf-apv-det ul{margin:7px 0 2px;padding:0;list-style:none;display:flex;flex-wrap:wrap;gap:4px}'
+      + '.vf-apv-det li{background:#f2f6fc;color:#54678a;font-size:11.5px;padding:2px 8px;border-radius:5px}'
       + '.vf-apv-annee td{background:#f4f8fd;color:#1F4A85;font-weight:700;font-size:11.5px;padding:5px 10px;border-bottom:1px solid #e3ecf7}'
-      // La seule audace du tableau : une barre fine qui dit, sans chiffre,
-      // si l'intervention etait surtout de la main-d'oeuvre ou des pieces.
-      + '.vf-apv-bar{display:block;height:3px;border-radius:2px;background:#dfe9f5;margin-top:5px;overflow:hidden}'
-      + '.vf-apv-bar i{display:block;height:100%;background:#53bda7}'
       + '.vf-apv-avoir td{background:#fdf6f4}.vf-apv-avoir .c-tot{color:#b05a3c}'
       + '.vf-apv-table tfoot td{padding:11px 10px 0;border-top:1.5px solid #d7e2f0;font-weight:700;color:#1F4A85;font-size:13px;font-variant-numeric:tabular-nums}'
       + '.vf-apv-table tfoot td:first-child{text-align:left;color:#54678a;font-weight:600}'
@@ -1498,22 +1495,18 @@ OD.define('vo-liste', {
     var nbFact = lignes.length;
     var derniere = lignes[0] && lignes[0].DT_FAC ? lignes[0].DT_FAC : null;
 
-    // Trois reperes qui repondent aux questions d'un vendeur devant un VO :
-    // combien a coute ce vehicule, a quel rythme, et quand est-il passe la
-    // derniere fois. « Interventions par an » n'en etait pas un : sur six
-    // factures reparties sur quatre ans, le chiffre ne dit rien.
     h += '<div class="vf-apv-kpis">'
-      + apvKpi('Total facturé HT', eur(totalCA), '#1F4A85', nbFact + (nbFact > 1 ? ' interventions' : ' intervention'))
-      + apvKpi('Main-d\'œuvre', eur(totalMO), '#2a5ea9',
+      + apvKpi('Total facturé HT', eur(totalCA), nbFact + (nbFact > 1 ? ' interventions' : ' intervention'))
+      + apvKpi('Main-d\'œuvre', eur(totalMO),
                totalCA ? Math.round(100 * totalMO / totalCA) + ' % du total' : '')
-      + apvKpi('Dernier passage', derniere ? fmtDateLong(derniere) : '—', '#53bda7',
+      + apvKpi('Dernier passage', derniere ? fmtDateLong(derniere) : '—',
                derniere ? ecartDepuis(derniere) : '')
       + '</div>';
 
     h += '<table class="vf-apv-table"><thead><tr>'
       + '<th class="c-date">Date</th>'
-      + '<th class="c-ref">Références</th>'
-      + '<th>Intervention</th>'
+      + '<th class="c-ref">Ordre de réparation</th>'
+      + '<th>Prestations</th>'
       + '<th class="c-num">Main-d\'œuvre</th>'
       + '<th class="c-num">Pièces</th>'
       + '<th class="c-num">Total HT</th>'
@@ -1532,33 +1525,27 @@ OD.define('vo-liste', {
       }
 
       var mo = num(r.MT_TOT_MO) || 0, pi = num(r.MT_TOT_PIECE_INT) || 0;
-      var tot = mo + pi;
-      var partMO = tot ? Math.round(100 * mo / tot) : 0;
-      var desc = r.LIB_DESC || '';
       var avoir = (num(r.MT_TOT_FACT_HT) || 0) < 0;
+
+      // Le DMS ne livre pas d'intitule d'intervention : LIB_DESC est la
+      // liste des pieces et des codes de main-d'oeuvre, mis bout a bout.
+      // L'etaler en clair remplissait l'ecran sans rien apprendre. On
+      // annonce donc ce qu'il y a dedans, et on le deplie au clic.
+      var items = String(r.LIB_DESC || '').split(' · ')
+        .map(function (x) { return x.trim(); })
+        .filter(function (x) { return x.length; });
 
       h += '<tr' + (avoir ? ' class="vf-apv-avoir"' : '') + '>'
         + '<td class="c-date">' + esc(fmtDateFR(r.DT_FAC)) + '</td>'
         + '<td class="c-ref">'
-          + '<span class="vf-apv-or">OR ' + esc(r.NUM_OR || '—') + '</span>'
-          + (notEmpty(r.NUM_FACT_DMS) ? '<span class="vf-apv-fact">' + esc(r.NUM_FACT_DMS) + '</span>'
+          + '<span class="vf-apv-or">' + esc(r.NUM_OR || '—') + '</span>'
+          + (notEmpty(r.NUM_FACT_DMS) ? '<span class="vf-apv-fact">facture ' + esc(r.NUM_FACT_DMS) + '</span>'
                                       : '<span class="vf-apv-nonfact">non facturé</span>')
-          + (r.CAT_FACT === 'MAGASIN' ? '<span class="vf-apv-cat">magasin</span>' : '')
         + '</td>'
-        // La description est la seule colonne qui porte du sens : on la
-        // laisse respirer sur deux lignes plutot que de la couper net.
-        + '<td class="c-desc" title="' + esc(desc) + '">' + (notEmpty(desc) ? esc(desc) : '—') + '</td>'
+        + '<td class="c-desc">' + apvPrestations(items) + '</td>'
         + '<td class="c-num">' + (mo ? eur(mo) : '<span class="vf-apv-zero">—</span>') + '</td>'
         + '<td class="c-num">' + (pi ? eur(pi) : '<span class="vf-apv-zero">—</span>') + '</td>'
-        + '<td class="c-num c-tot">' + eur(r.MT_TOT_FACT_HT)
-          // Une barre fine sous le total dit d'un coup d'oeil si
-          // l'intervention etait de la main-d'oeuvre ou des pieces.
-          // La barre ne s'affiche que si l'intervention melange les deux
-          // postes : sur une facture 100 % pieces, une barre vide
-          // ressemblerait a un defaut d'affichage.
-          + ((mo && pi) ? '<span class="vf-apv-bar" title="' + partMO + ' % de main-d\'œuvre, '
-                 + (100 - partMO) + ' % de pièces"><i style="width:' + partMO + '%"></i></span>' : '')
-        + '</td>'
+        + '<td class="c-num c-tot">' + eur(r.MT_TOT_FACT_HT) + '</td>'
         + '</tr>';
     });
 
@@ -1569,6 +1556,17 @@ OD.define('vo-liste', {
       + '<td class="c-num c-tot">' + eur(totalCA) + '</td>'
       + '</tr></tfoot></table>';
     return h;
+  }
+
+  // Une ligne sobre repliee, la liste complete au clic. <details> est natif :
+  // pas de gestionnaire d'evenement a recabler apres chaque rendu.
+  function apvPrestations(items) {
+    if (!items.length) return '<span class="vf-apv-zero">—</span>';
+    if (items.length === 1) return '<span class="vf-apv-seul">' + esc(items[0]) + '</span>';
+    return '<details class="vf-apv-det">'
+      + '<summary>' + items.length + ' prestations</summary>'
+      + '<ul>' + items.map(function (x) { return '<li>' + esc(x) + '</li>'; }).join('') + '</ul>'
+      + '</details>';
   }
 
   // Un repere lisible : « il y a 5 jours », « il y a 8 mois ».
@@ -1593,10 +1591,10 @@ OD.define('vo-liste', {
     return Number(p[2]) + ' ' + MOIS_FR[Number(p[1]) - 1] + ' ' + p[0];
   }
 
-  function apvKpi(lbl, val, color, note) {
+  function apvKpi(lbl, val, note) {
     return '<div class="vf-apv-kpi">'
       + '<div class="vf-apv-kpi-lbl">' + esc(lbl) + '</div>'
-      + '<div class="vf-apv-kpi-val" style="color:' + color + '">' + val + '</div>'
+      + '<div class="vf-apv-kpi-val">' + val + '</div>'
       + (note ? '<div class="vf-apv-kpi-note">' + esc(note) + '</div>' : '')
       + '</div>';
   }
@@ -2647,22 +2645,18 @@ OD.define('vo-liste', {
     var nbFact = lignes.length;
     var derniere = lignes[0] && lignes[0].DT_FAC ? lignes[0].DT_FAC : null;
 
-    // Trois reperes qui repondent aux questions d'un vendeur devant un VO :
-    // combien a coute ce vehicule, a quel rythme, et quand est-il passe la
-    // derniere fois. « Interventions par an » n'en etait pas un : sur six
-    // factures reparties sur quatre ans, le chiffre ne dit rien.
     h += '<div class="vf-apv-kpis">'
-      + apvKpi2('Total facturé HT', eur(totalCA), '#1F4A85', nbFact + (nbFact > 1 ? ' interventions' : ' intervention'))
-      + apvKpi2('Main-d\'œuvre', eur(totalMO), '#2a5ea9',
+      + apvKpi2('Total facturé HT', eur(totalCA), nbFact + (nbFact > 1 ? ' interventions' : ' intervention'))
+      + apvKpi2('Main-d\'œuvre', eur(totalMO),
                totalCA ? Math.round(100 * totalMO / totalCA) + ' % du total' : '')
-      + apvKpi2('Dernier passage', derniere ? fmtDateLong2(derniere) : '—', '#53bda7',
+      + apvKpi2('Dernier passage', derniere ? fmtDateLong2(derniere) : '—',
                derniere ? ecartDepuis2(derniere) : '')
       + '</div>';
 
     h += '<table class="vf-apv-table"><thead><tr>'
       + '<th class="c-date">Date</th>'
-      + '<th class="c-ref">Références</th>'
-      + '<th>Intervention</th>'
+      + '<th class="c-ref">Ordre de réparation</th>'
+      + '<th>Prestations</th>'
       + '<th class="c-num">Main-d\'œuvre</th>'
       + '<th class="c-num">Pièces</th>'
       + '<th class="c-num">Total HT</th>'
@@ -2681,33 +2675,27 @@ OD.define('vo-liste', {
       }
 
       var mo = num(r.MT_TOT_MO) || 0, pi = num(r.MT_TOT_PIECE_INT) || 0;
-      var tot = mo + pi;
-      var partMO = tot ? Math.round(100 * mo / tot) : 0;
-      var desc = r.LIB_DESC || '';
       var avoir = (num(r.MT_TOT_FACT_HT) || 0) < 0;
+
+      // Le DMS ne livre pas d'intitule d'intervention : LIB_DESC est la
+      // liste des pieces et des codes de main-d'oeuvre, mis bout a bout.
+      // L'etaler en clair remplissait l'ecran sans rien apprendre. On
+      // annonce donc ce qu'il y a dedans, et on le deplie au clic.
+      var items = String(r.LIB_DESC || '').split(' · ')
+        .map(function (x) { return x.trim(); })
+        .filter(function (x) { return x.length; });
 
       h += '<tr' + (avoir ? ' class="vf-apv-avoir"' : '') + '>'
         + '<td class="c-date">' + esc(fmtDateFR(r.DT_FAC)) + '</td>'
         + '<td class="c-ref">'
-          + '<span class="vf-apv-or">OR ' + esc(r.NUM_OR || '—') + '</span>'
-          + (notEmpty(r.NUM_FACT_DMS) ? '<span class="vf-apv-fact">' + esc(r.NUM_FACT_DMS) + '</span>'
+          + '<span class="vf-apv-or">' + esc(r.NUM_OR || '—') + '</span>'
+          + (notEmpty(r.NUM_FACT_DMS) ? '<span class="vf-apv-fact">facture ' + esc(r.NUM_FACT_DMS) + '</span>'
                                       : '<span class="vf-apv-nonfact">non facturé</span>')
-          + (r.CAT_FACT === 'MAGASIN' ? '<span class="vf-apv-cat">magasin</span>' : '')
         + '</td>'
-        // La description est la seule colonne qui porte du sens : on la
-        // laisse respirer sur deux lignes plutot que de la couper net.
-        + '<td class="c-desc" title="' + esc(desc) + '">' + (notEmpty(desc) ? esc(desc) : '—') + '</td>'
+        + '<td class="c-desc">' + apvPrestations2(items) + '</td>'
         + '<td class="c-num">' + (mo ? eur(mo) : '<span class="vf-apv-zero">—</span>') + '</td>'
         + '<td class="c-num">' + (pi ? eur(pi) : '<span class="vf-apv-zero">—</span>') + '</td>'
-        + '<td class="c-num c-tot">' + eur(r.MT_TOT_FACT_HT)
-          // Une barre fine sous le total dit d'un coup d'oeil si
-          // l'intervention etait de la main-d'oeuvre ou des pieces.
-          // La barre ne s'affiche que si l'intervention melange les deux
-          // postes : sur une facture 100 % pieces, une barre vide
-          // ressemblerait a un defaut d'affichage.
-          + ((mo && pi) ? '<span class="vf-apv-bar" title="' + partMO + ' % de main-d\'œuvre, '
-                 + (100 - partMO) + ' % de pièces"><i style="width:' + partMO + '%"></i></span>' : '')
-        + '</td>'
+        + '<td class="c-num c-tot">' + eur(r.MT_TOT_FACT_HT) + '</td>'
         + '</tr>';
     });
 
@@ -2718,6 +2706,17 @@ OD.define('vo-liste', {
       + '<td class="c-num c-tot">' + eur(totalCA) + '</td>'
       + '</tr></tfoot></table>';
     return h;
+  }
+
+  // Une ligne sobre repliee, la liste complete au clic. <details> est natif :
+  // pas de gestionnaire d'evenement a recabler apres chaque rendu.
+  function apvPrestations2(items) {
+    if (!items.length) return '<span class="vf-apv-zero">—</span>';
+    if (items.length === 1) return '<span class="vf-apv-seul">' + esc(items[0]) + '</span>';
+    return '<details class="vf-apv-det">'
+      + '<summary>' + items.length + ' prestations</summary>'
+      + '<ul>' + items.map(function (x) { return '<li>' + esc(x) + '</li>'; }).join('') + '</ul>'
+      + '</details>';
   }
 
   // Un repere lisible : « il y a 5 jours », « il y a 8 mois ».
@@ -2742,10 +2741,10 @@ OD.define('vo-liste', {
     return Number(p[2]) + ' ' + MOIS_FR2[Number(p[1]) - 1] + ' ' + p[0];
   }
 
-  function apvKpi2(lbl, val, color, note) {
+  function apvKpi2(lbl, val, note) {
     return '<div class="vf-apv-kpi">'
       + '<div class="vf-apv-kpi-lbl">' + esc(lbl) + '</div>'
-      + '<div class="vf-apv-kpi-val" style="color:' + color + '">' + val + '</div>'
+      + '<div class="vf-apv-kpi-val">' + val + '</div>'
       + (note ? '<div class="vf-apv-kpi-note">' + esc(note) + '</div>' : '')
       + '</div>';
   }
