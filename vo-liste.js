@@ -255,13 +255,41 @@ OD.define('vo-liste', {
       + '.vf-photo-item:hover{transform:scale(1.02)}'
       + '.vf-photo-item img{width:100%;height:100%;object-fit:cover;display:block}'
       // APV
-      + '.vf-apv-empty{padding:30px;text-align:center;color:#9bb3d1;font-size:13px;font-weight:600}'
-      + '.vf-apv-table{width:100%;border-collapse:collapse;font-size:12px}'
-      + '.vf-apv-table th{background:#2a5ea9;color:#fff;font-weight:700;padding:8px 10px;text-align:left;font-size:10px;text-transform:uppercase;letter-spacing:.04em}'
-      + '.vf-apv-table th:first-child{border-radius:8px 0 0 8px}.vf-apv-table th:last-child{border-radius:0 8px 8px 0}'
-      + '.vf-apv-table td{padding:8px 10px;border-bottom:.5px solid #eef2f8}'
-      + '.vf-apv-table tbody tr:hover td{background:#f7f9fc}'
-      + '.vf-apv-total{margin-top:12px;text-align:right;font-size:13px;font-weight:700;color:#1F4A85}'
+      + '.vf-apv-empty{padding:40px;text-align:center;color:#9bb3d1;font-size:13px;font-weight:600}'
+      // Trois reperes, pas trois cartes identiques : la valeur porte, le
+      // libelle et la note restent discrets.
+      + '.vf-apv-kpis{display:grid;grid-template-columns:repeat(3,1fr);gap:1px;background:#e8eef7;border:1px solid #e8eef7;border-radius:10px;overflow:hidden;margin-bottom:20px}'
+      + '.vf-apv-kpi{background:#fff;padding:13px 15px}'
+      + '.vf-apv-kpi-lbl{font-size:11.5px;color:#8ba3c0;font-weight:600;margin-bottom:5px}'
+      + '.vf-apv-kpi-val{font-size:21px;font-weight:800;line-height:1.1;font-variant-numeric:tabular-nums}'
+      + '.vf-apv-kpi-note{font-size:11.5px;color:#a8bcd4;margin-top:3px}'
+      // En-tete sobre plutot qu'un bandeau bleu plein : le tableau se lit
+      // mieux quand rien ne rivalise avec les montants.
+      + '.vf-apv-table{width:100%;border-collapse:collapse;font-size:12.5px;table-layout:fixed}'
+      + '.vf-apv-table th{color:#54678a;font-weight:600;padding:0 10px 7px;text-align:left;font-size:11.5px;border-bottom:1.5px solid #d7e2f0}'
+      + '.vf-apv-table td{padding:9px 10px;border-bottom:1px solid #f0f4fa;vertical-align:top}'
+      + '.vf-apv-table tbody tr:hover td{background:#f9fbfe}'
+      + '.vf-apv-table .c-date{width:84px;white-space:nowrap;color:#54678a;font-variant-numeric:tabular-nums}'
+      + '.vf-apv-table .c-ref{width:150px}'
+      + '.vf-apv-table .c-num{width:96px;text-align:right;color:#54678a;font-variant-numeric:tabular-nums;white-space:nowrap}'
+      + '.vf-apv-table .c-tot{color:#1F4A85;font-weight:700}'
+      + '.vf-apv-table .c-desc{color:#2e4260;line-height:1.45;min-height:2px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}'
+      + '.vf-apv-or{display:block;font-weight:600;color:#2e4260;font-variant-numeric:tabular-nums}'
+      + '.vf-apv-fact{display:block;font-size:11px;color:#8ba3c0;font-variant-numeric:tabular-nums;margin-top:1px}'
+      + '.vf-apv-nonfact{display:block;font-size:11px;color:#c08b5a;margin-top:1px}'
+      + '.vf-apv-cat{display:inline-block;margin-top:3px;background:#eef4fc;color:#2a5ea9;font-size:10px;font-weight:700;padding:1px 6px;border-radius:999px}'
+      + '.vf-apv-zero{color:#c8d5e5}'
+      // Separateur d'annee : rend la chronologie lisible sans ajouter de
+      // chrome, et donne le cumul annuel au passage.
+      + '.vf-apv-annee td{background:#f4f8fd;color:#1F4A85;font-weight:700;font-size:11.5px;padding:5px 10px;border-bottom:1px solid #e3ecf7}'
+      // La seule audace du tableau : une barre fine qui dit, sans chiffre,
+      // si l'intervention etait surtout de la main-d'oeuvre ou des pieces.
+      + '.vf-apv-bar{display:block;height:3px;border-radius:2px;background:#dfe9f5;margin-top:5px;overflow:hidden}'
+      + '.vf-apv-bar i{display:block;height:100%;background:#53bda7}'
+      + '.vf-apv-avoir td{background:#fdf6f4}.vf-apv-avoir .c-tot{color:#b05a3c}'
+      + '.vf-apv-table tfoot td{padding:11px 10px 0;border-top:1.5px solid #d7e2f0;font-weight:700;color:#1F4A85;font-size:13px;font-variant-numeric:tabular-nums}'
+      + '.vf-apv-table tfoot td:first-child{text-align:left;color:#54678a;font-weight:600}'
+      + '@media(max-width:700px){.vf-apv-kpis{grid-template-columns:1fr}.vf-apv-table .c-ref{width:120px}.vf-apv-table .c-num{width:78px}}'
       + '@media(max-width:860px){.vf-fiche{grid-template-columns:1fr}.vf-sections{grid-template-columns:1fr 1fr}}'
       + '@media(max-width:600px){.vf-sections{grid-template-columns:1fr}.vf-head{padding:12px 48px 10px 14px}.vf-head-top{flex-wrap:wrap;gap:8px}.vf-head-right{gap:6px;max-width:100%}.vf-title{font-size:16px;line-height:1.2}.vf-sub{font-size:11px}.vf-price{font-size:15px}.vf-status{font-size:10px;padding:3px 8px}.vf-like{font-size:11px;padding:5px 11px}.vf-body{padding:12px 14px}.vf-tabs{padding:0 14px}.vf-tab{padding:9px 12px;font-size:12px}.vf-chips{gap:6px;margin-top:8px}.vf-chip{padding:5px 9px;font-size:11px}}'
       + '</style>';
@@ -1452,54 +1480,124 @@ OD.define('vo-liste', {
   }
 
   function renderApvTab() {
-    if (ficheState.apvLoading) return '<div style="padding:40px;text-align:center;color:#9bb3d1;font-size:13px;font-weight:600">Chargement des factures…</div>';
-    if (!ficheState.apv) { if (!ficheState.apvLoading) loadApv(ficheState.vin); return '<div style="padding:40px;text-align:center;color:#9bb3d1;font-size:13px;font-weight:600">Chargement des factures…</div>'; }
+    if (ficheState.apvLoading) return '<div class="vf-apv-empty">Chargement des factures…</div>';
+    if (!ficheState.apv) { if (!ficheState.apvLoading) loadApv(ficheState.vin); return '<div class="vf-apv-empty">Chargement des factures…</div>'; }
 
-    var h = '<div style="font-size:16px;font-weight:800;color:#1F4A85;margin-bottom:4px">Historique factures APV</div>'
-      + '<div style="font-size:13px;color:#9bb3d1;margin-bottom:16px">Suivi des interventions atelier, montants et dates clés du véhicule</div>';
+    var h = '<div style="font-size:16px;font-weight:800;color:#1F4A85;margin-bottom:4px">Historique atelier</div>'
+      + '<div style="font-size:13px;color:#9bb3d1;margin-bottom:16px">Interventions facturées sur ce véhicule, de la plus récente à la plus ancienne</div>';
 
-    if (!ficheState.apv.length) return h + '<div style="padding:30px;text-align:center;color:#9bb3d1;font-weight:600">Aucune facture APV pour ce véhicule.</div>';
+    if (!ficheState.apv.length) return h + '<div class="vf-apv-empty">Aucune intervention facturée sur ce véhicule.</div>';
 
-    // KPIs synthèse
-    var totalCA = ficheState.apv.reduce(function (s, r) { return s + num(r.MT_TOT_FACT_HT); }, 0);
-    var nbFact = ficheState.apv.length;
-    var caMoyen = nbFact ? Math.round(totalCA / nbFact) : 0;
-    // interventions par an : groupe par année
-    var years = {}; ficheState.apv.forEach(function (r) { var y = r.DT_FAC ? String(r.DT_FAC).slice(0, 4) : '?'; years[y] = (years[y] || 0) + 1; });
-    var nbYears = Object.keys(years).filter(function (y) { return y !== '?'; }).length || 1;
-    var intParAn = Math.round(nbFact / nbYears);
+    var lignes = ficheState.apv.slice().sort(function (a, b) {
+      return String(b.DT_FAC || '').localeCompare(String(a.DT_FAC || ''));
+    });
 
-    h += '<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:18px">';
-    h += apvKpi('Total CA HT', eur(totalCA), '#2a5ea9');
-    h += apvKpi('CA moyen / facture', eur(caMoyen), '#53bda7');
-    h += apvKpi('Interventions / an', intParAn, '#854f0b');
-    h += '</div>';
+    var totalCA = lignes.reduce(function (s, r) { return s + (num(r.MT_TOT_FACT_HT) || 0); }, 0);
+    var totalMO = lignes.reduce(function (s, r) { return s + (num(r.MT_TOT_MO) || 0); }, 0);
+    var totalPI = lignes.reduce(function (s, r) { return s + (num(r.MT_TOT_PIECE_INT) || 0); }, 0);
+    var nbFact = lignes.length;
+    var derniere = lignes[0] && lignes[0].DT_FAC ? lignes[0].DT_FAC : null;
 
-    // Tableau
-    h += '<div style="overflow-x:auto"><table class="vf-apv-table"><thead><tr>'
-      + '<th>Date FAC</th><th>N° Fact.</th><th>OR</th><th>Catégorie</th><th>Description</th>'
-      + '<th style="text-align:right">MO HT</th><th style="text-align:right">Pièces HT</th><th style="text-align:right">Total HT</th>'
+    // Trois reperes qui repondent aux questions d'un vendeur devant un VO :
+    // combien a coute ce vehicule, a quel rythme, et quand est-il passe la
+    // derniere fois. « Interventions par an » n'en etait pas un : sur six
+    // factures reparties sur quatre ans, le chiffre ne dit rien.
+    h += '<div class="vf-apv-kpis">'
+      + apvKpi('Total facturé HT', eur(totalCA), '#1F4A85', nbFact + (nbFact > 1 ? ' interventions' : ' intervention'))
+      + apvKpi('Main-d\'œuvre', eur(totalMO), '#2a5ea9',
+               totalCA ? Math.round(100 * totalMO / totalCA) + ' % du total' : '')
+      + apvKpi('Dernier passage', derniere ? fmtDateLong(derniere) : '—', '#53bda7',
+               derniere ? ecartDepuis(derniere) : '')
+      + '</div>';
+
+    h += '<table class="vf-apv-table"><thead><tr>'
+      + '<th class="c-date">Date</th>'
+      + '<th class="c-ref">Références</th>'
+      + '<th>Intervention</th>'
+      + '<th class="c-num">Main-d\'œuvre</th>'
+      + '<th class="c-num">Pièces</th>'
+      + '<th class="c-num">Total HT</th>'
       + '</tr></thead><tbody>';
-    ficheState.apv.forEach(function (r) {
-      h += '<tr>'
-        + '<td>' + esc(fmtDateFR(r.DT_FAC)) + '</td>'
-        + '<td style="color:#2a5ea9;font-weight:600">' + esc(r.NUM_FACT_DMS || '-') + '</td>'
-        + '<td>' + esc(r.NUM_OR || '-') + '</td>'
-        + '<td><span style="background:#eef4fc;color:#2a5ea9;font-size:10px;font-weight:700;padding:2px 7px;border-radius:999px">' + esc(r.CAT_FACT || '-') + '</span></td>'
-        + '<td style="max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="' + esc(r.LIB_DESC || '') + '">' + esc(r.LIB_DESC || '-') + '</td>'
-        + '<td style="text-align:right;color:#54678a">' + (num(r.MT_TOT_MO) ? eur(r.MT_TOT_MO) : '-') + '</td>'
-        + '<td style="text-align:right;color:#54678a">' + (num(r.MT_TOT_PIECE_INT) ? eur(r.MT_TOT_PIECE_INT) : '-') + '</td>'
-        + '<td style="text-align:right;font-weight:700;color:#1F4A85">' + eur(r.MT_TOT_FACT_HT) + '</td>'
+
+    var anneeCourante = null;
+    lignes.forEach(function (r) {
+      var annee = r.DT_FAC ? String(r.DT_FAC).slice(0, 4) : null;
+      if (annee && annee !== anneeCourante) {
+        anneeCourante = annee;
+        var totalAnnee = lignes
+          .filter(function (x) { return String(x.DT_FAC || '').slice(0, 4) === annee; })
+          .reduce(function (s, x) { return s + (num(x.MT_TOT_FACT_HT) || 0); }, 0);
+        h += '<tr class="vf-apv-annee"><td colspan="5">' + annee + '</td>'
+           + '<td class="c-num">' + eur(totalAnnee) + '</td></tr>';
+      }
+
+      var mo = num(r.MT_TOT_MO) || 0, pi = num(r.MT_TOT_PIECE_INT) || 0;
+      var tot = mo + pi;
+      var partMO = tot ? Math.round(100 * mo / tot) : 0;
+      var desc = r.LIB_DESC || '';
+      var avoir = (num(r.MT_TOT_FACT_HT) || 0) < 0;
+
+      h += '<tr' + (avoir ? ' class="vf-apv-avoir"' : '') + '>'
+        + '<td class="c-date">' + esc(fmtDateFR(r.DT_FAC)) + '</td>'
+        + '<td class="c-ref">'
+          + '<span class="vf-apv-or">OR ' + esc(r.NUM_OR || '—') + '</span>'
+          + (notEmpty(r.NUM_FACT_DMS) ? '<span class="vf-apv-fact">' + esc(r.NUM_FACT_DMS) + '</span>'
+                                      : '<span class="vf-apv-nonfact">non facturé</span>')
+          + (r.CAT_FACT === 'MAGASIN' ? '<span class="vf-apv-cat">magasin</span>' : '')
+        + '</td>'
+        // La description est la seule colonne qui porte du sens : on la
+        // laisse respirer sur deux lignes plutot que de la couper net.
+        + '<td class="c-desc" title="' + esc(desc) + '">' + (notEmpty(desc) ? esc(desc) : '—') + '</td>'
+        + '<td class="c-num">' + (mo ? eur(mo) : '<span class="vf-apv-zero">—</span>') + '</td>'
+        + '<td class="c-num">' + (pi ? eur(pi) : '<span class="vf-apv-zero">—</span>') + '</td>'
+        + '<td class="c-num c-tot">' + eur(r.MT_TOT_FACT_HT)
+          // Une barre fine sous le total dit d'un coup d'oeil si
+          // l'intervention etait de la main-d'oeuvre ou des pieces.
+          // La barre ne s'affiche que si l'intervention melange les deux
+          // postes : sur une facture 100 % pieces, une barre vide
+          // ressemblerait a un defaut d'affichage.
+          + ((mo && pi) ? '<span class="vf-apv-bar" title="' + partMO + ' % de main-d\'œuvre, '
+                 + (100 - partMO) + ' % de pièces"><i style="width:' + partMO + '%"></i></span>' : '')
+        + '</td>'
         + '</tr>';
     });
-    h += '</tbody></table></div>';
-    h += '<div class="vf-apv-total">Total HT : ' + eur(totalCA) + '</div>';
+
+    h += '</tbody><tfoot><tr>'
+      + '<td colspan="3">Total</td>'
+      + '<td class="c-num">' + (totalMO ? eur(totalMO) : '—') + '</td>'
+      + '<td class="c-num">' + (totalPI ? eur(totalPI) : '—') + '</td>'
+      + '<td class="c-num c-tot">' + eur(totalCA) + '</td>'
+      + '</tr></tfoot></table>';
     return h;
   }
-  function apvKpi(lbl, val, color) {
-    return '<div style="background:#f7f9fc;border:1.5px solid #e8eef7;border-radius:12px;padding:14px">'
-      + '<div style="font-size:11px;color:#9bb3d1;font-weight:700;text-transform:uppercase;letter-spacing:.04em;margin-bottom:6px">' + esc(lbl) + '</div>'
-      + '<div style="font-size:22px;font-weight:800;color:' + color + '">' + val + '</div>'
+
+  // Un repere lisible : « il y a 5 jours », « il y a 8 mois ».
+  function ecartDepuis(iso) {
+    var d = new Date(String(iso).slice(0, 10));
+    if (isNaN(d)) return '';
+    var jours = Math.floor((Date.now() - d.getTime()) / 86400000);
+    if (jours < 0) return '';
+    if (jours === 0) return 'aujourd\'hui';
+    if (jours === 1) return 'hier';
+    if (jours < 31) return 'il y a ' + jours + ' jours';
+    var mois = Math.round(jours / 30.4);
+    if (mois < 24) return 'il y a ' + mois + ' mois';
+    return 'il y a ' + Math.floor(mois / 12) + ' ans';
+  }
+
+  var MOIS_FR = ['janv.', 'févr.', 'mars', 'avr.', 'mai', 'juin',
+                 'juil.', 'août', 'sept.', 'oct.', 'nov.', 'déc.'];
+  function fmtDateLong(iso) {
+    var p = String(iso).slice(0, 10).split('-');
+    if (p.length !== 3) return String(iso);
+    return Number(p[2]) + ' ' + MOIS_FR[Number(p[1]) - 1] + ' ' + p[0];
+  }
+
+  function apvKpi(lbl, val, color, note) {
+    return '<div class="vf-apv-kpi">'
+      + '<div class="vf-apv-kpi-lbl">' + esc(lbl) + '</div>'
+      + '<div class="vf-apv-kpi-val" style="color:' + color + '">' + val + '</div>'
+      + (note ? '<div class="vf-apv-kpi-note">' + esc(note) + '</div>' : '')
       + '</div>';
   }
 
@@ -2531,54 +2629,124 @@ OD.define('vo-liste', {
   }
 
   function renderApvTab() {
-    if (ficheState.apvLoading) return '<div style="padding:40px;text-align:center;color:#9bb3d1;font-size:13px;font-weight:600">Chargement des factures…</div>';
-    if (!ficheState.apv) { if (!ficheState.apvLoading) loadApv(ficheState.vin); return '<div style="padding:40px;text-align:center;color:#9bb3d1;font-size:13px;font-weight:600">Chargement des factures…</div>'; }
+    if (ficheState.apvLoading) return '<div class="vf-apv-empty">Chargement des factures…</div>';
+    if (!ficheState.apv) { if (!ficheState.apvLoading) loadApv(ficheState.vin); return '<div class="vf-apv-empty">Chargement des factures…</div>'; }
 
-    var h = '<div style="font-size:16px;font-weight:800;color:#1F4A85;margin-bottom:4px">Historique factures APV</div>'
-      + '<div style="font-size:13px;color:#9bb3d1;margin-bottom:16px">Suivi des interventions atelier, montants et dates clés du véhicule</div>';
+    var h = '<div style="font-size:16px;font-weight:800;color:#1F4A85;margin-bottom:4px">Historique atelier</div>'
+      + '<div style="font-size:13px;color:#9bb3d1;margin-bottom:16px">Interventions facturées sur ce véhicule, de la plus récente à la plus ancienne</div>';
 
-    if (!ficheState.apv.length) return h + '<div style="padding:30px;text-align:center;color:#9bb3d1;font-weight:600">Aucune facture APV pour ce véhicule.</div>';
+    if (!ficheState.apv.length) return h + '<div class="vf-apv-empty">Aucune intervention facturée sur ce véhicule.</div>';
 
-    // KPIs synthèse
-    var totalCA = ficheState.apv.reduce(function (s, r) { return s + num(r.MT_TOT_FACT_HT); }, 0);
-    var nbFact = ficheState.apv.length;
-    var caMoyen = nbFact ? Math.round(totalCA / nbFact) : 0;
-    // interventions par an : groupe par année
-    var years = {}; ficheState.apv.forEach(function (r) { var y = r.DT_FAC ? String(r.DT_FAC).slice(0, 4) : '?'; years[y] = (years[y] || 0) + 1; });
-    var nbYears = Object.keys(years).filter(function (y) { return y !== '?'; }).length || 1;
-    var intParAn = Math.round(nbFact / nbYears);
+    var lignes = ficheState.apv.slice().sort(function (a, b) {
+      return String(b.DT_FAC || '').localeCompare(String(a.DT_FAC || ''));
+    });
 
-    h += '<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:18px">';
-    h += apvKpi('Total CA HT', eur(totalCA), '#2a5ea9');
-    h += apvKpi('CA moyen / facture', eur(caMoyen), '#53bda7');
-    h += apvKpi('Interventions / an', intParAn, '#854f0b');
-    h += '</div>';
+    var totalCA = lignes.reduce(function (s, r) { return s + (num(r.MT_TOT_FACT_HT) || 0); }, 0);
+    var totalMO = lignes.reduce(function (s, r) { return s + (num(r.MT_TOT_MO) || 0); }, 0);
+    var totalPI = lignes.reduce(function (s, r) { return s + (num(r.MT_TOT_PIECE_INT) || 0); }, 0);
+    var nbFact = lignes.length;
+    var derniere = lignes[0] && lignes[0].DT_FAC ? lignes[0].DT_FAC : null;
 
-    // Tableau
-    h += '<div style="overflow-x:auto"><table class="vf-apv-table"><thead><tr>'
-      + '<th>Date FAC</th><th>N° Fact.</th><th>OR</th><th>Catégorie</th><th>Description</th>'
-      + '<th style="text-align:right">MO HT</th><th style="text-align:right">Pièces HT</th><th style="text-align:right">Total HT</th>'
+    // Trois reperes qui repondent aux questions d'un vendeur devant un VO :
+    // combien a coute ce vehicule, a quel rythme, et quand est-il passe la
+    // derniere fois. « Interventions par an » n'en etait pas un : sur six
+    // factures reparties sur quatre ans, le chiffre ne dit rien.
+    h += '<div class="vf-apv-kpis">'
+      + apvKpi2('Total facturé HT', eur(totalCA), '#1F4A85', nbFact + (nbFact > 1 ? ' interventions' : ' intervention'))
+      + apvKpi2('Main-d\'œuvre', eur(totalMO), '#2a5ea9',
+               totalCA ? Math.round(100 * totalMO / totalCA) + ' % du total' : '')
+      + apvKpi2('Dernier passage', derniere ? fmtDateLong2(derniere) : '—', '#53bda7',
+               derniere ? ecartDepuis2(derniere) : '')
+      + '</div>';
+
+    h += '<table class="vf-apv-table"><thead><tr>'
+      + '<th class="c-date">Date</th>'
+      + '<th class="c-ref">Références</th>'
+      + '<th>Intervention</th>'
+      + '<th class="c-num">Main-d\'œuvre</th>'
+      + '<th class="c-num">Pièces</th>'
+      + '<th class="c-num">Total HT</th>'
       + '</tr></thead><tbody>';
-    ficheState.apv.forEach(function (r) {
-      h += '<tr>'
-        + '<td>' + esc(fmtDateFR(r.DT_FAC)) + '</td>'
-        + '<td style="color:#2a5ea9;font-weight:600">' + esc(r.NUM_FACT_DMS || '-') + '</td>'
-        + '<td>' + esc(r.NUM_OR || '-') + '</td>'
-        + '<td><span style="background:#eef4fc;color:#2a5ea9;font-size:10px;font-weight:700;padding:2px 7px;border-radius:999px">' + esc(r.CAT_FACT || '-') + '</span></td>'
-        + '<td style="max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="' + esc(r.LIB_DESC || '') + '">' + esc(r.LIB_DESC || '-') + '</td>'
-        + '<td style="text-align:right;color:#54678a">' + (num(r.MT_TOT_MO) ? eur(r.MT_TOT_MO) : '-') + '</td>'
-        + '<td style="text-align:right;color:#54678a">' + (num(r.MT_TOT_PIECE_INT) ? eur(r.MT_TOT_PIECE_INT) : '-') + '</td>'
-        + '<td style="text-align:right;font-weight:700;color:#1F4A85">' + eur(r.MT_TOT_FACT_HT) + '</td>'
+
+    var anneeCourante = null;
+    lignes.forEach(function (r) {
+      var annee = r.DT_FAC ? String(r.DT_FAC).slice(0, 4) : null;
+      if (annee && annee !== anneeCourante) {
+        anneeCourante = annee;
+        var totalAnnee = lignes
+          .filter(function (x) { return String(x.DT_FAC || '').slice(0, 4) === annee; })
+          .reduce(function (s, x) { return s + (num(x.MT_TOT_FACT_HT) || 0); }, 0);
+        h += '<tr class="vf-apv-annee"><td colspan="5">' + annee + '</td>'
+           + '<td class="c-num">' + eur(totalAnnee) + '</td></tr>';
+      }
+
+      var mo = num(r.MT_TOT_MO) || 0, pi = num(r.MT_TOT_PIECE_INT) || 0;
+      var tot = mo + pi;
+      var partMO = tot ? Math.round(100 * mo / tot) : 0;
+      var desc = r.LIB_DESC || '';
+      var avoir = (num(r.MT_TOT_FACT_HT) || 0) < 0;
+
+      h += '<tr' + (avoir ? ' class="vf-apv-avoir"' : '') + '>'
+        + '<td class="c-date">' + esc(fmtDateFR(r.DT_FAC)) + '</td>'
+        + '<td class="c-ref">'
+          + '<span class="vf-apv-or">OR ' + esc(r.NUM_OR || '—') + '</span>'
+          + (notEmpty(r.NUM_FACT_DMS) ? '<span class="vf-apv-fact">' + esc(r.NUM_FACT_DMS) + '</span>'
+                                      : '<span class="vf-apv-nonfact">non facturé</span>')
+          + (r.CAT_FACT === 'MAGASIN' ? '<span class="vf-apv-cat">magasin</span>' : '')
+        + '</td>'
+        // La description est la seule colonne qui porte du sens : on la
+        // laisse respirer sur deux lignes plutot que de la couper net.
+        + '<td class="c-desc" title="' + esc(desc) + '">' + (notEmpty(desc) ? esc(desc) : '—') + '</td>'
+        + '<td class="c-num">' + (mo ? eur(mo) : '<span class="vf-apv-zero">—</span>') + '</td>'
+        + '<td class="c-num">' + (pi ? eur(pi) : '<span class="vf-apv-zero">—</span>') + '</td>'
+        + '<td class="c-num c-tot">' + eur(r.MT_TOT_FACT_HT)
+          // Une barre fine sous le total dit d'un coup d'oeil si
+          // l'intervention etait de la main-d'oeuvre ou des pieces.
+          // La barre ne s'affiche que si l'intervention melange les deux
+          // postes : sur une facture 100 % pieces, une barre vide
+          // ressemblerait a un defaut d'affichage.
+          + ((mo && pi) ? '<span class="vf-apv-bar" title="' + partMO + ' % de main-d\'œuvre, '
+                 + (100 - partMO) + ' % de pièces"><i style="width:' + partMO + '%"></i></span>' : '')
+        + '</td>'
         + '</tr>';
     });
-    h += '</tbody></table></div>';
-    h += '<div class="vf-apv-total">Total HT : ' + eur(totalCA) + '</div>';
+
+    h += '</tbody><tfoot><tr>'
+      + '<td colspan="3">Total</td>'
+      + '<td class="c-num">' + (totalMO ? eur(totalMO) : '—') + '</td>'
+      + '<td class="c-num">' + (totalPI ? eur(totalPI) : '—') + '</td>'
+      + '<td class="c-num c-tot">' + eur(totalCA) + '</td>'
+      + '</tr></tfoot></table>';
     return h;
   }
-  function apvKpi(lbl, val, color) {
-    return '<div style="background:#f7f9fc;border:1.5px solid #e8eef7;border-radius:12px;padding:14px">'
-      + '<div style="font-size:11px;color:#9bb3d1;font-weight:700;text-transform:uppercase;letter-spacing:.04em;margin-bottom:6px">' + esc(lbl) + '</div>'
-      + '<div style="font-size:22px;font-weight:800;color:' + color + '">' + val + '</div>'
+
+  // Un repere lisible : « il y a 5 jours », « il y a 8 mois ».
+  function ecartDepuis2(iso) {
+    var d = new Date(String(iso).slice(0, 10));
+    if (isNaN(d)) return '';
+    var jours = Math.floor((Date.now() - d.getTime()) / 86400000);
+    if (jours < 0) return '';
+    if (jours === 0) return 'aujourd\'hui';
+    if (jours === 1) return 'hier';
+    if (jours < 31) return 'il y a ' + jours + ' jours';
+    var mois = Math.round(jours / 30.4);
+    if (mois < 24) return 'il y a ' + mois + ' mois';
+    return 'il y a ' + Math.floor(mois / 12) + ' ans';
+  }
+
+  var MOIS_FR2 = ['janv.', 'févr.', 'mars', 'avr.', 'mai', 'juin',
+                 'juil.', 'août', 'sept.', 'oct.', 'nov.', 'déc.'];
+  function fmtDateLong2(iso) {
+    var p = String(iso).slice(0, 10).split('-');
+    if (p.length !== 3) return String(iso);
+    return Number(p[2]) + ' ' + MOIS_FR2[Number(p[1]) - 1] + ' ' + p[0];
+  }
+
+  function apvKpi2(lbl, val, color, note) {
+    return '<div class="vf-apv-kpi">'
+      + '<div class="vf-apv-kpi-lbl">' + esc(lbl) + '</div>'
+      + '<div class="vf-apv-kpi-val" style="color:' + color + '">' + val + '</div>'
+      + (note ? '<div class="vf-apv-kpi-note">' + esc(note) + '</div>' : '')
       + '</div>';
   }
 
