@@ -370,7 +370,12 @@ const LM_REGLES_CSS = `
 #lead-mgmt-root .rg-h { padding:15px 20px; border-bottom:1px solid var(--border);
   display:flex; align-items:flex-start; gap:12px; }
 #lead-mgmt-root .rg-h b { font-size:15px; }
-#lead-mgmt-root .rg-h .n { font-size:11px; color:var(--text-mut); margin-top:3px; line-height:1.5; }
+#lead-mgmt-root .rg-h .n { font-size:11px; color:var(--text-mut); margin-top:5px; line-height:1.5; }
+#lead-mgmt-root .rg-site { display:flex; align-items:center; gap:7px; margin-top:6px; }
+#lead-mgmt-root .rg-site > span { color:var(--text-mut); font-size:11px; }
+#lead-mgmt-root .rg-site select { padding:4px 8px; border:1px solid var(--border);
+  border-radius:7px; font:inherit; font-size:12px; font-weight:700; color:var(--text);
+  background:var(--card); max-width:340px; }
 #lead-mgmt-root .rg-x { margin-left:auto; background:none; border:none; font-size:22px;
   line-height:1; color:var(--text-mut); cursor:pointer; padding:0 4px; }
 #lead-mgmt-root .rg-b { padding:14px 20px 18px; overflow-y:auto; flex:1; }
@@ -3630,7 +3635,7 @@ const RG_REPARTITION = [
   { k:'sequentiel', l:'Tour de rôle séquentiel',
     d:'Chacun son tour, dans l\u2019ordre : le dernier servi repasse en queue.' },
   { k:'conversion', l:'Au meilleur taux de conversion',
-    d:'Le plus performant d\u2019abord, la charge départageant ensuite.' }
+    d:'La charge reste le premier critère : à charge égale, le lead part à celui qui transforme le mieux.' }
 ];
 
 // Quel SITE la modale parametre-t-elle ? Le fil d Ariane repond deja :
@@ -3654,8 +3659,8 @@ function rgNomSite(idSite) {
   return (s && s.nom_site) || ('Site ' + idSite);
 }
 
-async function ouvrirRegles() {
-  const idSite = reglesSiteCourant();
+async function ouvrirRegles(idSiteForce) {
+  const idSite = (idSiteForce !== undefined) ? idSiteForce : reglesSiteCourant();
   if (idSite == null && !PEUT_PARAMETRER_DEFAUT) {
     // Un chef des ventes au-dessus de son site : on ne le laisse pas croire
     // qu il va regler le groupe. On le renvoie a SON site.
@@ -3745,11 +3750,12 @@ function rgOpt(champ, valeur, libelle, desc, type) {
     + (desc ? '<span class="d">' + escapeHtml(desc) + '</span>' : '') + '</span></label>';
 }
 
-function rgNum(champ, libelle, min, max) {
+function rgNum(champ, libelle, min, max, unite) {
   return '<div class="rg-num"><span>' + escapeHtml(libelle) + '</span>'
     + '<input type="number" min="' + min + '" max="' + max + '" value="'
     + (rgEtat.regles[champ] == null ? '' : rgEtat.regles[champ])
-    + '" data-rgn="' + champ + '"></div>';
+    + '" data-rgn="' + champ + '">'
+    + (unite ? '<span>' + escapeHtml(unite) + '</span>' : '') + '</div>';
 }
 
 function renderRegles() {
@@ -3765,8 +3771,20 @@ function renderRegles() {
       + '<button type="button" data-rgfermer="1">Fermer</button></div></div>';
   }
 
-  h += '<div class="rg-h"><div><b>Règles d\u2019attribution &middot; '
-    + escapeHtml(rgNomSite(rgEtat.idSite)) + '</b>'
+  // Le badge de la topnav (site de rattachement) et le fil d'Ariane (perimetre
+  // explore) sont DEUX choses differentes. Suivre l'un en silence, c'est
+  // promettre a un chef qu'il regle un site et en regler un autre : on affiche
+  // donc le site vise, et on le rend choisissable.
+  h += '<div class="rg-h"><div style="flex:1"><b>Règles d\u2019attribution</b>'
+    + '<div class="rg-site"><span>Pour&nbsp;:</span><select data-rgsite>'
+    + (PEUT_PARAMETRER_DEFAUT
+        ? '<option value=""' + (rgEtat.idSite == null ? ' selected' : '')
+          + '>Tous les sites (règle par défaut)</option>' : '')
+    + (dataSites || []).map(s =>
+        '<option value="' + s.id_site + '"'
+        + (Number(s.id_site) === Number(rgEtat.idSite) ? ' selected' : '') + '>'
+        + escapeHtml(s.nom_site || ('Site ' + s.id_site)) + '</option>').join('')
+    + '</select></div>'
     + '<div class="n">Ces règles décident à quel vendeur part un lead entrant. '
     + 'Elles ne touchent pas aux leads déjà attribués.</div></div>'
     + '<button type="button" class="rg-x" data-rgfermer="1">&times;</button></div>'
@@ -3792,17 +3810,17 @@ function renderRegles() {
         'Si un dossier est ouvert pour ce client sur ce site, le lead revient à celui qui le suit.')
     + rgOpt('vendeur_habituel', true, 'A son vendeur habituel',
         'Celui qui a eu un contact sortant avec ce client sur la période ci-dessous.')
-    + rgNum('vendeur_habituel_mois', 'Sur les', 1, 60) + '</div>';
+    + rgNum('vendeur_habituel_mois', 'Sur les', 1, 60, 'derniers mois') + '</div>';
 
   h += '<div class="rg-sec"><div class="t">Sinon, comment répartir</div>'
     + RG_REPARTITION.map(o => rgOpt('repartition', o.k, o.l, o.d, 'radio')).join('');
   if (rgEtat.regles.repartition === 'conversion') {
-    h += rgNum('conversion_mois', 'Conversion mesurée sur les derniers mois :', 1, 36)
-      + rgNum('conversion_min_leads', 'À partir de combien de leads :', 1, 500)
+    h += rgNum('conversion_mois', 'Conversion mesurée sur les', 1, 36, 'derniers mois')
+      + rgNum('conversion_min_leads', 'À partir de', 1, 500, 'leads sur la période')
       + '<div class="rg-note">Sous ce nombre de leads, le taux d\u2019un vendeur n\u2019est pas '
-      + 'calculé et il est classé à la charge : un vendeur à 2 leads dont 2 vendus '
-      + 'afficherait 100 % et prendrait tout le flux. La charge départage toujours '
-      + 'en second, pour qu\u2019un seul vendeur ne sature pas.</div>';
+      + 'calculé : un vendeur à 2 leads dont 2 vendus afficherait 100 %. La charge '
+      + 'reste le premier critère — la conversion ne fait que départager les '
+      + 'vendeurs à égalité, pour qu\u2019un seul ne sature pas.</div>';
   }
   h += rgOpt('filtre_vn_vo', true, 'Respecter la spécialité VN / VO',
         'Un lead sur un véhicule d\u2019occasion ne part qu\u2019à un vendeur VO.')
@@ -4682,6 +4700,9 @@ function bindEvents() {
   root.querySelectorAll('[data-rgex]').forEach(el => {
     el.addEventListener('click', () => basculerExclusion(
       el.getAttribute('data-rgex'), el.getAttribute('data-rgexo') === '1'));
+  });
+  root.querySelectorAll('[data-rgsite]').forEach(el => {
+    el.addEventListener('change', () => ouvrirRegles(el.value ? Number(el.value) : null));
   });
   root.querySelectorAll('[data-rgok]').forEach(el => {
     el.addEventListener('click', () => enregistrerRegles());
