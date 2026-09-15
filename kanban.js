@@ -507,7 +507,15 @@ OD.define('kanban', {
     const vt = c.vn_vo === 'VN' ? 'vn' : (c.vn_vo === 'VO' ? 'vo' : 'na');
     // Plusieurs documents de meme nature dans l'affaire : on affiche leur nombre
     // et on ouvre la liste au clic, plutot qu'un contenu arbitraire.
-    const vnMulti = (c.vn_vo === 'VN' && c.nb_versions > 1 &&
+    // Ce qui distingue les deux presentations n'est PAS le neuf et l'occasion,
+    // mais l'ORIGINE du document. Un VO propose dans BACS suit exactement la
+    // chaine d'un VN — opportunite, simulations, commande — et doit donc
+    // s'afficher comme lui : liste des propositions, photo, montant. Le chemin
+    // historique (versions depliables, « definir comme propale ») appartient
+    // aux propales VO saisies dans One Data, ou le vendeur pilote lui-meme le
+    // statut. Brancher sur vn_vo faisait tomber les VO de BACS du mauvais cote.
+    const deBacs = !!(c.bacs_sf_id || c.id_affaire_bacs);
+    const vnMulti = (deBacs && c.nb_versions > 1 &&
                      (c.nature === 'simulation' || c.nature === 'commande'));
     const motMulti = (c.nature === 'commande') ? 'commandes' : 'propositions';
     const j = ageJours(c.maj);
@@ -554,7 +562,7 @@ OD.define('kanban', {
       h += '<div class="kc-row"><span class="kc-eur">' + eur(c.montant) + '</span>' + ageBadge(j) + '</div>';
     }
 
-    if (c.nb_versions > 1 && !vnMulti) {
+    if (c.nb_versions > 1 && !vnMulti && !deBacs) {
       const open = state.openVersions === c.id_propale_bdc;
       h += '<button class="kc-vers" data-versions="' + c.id_propale_bdc + '">' + c.nb_versions + ' versions ' + (open ? '▾' : '▸') + '</button>';
       if (open) h += renderVersionList(c);
@@ -566,7 +574,8 @@ OD.define('kanban', {
     // le plus de raisons de relire. En VN elle reste une lecture — le
     // configurateur est chez le constructeur, One Data reflete.
     if (c.status === 'propale' || c.status === 'draft' || c.status === 'bdc') {
-      if (c.vn_vo === 'VN') {
+      if (deBacs) {
+        // Document du constructeur : One Data reflete, il ne modifie pas.
         if (!vnMulti) h += '<button class="kc-ic" data-modif="' + c.id_propale_bdc + '" title="Consulter">' + ICON_SEARCH_VN + '</button>';
       } else if (c.status !== 'bdc') {
         h += '<button class="kc-ic" data-modif="' + c.id_propale_bdc + '" title="Modifier">' + ICON_EDIT + '</button>';
