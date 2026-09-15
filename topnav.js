@@ -67,7 +67,7 @@ OD.define('topnav', {
     '/activite':         '55717966-7e07-4957-9969-399198cce1ad',
     '/marketing':        '99519997-f935-471a-9147-b0118191b991',
     '/vo-liste':         '188b0f0b-5e80-4a77-a856-26469b08b614',
-    '/vn-liste':         '5a11786d-59a3-49eb-a7a9-542f7d3c460e',
+    '/vn-liste':         '08106b65-19e5-4e36-bdbb-2b12f67a2b6c',
     '/bdc-vn':           '5ecc8832-d99b-47c7-a853-0921624d80ef',
     '/delco':            'da5005d5-42e4-4b37-9d42-f8b8728ddb0e',
     '/annuaire':         'a6c1a683-2490-4263-8dc5-5e187bcbec87',
