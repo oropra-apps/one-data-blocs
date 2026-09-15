@@ -280,7 +280,9 @@ OD.define('pcom', {
                      '" data-sf="' + esc(d.bacs_sf_id) + '" data-lib="' + esc(lib) +
                      '" title="Abandonner">' + I_X + '</button>';
         }
-        if (d.status === 'propale' && d.vn_vo !== 'VN') {
+        // Modifier n'a de sens que sur un document saisi dans One Data : ceux
+        // du constructeur se consultent, ils ne s'editent pas ici.
+        if (d.status === 'propale' && !d.bacs_sf_id) {
           actions += '<button type="button" class="b" data-mod="' + d.id_propale_bdc +
                      '" title="Modifier">' + I_EDIT + '</button>';
         }
