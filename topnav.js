@@ -227,6 +227,7 @@ OD.define('topnav', {
       { t: 'Lead Management', p: P.marketing }
     ] },
     { label: 'Véhicules', items: [
+      { t: 'Stock VN', p: P.vnListe },
       { t: 'Stock VO', p: P.voListe },
       { t: 'Import VN', p: P.vnConfig }
     ] }
