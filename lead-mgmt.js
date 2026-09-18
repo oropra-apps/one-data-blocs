@@ -627,6 +627,77 @@ const LM_V2_CSS = `
 #lead-mgmt-root .v2-sous { font-size:11px; color:var(--text-mut); font-weight:400; }
 `;
 
+const LM_GESTES_CSS = `
+#lead-mgmt-root .g-bandeau { display:flex; align-items:center; gap:11px; padding:11px 16px;
+  border-radius:10px; margin-bottom:14px; font-size:13px; }
+#lead-mgmt-root .g-bandeau.off { background:#fdf6e6; border:1px solid #b8851a; color:#7a5a12; }
+#lead-mgmt-root .g-bandeau.on { background:var(--green-bg,#e1f5ee); border:1px solid #53bda7;
+  color:var(--green); font-size:12px; padding:7px 14px; }
+#lead-mgmt-root .g-bandeau b { color:#5d4409; }
+#lead-mgmt-root .g-pastille { width:9px; height:9px; border-radius:50%; flex-shrink:0; }
+#lead-mgmt-root .g-bandeau.off .g-pastille { background:var(--red-soft); animation:gpulse 1.6s infinite; }
+#lead-mgmt-root .g-bandeau.on .g-pastille { background:#53bda7; }
+@keyframes gpulse { 50% { opacity:.35; } }
+#lead-mgmt-root .g-bandeau .g-act { margin-left:auto; background:#b8851a; color:#fff;
+  border:none; padding:6px 14px; border-radius:5px; font-size:12px; font-weight:600;
+  font-family:inherit; cursor:pointer; white-space:nowrap; }
+
+/* La source : une pastille discrète, jamais un pavé coloré. */
+#lead-mgmt-root .g-src { display:inline-flex; align-items:center; gap:5px; font-size:10px;
+  font-weight:700; padding:2px 8px; border-radius:10px; background:#f1efe8; color:#5f5e5a; }
+#lead-mgmt-root .g-src i { width:6px; height:6px; border-radius:50%; background:currentColor;
+  font-style:normal; }
+#lead-mgmt-root .g-src.bacs { background:#e8eef7; color:#2a5ea9; }
+#lead-mgmt-root .g-src.lbc { background:#fdeee6; color:#c2410c; }
+#lead-mgmt-root .g-src.centrale { background:#e9e7f8; color:#4c3fa8; }
+#lead-mgmt-root .g-src.stock { background:#e6f2ef; color:#166b56; }
+#lead-mgmt-root .g-src.web { background:var(--blue-bg); color:var(--blue-dk); }
+
+/* Les gestes : ce que la source PERMET. */
+#lead-mgmt-root .g-grille { display:grid; grid-template-columns:1fr 1fr; gap:8px; }
+@media (max-width:560px) { #lead-mgmt-root .g-grille { grid-template-columns:1fr; } }
+#lead-mgmt-root .g-btn { border:1px solid var(--border); border-radius:8px; padding:10px 12px;
+  background:var(--card); text-align:left; display:flex; flex-direction:column; gap:3px;
+  font-family:inherit; cursor:pointer; }
+#lead-mgmt-root .g-btn:hover:not(:disabled) { border-color:var(--blue-line); background:var(--blue-bg); }
+#lead-mgmt-root .g-btn b { font-size:12.5px; font-weight:600; color:var(--text); }
+#lead-mgmt-root .g-btn i { font-style:normal; font-size:10.5px; color:var(--text-mut); }
+#lead-mgmt-root .g-btn:disabled { opacity:.45; cursor:not-allowed; }
+#lead-mgmt-root .g-ou { font-size:9px; font-weight:700; padding:1px 5px; border-radius:8px;
+  margin-left:6px; vertical-align:1px; }
+#lead-mgmt-root .g-ou.bacs { color:var(--blue); background:var(--blue-bg); }
+#lead-mgmt-root .g-ou.od { color:var(--green); background:#e1f5ee; }
+
+/* Modale : transfert, rendez-vous, relance. */
+#lead-mgmt-root .g-modal { position:fixed; inset:0; background:rgba(28,43,61,.38); z-index:10000;
+  display:flex; align-items:center; justify-content:center; padding:20px; }
+#lead-mgmt-root .g-modal-c { background:var(--card); border-radius:12px; width:520px;
+  max-width:100%; max-height:88vh; display:flex; flex-direction:column;
+  box-shadow:0 12px 40px rgba(28,43,61,.28); }
+#lead-mgmt-root .g-modal-h { padding:16px 20px; border-bottom:1px solid var(--border); }
+#lead-mgmt-root .g-modal-h b { font-size:16px; }
+#lead-mgmt-root .g-modal-h p { margin:4px 0 0; font-size:12px; color:var(--text-soft); }
+#lead-mgmt-root .g-modal-b { padding:16px 20px; overflow-y:auto; }
+#lead-mgmt-root .g-modal-f { padding:14px 20px; border-top:1px solid var(--border);
+  display:flex; gap:8px; justify-content:flex-end; }
+#lead-mgmt-root .g-site { display:flex; align-items:center; gap:11px; padding:11px 13px;
+  border:1px solid var(--border); border-radius:8px; margin-bottom:7px; cursor:pointer; }
+#lead-mgmt-root .g-site:hover { background:var(--blue-pale,#f5f8fc); }
+#lead-mgmt-root .g-site.on { border-color:var(--blue); background:var(--blue-bg); }
+#lead-mgmt-root .g-site b { font-size:13px; display:block; }
+#lead-mgmt-root .g-site i { font-style:normal; font-size:11px; color:var(--text-mut); }
+#lead-mgmt-root .g-site .g-charge { margin-left:auto; font-size:11px; color:var(--text-soft);
+  white-space:nowrap; }
+#lead-mgmt-root .g-champ { margin-top:12px; }
+#lead-mgmt-root .g-champ label { font-size:11.5px; color:var(--text-mut); display:block;
+  margin-bottom:5px; }
+#lead-mgmt-root .g-champ input, #lead-mgmt-root .g-champ textarea,
+#lead-mgmt-root .g-champ select { width:100%; border:1px solid var(--border); border-radius:6px;
+  padding:8px; font-family:inherit; font-size:13px; color:var(--text); background:var(--card); }
+#lead-mgmt-root .g-note { background:#fdf6e6; border-left:3px solid #b8851a; padding:10px 13px;
+  border-radius:0 5px 5px 0; font-size:12px; color:#7a5a12; margin-bottom:14px; }
+`;
+
 // --- 3. Style (injection forcée) ----------------------------
 const STYLE_ID = 'lead-mgmt-style';
 const existing = doc.getElementById(STYLE_ID);
@@ -989,6 +1060,7 @@ ${LM_SLA_CSS}
 ${LM_ROLE_CSS}
 ${LM_REGLES_CSS}
 ${LM_V2_CSS}
+${LM_GESTES_CSS}
 `;
 doc.head.appendChild(styleEl);
 
@@ -4095,6 +4167,287 @@ function v2Reactivite() {
 // lui, le mur montre où ça coince sans jamais dire QUI — il désigne un
 // problème sans donner prise dessus.
 
+// ============================================================
+//  LES GESTES SUR UN LEAD, ET LE CANAL BACS      (17/09/2026)
+//
+//  PRINCIPE : le vendeur voit les MÊMES boutons quelle que soit la
+//  source. Un lead LeBonCoin et un lead Toyota se traitent pareil.
+//  La source ne décide que de deux choses — le délai attendu, et OÙ le
+//  geste sera écrit.
+//
+//  Les leads BACS passent par la file `bacs_sortant` : One Data ne peut
+//  pas écrire dans Salesforce, il faut une session vivante dans un
+//  navigateur. Les autres écrivent directement dans One Data.
+// ============================================================
+
+
+
+// Ce que chaque source permet, et où le geste s'écrit.
+// `distant: 'bacs'` => le geste part dans la file sortante.
+const LM_SOURCES = {
+  bacs_constructeur:{ l:'Toyota.fr',        cls:'bacs',     distant:'bacs' },
+  bacs_campagne:    { l:'Campagne BACS',    cls:'bacs',     distant:'bacs' },
+  bacs_atelier:     { l:'Trafic atelier',   cls:'bacs',     distant:'bacs' },
+  bacs_showroom:    { l:'Showroom',         cls:'bacs',     distant:'bacs' },
+  bacs_autre:       { l:'Autre BACS',       cls:'bacs',     distant:'bacs' },
+  leboncoin:        { l:'LeBonCoin',        cls:'lbc',      distant:null },
+  la_centrale:      { l:'La Centrale',      cls:'centrale', distant:null },
+  stockspark:       { l:'StockSpark',       cls:'stock',    distant:null },
+  autoscout:        { l:'AutoScout24',      cls:'stock',    distant:null },
+  site_web:         { l:'Site du groupe',   cls:'web',      distant:null },
+  wa_entrant:       { l:'WhatsApp',         cls:'web',      distant:null },
+  tel_traceur:      { l:'Tél. traceur',     cls:'web',      distant:null },
+  transfert_plateau:{ l:'Transféré',        cls:'web',      distant:null }
+};
+function lmSource(code) {
+  return LM_SOURCES[code] || { l: code || 'Source inconnue', cls:'', distant:null };
+}
+
+// --- Le canal BACS : joignable ou non ------------------------
+let bacsJoignable = null;   // null = pas encore su
+let bacsDernierTest = 0;
+
+async function ensureBacsJoignable() {
+  // ⚠️ On n'interroge pas à chaque rendu : le battement de cœur ne bouge
+  //    qu'une fois par minute, une lecture toutes les 30 s suffit.
+  if (Date.now() - bacsDernierTest < 30000 && bacsJoignable !== null) return;
+  bacsDernierTest = Date.now();
+  try {
+    const { data, error } = await sb.rpc('bacs_est_joignable');
+    if (error) throw error;
+    const avant = bacsJoignable;
+    bacsJoignable = data === true;
+    if (avant !== bacsJoignable && window.__renderLeadMgmt) window.__renderLeadMgmt();
+  } catch (e) {
+    bacsJoignable = false;
+  }
+}
+
+// Le bandeau. ⚠️ Pas de croix quand BACS est fermé : seule la connexion
+// le referme. Un bandeau qu'on peut faire taire ne protège de rien —
+// le vendeur le fermerait et perdrait ses gestes sans le savoir.
+function lmBandeauBacs() {
+  ensureBacsJoignable();
+  if (bacsJoignable === null) return '';
+  if (bacsJoignable) {
+    return '<div class="g-bandeau on"><span class="g-pastille"></span>'
+      + 'BACS connecté — rendez-vous, relances et transferts partent directement.</div>';
+  }
+  return '<div class="g-bandeau off"><span class="g-pastille"></span>'
+    + '<span><b>BACS n\'est pas ouvert.</b> Les leads Toyota restent consultables, mais aucun '
+    + 'rendez-vous, relance ou transfert ne peut leur être appliqué. Ouvrez BACS et '
+    + 'reconnectez-vous — ce message disparaîtra seul.</span>'
+    + '<button type="button" class="g-act" data-bacs-ouvrir="1">Ouvrir BACS</button></div>';
+}
+
+// --- Les gestes ---------------------------------------------
+const LM_GESTES = [
+  { k:'appel',     l:'Appeler',                 d:'Ouvre le composeur',     local:true },
+  { k:'rdv',       l:'Prendre rendez-vous',     d:'Agenda du vendeur' },
+  { k:'relance',   l:'Programmer une relance',  d:'Rappel daté' },
+  { k:'rpv',       l:'Saisir un compte rendu',  d:'Rapport vendeur',        local:true },
+  { k:'transfert', l:'Transférer à un site',    d:'Change de concession',   manager:true },
+  { k:'perdre',    l:'Classer sans suite',      d:'Avec un motif' }
+];
+
+function lmGesteDispo(lead, g) {
+  const s = lmSource(lead.source);
+  // Un geste LOCAL ne dépend jamais de BACS : appeler ou saisir un
+  // rapport s'écrit dans One Data, quelle que soit la source.
+  if (g.local) return true;
+  if (g.manager && PROFIL === 'vendeur') return false;
+  if (s.distant === 'bacs' && bacsJoignable === false) return false;
+  return true;
+}
+
+function lmGestesHtml(lead) {
+  const s = lmSource(lead.source);
+  let h = '<div class="g-grille">';
+  LM_GESTES.forEach(g => {
+    const ok = lmGesteDispo(lead, g);
+    const ou = g.local ? '' :
+      (s.distant === 'bacs' ? '<span class="g-ou bacs">BACS</span>'
+                            : '<span class="g-ou od">One Data</span>');
+    h += '<button type="button" class="g-btn" ' + (ok ? '' : 'disabled')
+      + ' data-geste="' + g.k + '" data-lead="' + lead.id_lead + '">'
+      + '<b>' + g.l + ou + '</b>'
+      + '<i>' + (ok ? g.d : 'BACS doit être ouvert') + '</i></button>';
+  });
+  h += '</div>';
+  return h;
+}
+
+// --- Les modales --------------------------------------------
+let lmModale = null;   // { type, lead }
+
+async function lmSitesCibles() {
+  try {
+    const { data, error } = await sb.from('v_lead_sites').select('*');
+    if (error) throw error;
+    return (data || []).filter(s => userSiteIds.map(Number).indexOf(Number(s.id_site)) >= 0);
+  } catch (e) { return []; }
+}
+
+function lmModaleHtml() {
+  if (!lmModale) return '';
+  const l = lmModale.lead, s = lmSource(l.source);
+  let corps = '', titre = '', valider = 'Valider';
+
+  if (lmModale.type === 'transfert') {
+    titre = 'Transférer vers une concession';
+    valider = 'Transférer';
+    corps = '<div class="g-note">Le délai ne repart PAS à zéro : il court depuis la réception '
+      + 'de la demande. Transférer ne rend pas un lead neuf.</div>';
+    (lmModale.sites || []).forEach((st, i) => {
+      corps += '<label class="g-site' + (i === 0 ? ' on' : '') + '">'
+        + '<input type="radio" name="g-site" value="' + st.id_site + '"' + (i === 0 ? ' checked' : '') + '>'
+        + '<span><b>' + escapeHtml(st.nom_site || ('Site ' + st.id_site)) + '</b>'
+        + '<i>' + (st.vendeurs || 0) + ' vendeurs</i></span>'
+        + '<span class="g-charge">' + (st.leads_en_file || 0) + ' leads en cours</span></label>';
+    });
+    if (!(lmModale.sites || []).length) {
+      corps += '<div style="color:var(--text-mut);font-size:12px">Aucun autre site dans votre '
+        + 'périmètre.</div>';
+    }
+    corps += '<div class="g-champ"><label>Qualification (transmise au vendeur)</label>'
+      + '<textarea id="g-qualif" rows="3" placeholder="Client joint, souhaite un essai samedi. '
+      + 'Budget 32 000 €, reprise Clio 2019."></textarea></div>';
+    if (s.distant === 'bacs') {
+      corps += '<div style="margin-top:12px;font-size:11.5px;color:var(--text-soft)">'
+        + 'Le site et le propriétaire seront aussi mis à jour dans BACS.</div>';
+    }
+
+  } else if (lmModale.type === 'rdv') {
+    titre = 'Prendre rendez-vous';
+    valider = 'Créer le rendez-vous';
+    const d = new Date(Date.now() + 86400000);
+    const j = d.toISOString().slice(0, 10);
+    corps = '<div class="g-champ"><label>Objet</label>'
+      + '<input id="g-sujet" value="Rendez-vous — ' + escapeHtml(l.nom_affiche || 'client') + '"></div>'
+      + '<div class="g-champ"><label>Date</label><input id="g-date" type="date" value="' + j + '"></div>'
+      + '<div class="g-champ"><label>Heure de début</label>'
+      + '<input id="g-h1" type="time" value="10:00"></div>'
+      + '<div class="g-champ"><label>Heure de fin</label>'
+      + '<input id="g-h2" type="time" value="11:00"></div>';
+    if (s.distant === 'bacs') {
+      corps += '<div style="margin-top:12px;font-size:11.5px;color:var(--text-soft)">'
+        + 'Le rendez-vous sera créé dans BACS, au nom du vendeur attribué.</div>';
+    }
+
+  } else if (lmModale.type === 'relance') {
+    titre = 'Programmer une relance';
+    valider = 'Programmer';
+    const d = new Date(Date.now() + 86400000);
+    corps = '<div class="g-champ"><label>Date de rappel</label>'
+      + '<input id="g-date" type="date" value="' + d.toISOString().slice(0, 10) + '"></div>'
+      + '<div class="g-champ"><label>Heure</label><input id="g-h1" type="time" value="10:00"></div>';
+
+  } else if (lmModale.type === 'perdre') {
+    titre = 'Classer sans suite';
+    valider = 'Classer';
+    corps = '<div class="g-champ"><label>Motif</label><select id="g-motif">'
+      + '<option value="injoignable">Injoignable</option>'
+      + '<option value="pas_interesse">Plus intéressé</option>'
+      + '<option value="concurrent">Parti à la concurrence</option>'
+      + '<option value="hors_perimetre">Hors périmètre</option>'
+      + '<option value="doublon">Doublon</option>'
+      + '</select></div>'
+      + '<div class="g-champ"><label>Précision (facultatif)</label>'
+      + '<textarea id="g-detail" rows="2"></textarea></div>';
+  }
+
+  return '<div class="g-modal" data-gfermer="1"><div class="g-modal-c" data-stop="1">'
+    + '<div class="g-modal-h"><b>' + titre + '</b><p>'
+    + escapeHtml(l.nom_affiche || 'Lead ' + l.id_lead)
+    + (l.vehicule_interet ? ' — ' + escapeHtml(l.vehicule_interet) : '') + '</p></div>'
+    + '<div class="g-modal-b">' + corps + '</div>'
+    + '<div class="g-modal-f">'
+    + '<button type="button" class="lmf-btn" data-gfermer="1">Annuler</button>'
+    + '<button type="button" class="lmf-btn lmf-btn-p" data-gvalider="1">' + valider + '</button>'
+    + '</div></div></div>';
+}
+
+// --- L'exécution --------------------------------------------
+function lmChampVal(id) {
+  const el = root.querySelector('#' + id);
+  return el ? el.value : null;
+}
+
+async function lmExecuterGeste() {
+  if (!lmModale) return;
+  const l = lmModale.lead, type = lmModale.type;
+  const s = lmSource(l.source);
+  try {
+    if (type === 'transfert') {
+      const r = root.querySelector('input[name="g-site"]:checked');
+      if (!r) { alert('Choisissez une concession.'); return; }
+      const { data, error } = await sb.rpc('lead_transferer_site', {
+        p_id_lead: Number(l.id_lead),
+        p_id_site: Number(r.value),
+        p_qualification: lmChampVal('g-qualif') || null,
+        p_id_user_cible: null
+      });
+      if (error) throw error;
+      lmModale = null;
+      // Le transfert change le périmètre du lead : on recharge la file.
+      state.mafileKey = null; state.mafileData = null;
+      fetchMaFile();
+      alert(data && data.ok
+        ? 'Lead transféré.' + (data.pousse_vers_bacs ? ' La mise à jour BACS suivra.' : '')
+        : 'Transfert impossible : ' + ((data && data.motif) || 'raison inconnue'));
+      return;
+    }
+
+    if (type === 'rdv' || type === 'relance') {
+      const j = lmChampVal('g-date'), h1 = lmChampVal('g-h1');
+      if (!j || !h1) { alert('Renseignez la date et l\'heure.'); return; }
+      const debut = new Date(j + 'T' + h1 + ':00');
+      if (isNaN(debut.getTime())) { alert('Date invalide.'); return; }
+
+      if (s.distant === 'bacs') {
+        const charge = (type === 'rdv')
+          ? { sujet: lmChampVal('g-sujet') || 'Rendez-vous',
+              debut: debut.toISOString(),
+              fin: new Date(j + 'T' + (lmChampVal('g-h2') || h1) + ':00').toISOString(),
+              owner_bacs: null }
+          : { date: debut.toISOString() };
+        const { error } = await sb.rpc('bacs_sortant_deposer', {
+          p_geste: type, p_id_lead: Number(l.id_lead), p_charge: charge });
+        if (error) throw error;
+        lmModale = null;
+        renderAll();
+        // ⚠️ On annonce une MISE EN FILE, pas une réussite : le geste
+        //    part dans BACS quand l'onglet répond, pas à l'instant du clic.
+        alert(type === 'rdv'
+          ? 'Rendez-vous transmis à BACS. Il apparaîtra dans la fiche sous peu.'
+          : 'Relance transmise à BACS.');
+        return;
+      }
+      // Source sans système distant : on écrit dans One Data.
+      lmModale = null;
+      renderAll();
+      alert('Cette source n\'a pas de système distant : le rendez-vous se prend dans '
+        + 'l\'agenda One Data.');
+      return;
+    }
+
+    if (type === 'perdre') {
+      const { error } = await sb.from('LEADS_EXTERNES')
+        .update({ statut: 'perdu', motif_fin: lmChampVal('g-motif'),
+                  clos_le: new Date().toISOString() })
+        .eq('id_lead', Number(l.id_lead));
+      if (error) throw error;
+      lmModale = null;
+      state.mafileKey = null; state.mafileData = null;
+      fetchMaFile();
+      return;
+    }
+  } catch (e) {
+    console.error('[leadMgmt] geste', e);
+    alert('Le geste n\'a pas pu être enregistré : ' + ((e && e.message) || e));
+  }
+}
+
 function v2Panneau() {
   const V = state.v2;
   if (!V || !V.sel) return '';
@@ -4138,6 +4491,14 @@ function v2PanneauCorps() {
     h += '</div>';
   });
   h += '</div>';
+  // ⚠️ Les gestes ne s'affichent que sur UN lead : proposer « prendre
+  //    rendez-vous » devant une liste de douze dossiers n'aurait pas de
+  //    sens — avec lequel ?
+  if (L.length === 1) {
+    h += '<div style="padding:0 12px 14px"><div style="font-size:10px;text-transform:uppercase;'
+      + 'letter-spacing:.07em;color:var(--text-mut);font-weight:700;margin-bottom:8px">'
+      + 'Que faire</div>' + lmGestesHtml(L[0]) + '</div>';
+  }
   h += '<div class="v2-pan-f">Cliquez un client pour ouvrir sa fiche. '
     + 'Échap ou le fond pour refermer.</div></div>';
   return h;
@@ -4558,6 +4919,9 @@ function renderAll() {
   }
 
   html += v2Fil();
+  // Le canal BACS conditionne une partie des gestes : on le dit AVANT
+  // que le vendeur n'essaie, pas après.
+  html += lmBandeauBacs();
 
   // Trois lectures d'un même périmètre. Libellés IDENTIQUES pour tous
   // les rôles : ce sont les mêmes questions, à des échelles différentes.
@@ -4575,6 +4939,8 @@ function renderAll() {
   else if (V.vue === 'rapport') html += v2Rapport() + v2Panneau();
   else                          html += v2Mur() + v2Panneau();
   html += renderRegles();
+
+  html += lmModaleHtml();
 
   root.innerHTML = html;
   const __tBind = performance.now();
@@ -4778,6 +5144,57 @@ function bindEvents() {
                            el.getAttribute('data-v2cvend'));
     });
   });
+  // --- Les gestes sur un lead ----------------------------------
+  root.querySelectorAll('[data-geste]').forEach(el => {
+    el.addEventListener('click', async (ev) => {
+      ev.stopPropagation();
+      if (el.disabled) return;
+      const k = el.getAttribute('data-geste');
+      const idl = Number(el.getAttribute('data-lead'));
+      const lead = (state.mafileData || []).find(x => Number(x.id_lead) === idl);
+      if (!lead) return;
+
+      if (k === 'appel') {
+        // Le composeur existe déjà dans le socle : on ne le réécrit pas.
+        if (window.__oropraAppeler) window.__oropraAppeler(lead.id_client, lead.telephone);
+        else alert('Composeur indisponible sur cet écran.');
+        return;
+      }
+      if (k === 'rpv') {
+        if (window.__oropraOuvrirRPV) window.__oropraOuvrirRPV(lead.id_cycle_comm);
+        else alert('La saisie de compte rendu se fait depuis la fiche client.');
+        return;
+      }
+      lmModale = { type: k, lead: lead };
+      if (k === 'transfert') lmModale.sites = await lmSitesCibles();
+      renderAll();
+    });
+  });
+  root.querySelectorAll('[data-gvalider]').forEach(el => {
+    el.addEventListener('click', (ev) => { ev.stopPropagation(); lmExecuterGeste(); });
+  });
+  root.querySelectorAll('[data-gfermer]').forEach(el => {
+    el.addEventListener('click', (ev) => {
+      // Le clic DANS la boîte ne doit pas la fermer.
+      if (ev.target.closest('[data-stop]') && !el.hasAttribute('data-gfermer')) return;
+      if (ev.target !== el && !ev.target.closest('.g-modal-f')) return;
+      lmModale = null; renderAll();
+    });
+  });
+  root.querySelectorAll('.g-site').forEach(el => {
+    el.addEventListener('click', () => {
+      root.querySelectorAll('.g-site').forEach(x => x.classList.remove('on'));
+      el.classList.add('on');
+    });
+  });
+  root.querySelectorAll('[data-bacs-ouvrir]').forEach(el => {
+    el.addEventListener('click', () => {
+      // On ne connaît pas l'URL du tenant BACS : on ouvre la page connue
+      // et l'utilisateur atterrit sur sa session.
+      window.open('https://toyota-france.my.site.com/bacs2/s/', '_blank');
+    });
+  });
+
   root.querySelectorAll('[data-v2fermer]').forEach(el => {
     el.addEventListener('click', () => { state.v2.sel = null; renderAll(); });
   });
