@@ -654,6 +654,10 @@ const LM_GESTES_CSS = `
 #lead-mgmt-root .g-src.web { background:var(--blue-bg); color:var(--blue-dk); }
 
 /* Les gestes : ce que la source PERMET. */
+#lead-mgmt-root .v2-lead { cursor:pointer; }
+#lead-mgmt-root .v2-lead-on { background:var(--blue-bg); border-left-width:4px; }
+#lead-mgmt-root .v2-lead-g { margin-top:10px; padding-top:10px;
+  border-top:1px solid var(--border); }
 #lead-mgmt-root .g-grille { display:grid; grid-template-columns:1fr 1fr; gap:8px; }
 @media (max-width:560px) { #lead-mgmt-root .g-grille { grid-template-columns:1fr; } }
 #lead-mgmt-root .g-btn { border:1px solid var(--border); border-radius:8px; padding:10px 12px;
@@ -4199,6 +4203,20 @@ const LM_SOURCES = {
   tel_traceur:      { l:'Tél. traceur',     cls:'web',      distant:null },
   transfert_plateau:{ l:'Transféré',        cls:'web',      distant:null }
 };
+// ⚠️ Toyota anonymise les clients au titre du droit à l'effacement :
+//    le nom devient un jeton (« 3Rgia YIyXdZH6 »). L'afficher tel quel
+//    laisse croire à un vrai nom mal orthographié. On le DIT.
+function lmEstAnonymise(l) {
+  const n = String(l.nom || '') + ' ' + String(l.prenom || '');
+  if (/anonymized|\.rtbf/i.test(String(l.email || ''))) return true;
+  // Un jeton mêle chiffres et casse au milieu d'un mot : « YIyXdZH6 ».
+  return /[A-Za-z][0-9][A-Za-z]|[0-9][A-Za-z][0-9]/.test(n) && !/\s[A-ZÉÈÀ]{2,}/.test(n);
+}
+function lmNomLisible(l) {
+  if (lmEstAnonymise(l)) return 'Client anonymisé';
+  return l.nom_affiche || [l.prenom, l.nom].filter(Boolean).join(' ') || 'Sans nom';
+}
+
 function lmSource(code) {
   return LM_SOURCES[code] || { l: code || 'Source inconnue', cls:'', distant:null };
 }
@@ -4298,6 +4316,7 @@ function lmGestesHtml(lead) {
 
 // --- Les modales --------------------------------------------
 let lmModale = null;   // { type, lead }
+let lmLeadSel = null;  // le lead choisi dans le volet
 
 async function lmSitesCibles() {
   try {
@@ -4496,13 +4515,35 @@ function v2PanneauCorps() {
     const r = lmfReste(l);
     const cls = n === 'retard' ? 'ko' : n === 'bientot' ? 'warn' : 'ok';
     const tps = (r == null) ? 'traité' : (r < 0 ? '+ ' + lmfDuree(-r) : lmfDuree(r));
-    h += '<div class="v2-lead ' + cls + '"'
-      + (l.id_client ? ' data-v2client="' + l.id_client + '"' : '') + '>'
-      + '<div class="v2-lead-h"><b>' + escapeHtml(l.nom_affiche || 'Sans nom') + '</b>'
+    // ⚠️ Le clic SÉLECTIONNE le lead et montre ses gestes. Il n'ouvre
+    //    PLUS la fiche client : un vendeur qui clique veut agir, et la
+    //    navigation lui faisait perdre l'écran (relevé le 18/09).
+    //    La fiche reste accessible par un bouton dédié.
+    const choisi = (lmLeadSel != null && Number(lmLeadSel) === Number(l.id_lead));
+    h += '<div class="v2-lead ' + cls + (choisi ? ' v2-lead-on' : '') + '"'
+      + ' data-v2lead="' + l.id_lead + '">'
+      + '<div class="v2-lead-h"><b>' + escapeHtml(lmNomLisible(l)) + '</b>'
       + '<em class="' + cls + '">' + tps + '</em></div>'
       + '<div class="v2-lead-m"><span class="v2-tag">'
       + escapeHtml(l.source_libelle || l.source || '?') + '</span> '
       + escapeHtml(l.vehicule_interet || '') + '</div>';
+    // Les gestes s'ouvrent SOUS le lead choisi : le vendeur garde sa
+    // liste sous les yeux au lieu de changer d'écran.
+    if (choisi) {
+      h += '<div class="v2-lead-g">' + lmGestesHtml(l);
+      if (l.id_client) {
+        h += '<button type="button" class="g-btn" style="margin-top:8px" '
+          + 'data-v2client="' + l.id_client + '"><b>Ouvrir la fiche client</b>'
+          + '<i>Historique, véhicules, contacts</i></button>';
+      } else {
+        // ⚠️ Sans fiche client, la navigation échouait et faisait
+        //    clignoter l'écran. On le DIT au lieu de laisser essayer.
+        h += '<div style="margin-top:8px;font-size:11.5px;color:var(--text-mut);'
+          + 'padding:8px 10px;background:var(--blue-pale,#f5f8fc);border-radius:6px">'
+          + 'Aucune fiche client rattachée à ce lead.</div>';
+      }
+      h += '</div>';
+    }
     if (PEUT_REAFFECTER) {
       h += '<button type="button" class="v2-reaff" data-v2reaff="' + l.id_lead + '">'
         + 'Réaffecter</button>';
@@ -4510,15 +4551,7 @@ function v2PanneauCorps() {
     h += '</div>';
   });
   h += '</div>';
-  // ⚠️ Les gestes ne s'affichent que sur UN lead : proposer « prendre
-  //    rendez-vous » devant une liste de douze dossiers n'aurait pas de
-  //    sens — avec lequel ?
-  if (L.length === 1) {
-    h += '<div style="padding:0 12px 14px"><div style="font-size:10px;text-transform:uppercase;'
-      + 'letter-spacing:.07em;color:var(--text-mut);font-weight:700;margin-bottom:8px">'
-      + 'Que faire</div>' + lmGestesHtml(L[0]) + '</div>';
-  }
-  h += '<div class="v2-pan-f">Cliquez un client pour ouvrir sa fiche. '
+  h += '<div class="v2-pan-f">Cliquez un dossier pour voir ce que vous pouvez en faire. '
     + 'Échap ou le fond pour refermer.</div></div>';
   return h;
 }
@@ -5164,6 +5197,16 @@ function bindEvents() {
     });
   });
   // --- Les gestes sur un lead ----------------------------------
+  root.querySelectorAll('[data-v2lead]').forEach(el => {
+    el.addEventListener('click', (ev) => {
+      if (ev.target.closest('[data-geste]') || ev.target.closest('[data-v2client]')
+          || ev.target.closest('[data-v2reaff]')) return;
+      const id = Number(el.getAttribute('data-v2lead'));
+      lmLeadSel = (lmLeadSel === id) ? null : id;   // un second clic referme
+      renderAll();
+    });
+  });
+
   root.querySelectorAll('[data-geste]').forEach(el => {
     el.addEventListener('click', async (ev) => {
       ev.stopPropagation();
