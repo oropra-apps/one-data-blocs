@@ -4208,9 +4208,13 @@ let bacsJoignable = null;   // null = pas encore su
 let bacsDernierTest = 0;
 
 async function ensureBacsJoignable() {
-  // ⚠️ On n'interroge pas à chaque rendu : le battement de cœur ne bouge
-  //    qu'une fois par minute, une lecture toutes les 30 s suffit.
-  if (Date.now() - bacsDernierTest < 30000 && bacsJoignable !== null) return;
+  // ⚠️ RELEVÉ LE 18/09 : le bandeau restait VERT plusieurs minutes après
+  //    la fermeture de BACS. Deux délais s'additionnaient — ce cache, et
+  //    la fenêtre de 3 min de `bacs_est_joignable`. Un bandeau qui ment
+  //    est pire qu'absent : le vendeur agit et perd son geste.
+  //    On interroge donc toutes les 10 s, et la base a resserré sa
+  //    fenêtre à 90 s.
+  if (Date.now() - bacsDernierTest < 10000 && bacsJoignable !== null) return;
   bacsDernierTest = Date.now();
   try {
     const { data, error } = await sb.rpc('bacs_est_joignable');
@@ -4223,11 +4227,26 @@ async function ensureBacsJoignable() {
   }
 }
 
+// ⚠️ Sans horloge, l'état ne serait relu qu'au prochain rendu — donc
+//    jamais si le vendeur laisse l'écran ouvert. C'est exactement ce qui
+//    s'est produit le 18/09.
+let bacsHorloge = null;
+function lmDemarrerHorlogeBacs() {
+  if (bacsHorloge) return;
+  bacsHorloge = setInterval(() => {
+    if (!document.getElementById('lead-mgmt-root')) {
+      clearInterval(bacsHorloge); bacsHorloge = null; return;
+    }
+    ensureBacsJoignable();
+  }, 12000);
+}
+
 // Le bandeau. ⚠️ Pas de croix quand BACS est fermé : seule la connexion
 // le referme. Un bandeau qu'on peut faire taire ne protège de rien —
 // le vendeur le fermerait et perdrait ses gestes sans le savoir.
 function lmBandeauBacs() {
   ensureBacsJoignable();
+  lmDemarrerHorlogeBacs();
   if (bacsJoignable === null) return '';
   if (bacsJoignable) {
     return '<div class="g-bandeau on"><span class="g-pastille"></span>'
@@ -5155,14 +5174,30 @@ function bindEvents() {
       if (!lead) return;
 
       if (k === 'appel') {
-        // Le composeur existe déjà dans le socle : on ne le réécrit pas.
-        if (window.__oropraAppeler) window.__oropraAppeler(lead.id_client, lead.telephone);
-        else alert('Composeur indisponible sur cet écran.');
+        // ⚠️ J'avais inventé `window.__oropraAppeler`, qui n'existe pas.
+        //    Le module compose DÉJÀ par un lien `tel:` ailleurs dans ce
+        //    fichier : on reprend ce qui marche.
+        const tel = lead.telephone || lead.mobile || '';
+        if (!tel) { alert('Ce lead ne porte aucun numéro.'); return; }
+        try {
+          const w = (window.wwLib && wwLib.getFrontWindow && wwLib.getFrontWindow()) || window;
+          w.open('tel:' + String(tel).replace(/[^0-9+]/g, ''), '_self');
+        } catch (e) {
+          window.open('tel:' + String(tel).replace(/[^0-9+]/g, ''), '_self');
+        }
         return;
       }
       if (k === 'rpv') {
-        if (window.__oropraOuvrirRPV) window.__oropraOuvrirRPV(lead.id_cycle_comm);
-        else alert('La saisie de compte rendu se fait depuis la fiche client.');
+        // Le compte rendu vit dans la fiche client : le RPV est un
+        // module monté là-bas, pas une fonction appelable d'ici. On
+        // emmène le vendeur au bon endroit plutôt que de lui afficher
+        // une erreur.
+        if (!lead.id_client) {
+          alert('Ce lead n\'est rattaché à aucune fiche client : le compte rendu '
+            + 'ne peut pas être saisi.');
+          return;
+        }
+        openClientFiche(lead.id_client, TAB_DEFAULT, null);
         return;
       }
       lmModale = { type: k, lead: lead };
