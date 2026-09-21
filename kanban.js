@@ -1034,6 +1034,15 @@ OD.define('kanban', {
   // ── Navigation : propale update ──────────────────────────────────────────
   function modifPropale(idPropale) {
     const c = findCard(idPropale);
+    // ⚠️ RELEVÉ LE 21/09 : la loupe d'une carte VD/VK menait à la page de
+    //    proposition VO de One Data — faite pour les propositions SAISIES
+    //    dans One Data, pas pour un document BACS — et finissait sur une
+    //    page d'erreur. Un VO ou un VD/VK venu de BACS se consulte par sa
+    //    fiche véhicule ; les VN BACS gardent leur consultation.
+    if (c && estBacs(c) && String(c.vn_vo || '').toUpperCase() !== 'VN' && c.vin) {
+      kanOpenFicheVO(c.vin);
+      return;
+    }
     if (c && String(c.vn_vo || '').toUpperCase() === 'VN') {
       if (c.status === 'draft' && c.nb_versions > 1) { choisirQuoteVN(idPropale); return; }
       try { wwLib.wwVariable.updateValue(VAR_ID_PROPALE, Number(idPropale)); } catch (e) { }
