@@ -571,6 +571,11 @@ OD.define('kanban', {
     return h ? '<div>' + h + '</div>' : '';
   }
 
+  // ⚠️ La carte porte `data-kbacs`, JAMAIS `data-bacs` : ce nom appartient au
+  //    bouton « B », dont le gestionnaire cherche l'élément `[data-bacs]` le
+  //    plus proche du clic. Sur la carte entière (v41 à v43), il captait TOUT
+  //    clic — loupe, fiche client, véhicule — et ouvrait BACS à l'adresse
+  //    /quote/1 (relevé le 21/09).
   function renderCard(c) {
     const vnvo = c.vn_vo_effectif || c.vn_vo;   // VD/VK : l'univers du vendeur
     const vt = vnvo === 'VN' ? 'vn' : (vnvo === 'VO' ? 'vo' : 'na');
@@ -590,7 +595,7 @@ OD.define('kanban', {
     const j = ageJours(c.maj);
     const isPdf = (c.status === 'propale' || c.status === 'bdc' || c.status === 'win');
     const pdfType = (c.status === 'propale') ? 'propale' : 'bdc';
-    let h = '<div class="kc-card vt-' + vt + (c._moving ? ' moving' : '') + '" draggable="true" data-card="' + c.id_propale_bdc + '" data-from="' + c.status + '" data-bacs="' + (deBacs ? '1' : '') + '">';
+    let h = '<div class="kc-card vt-' + vt + (c._moving ? ' moving' : '') + '" draggable="true" data-card="' + c.id_propale_bdc + '" data-from="' + c.status + '" data-kbacs="' + (deBacs ? '1' : '') + '">';
     h += pastilleBacs(c);
     if (c._moving) h += '<div class="kc-spin"><span class="kc-spinner"></span></div>';
 
@@ -2780,7 +2785,7 @@ OD.define('kanban', {
       if (!col || !e.target.closest('#kanban-root')) return;
       const dragging = doc.querySelector('#kanban-root .kc-card.dragging');
       if (!dragging) return;
-      if (canMove(dragging.getAttribute('data-from'), col.getAttribute('data-col'), dragging.getAttribute('data-bacs') === '1')) { e.preventDefault(); col.classList.add('over'); }
+      if (canMove(dragging.getAttribute('data-from'), col.getAttribute('data-col'), dragging.getAttribute('data-kbacs') === '1')) { e.preventDefault(); col.classList.add('over'); }
     }, true);
     doc.addEventListener('dragleave', function (e) { const col = e.target.closest && e.target.closest('[data-col]'); if (col) col.classList.remove('over'); }, true);
     doc.addEventListener('drop', function (e) {
