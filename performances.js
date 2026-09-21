@@ -1,5 +1,13 @@
 // ============================================================================
 //  PERFORMANCES ÉQUIPE — module One Data (OD.define)  v1
+//  v4.5 (22/09/2026) PROFIL TEAM COLIN : sur le tenant onedata-teamcolin
+//  (ref ieztupavcdnubmpbjvuq), le module lit v_performances_tc et affiche les
+//  KPI du reporting « COMMANDE 2026 » des chefs des ventes (Cde, Pro,
+//  PHEV/EV, FI, VU, Kinto, Arval + dont VD/VK, LOA/Easy, Pack Premium,
+//  Gravage, Reprises, Accessoires HT). Tous les autres tenants gardent
+//  strictement le comportement v4.4 (v_performances_v2, 5 KPI).
+//  Forçage manuel pour tester ailleurs : window.__OD_PERF_PROFILE__ = 'teamcolin'
+//  (la vue v_performances_tc doit alors exister sur le tenant).
 //  Rendu dans __anchor ; SUPABASE_URL/clé/JWT via ctx (tenant + session runtime) ;
 //  gardes arguments.callee et ensureRenderedPerf retirés (le loader possède le
 //  cycle de vie). User via socle oropraUser. VAR_SITES partagé avec objectifs.
@@ -47,7 +55,22 @@ OD.define('performances', {
 
   const doc = __anchor.ownerDocument || document;
   function getRoot() { return __anchor; }
-  try { window.__perfVer = 'v4.4-responsive'; } catch (e) { }
+  try { window.__perfVer = 'v4.5-teamcolin'; } catch (e) { }
+
+  // --- PROFIL TENANT -----------------------------------------------------------
+  // Team Colin est reconnu par la ref de son projet Supabase (source sûre), ou
+  // par un slug si le loader en fournit un. Aucun autre tenant n'est concerné.
+  const TC_REF = 'ieztupavcdnubmpbjvuq';
+  const IS_TC = (function () {
+    try {
+      if (window.__OD_PERF_PROFILE__ === 'teamcolin') return true;
+      const t = ctx.tenant || {};
+      if (String(t.supabase_url || '').indexOf(TC_REF) !== -1) return true;
+      const slug = String(t.slug || t.code || t.tenant_slug || t.name || '').toLowerCase().replace(/[^a-z]/g, '');
+      return slug === 'teamcolin';
+    } catch (e) { return false; }
+  })();
+  const PERF_VIEW = IS_TC ? 'v_performances_tc' : 'v_performances_v2';
 
   // --- Bus de site (oropra-site-bus.js) ----------------------------------------
   function siteBus() {
@@ -74,12 +97,12 @@ OD.define('performances', {
   // de fetcher col_performances_equipe via workflow puis lire une variable.
   async function loadPerfData(deb, fin) {
     if (!perimSites.length) await loadPerimeter();
-    let q = sb.from('v_performances_v2').select('*')
+    let q = sb.from(PERF_VIEW).select('*')
       .gte('date_mois', String(deb).slice(0, 10))
       .lte('date_mois', String(fin).slice(0, 10));
     if (perimSites.length) q = q.in('id_site', perimSites);
     const { data, error } = await q;
-    if (error) { console.error('[perf] v_performances_v2', error); return allRawData; }
+    if (error) { console.error('[perf] ' + PERF_VIEW, error); return allRawData; }
     allRawData = data || [];
     return allRawData;
   }
@@ -137,13 +160,37 @@ OD.define('performances', {
   })();
 
   // --- KPIs -------------------------------------------------------------------
-  const KPIS = [
-    { r: 'commandes_realisees', o: 'objectif_commandes', label: 'Commandes' },
-    { r: 'financements_realises', o: 'objectif_financements', label: 'Financement' },
-    { r: 'waxoyls_realises', o: 'objectif_waxoyl', label: 'Waxoyl' },
-    { r: 'contrats_service_realises', o: 'objectif_contrat_service', label: 'CS' },
-    { r: 'gravages_realises', o: 'objectif_gravage', label: 'Gravage' }
+  // mode 'obj'  : réalisé / objectif (comportement historique, inchangé)
+  // mode 'taux' : volume sans objectif, affiché en % des commandes
+  // mode 'euro' : montant cumulé (€ HT), avec moyenne par commande
+  // pen        : sur un KPI à objectif, ajoute la pénétration « % des cdes »
+  const KPIS_STD = [
+    { r: 'commandes_realisees', o: 'objectif_commandes', label: 'Commandes', mode: 'obj' },
+    { r: 'financements_realises', o: 'objectif_financements', label: 'Financement', mode: 'obj' },
+    { r: 'waxoyls_realises', o: 'objectif_waxoyl', label: 'Waxoyl', mode: 'obj' },
+    { r: 'contrats_service_realises', o: 'objectif_contrat_service', label: 'CS', mode: 'obj' },
+    { r: 'gravages_realises', o: 'objectif_gravage', label: 'Gravage', mode: 'obj' }
   ];
+  // Team Colin — ordre et libellés du reporting « COMMANDE 2026 » (onglet Total).
+  // Objectifs Cde et FI : table OBJECTIF ; Pro, PHEV/EV, VU, Kinto, Arval : objectif_kpi.
+  const KPIS_TC = [
+    { r: 'commandes_realisees', o: 'objectif_commandes', label: 'Cde', mode: 'obj' },
+    { r: 'pro_realises', o: 'objectif_pro', label: 'Pro', mode: 'obj', pen: true },
+    { r: 'phev_ev_realises', o: 'objectif_phev_ev', label: 'PHEV / EV', mode: 'obj', pen: true },
+    { r: 'financements_realises', o: 'objectif_financements', label: 'FI', mode: 'obj', pen: true },
+    { r: 'vu_realises', o: 'objectif_vu', label: 'VU', mode: 'obj' },
+    { r: 'kinto_realises', o: 'objectif_kinto', label: 'Kinto', mode: 'obj' },
+    { r: 'arval_realises', o: 'objectif_arval', label: 'Arval', mode: 'obj' },
+    { r: 'vdvk_realises', label: 'dont VD/VK', mode: 'taux' },
+    { r: 'loa_realises', label: 'LOA / Easy', mode: 'taux' },
+    { r: 'pack_premium_realises', label: 'Pack Premium', mode: 'taux' },
+    { r: 'gravages_realises', label: 'Gravage', mode: 'taux' },
+    { r: 'reprises_realises', label: 'Reprises', mode: 'taux' },
+    { r: 'accessoires_ht', label: 'Accessoires HT', mode: 'euro' }
+  ];
+  const KPIS = IS_TC ? KPIS_TC : KPIS_STD;
+  const KPIS_OBJ = KPIS.filter(k => k.mode === 'obj');
+  const KPI_CDE = KPIS[0];   // dénominateur des taux : toujours les commandes
   // --- VOLUME vs ATTEINTE -----------------------------------------------------
   // Arbitrage du 21/08/2026 : une commande signée par un chef des ventes EST
   // une commande de la concession, mais un chef n'a quasiment jamais
@@ -166,7 +213,7 @@ OD.define('performances', {
   }
   function emptyAgg() {
     const a = {};
-    for (const k of KPIS) { a[k.r] = 0; a[k.o] = 0; a[k.r + '_enc'] = 0; }
+    for (const k of KPIS) { a[k.r] = 0; if (k.o) a[k.o] = 0; a[k.r + '_enc'] = 0; }
     a._ids = [];
     return a;
   }
@@ -178,7 +225,7 @@ OD.define('performances', {
   }
   function addAgg(t, row) {
     if (estVendeurPerf(row)) {
-      for (const k of KPIS) { t[k.r] += num(row[k.r]); t[k.o] += num(row[k.o]); }
+      for (const k of KPIS) { t[k.r] += num(row[k.r]); if (k.o) t[k.o] += num(row[k.o]); }
     } else {
       // Encadrement : le volume est conservé et affiché à part, l'objectif
       // n'entre nulle part — il n'existe pas.
@@ -191,12 +238,45 @@ OD.define('performances', {
   // Variante brute : compte le réalisé quel que soit le rôle. Réservée à la
   // ligne « Encadrement » de l'arbre, qui doit afficher son propre volume.
   function addAggRaw(t, row) {
-    for (const k of KPIS) { t[k.r] += num(row[k.r]); t[k.o] += num(row[k.o]); }
+    for (const k of KPIS) { t[k.r] += num(row[k.r]); if (k.o) t[k.o] += num(row[k.o]); }
     if (Array.isArray(row.ids_commandes)) t._ids.push(...row.ids_commandes);
   }
   // Volume total d'un agrégat : vendeurs + encadrement.
   function volTotal(agg, k) { return num(agg[k.r]) + num(agg[k.r + '_enc']); }
   function pct(realise, objectif) { const o = num(objectif); return o > 0 ? Math.round(num(realise) / o * 100) : 0; }
+
+  // --- KPI SANS OBJECTIF (profil Team Colin) ------------------------------------
+  // Un taux se lit sur le VOLUME TOTAL (vendeurs + encadrement) rapporté aux
+  // commandes totales du même périmètre : c'est le « FI / Cde » du reporting.
+  const COL_NEUTRE = { bg: '#e6f1fb', text: '#0c447c', bar: '#acc5e4' };
+  const COL_VIDE = { bg: '#f0f2f5', text: '#8a96a8', bar: '#dde2ea' };
+  function fmtEur(v) { return Math.round(num(v)).toLocaleString('fr-FR') + ' €'; }
+  function tauxCde(agg, k) {
+    const cde = volTotal(agg, KPI_CDE);
+    return cde > 0 ? Math.round(volTotal(agg, k) / cde * 100) : null;
+  }
+  // Vue unifiée d'un KPI non-objectif : texte principal, badge, couleurs, barre.
+  function kpiLibre(agg, k) {
+    const v = volTotal(agg, k), cde = volTotal(agg, KPI_CDE), enc = num(agg[k.r + '_enc']);
+    if (k.mode === 'euro') {
+      return {
+        main: fmtEur(v), badge: cde > 0 ? fmtEur(v / cde) + '/cde' : '—',
+        col: v > 0 ? COL_NEUTRE : COL_VIDE, fill: v > 0 ? 100 : 0, score: v,
+        enc: enc > 0 ? 'dont ' + fmtEur(enc) + ' encadrement' : ''
+      };
+    }
+    const p = tauxCde(agg, k);
+    return {
+      main: String(v), badge: p == null ? '—' : p + '%',
+      col: v > 0 ? COL_NEUTRE : COL_VIDE, fill: p == null ? 0 : Math.min(p, 100), score: p == null ? -1 : p,
+      enc: enc > 0 ? 'dont ' + enc + ' encadrement' : ''
+    };
+  }
+  function penLine(agg, k) {
+    if (!k.pen) return '';
+    const p = tauxCde(agg, k);
+    return p == null ? '' : p + '% des cdes';
+  }
 
   // --- PRORATA TEMPS (jours ouvrés lun-sam) ------------------------------------
   let __prorata = 1;   // recalculé à chaque render
@@ -407,6 +487,14 @@ OD.define('performances', {
 #perf-root .pf-kpi-enc { margin-top:6px; font-size:10px; color:var(--text-mut); font-style:italic; }
 #perf-root .pf-kpi-fill { height:4px; border-radius:3px; }
 @media (max-width:900px){ #perf-root .pf-kpi-grid{ grid-template-columns:repeat(2,1fr);} }
+#perf-root .pf-kpi-grid.tc { grid-template-columns:repeat(auto-fill,minmax(140px,1fr)); }
+#perf-root .pf-kpi-sub { font-size:10px; color:var(--text-mut); text-transform:uppercase; letter-spacing:.5px; font-weight:600; margin:14px 0 8px; }
+#perf-root .pf-kpi-pen, #perf-root .pf-cell-pen { color:var(--text-soft); font-size:10px; margin-top:5px; font-variant-numeric:tabular-nums; }
+#perf-root .pf-cell-pen { font-size:9.5px; margin-top:3px; white-space:nowrap; }
+#perf-root .pf-tree th.th-libre { background:#f3f7fc; }
+#perf-root .pf-tree td.td-libre { background:rgba(230,241,251,.25); }
+#perf-root .pf-cell.libre { min-width:70px; }
+#perf-root .pf-chart-wrap-tc { position:relative; height:220px; min-width:0; }
 
 #perf-root .pf-charts { display:grid; grid-template-columns:1fr 1fr; gap:16px; margin-bottom:16px; }
 #perf-root .pf-charts > * { min-width:0; }   /* sans ça, les cellules de grille ne rétrécissent pas -> le canvas déborde */
@@ -477,7 +565,7 @@ OD.define('performances', {
 }
 /* Repli .perf-narrow : déclenché par la largeur RÉELLE de #perf-root (ResizeObserver),
    indépendant de la media query (l'aperçu WeWeb peut l'évaluer en largeur desktop). */
-#perf-root.perf-narrow .pf-kpi-grid { grid-template-columns:repeat(2,1fr); }
+#perf-root.perf-narrow .pf-kpi-grid, #perf-root.perf-narrow .pf-kpi-grid.tc { grid-template-columns:repeat(2,1fr); }
 #perf-root.perf-narrow .pf-charts   { grid-template-columns:1fr; }
 #perf-root.perf-narrow .pf-cmp-grid { grid-template-columns:84px 1fr 1fr; }
 #perf-root.perf-narrow .pf-bar      { gap:8px; }
@@ -520,6 +608,21 @@ OD.define('performances', {
       encLine +
       '</div>';
   }
+  // Cellule d'arbre d'un KPI sans objectif (taux ou montant).
+  function kpiCellLibre(agg, k, kpiLabel) {
+    const v = kpiLibre(agg, k);
+    const ids = agg._ids;
+    const clickable = Array.isArray(ids) && ids.length > 0;
+    const idsAttr = clickable ? ' data-kpi-ids="' + esc(ids.join(',')) + '" data-kpi-label="' + esc(kpiLabel) + '"' : '';
+    return '<div class="pf-cell libre"' + (clickable ? ' data-kpi-click="1"' : '') + idsAttr + '>' +
+      '<div class="pf-cell-top">' +
+      '<span class="pf-cell-ro">' + esc(v.main) + '</span>' +
+      '<span class="pf-cell-pct" style="background:' + v.col.bg + ';color:' + v.col.text + '">' + esc(v.badge) + '</span>' +
+      '</div>' +
+      '<div class="pf-cell-track"><div class="pf-cell-fill" style="width:' + v.fill + '%;background:' + v.col.bar + '"></div></div>' +
+      (v.enc ? '<div class="pf-cell-enc">' + esc(v.enc) + '</div>' : '') +
+      '</div>';
+  }
   function kpiCellsTree(agg, label) {
     let h = '';
     // Le réalisé affiché est le VOLUME TOTAL de la concession : vendeurs +
@@ -530,7 +633,14 @@ OD.define('performances', {
     // L'objectif reste celui des VENDEURS : un chef n'en porte pas, il
     // n'ajoute donc rien au dénominateur. Le taux peut dépasser 100 %, c'est
     // assumé et c'est la réalité du site.
-    for (const k of KPIS) h += '<td>' + kpiCell(volTotal(agg, k), agg[k.o], (label ? label + ' · ' : '') + k.label, agg._ids, agg[k.r + '_enc']) + '</td>';
+    for (const k of KPIS) {
+      const lbl = (label ? label + ' · ' : '') + k.label;
+      if (k.mode !== 'obj') { h += '<td class="td-libre">' + kpiCellLibre(agg, k, lbl) + '</td>'; continue; }
+      let cell = kpiCell(volTotal(agg, k), agg[k.o], lbl, agg._ids, agg[k.r + '_enc']);
+      const pen = penLine(agg, k);
+      if (pen) cell = cell.replace(/<\/div>$/, '<div class="pf-cell-pen">' + esc(pen) + '</div></div>');
+      h += '<td>' + cell + '</td>';
+    }
     return h;
   }
   function expIcon(open) { return '<span class="pf-exp">' + (open ? '▼' : '▶') + '</span>'; }
@@ -553,6 +663,19 @@ OD.define('performances', {
       h += '<div class="pf-cmp-grid">';
       h += '<div></div><div class="pf-cmp-head">' + esc(c.items[0].label) + '</div><div class="pf-cmp-head">' + esc(c.items[1].label) + '</div>';
       for (const k of KPIS) {
+        if (k.mode !== 'obj') {
+          const v = [kpiLibre(aggs[0], k), kpiLibre(aggs[1], k)];
+          const win = (v[0].score >= 0 && v[1].score >= 0 && v[0].score !== v[1].score) ? (v[0].score > v[1].score ? 0 : 1) : -1;
+          h += '<div class="pf-cmp-lbl">' + esc(k.label) + '</div>';
+          for (let i = 0; i < 2; i++) {
+            h += '<div class="pf-cmp-cell' + (win === i ? ' is-win' : '') + '">' +
+              '<span class="pf-cmp-ro">' + esc(v[i].main) + '</span>' +
+              '<span class="pf-cell-pct" style="background:' + v[i].col.bg + ';color:' + v[i].col.text + '">' + esc(v[i].badge) + '</span>' +
+              '<div class="pf-cell-track" style="margin-top:5px"><div class="pf-cell-fill" style="width:' + v[i].fill + '%;background:' + v[i].col.bar + '"></div></div>' +
+              '</div>';
+          }
+          continue;
+        }
         const p = [pct(aggs[0][k.r], aggs[0][k.o]), pct(aggs[1][k.r], aggs[1][k.o])];
         const hasO = [num(aggs[0][k.o]) > 0, num(aggs[1][k.o]) > 0];
         const win = (hasO[0] && hasO[1] && p[0] !== p[1]) ? (p[0] > p[1] ? 0 : 1) : -1;
@@ -595,6 +718,17 @@ OD.define('performances', {
       .map(x => {
         const o = { 'Réseau': x.reseau, 'Affaire': x.affaire, 'Site': x.site, 'Type': x.type, 'Vendeur': x.vendeur, 'Fonction': x.fonction };
         for (const k of KPIS) {
+          if (k.mode === 'euro') {
+            o[k.label + ' (€)'] = Math.round(volTotal(x.agg, k) * 100) / 100;
+            o[k.label + ' encadrement (€)'] = Math.round(num(x.agg[k.r + '_enc']) * 100) / 100;
+            continue;
+          }
+          if (k.mode === 'taux') {
+            o[k.label] = volTotal(x.agg, k);
+            o[k.label + ' % cdes'] = tauxCde(x.agg, k);
+            o[k.label + ' encadrement'] = num(x.agg[k.r + '_enc']);
+            continue;
+          }
           o[k.label + ' réalisé'] = num(x.agg[k.r]);
           o[k.label + ' objectif'] = num(x.agg[k.o]);
           o[k.label + ' %'] = num(x.agg[k.o]) > 0 ? pct(x.agg[k.r], x.agg[k.o]) : null;
@@ -708,8 +842,8 @@ OD.define('performances', {
 
     html += '<div class="pf-card">';
     html += shead('var(--blue-dk)', 'Performance — ' + scopeLabel, periodResume(curDeb, curFin) + ' · vs ' + Math.round(__prorata * 100) + '% du mois');
-    html += '<div class="pf-kpi-grid">';
-    for (const k of KPIS) {
+    html += '<div class="pf-kpi-grid' + (IS_TC ? ' tc' : '') + '">';
+    for (const k of KPIS_OBJ) {
       // Meme regle que l'arbre : le realise est le VOLUME TOTAL du perimetre.
       const r = volTotal(agg, k), o = agg[k.o], c = kpiColorPro(r, o);
       const badge = pctLabel(r, o);
@@ -726,15 +860,37 @@ OD.define('performances', {
         '<div class="pf-kpi-vals"><span class="pf-kpi-ro">' + r + ' <small>/ ' + o + '</small></span>' +
         '<span class="pf-kpi-pct" style="background:' + c.bg + ';color:' + c.text + '">' + badge + '</span></div>' +
         '<div class="pf-kpi-track"><div class="pf-kpi-fill" style="width:' + fillW + '%;background:' + c.bar + '"></div></div>' +
+        (penLine(agg, k) ? '<div class="pf-kpi-pen">' + esc(penLine(agg, k)) + '</div>' : '') +
         encLine +
         '</div>';
     }
-    html += '</div></div>';
+    html += '</div>';
+    const libres = KPIS.filter(k => k.mode !== 'obj');
+    if (libres.length) {
+      html += '<div class="pf-kpi-sub">Mix &amp; équipement · en % des commandes</div>';
+      html += '<div class="pf-kpi-grid' + (IS_TC ? ' tc' : '') + '">';
+      for (const k of libres) {
+        const v = kpiLibre(agg, k);
+        html += '<div class="pf-kpi">' +
+          '<div class="pf-kpi-label">' + esc(k.label) + '</div>' +
+          '<div class="pf-kpi-vals"><span class="pf-kpi-ro">' + esc(v.main) + '</span>' +
+          '<span class="pf-kpi-pct" style="background:' + v.col.bg + ';color:' + v.col.text + '">' + esc(v.badge) + '</span></div>' +
+          '<div class="pf-kpi-track"><div class="pf-kpi-fill" style="width:' + v.fill + '%;background:' + v.col.bar + '"></div></div>' +
+          (v.enc ? '<div class="pf-kpi-enc">' + esc(v.enc) + '</div>' : '') +
+          '</div>';
+      }
+      html += '</div>';
+    }
+    html += '</div>';
 
     html += '<div class="pf-charts">';
     html += '<div class="pf-card" style="margin-bottom:0">' + shead('var(--blue-dk)', 'Réalisé vs Objectif') + '<div class="pf-chart-wrap"><canvas id="pf-c1"></canvas></div></div>';
     html += '<div class="pf-card" style="margin-bottom:0">' + shead('var(--green)', chart2Title()) + '<div class="pf-chart-wrap"><canvas id="pf-c2"></canvas></div></div>';
     html += '</div>';
+    if (IS_TC) {
+      html += '<div class="pf-card">' + shead('var(--orange)', 'Taux d\'équipement — % des commandes', scopeLabel + (state.vnvo !== 'ALL' ? ' · ' + state.vnvo : '')) +
+        '<div class="pf-chart-wrap-tc"><canvas id="pf-c4"></canvas></div></div>';
+    }
 
     if (mois.length > 1) {
       html += '<div class="pf-card">';
@@ -911,7 +1067,7 @@ OD.define('performances', {
       }
     }
     let h = '<div class="pf-tree-wrap"><table class="pf-tree"><thead><tr><th>Périmètre</th>';
-    for (const k of KPIS) h += '<th>' + esc(k.label) + '</th>';
+    for (const k of KPIS) h += '<th' + (k.mode !== 'obj' ? ' class="th-libre" title="Sans objectif — en % des commandes"' : '') + '>' + esc(k.label) + '</th>';
     h += '</tr></thead><tbody>' + body + '</tbody></table></div>';
     return h;
   }
@@ -955,10 +1111,10 @@ OD.define('performances', {
     if (d.dim === 'kpi') {
       const a = sumAgg(rows);
       return {
-        labels: KPIS.map(k => k.label),
-        values: KPIS.map(k => pct(a[k.r], a[k.o])),
-        rea: KPIS.map(k => num(a[k.r])),
-        obj: KPIS.map(k => num(a[k.o]))
+        labels: KPIS_OBJ.map(k => k.label),
+        values: KPIS_OBJ.map(k => pct(a[k.r], a[k.o])),
+        rea: KPIS_OBJ.map(k => num(a[k.r])),
+        obj: KPIS_OBJ.map(k => num(a[k.o]))
       };
     }
     const m = {};
@@ -994,7 +1150,7 @@ OD.define('performances', {
     };
   }
 
-  let __c1 = null, __c2 = null, __c3 = null;
+  let __c1 = null, __c2 = null, __c3 = null, __c4 = null;
   function loadChartJs() {
     const win = doc.defaultView || window;
     if (win.Chart) return Promise.resolve(win.Chart);
@@ -1014,6 +1170,7 @@ OD.define('performances', {
     if (__c1) { try { __c1.destroy(); } catch (e) { } __c1 = null; }
     if (__c2) { try { __c2.destroy(); } catch (e) { } __c2 = null; }
     if (__c3) { try { __c3.destroy(); } catch (e) { } __c3 = null; }
+    if (__c4) { try { __c4.destroy(); } catch (e) { } __c4 = null; }
     const rows = rowsForSelection();
     const agg = sumAgg(rows);
 
@@ -1022,9 +1179,9 @@ OD.define('performances', {
       __c1 = new Chart(c1.getContext('2d'), {
         type: 'bar',
         data: {
-          labels: KPIS.map(k => k.label), datasets: [
-            { label: 'Réalisé', data: KPIS.map(k => agg[k.r]), backgroundColor: '#2a5ea9', borderRadius: 3, maxBarThickness: 28 },
-            { label: 'Objectif', data: KPIS.map(k => agg[k.o]), backgroundColor: '#d4e3f5', borderRadius: 3, maxBarThickness: 28 }
+          labels: KPIS_OBJ.map(k => k.label), datasets: [
+            { label: 'Réalisé', data: KPIS_OBJ.map(k => agg[k.r]), backgroundColor: '#2a5ea9', borderRadius: 3, maxBarThickness: 28 },
+            { label: 'Objectif', data: KPIS_OBJ.map(k => agg[k.o]), backgroundColor: '#d4e3f5', borderRadius: 3, maxBarThickness: 28 }
           ]
         },
         options: {
@@ -1058,6 +1215,31 @@ OD.define('performances', {
               callbacks: {
                 label: i => { const j = i.dataIndex; return d.rea[j] + ' / ' + d.obj[j] + ' · ' + d.values[j] + '%'; }
               }
+            }
+          },
+          scales: {
+            x: { beginAtZero: true, suggestedMax: 100, ticks: { font: { size: 9 }, color: '#7a9cc4', callback: v => v + '%' }, grid: { color: '#eaf0f9' } },
+            y: { ticks: { font: { size: 10 }, color: '#4a6a8a' }, grid: { display: false } }
+          }
+        }
+      });
+    }
+
+    const c4 = doc.getElementById('pf-c4');
+    if (c4) {
+      // Taux de pénétration sur le VOLUME TOTAL (vendeurs + encadrement), comme le reporting.
+      const ks = KPIS.filter(k => k !== KPI_CDE && k.mode !== 'euro');
+      const vals = ks.map(k => { const p = tauxCde(agg, k); return p == null ? 0 : p; });
+      const cnt = ks.map(k => volTotal(agg, k));
+      const cde = volTotal(agg, KPI_CDE);
+      __c4 = new Chart(c4.getContext('2d'), {
+        type: 'bar',
+        data: { labels: ks.map(k => k.label), datasets: [{ label: '% des commandes', data: vals, backgroundColor: ks.map(k => k.mode === 'obj' ? '#2a5ea9' : '#acc5e4'), borderRadius: 3, maxBarThickness: 18 }] },
+        options: {
+          indexAxis: 'y', responsive: true, maintainAspectRatio: false,
+          plugins: {
+            legend: { display: false }, tooltip: {
+              callbacks: { label: i => cnt[i.dataIndex] + ' / ' + cde + ' cdes · ' + vals[i.dataIndex] + '%' }
             }
           },
           scales: {
@@ -1133,7 +1315,7 @@ OD.define('performances', {
     const idsStr = [...new Set(ids)].join(',');
     let propales = []; const stockMap = {}, clientMap = {}, pdfMap = {};
     try {
-      const res = await fetch(SUPABASE_URL + '/rest/v1/PROPALE_BDC?id_propale_bdc=in.(' + idsStr + ')&select=id_propale_bdc,id_client_vu,VIN,"TotalProp","DateLivraison","TypeFinancement","Contrat_Service","GravageSimple","GravageFranchiseAccident","Waxoyl","VN_VO","LABEL","id_site","id_user_creation"',
+      const res = await fetch(SUPABASE_URL + '/rest/v1/PROPALE_BDC?id_propale_bdc=in.(' + idsStr + ')&select=id_propale_bdc,id_client_vu,VIN,"TotalProp","DateLivraison","TypeFinancement","Contrat_Service","GravageSimple","GravageFranchiseAccident","Waxoyl","VN_VO","LABEL","id_site","id_user_creation","RepriseVehicule"',
         { headers: { 'apikey': SUPABASE_KEY, 'Authorization': 'Bearer ' + userJwt } });
       propales = await res.json();
     } catch (e) { console.error(e); }
@@ -1175,6 +1357,7 @@ OD.define('performances', {
     const nCS = propales.filter(p => p.Contrat_Service && p.Contrat_Service.trim() && p.Contrat_Service.toLowerCase() !== 'aucun').length;
     const nGr = propales.filter(p => p.GravageSimple || p.GravageFranchiseAccident).length;
     const nWx = propales.filter(p => p.Waxoyl).length;
+    const nRp = propales.filter(p => p.RepriseVehicule).length;
     const pe = (n) => nb > 0 ? Math.round(n / nb * 100) : 0;
     const peCol = (p) => p >= 60 ? '#085041' : p >= 30 ? '#633806' : '#791f1f';
     const synth = doc.createElement('div');
@@ -1184,15 +1367,18 @@ OD.define('performances', {
       tag('Commandes', nb) +
       tag('Panier moyen', (nb > 0 ? Math.round(total / nb).toLocaleString('fr-FR') : 0) + ' €') +
       tag('Financement', pe(nFin) + '%', peCol(pe(nFin))) +
-      tag('CS', pe(nCS) + '%', peCol(pe(nCS))) +
-      tag('Gravage', pe(nGr) + '%', peCol(pe(nGr))) +
-      tag('Waxoyl', pe(nWx) + '%', peCol(pe(nWx)));
+      (IS_TC
+        ? tag('Gravage', pe(nGr) + '%', peCol(pe(nGr))) +
+          tag('Reprise', pe(nRp) + '%', peCol(pe(nRp)))
+        : tag('CS', pe(nCS) + '%', peCol(pe(nCS))) +
+          tag('Gravage', pe(nGr) + '%', peCol(pe(nGr))) +
+          tag('Waxoyl', pe(nWx) + '%', peCol(pe(nWx))));
     bodyDiv.appendChild(synth);
 
     const table = doc.createElement('table'); table.style.cssText = 'width:100%;border-collapse:collapse;font-size:12px;table-layout:fixed;min-width:760px';
-    const cg = doc.createElement('colgroup');['140px', '150px', '90px', '80px', '100px', '55px', '60px', '60px', '40px'].forEach(w => { const c = doc.createElement('col'); c.style.width = w; cg.appendChild(c); }); table.appendChild(cg);
+    const cg = doc.createElement('colgroup');(IS_TC ? ['150px', '170px', '90px', '80px', '110px', '60px', '60px', '40px'] : ['140px', '150px', '90px', '80px', '100px', '55px', '60px', '60px', '40px']).forEach(w => { const c = doc.createElement('col'); c.style.width = w; cg.appendChild(c); }); table.appendChild(cg);
     const thead = doc.createElement('thead'); const hr = doc.createElement('tr'); hr.style.cssText = 'background:#2a5ea9';
-    ['Client', 'Véhicule', 'Montant TTC', 'Date', 'Financement', 'CS', 'Gravage', 'Waxoyl', ''].forEach((h, i, arr) => { const th = doc.createElement('th'); th.style.cssText = 'color:#fff;font-weight:400;padding:7px 10px;text-align:left;font-size:10px'; if (i === 0) th.style.borderRadius = '5px 0 0 5px'; if (i === arr.length - 1) th.style.borderRadius = '0 5px 5px 0'; th.textContent = h; hr.appendChild(th); }); thead.appendChild(hr); table.appendChild(thead);
+    (IS_TC ? ['Client', 'Véhicule', 'Montant TTC', 'Date', 'Financement', 'Gravage', 'Reprise', ''] : ['Client', 'Véhicule', 'Montant TTC', 'Date', 'Financement', 'CS', 'Gravage', 'Waxoyl', '']).forEach((h, i, arr) => { const th = doc.createElement('th'); th.style.cssText = 'color:#fff;font-weight:400;padding:7px 10px;text-align:left;font-size:10px'; if (i === 0) th.style.borderRadius = '5px 0 0 5px'; if (i === arr.length - 1) th.style.borderRadius = '0 5px 5px 0'; th.textContent = h; hr.appendChild(th); }); thead.appendChild(hr); table.appendChild(thead);
     const tbody = doc.createElement('tbody'); let totalMontant = 0;
     for (const p of propales) {
       const c = clientMap[p.id_client_vu] || {}, s = stockMap[p.VIN] || {}, pdfDoc = pdfMap[String(p.id_propale_bdc)]; const hasPdf = canDownloadPdf(pdfDoc);
@@ -1210,11 +1396,15 @@ OD.define('performances', {
       const cells = [
         { v: montant ? montant.toLocaleString('fr-FR', { minimumFractionDigits: 0 }) + ' €' : '—', css: 'color:#2a5ea9;font-weight:500;text-align:right' },
         { v: p.DateLivraison ? new Date(p.DateLivraison).toLocaleDateString('fr-FR') : '—', css: 'color:#7a9cc4' },
-        { v: (p.TypeFinancement && p.TypeFinancement.trim()) ? p.TypeFinancement : '—', css: 'color:#4a6a8a;font-size:11px' },
+        { v: (p.TypeFinancement && p.TypeFinancement.trim()) ? p.TypeFinancement : '—', css: 'color:#4a6a8a;font-size:11px' }
+      ].concat(IS_TC ? [
+        { v: (p.GravageSimple || p.GravageFranchiseAccident) ? '✓' : '—', css: 'text-align:center' },
+        { v: p.RepriseVehicule ? '✓' : '—', css: 'text-align:center' }
+      ] : [
         { v: (p.Contrat_Service && p.Contrat_Service.trim() && p.Contrat_Service.toLowerCase() !== 'aucun') ? '✓' : '—', css: 'text-align:center' },
         { v: (p.GravageSimple || p.GravageFranchiseAccident) ? '✓' : '—', css: 'text-align:center' },
         { v: p.Waxoyl ? '✓' : '—', css: 'text-align:center' }
-      ];
+      ]);
       for (const cell of cells) { const td = doc.createElement('td'); td.style.cssText = 'padding:8px 10px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;' + cell.css + (cell.v === '✓' ? ';color:#53bda7;font-weight:500' : (cell.v === '—' ? ';color:#acc5e4' : '')); td.textContent = cell.v; tr.appendChild(td); }
       const tdP = doc.createElement('td'); tdP.style.cssText = 'padding:8px 10px;text-align:center';
       if (hasPdf) {
@@ -1228,7 +1418,7 @@ OD.define('performances', {
     const tfoot = doc.createElement('tfoot'); const totr = doc.createElement('tr'); totr.style.cssText = 'background:#f5f8fc;border-top:1px solid #eaf0f9';
     const tl = doc.createElement('td'); tl.setAttribute('colspan', '2'); tl.style.cssText = 'padding:8px 10px;color:#2a5ea9;font-weight:500'; tl.textContent = propales.length + ' commande' + (propales.length > 1 ? 's' : ''); totr.appendChild(tl);
     const tm = doc.createElement('td'); tm.style.cssText = 'padding:8px 10px;color:#2a5ea9;font-weight:500;text-align:right'; tm.textContent = totalMontant.toLocaleString('fr-FR', { minimumFractionDigits: 0 }) + ' €'; totr.appendChild(tm);
-    const te = doc.createElement('td'); te.setAttribute('colspan', '6'); totr.appendChild(te); tfoot.appendChild(totr); table.appendChild(tfoot);
+    const te = doc.createElement('td'); te.setAttribute('colspan', IS_TC ? '5' : '6'); totr.appendChild(te); tfoot.appendChild(totr); table.appendChild(tfoot);
     bodyDiv.appendChild(table); modal.appendChild(bodyDiv); overlay.appendChild(modal); doc.body.appendChild(overlay);
   }
 
