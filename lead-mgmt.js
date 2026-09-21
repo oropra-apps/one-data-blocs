@@ -4396,7 +4396,14 @@ function lmGesteDispo(lead, g) {
     return lead.id_client
       ? { ok: true } : { ok: false, raison: 'Aucune fiche client' };
   }
-  if (g.k === 'rdv' || g.k === 'relance') {
+  // Le rendez-vous s'inscrit d'abord dans l'agenda One Data : il ne
+  // dépend que d'une fiche client. Pour un lead BACS, la poussée vers
+  // Salesforce attend en file si l'onglet est fermé — rien ne se perd.
+  if (g.k === 'rdv') {
+    return lead.id_client
+      ? { ok: true } : { ok: false, raison: 'Aucune fiche client' };
+  }
+  if (g.k === 'relance') {
     if (bacs) {
       return bacsJoignable === false
         ? { ok: false, raison: 'BACS doit être ouvert' } : { ok: true };
@@ -4561,7 +4568,7 @@ function lmModaleHtml() {
       + lmCreneauHtml(true);
     if (s.distant === 'bacs') {
       corps += '<div style="margin-top:12px;font-size:11.5px;color:var(--text-soft)">'
-        + 'Le rendez-vous sera créé dans BACS, au nom du vendeur attribué.</div>';
+        + 'Le rendez-vous sera inscrit dans l\'agenda One Data et dans BACS, au nom du vendeur attribué.</div>';
     }
 
   } else if (lmModale.type === 'relance') {
@@ -4672,13 +4679,30 @@ async function lmExecuterGeste() {
       if (!cr) { lmToast('Choisissez un jour et une heure.', 'erreur'); return; }
       const debut = cr.debut;
 
+      // ⚠️ RELEVÉ LE 21/09 : les rendez-vous pris ici arrivaient dans BACS
+      //    mais PAS dans l'agenda One Data — où le vendeur travaille. Ils
+      //    passent désormais par `lead_rdv_creer`, qui les inscrit dans
+      //    l'agenda (même logique que le module agenda) et, pour un lead
+      //    BACS, dépose en plus le geste vers Salesforce, lié.
+      //    Heures LOCALES, au format de l'agenda.
+      if (type === 'rdv') {
+        const loc = (d) => d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-'
+          + String(d.getDate()).padStart(2, '0') + ' ' + String(d.getHours()).padStart(2, '0') + ':'
+          + String(d.getMinutes()).padStart(2, '0') + ':00';
+        const { data, error } = await sb.rpc('lead_rdv_creer', {
+          p_id_lead: Number(l.id_lead), p_start: loc(debut), p_end: loc(cr.fin),
+          p_sujet: lmChampVal('g-sujet') || 'Rendez-vous' });
+        if (error) throw error;
+        lmModale = null;
+        renderAll();
+        lmToast(data && data.vers_bacs
+          ? 'Rendez-vous inscrit dans l\'agenda. Il partira aussi dans BACS dès que l\'onglet répondra.'
+          : 'Rendez-vous inscrit dans l\'agenda.', data && data.vers_bacs ? 'attente' : 'ok');
+        return;
+      }
+
       if (s.distant === 'bacs') {
-        const charge = (type === 'rdv')
-          ? { sujet: lmChampVal('g-sujet') || 'Rendez-vous',
-              debut: debut.toISOString(),
-              fin: cr.fin.toISOString(),
-              owner_bacs: null }
-          : { date: debut.toISOString() };
+        const charge = { date: debut.toISOString() };
         const { error } = await sb.rpc('bacs_sortant_deposer', {
           p_geste: type, p_id_lead: Number(l.id_lead), p_charge: charge });
         if (error) throw error;
@@ -4686,9 +4710,7 @@ async function lmExecuterGeste() {
         renderAll();
         // ⚠️ On annonce une MISE EN FILE, pas une réussite : le geste
         //    part dans BACS quand l'onglet répond, pas à l'instant du clic.
-        lmToast(type === 'rdv'
-          ? 'Rendez-vous transmis à BACS. Il apparaîtra dans la fiche d\'ici une minute.'
-          : 'Relance transmise à BACS.', 'attente');
+        lmToast('Relance transmise à BACS.', 'attente');
         return;
       }
       // Source sans système distant : on écrit dans One Data.
@@ -5483,7 +5505,7 @@ function bindEvents() {
       // Hors BACS, le rendez-vous et la relance vivent dans l'agenda de
       // la fiche client : on y emmène le vendeur plutôt que de lui
       // afficher un message qui l'y renvoie.
-      if ((k === 'rdv' || k === 'relance') && lmSource(lead.source).distant !== 'bacs') {
+      if (k === 'relance' && lmSource(lead.source).distant !== 'bacs') {
         if (lead.id_client) openClientFiche(lead.id_client, TAB_DEFAULT, null);
         return;
       }
