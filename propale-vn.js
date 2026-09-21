@@ -137,7 +137,11 @@
     const enStock = !!(P.VIN && String(P.VIN).trim());
 
     const V = ST.V;   // véhicule d'une simulation BACS sans configuration (VO, VD/VK)
-    const univers = String(P.VN_VO || (V && V.univers) || 'VN').toUpperCase();
+    const univBrut = String(P.VN_VO || (V && V.univers) || 'VN').toUpperCase();
+    // Un VD/VK sort du STOCK VO : c'est un VO, quel que soit le vendeur qui
+    // le propose (Antoine, 21/09). On le précise sans changer d'univers.
+    const estVDVK = univBrut === 'VD/VK';
+    const univers = estVDVK ? 'VO' : univBrut;
     const vehName  = [C.marque, C.famille, C.finition].filter(Boolean).join(' ')
       || (V && (V.libelle || [V.marque, V.modele].filter(Boolean).join(' ')))
       || (P.LABEL || '—');
@@ -190,7 +194,7 @@
     ].join('');
     const vinAff = P.VIN || (V && V.vin);
     const vehTitle = V
-      ? `VÉHICULE — ${esc(univers)}${vinAff ? ' · VIN ' + esc(vinAff) : ''}`
+      ? `VÉHICULE — ${esc(univers)}${estVDVK ? ' · VD/VK' : ''}${vinAff ? ' · VIN ' + esc(vinAff) : ''}`
       : (enStock ? `VÉHICULE — EN STOCK · VIN ${esc(P.VIN)}` : 'VÉHICULE — CONFIGURATION');
     const vehCard = card(vehTitle,
       `<div class="pv-veh"><div class="pv-veh-ph">${photo}</div><div class="pv-attrs">${vehAttrs}</div></div>`);
@@ -265,12 +269,12 @@
 
     root.innerHTML = `<style>${CSS}</style><div class="pv-wrap">
       <div class="pv-top">
-        <span class="pv-tag"${univers === 'VN' ? '' : ` style="background:${univers === 'VO' ? '#3a9e8a' : '#7c5cc4'}"`}>${esc(univers)}</span><span class="pv-title">Proposition</span>
+        <span class="pv-tag"${univers === 'VN' ? '' : ` style="background:#3a9e8a"`}>${esc(univers)}</span>${estVDVK ? '<span class="pv-tag" style="background:#ede9fe;color:#5b21b6">VD/VK</span>' : ''}<span class="pv-title">Proposition</span>
         <div class="pv-ctx">
           <div class="pv-chip"><span>Véhicule</span><b>${esc(vehName)}</b></div>
           <div class="pv-sep"></div>
           <div class="pv-chip"><span>Point de vente</span><b>${esc(siteName)}</b></div>
-          <span class="pv-branch">${V ? (V.statut_stock ? '🚗 En stock' : '🚗 Véhicule d\'occasion') : (enStock ? '🚗 En stock' : '🔧 Configuration — à produire')}</span>
+          <span class="pv-branch">${V ? (estVDVK ? '🚗 Stock VO · démonstration' : (V.statut_stock ? '🚗 Stock VO' : '🚗 Véhicule d\'occasion')) : (enStock ? '🚗 En stock' : '🔧 Configuration — à produire')}</span>
         </div>
         <div class="pv-ht"><span class="on">TTC</span><div class="pv-switch"></div><span>HT</span></div>
       </div>
