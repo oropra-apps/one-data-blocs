@@ -88,17 +88,34 @@ OD.define('kanban', {
     win: { bdc: 'M', lose: 'M' },
     lose: { bdc: 'M' }
   };
-  function transitionLevel(from, to) { return (TRANSITIONS[from] && TRANSITIONS[from][to]) || null; }
-  function canMove(from, to) { const lvl = transitionLevel(from, to); if (!lvl) return false; if (lvl === 'M' && !isManager()) return false; return true; }
+  // Cartes BACS (21/09) : c'est BACS qui fait avancer la commande. Le vendeur
+  // passe une simulation en commande ou abandonne ; l'édition — qui mène en
+  // demande d'approbation — se fait dans BACS ; seul le chef transmet /
+  // valide ou abandonne une commande en demande d'approbation. Aucun retour
+  // en arrière à la main : One Data et BACS divergeraient.
+  const TRANSITIONS_BACS = {
+    draft: { propale: 'V', lose: 'V' },
+    propale: { lose: 'V' },
+    bdc: { win: 'M', lose: 'M' },
+    win: {},
+    lose: {}
+  };
+  function transitionLevel(from, to, bacs) {
+    const T = bacs ? TRANSITIONS_BACS : TRANSITIONS;
+    return (T[from] && T[from][to]) || null;
+  }
+  function canMove(from, to, bacs) { const lvl = transitionLevel(from, to, bacs); if (!lvl) return false; if (lvl === 'M' && !isManager()) return false; return true; }
+  function estBacs(c) { return !!(c && (c.bacs_sf_id || c.id_affaire_bacs)); }
   function canArchive(status) { return status === 'draft' || status === 'propale'; }
 
   const COLS = [
     // Libellé d'affichage seulement : le statut reste 'draft' en base.
+    // Libellés du cycle BACS (21/09). Les codes restent en base.
     { key: 'draft', label: 'Simulations' },
-    { key: 'propale', label: 'Propale' },
-    { key: 'bdc', label: 'BDC' },
-    { key: 'win', label: 'Gagné' },
-    { key: 'lose', label: 'Perdu' }
+    { key: 'propale', label: 'Commandes' },
+    { key: 'bdc', label: "Demande d'approbation" },
+    { key: 'win', label: 'Transmis TFR / Validée' },
+    { key: 'lose', label: 'Abandonné' }
   ];
   const COL_KEYS = COLS.map(c => c.key);
 
@@ -152,6 +169,19 @@ OD.define('kanban', {
       const r = await supabase.rpc('get_kanban_cards', { p_id_user: state.vendeurId, p_date_from: state.period.from, p_date_to: state.period.to, p_id_site: state.busSite != null ? Number(state.busSite) : null });
       if (r.error) throw r.error;
       state.cards = normalizeCards(r.data || []);
+      // Statut BACS et n° de commande : lus à part, sur les seules cartes
+      // BACS. `get_kanban_cards` renvoie une table au format figé ; y ajouter
+      // une colonne obligerait à la recréer avec ses droits.
+      try {
+        const ids = state.cards.filter(estBacs).map(c => c.id_propale_bdc);
+        if (ids.length) {
+          const rb = await supabase.from('PROPALE_BDC')
+            .select('id_propale_bdc,statut_bacs,num_commande_constructeur').in('id_propale_bdc', ids);
+          const ix = {}; (rb.data || []).forEach(x => { ix[x.id_propale_bdc] = x; });
+          state.cards.forEach(c => { const x = ix[c.id_propale_bdc];
+            if (x) { c.statut_bacs = x.statut_bacs; c.num_commande_constructeur = x.num_commande_constructeur; } });
+        }
+      } catch (e) { /* les pastilles sont un confort */ }
     } catch (e) {
       console.warn('[kanban] get_kanban_cards indisponible, fallback mock', e);
       state.cards = MOCK_CARDS();
@@ -503,6 +533,29 @@ OD.define('kanban', {
     return h + '</div>';
   }
 
+  // Pastille du statut BACS : deux états partagent la colonne « Demande
+  // d'approbation » (édition par le vendeur, puis approbation lancée), et le
+  // chef doit voir ce qui lui revient.
+  const PASTILLES_BACS = {
+    'Printed':           ['Éditée', '#8a5a00', '#fdf2dd'],
+    'Awaiting Approval': ['Approbation lancée', '#1f4a87', '#eaf0f9'],
+    'Refused':           ['Refusée', '#a32d2d', '#fcebeb'],
+    'Transmitted to TFR':['Transmise à TFR', '#1d6e5f', '#e1f5ee'],
+    'Validated':         ['Validée', '#1d6e5f', '#e1f5ee'],
+    'Delivered':         ['Livrée', '#1d6e5f', '#e1f5ee']
+  };
+  function pastilleBacs(c) {
+    const p = PASTILLES_BACS[c.statut_bacs];
+    let h = '';
+    if (p) h += '<span style="display:inline-block;font-size:10.5px;font-weight:800;border-radius:999px;padding:2px 9px;'
+      + 'margin:0 6px 6px 0;color:' + p[1] + ';background:' + p[2] + '">' + esc(p[0]) + '</span>';
+    if (c.vn_vo === 'VD/VK') h += '<span style="display:inline-block;font-size:10.5px;font-weight:800;border-radius:999px;'
+      + 'padding:2px 9px;margin:0 6px 6px 0;color:#5b21b6;background:#ede9fe">VD/VK</span>';
+    if (c.num_commande_constructeur) h += '<span style="display:inline-block;font-size:10.5px;color:#888780;margin-bottom:6px">'
+      + 'Cde ' + esc(c.num_commande_constructeur) + '</span>';
+    return h ? '<div>' + h + '</div>' : '';
+  }
+
   function renderCard(c) {
     const vt = c.vn_vo === 'VN' ? 'vn' : (c.vn_vo === 'VO' ? 'vo' : 'na');
     // Plusieurs documents de meme nature dans l'affaire : on affiche leur nombre
@@ -521,7 +574,8 @@ OD.define('kanban', {
     const j = ageJours(c.maj);
     const isPdf = (c.status === 'propale' || c.status === 'bdc' || c.status === 'win');
     const pdfType = (c.status === 'propale') ? 'propale' : 'bdc';
-    let h = '<div class="kc-card vt-' + vt + (c._moving ? ' moving' : '') + '" draggable="true" data-card="' + c.id_propale_bdc + '" data-from="' + c.status + '">';
+    let h = '<div class="kc-card vt-' + vt + (c._moving ? ' moving' : '') + '" draggable="true" data-card="' + c.id_propale_bdc + '" data-from="' + c.status + '" data-bacs="' + (deBacs ? '1' : '') + '">';
+    h += pastilleBacs(c);
     if (c._moving) h += '<div class="kc-spin"><span class="kc-spinner"></span></div>';
 
     // Client
@@ -608,7 +662,7 @@ OD.define('kanban', {
   }
 
   function renderMoveMenu(c) {
-    const targets = COL_KEYS.filter(k => k !== c.status && canMove(c.status, k));
+    const targets = COL_KEYS.filter(k => k !== c.status && canMove(c.status, k, estBacs(c)));
     let h = '<div class="kc-menu">';
     if (!targets.length) h += '<div class="kc-menu-empty">Aucun déplacement possible</div>';
     targets.forEach(k => { const col = COLS.find(x => x.key === k); h += '<button class="kc-menu-b" data-go="' + c.id_propale_bdc + ':' + k + '">→ ' + esc(col.label) + '</button>'; });
@@ -696,15 +750,137 @@ OD.define('kanban', {
   }
 
 
+  // ── Validation / transmission TFR depuis One Data (chef) ──────────────
+  // Même geste que dans BACS : approbateurs, lancement de l'approbation,
+  // puis transmission (VN, avec le choix de la commande constructeur) ou
+  // validation (VO). Les garde-fous sont dans l'extension : statut relu dans
+  // BACS avant chaque étape, états connus seulement, jamais deux fois.
+  // Transport direct vers le pont de l'extension — le geste n'est pas
+  // (encore) dans OD.bacs ; la logique, elle, n'existe qu'une fois.
+  function traduireErreurBacs(e) {
+    return ({ extension_absente: "L'extension One Data n'est pas installée sur ce navigateur.",
+              extension_indisponible: "L'extension One Data ne répond pas : rechargez la page.",
+              bacs_non_ouvert: "Aucun onglet BACS n'est ouvert : connectez-vous à BACS dans un autre onglet.", sans_reponse: "BACS n'a rien répondu.",
+              bacs_non_pret: "L'onglet BACS n'est pas prêt : rechargez-le.",
+              delai_depasse: "BACS n'a pas répondu à temps. Vérifiez la commande dans BACS avant toute nouvelle tentative." })[e] || e || null;
+  }
+
+  function appelBacs(action, params, delaiMs) {
+    return new Promise((resolve) => {
+      const id = 'kv' + Date.now() + Math.random().toString(36).slice(2, 7);
+      const w = window;
+      let fini = false;
+      const ecoute = (ev) => {
+        const d = ev && ev.data;
+        if (!d || d.__od_bacs_result !== true || d.id !== id) return;
+        fini = true; w.removeEventListener('message', ecoute); resolve(d.result || d);
+      };
+      w.addEventListener('message', ecoute);
+      w.postMessage({ __od_bacs: true, id: id, action: action, params: params || {} }, '*');
+      setTimeout(() => { if (!fini) { w.removeEventListener('message', ecoute);
+        resolve({ ok: false, refus: "BACS ne répond pas : vérifiez qu'un onglet BACS est ouvert." }); } }, delaiMs || 90000);
+    });
+  }
+
+  async function ouvrirValidation(c) {
+    if (!isManager()) { toast('Réservé au chef des ventes.', true); return; }
+    const orderId = String(c.bacs_sf_id || '');
+    if (!/^801/.test(orderId)) { toast('Ouvrez la commande à transmettre.', true); return; }
+    const estVN = c.vn_vo === 'VN';
+    const titre = estVN ? 'Transmettre à TFR' : 'Valider la commande';
+    const ov = doc.createElement('div');
+    ov.id = 'kan-valid-ov';
+    ov.style.cssText = 'position:fixed;inset:0;background:rgba(28,43,69,.45);z-index:9999;display:flex;align-items:center;'
+      + 'justify-content:center;font-family:"Nunito Sans",sans-serif';
+    const fermer = () => { try { ov.remove(); } catch (e) {} };
+    const corps = (html) => {
+      ov.innerHTML = '<div style="background:#fff;border-radius:14px;width:min(560px,92vw);max-height:86vh;overflow:auto;'
+        + 'box-shadow:0 20px 50px rgba(0,0,0,.25);padding:20px 22px;color:#1c2b45">'
+        + '<div style="font-size:17px;font-weight:800;margin-bottom:4px">' + esc(titre) + '</div>'
+        + '<div style="font-size:13px;color:#888780;margin-bottom:14px">' + esc([c.client, c.vehicule].filter(Boolean).join(' · ')) + '</div>'
+        + html + '</div>';
+      ov.addEventListener('click', (e) => { if (e.target === ov) fermer(); });
+    };
+    doc.body.appendChild(ov);
+    const btn = (lib, attr, prim) => '<button type="button" ' + attr + ' style="border-radius:8px;padding:9px 18px;font:inherit;'
+      + 'font-size:13px;font-weight:700;cursor:pointer;border:1px solid ' + (prim ? '#2a5ea9;background:#2a5ea9;color:#fff' : '#ece9e1;background:#fff;color:#2a5ea9') + '">' + lib + '</button>';
+    const pied = (lib) => '<div style="display:flex;justify-content:flex-end;gap:8px;margin-top:16px">'
+      + btn('Annuler', 'data-kv-annuler', false) + btn(lib, 'data-kv-ok', true) + '</div>';
+    const avert = '<div style="font-size:12.5px;background:#fdf2dd;color:#8a5a00;border-radius:8px;padding:9px 12px;margin-top:12px">'
+      + (estVN ? 'La commande sera <b>transmise à Toyota France</b>. Ce geste est définitif.'
+               : 'La commande sera <b>validée dans BACS</b>. Ce geste est définitif.') + '</div>';
+
+    let numCde = null;
+    if (estVN) {
+      corps('<div style="font-size:13px;color:#888780">Recherche des commandes constructeur disponibles…</div>');
+      const r = await appelBacs('correspondances_as400', { orderId: orderId }, 60000);
+      const liste = (r && r.ok && r.liste) || [];
+      if (!liste.length) {
+        corps('<div style="font-size:13px;color:#a32d2d">' + esc((r && (r.refus || traduireErreurBacs(r.erreur))) || 'Aucune commande constructeur disponible pour cette configuration.') + '</div>'
+          + '<div style="display:flex;justify-content:flex-end;margin-top:14px">' + btn('Fermer', 'data-kv-annuler', false) + '</div>');
+        ov.querySelector('[data-kv-annuler]').onclick = fermer;
+        return;
+      }
+      const fmt = (d) => (d && d.length === 8) ? d.slice(6, 8) + '/' + d.slice(4, 6) + '/' + d.slice(0, 4) : (d || '');
+      let h = '<div style="font-size:12px;font-weight:800;text-transform:uppercase;letter-spacing:.04em;color:#888780;margin-bottom:8px">'
+        + 'Commande constructeur</div><div style="display:flex;flex-direction:column;gap:6px">';
+      liste.forEach((x, i) => {
+        h += '<label style="display:flex;gap:10px;align-items:flex-start;border:1px solid #ece9e1;border-radius:9px;padding:9px 11px;cursor:pointer">'
+          + '<input type="radio" name="kv-cde" value="' + esc(x.numCde) + '"' + (i === 0 ? ' checked' : '') + ' style="margin-top:3px">'
+          + '<span style="font-size:13px"><b>' + esc(x.numCde) + '</b> · ' + esc(x.version) + '<br>'
+          + '<span style="color:#888780">' + esc(x.couleur) + (x.dateLiv ? ' · livraison ' + esc(fmt(x.dateLiv)) : '')
+          + (x.villeLiv ? ' · ' + esc(x.villeLiv) : '') + '</span></span></label>';
+      });
+      corps(h + '</div>' + avert + pied('Transmettre à TFR'));
+    } else {
+      corps('<div style="font-size:13px">BACS vérifiera la disponibilité du véhicule avant validation.</div>' + avert + pied('Valider'));
+    }
+    ov.querySelector('[data-kv-annuler]').onclick = fermer;
+    ov.querySelector('[data-kv-ok]').onclick = async () => {
+      if (estVN) {
+        const choix = ov.querySelector('input[name="kv-cde"]:checked');
+        numCde = choix ? choix.value : null;
+        if (!numCde) { toast('Choisissez une commande constructeur.', true); return; }
+      }
+      const ok = ov.querySelector('[data-kv-ok]');
+      ok.disabled = true; ok.textContent = 'Transmission en cours…';
+      const r = await appelBacs('valider_commande', { orderId: orderId, numCde: numCde }, 120000);
+      fermer();
+      if (r && r.ok) {
+        toast(estVN ? 'Commande transmise à TFR.' : 'Commande validée.');
+        // La projection range la carte dès que la commande remonte.
+        setTimeout(() => { loadData(); }, 2500);
+      } else {
+        toast('Refusé par BACS : ' + ((r && (r.refus || traduireErreurBacs(r.erreur))) || 'raison inconnue'), true);
+      }
+    };
+  }
+
   async function doMove(id, to) {
     const c = findCard(id); if (!c) return;
     const from = c.status;
     if (from === to) return;
-    // Affaire BACS passee en commande : c'est BACS qui cree la commande, pas
-    // nous. On ne touche a la carte qu'apres sa confirmation.
-    if (to === 'bdc' && c.id_affaire_bacs && c.bacs_sf_id && /^0Q0/.test(String(c.bacs_sf_id))) {
+    // Carte BACS : chaque déplacement est un geste BACS. On ne touche à la
+    // carte qu'après confirmation de BACS — c'est la projection qui la range.
+    if (estBacs(c) && to !== 'archived') {
+      if (!canMove(from, to, true)) {
+        toast(to === 'bdc' ? "La demande d'approbation part de BACS : éditez la commande dans BACS."
+                           : 'Déplacement interdit', true);
+        return;
+      }
       state.menuFor = null; render();
-      await convertirEnCommande(id, c.bacs_sf_id, c.vehicule);
+      const sf = String(c.bacs_sf_id || '');
+      if (to === 'propale') {
+        if (/^0Q0/.test(sf)) await convertirEnCommande(id, sf, c.vehicule);
+        else toast('Ouvrez la simulation à passer en commande.', true);
+        return;
+      }
+      if (to === 'lose') {
+        if (/^(0Q0|801)/.test(sf)) await abandonnerProposition(id, sf, [c.client, c.vehicule].filter(Boolean).join(' \u00b7 '));
+        else await ouvrirAbandon(id);
+        return;
+      }
+      if (to === 'win') { await ouvrirValidation(c); return; }
       return;
     }
     if (!canMove(from, to) && to !== 'archived') { toast('Déplacement interdit', true); return; }
@@ -2579,7 +2755,7 @@ OD.define('kanban', {
       if (!col || !e.target.closest('#kanban-root')) return;
       const dragging = doc.querySelector('#kanban-root .kc-card.dragging');
       if (!dragging) return;
-      if (canMove(dragging.getAttribute('data-from'), col.getAttribute('data-col'))) { e.preventDefault(); col.classList.add('over'); }
+      if (canMove(dragging.getAttribute('data-from'), col.getAttribute('data-col'), dragging.getAttribute('data-bacs') === '1')) { e.preventDefault(); col.classList.add('over'); }
     }, true);
     doc.addEventListener('dragleave', function (e) { const col = e.target.closest && e.target.closest('[data-col]'); if (col) col.classList.remove('over'); }, true);
     doc.addEventListener('drop', function (e) {
@@ -2589,7 +2765,8 @@ OD.define('kanban', {
       let raw = ''; try { raw = e.dataTransfer.getData('text/plain'); } catch (x) { }
       if (!raw) return;
       const [id, from] = raw.split('|'), to = col.getAttribute('data-col');
-      if (canMove(from, to)) doMove(Number(id), to);
+      const cd = findCard(Number(id));
+      if (canMove(from, to, estBacs(cd))) doMove(Number(id), to);
     }, true);
   }
   bindDnD();
