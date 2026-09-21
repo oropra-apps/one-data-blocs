@@ -65,7 +65,12 @@ OD.define('kanban', {
     if (window.oropraPropaleVN) return Promise.resolve();
     if (window.__oropraPropaleVNChargement) return window.__oropraPropaleVNChargement;
     window.__oropraPropaleVNChargement = new Promise((resolve, reject) => {
-      const sc = document.createElement('script'); sc.src = PROPALE_VN_URL; sc.async = true;
+      // ⚠️ 21/09 : l'adresse était FIGÉE sur la v3 (commit d9068ea). Une
+      //    version publiée ensuite n'était jamais chargée. On prend celle que
+      //    le socle résout pour ce tenant ; l'adresse figée ne sert que de repli.
+      const man = window.OD && window.OD.manifest && window.OD.manifest['propale-vn'];
+      const url = (man && man.cdn_url) || PROPALE_VN_URL;
+      const sc = document.createElement('script'); sc.src = url; sc.async = true;
       sc.onload = () => resolve(); sc.onerror = () => reject(new Error('propale-vn.js introuvable'));
       document.head.appendChild(sc);
     }); return window.__oropraPropaleVNChargement;
