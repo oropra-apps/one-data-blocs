@@ -736,6 +736,12 @@ OD.define('topnav', {
   function arbNom(f) { return [f.civilite, f.nom, (f.societe ? '' : f.prenom)].filter(Boolean).join(' '); }
 
   // ---- badge compteur dans le menu -------------------------------
+  function majBadgeArbitrage(n) {
+    const el = root() && root().querySelector('#od-arb-badge');
+    if (!el) return;
+    if (n > 0) { el.textContent = n > 99 ? '99+' : String(n); el.hidden = false; }
+    else { el.hidden = true; }
+  }
   async function rafraichirBadgeArbitrage() {
     const el = root() && root().querySelector('#od-arb-badge');
     if (!el) return;
@@ -744,9 +750,7 @@ OD.define('topnav', {
     try {
       const { data, error } = await sb.rpc('client_file_arbitrage', { p_id_user: uid, p_statut: 'en_attente', p_limit: 99 });
       if (error) return;
-      const n = data && data.lignes ? data.lignes.length : 0;
-      if (n > 0) { el.textContent = n > 99 ? '99+' : String(n); el.hidden = false; }
-      else { el.hidden = true; }
+      majBadgeArbitrage(data && data.lignes ? data.lignes.length : 0);
     } catch (e) {}
   }
 
@@ -1113,14 +1117,22 @@ OD.define('topnav', {
 
   // ---- Rappel d'arbitrage au retour sur One Data (patch BACS2) ----
   // Réutilise rafraichirBadgeArbitrage / openArbitrage / arbSb / arbUserId / root / doc.
+  // ⚠️ 21/09/2026 : au retour sur l'onglet, « focus » ET « visibilitychange »
+  //    se déclenchent tous les deux, et chacun lançait DEUX fois la même
+  //    requête (badge + bandeau) — 4 appels par retour. Avec BACS ouvert à
+  //    côté, un vendeur change d'onglet sans arrêt. Désormais : un seul
+  //    appel, qui sert au badge et au bandeau, et au plus un toutes les 30 s.
+  let arbDernierRappel = 0;
   async function rappelArbitrageAuRetour() {
+    if (Date.now() - arbDernierRappel < 30000) return;
     try {
       const sb = arbSb(), uid = arbUserId();
       if (!sb || uid == null) return;
-      rafraichirBadgeArbitrage();
+      arbDernierRappel = Date.now();
       const { data, error } = await sb.rpc('client_file_arbitrage', { p_id_user: uid, p_statut: 'en_attente', p_limit: 99 });
       if (error) return;
       const n = (data && data.lignes) ? data.lignes.length : 0;
+      majBadgeArbitrage(n);
       afficherBandeauArbitrage(n);
     } catch (e) {}
   }
