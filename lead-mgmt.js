@@ -167,6 +167,11 @@ function profilDuRole(r) {
 
 const PROFIL   = profilDuRole(userRole);
 const SECTIONS_ROLE = PROFILS[PROFIL].sections;
+
+// 90 jours : au-delà, une demande n'est plus un lead à rappeler en priorité
+// mais une affaire à requalifier. Déclarée ICI, en tête : fetchMaFile peut
+// s'exécuter avant que le module n'atteigne le bloc des gestes (TDZ).
+const LM_ARRIERE_MIN = 90 * 1440;
 // Un manager qui n'a pas « mon_equipe » n'est pas un chef : le drapeau
 // sert à décider des boutons (réaffecter), pas des sections.
 const PEUT_REAFFECTER = PROFIL === 'chef' || PROFIL === 'directeur';
@@ -3057,17 +3062,36 @@ async function fetchMaFile() {
             + 'delai_reponse_min,sla_tenu,id_user_attribue,attribution_regle')
       .in('statut', ['recu', 'resolu', 'attribue'])
       .order('attente_min', { ascending: false })
-      .limit(300);
+      .limit(500);
+    // ⚠️ RELEVÉ LE 18/09 : la file était coupée à 300 lignes triées de la
+    //    PLUS ANCIENNE à la plus récente. Avec des dossiers de 900 jours en
+    //    tête, les demandes du jour — les seules encore gagnables — tombaient
+    //    hors de la limite. L'arriéré (> 90 jours) est donc écarté par
+    //    défaut et compté à part ; le vendeur peut l'afficher d'un clic.
+    if (!state.voirArriere) q = q.lte('attente_min', LM_ARRIERE_MIN);
     if (cible) q = q.eq('id_user_attribue', cible);
     if (state.busSite) q = q.eq('id_site', Number(state.busSite));
     const { data, error } = await q;
     if (error) throw error;
+
+    // Combien de dossiers dorment au-delà de 90 jours : on ne les montre
+    // pas, mais on ne les cache pas non plus.
+    try {
+      let qa = sb.from('v_lead_sla').select('id_lead', { count: 'exact', head: true })
+        .in('statut', ['recu', 'resolu', 'attribue'])
+        .gt('attente_min', LM_ARRIERE_MIN);
+      if (cible) qa = qa.eq('id_user_attribue', cible);
+      if (state.busSite) qa = qa.eq('id_site', Number(state.busSite));
+      const ra = await qa;
+      state.mafileArriere = ra.count || 0;
+    } catch (e) { state.mafileArriere = null; }
     state.mafileData = (data || []).map(r => ({
       id_lead:            r.id_lead,
       source:             r.source,
       source_libelle:     r.source_libelle,
       id_site:            r.id_site,
       id_client:          r.id_client,
+      id_cycle_comm:      r.id_cycle_comm,
       statut:             r.statut,
       sla_minutes:        Number(r.sla_minutes) || 60,
       attente_min:        r.attente_min != null ? Number(r.attente_min) : null,
@@ -3095,14 +3119,20 @@ async function enrichirMaFile() {
   const ids = rows.map(r => r.id_lead);
   try {
     const { data } = await sb.from('LEADS_EXTERNES')
-      .select('id_lead,nom,prenom,vehicule_interet').in('id_lead', ids);
+      .select('id_lead,nom,prenom,vehicule_interet,telephone,email,joignable')
+      .in('id_lead', ids);
     const idx = {};
     (data || []).forEach(r => { idx[r.id_lead] = r; });
     rows.forEach(r => {
       const s = idx[r.id_lead];
       if (!s) return;
       r.nom_affiche      = [s.prenom, s.nom].filter(Boolean).join(' ').trim() || null;
+      r.nom = s.nom; r.prenom = s.prenom;
       r.vehicule_interet = s.vehicule_interet || null;
+      // Nécessaires pour savoir QUELS GESTES sont possibles.
+      r.telephone = s.telephone || null;
+      r.email     = s.email || null;
+      r.joignable = s.joignable;
     });
   } catch (e) { /* le nom est un confort, pas un bloquant */ }
 }
@@ -4245,6 +4275,24 @@ async function ensureBacsJoignable() {
   }
 }
 
+
+function lmArriereHtml() {
+  const n = state.mafileArriere;
+  if (!n) return '';
+  return '<div style="display:flex;align-items:center;gap:10px;padding:8px 14px;'
+    + 'margin-bottom:12px;border-radius:8px;background:var(--blue-pale,#f5f8fc);'
+    + 'border:1px solid var(--border);font-size:12.5px;color:var(--text-soft)">'
+    + (state.voirArriere
+        ? '<span>L\'arriéré est affiché : <b>' + n + '</b> dossier' + (n > 1 ? 's' : '')
+          + ' de plus de 90 jours.</span>'
+        : '<span><b>' + n + '</b> dossier' + (n > 1 ? 's' : '') + ' de plus de 90 jours '
+          + (n > 1 ? 'sont masqués' : 'est masqué') + ' pour laisser voir les demandes récentes.</span>')
+    + '<button type="button" data-arriere="1" style="margin-left:auto;background:none;'
+    + 'border:1px solid var(--border);border-radius:5px;padding:4px 11px;font-size:12px;'
+    + 'font-family:inherit;color:var(--blue-dk);cursor:pointer;white-space:nowrap">'
+    + (state.voirArriere ? 'Masquer l\'arriéré' : 'Afficher l\'arriéré') + '</button></div>';
+}
+
 // ⚠️ Sans horloge, l'état ne serait relu qu'au prochain rendu — donc
 //    jamais si le vendeur laisse l'écran ouvert. C'est exactement ce qui
 //    s'est produit le 18/09.
@@ -4287,28 +4335,67 @@ const LM_GESTES = [
   { k:'perdre',    l:'Classer sans suite',      d:'Avec un motif' }
 ];
 
+// Même règle que `lead_tel_exploitable` côté base : Toyota remplace les
+// numéros anonymisés par 00.00.00.00.00 — un champ rempli n'est pas un
+// numéro.
+function lmTelExploitable(tel) {
+  const n = String(tel || '').replace(/[^0-9]/g, '');
+  if (n.length < 6) return false;
+  if (/^(.)\1+$/.test(n)) return false;
+  if (/^0?123456789/.test(n)) return false;
+  return true;
+}
+
+// ⚠️ RELEVÉ LE 18/09 : les gestes étaient proposés sans regarder la
+//    donnée. « Appeler » s'affichait sur un lead sans numéro, « Compte
+//    rendu » sur un lead sans fiche client. Un bouton qui ne peut pas
+//    aboutir ne doit pas être proposé — ou doit dire POURQUOI.
+//    Rend { ok, raison } : la raison s'affiche sous le bouton grisé.
 function lmGesteDispo(lead, g) {
   const s = lmSource(lead.source);
-  // Un geste LOCAL ne dépend jamais de BACS : appeler ou saisir un
-  // rapport s'écrit dans One Data, quelle que soit la source.
-  if (g.local) return true;
-  if (g.manager && PROFIL === 'vendeur') return false;
-  if (s.distant === 'bacs' && bacsJoignable === false) return false;
-  return true;
+  const bacs = (s.distant === 'bacs');
+  if (g.manager && PROFIL === 'vendeur') return { ok: false, cache: true };
+
+  if (g.k === 'appel') {
+    return lmTelExploitable(lead.telephone)
+      ? { ok: true } : { ok: false, raison: 'Aucun numéro exploitable' };
+  }
+  if (g.k === 'rpv') {
+    return lead.id_client
+      ? { ok: true } : { ok: false, raison: 'Aucune fiche client' };
+  }
+  if (g.k === 'rdv' || g.k === 'relance') {
+    if (bacs) {
+      return bacsJoignable === false
+        ? { ok: false, raison: 'BACS doit être ouvert' } : { ok: true };
+    }
+    // Hors BACS, rendez-vous et relance se posent dans l'agenda de la
+    // fiche client : sans fiche, il n'y a nulle part où les écrire.
+    return lead.id_client
+      ? { ok: true } : { ok: false, raison: 'Aucune fiche client' };
+  }
+  if (g.k === 'transfert') {
+    return (bacs && bacsJoignable === false)
+      ? { ok: false, raison: 'BACS doit être ouvert' } : { ok: true };
+  }
+  return { ok: true };   // classer sans suite : toujours possible
 }
 
 function lmGestesHtml(lead) {
   const s = lmSource(lead.source);
   let h = '<div class="g-grille">';
   LM_GESTES.forEach(g => {
-    const ok = lmGesteDispo(lead, g);
+    const d = lmGesteDispo(lead, g);
+    if (d.cache) return;   // un geste réservé au manager n'est pas montré au vendeur
+    // Où le geste s'écrit. « Classer sans suite » reste LOCAL : la
+    // clôture n'est pas encore poussée vers BACS (geste non reconnu).
+    const versBacs = (s.distant === 'bacs') && !g.local && g.k !== 'perdre';
     const ou = g.local ? '' :
-      (s.distant === 'bacs' ? '<span class="g-ou bacs">BACS</span>'
-                            : '<span class="g-ou od">One Data</span>');
-    h += '<button type="button" class="g-btn" ' + (ok ? '' : 'disabled')
+      (versBacs ? '<span class="g-ou bacs">BACS</span>' : '<span class="g-ou od">One Data</span>');
+    h += '<button type="button" class="g-btn" ' + (d.ok ? '' : 'disabled')
       + ' data-geste="' + g.k + '" data-lead="' + lead.id_lead + '">'
       + '<b>' + g.l + ou + '</b>'
-      + '<i>' + (ok ? g.d : 'BACS doit être ouvert') + '</i></button>';
+      + '<i>' + escapeHtml(d.ok ? g.d : (d.raison || 'Indisponible')) + '</i></button>';
   });
   h += '</div>';
   return h;
@@ -4974,6 +5061,7 @@ function renderAll() {
   // Le canal BACS conditionne une partie des gestes : on le dit AVANT
   // que le vendeur n'essaie, pas après.
   html += lmBandeauBacs();
+  html += lmArriereHtml();
 
   // Trois lectures d'un même périmètre. Libellés IDENTIQUES pour tous
   // les rôles : ce sont les mêmes questions, à des échelles différentes.
@@ -5197,6 +5285,14 @@ function bindEvents() {
     });
   });
   // --- Les gestes sur un lead ----------------------------------
+  root.querySelectorAll('[data-arriere]').forEach(el => {
+    el.addEventListener('click', () => {
+      state.voirArriere = !state.voirArriere;
+      state.mafileKey = null; state.mafileData = null;
+      fetchMaFile();
+    });
+  });
+
   root.querySelectorAll('[data-v2lead]').forEach(el => {
     el.addEventListener('click', (ev) => {
       if (ev.target.closest('[data-geste]') || ev.target.closest('[data-v2client]')
@@ -5241,6 +5337,13 @@ function bindEvents() {
           return;
         }
         openClientFiche(lead.id_client, TAB_DEFAULT, null);
+        return;
+      }
+      // Hors BACS, le rendez-vous et la relance vivent dans l'agenda de
+      // la fiche client : on y emmène le vendeur plutôt que de lui
+      // afficher un message qui l'y renvoie.
+      if ((k === 'rdv' || k === 'relance') && lmSource(lead.source).distant !== 'bacs') {
+        if (lead.id_client) openClientFiche(lead.id_client, TAB_DEFAULT, null);
         return;
       }
       lmModale = { type: k, lead: lead };
