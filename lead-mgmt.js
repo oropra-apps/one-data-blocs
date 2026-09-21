@@ -633,6 +633,11 @@ const LM_V2_CSS = `
 `;
 
 const LM_GESTES_CSS = `
+/* ⚠️ RELEVÉ LE 21/09 : --blue, --blue-line et --blue-pale étaient
+   utilisées mais JAMAIS définies. Tout ce qui en dépendait devenait
+   transparent, texte blanc compris : le bouton « Créer le rendez-vous »
+   et chaque créneau sélectionné n'apparaissaient qu'au survol. */
+#lead-mgmt-root { --blue:#2a5ea9; --blue-hover:#1f4a87; --blue-line:#acc5e4; --blue-pale:#f5f8fc; }
 #lead-mgmt-root .g-bandeau { display:flex; align-items:center; gap:11px; padding:11px 16px;
   border-radius:10px; margin-bottom:14px; font-size:13px; }
 #lead-mgmt-root .g-bandeau.off { background:#fdf6e6; border:1px solid #b8851a; color:#7a5a12; }
@@ -710,7 +715,7 @@ const LM_GESTES_CSS = `
   border-radius:8px; padding:9px 18px; font-size:13px; font-weight:600; font-family:inherit; cursor:pointer; }
 #lead-mgmt-root .g-act:hover { background:var(--blue-bg); }
 #lead-mgmt-root .g-act.p { background:var(--blue); border-color:var(--blue); color:#fff; }
-#lead-mgmt-root .g-act.p:hover { background:var(--blue-dk); }
+#lead-mgmt-root .g-act.p:hover { background:var(--blue-hover); border-color:var(--blue-hover); }
 #lead-mgmt-root .g-act:disabled { opacity:.5; cursor:not-allowed; }
 
 /* Créneaux : un jour, une heure, une durée — trois clics au lieu de
@@ -3298,11 +3303,11 @@ async function ouvrirReaffectation(idLead) {
     if (error) throw error;
     cibles = data || [];
   } catch (e) {
-    alert('Impossible de charger les vendeurs : ' + ((e && e.message) || 'erreur'));
+    lmToast('Impossible de charger les vendeurs : ' + ((e && e.message) || 'erreur'), 'erreur');
     return;
   }
   if (!cibles.length) {
-    alert('Aucun vendeur disponible sur ce site, ou vous n\'avez pas le droit de réaffecter ce lead.');
+    lmToast('Aucun vendeur disponible sur ce site, ou vous n\'avez pas le droit de réaffecter ce lead.', 'erreur');
     return;
   }
   const lignes = cibles.map(function (c, i) {
@@ -3311,7 +3316,7 @@ async function ouvrirReaffectation(idLead) {
   const rep = prompt('Réaffecter ce lead à :\n\n' + lignes + '\n\nNuméro du vendeur :');
   if (!rep) return;
   const idx = parseInt(rep, 10) - 1;
-  if (isNaN(idx) || idx < 0 || idx >= cibles.length) { alert('Choix invalide.'); return; }
+  if (isNaN(idx) || idx < 0 || idx >= cibles.length) { lmToast('Choix invalide.', 'erreur'); return; }
   const motif = prompt('Motif de la réaffectation (facultatif) :') || null;
   try {
     const { error } = await sb.rpc('lead_reaffecter', {
@@ -3323,7 +3328,7 @@ async function ouvrirReaffectation(idLead) {
     fetchMaFile();
   } catch (e) {
     // 42501 = la RPC a refuse : l'appelant n'encadre pas ce site.
-    alert('Réaffectation refusée : ' + ((e && e.message) || 'droits insuffisants'));
+    lmToast('Réaffectation refusée : ' + ((e && e.message) || 'droits insuffisants'), 'erreur');
   }
 }
 
@@ -4590,6 +4595,49 @@ function lmModaleHtml() {
 }
 
 // --- L'exécution --------------------------------------------
+// Notification intégrée, à la place des boîtes d'alerte du navigateur.
+// ⚠️ Accrochée au DOCUMENT et non à #lead-mgmt-root : chaque rendu
+//    réécrit l'écran, et une notification qui y vivrait disparaîtrait
+//    au premier rafraîchissement.
+function lmToast(message, genre) {
+  try {
+    const d = (typeof doc !== 'undefined' && doc) ? doc : document;
+    let zone = d.getElementById('lm-toasts');
+    if (!zone) {
+      zone = d.createElement('div');
+      zone.id = 'lm-toasts';
+      zone.style.cssText = 'position:fixed;top:18px;left:50%;transform:translateX(-50%);z-index:100000;'
+        + 'display:flex;flex-direction:column;gap:8px;align-items:center;pointer-events:none;'
+        + 'font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;';
+      d.body.appendChild(zone);
+    }
+    const couleurs = {
+      ok:     ['#e1f5ee', '#1d6e5f', '#53bda7', '✓'],
+      attente:['#eaf0f9', '#1f4a87', '#acc5e4', '↗'],
+      erreur: ['#fcebeb', '#a32d2d', '#e3a6a0', '!']
+    }[genre || 'ok'];
+    const el = d.createElement('div');
+    el.style.cssText = 'pointer-events:auto;display:flex;align-items:center;gap:10px;max-width:460px;'
+      + 'padding:11px 16px;border-radius:10px;font-size:13px;line-height:1.4;'
+      + 'box-shadow:0 8px 24px rgba(28,43,61,.18);transition:opacity .25s,transform .25s;'
+      + 'opacity:0;transform:translateY(-6px);'
+      + 'background:' + couleurs[0] + ';color:' + couleurs[1] + ';border:1px solid ' + couleurs[2] + ';';
+    el.innerHTML = '<span style="width:20px;height:20px;border-radius:50%;flex-shrink:0;display:flex;'
+      + 'align-items:center;justify-content:center;font-weight:700;font-size:12px;background:'
+      + couleurs[1] + ';color:#fff">' + couleurs[3] + '</span><span>' + escapeHtml(message) + '</span>';
+    zone.appendChild(el);
+    requestAnimationFrame(() => { el.style.opacity = '1'; el.style.transform = 'none'; });
+    const duree = genre === 'erreur' ? 7000 : 4000;
+    setTimeout(() => {
+      el.style.opacity = '0'; el.style.transform = 'translateY(-6px)';
+      setTimeout(() => el.remove(), 300);
+    }, duree);
+    el.addEventListener('click', () => el.remove());
+  } catch (e) {
+    try { alert(message); } catch (e2) {}
+  }
+}
+
 function lmChampVal(id) {
   const el = root.querySelector('#' + id);
   return el ? el.value : null;
@@ -4602,7 +4650,7 @@ async function lmExecuterGeste() {
   try {
     if (type === 'transfert') {
       const r = root.querySelector('input[name="g-site"]:checked');
-      if (!r) { alert('Choisissez une concession.'); return; }
+      if (!r) { lmToast('Choisissez une concession.', 'erreur'); return; }
       const { data, error } = await sb.rpc('lead_transferer_site', {
         p_id_lead: Number(l.id_lead),
         p_id_site: Number(r.value),
@@ -4614,15 +4662,14 @@ async function lmExecuterGeste() {
       // Le transfert change le périmètre du lead : on recharge la file.
       state.mafileKey = null; state.mafileData = null;
       fetchMaFile();
-      alert(data && data.ok
-        ? 'Lead transféré.' + (data.pousse_vers_bacs ? ' La mise à jour BACS suivra.' : '')
-        : 'Transfert impossible : ' + ((data && data.motif) || 'raison inconnue'));
+      if (data && data.ok) lmToast('Lead transféré.' + (data.pousse_vers_bacs ? ' La mise à jour BACS suivra.' : ''), 'ok');
+      else lmToast('Transfert impossible : ' + ((data && data.motif) || 'raison inconnue'), 'erreur');
       return;
     }
 
     if (type === 'rdv' || type === 'relance') {
       const cr = lmCreneauLu();
-      if (!cr) { alert('Choisissez un jour et une heure.'); return; }
+      if (!cr) { lmToast('Choisissez un jour et une heure.', 'erreur'); return; }
       const debut = cr.debut;
 
       if (s.distant === 'bacs') {
@@ -4639,16 +4686,15 @@ async function lmExecuterGeste() {
         renderAll();
         // ⚠️ On annonce une MISE EN FILE, pas une réussite : le geste
         //    part dans BACS quand l'onglet répond, pas à l'instant du clic.
-        alert(type === 'rdv'
-          ? 'Rendez-vous transmis à BACS. Il apparaîtra dans la fiche sous peu.'
-          : 'Relance transmise à BACS.');
+        lmToast(type === 'rdv'
+          ? 'Rendez-vous transmis à BACS. Il apparaîtra dans la fiche d\'ici une minute.'
+          : 'Relance transmise à BACS.', 'attente');
         return;
       }
       // Source sans système distant : on écrit dans One Data.
       lmModale = null;
       renderAll();
-      alert('Cette source n\'a pas de système distant : le rendez-vous se prend dans '
-        + 'l\'agenda One Data.');
+      lmToast('Cette source n\'a pas de système distant : le rendez-vous se prend dans l\'agenda One Data.', 'attente');
       return;
     }
 
@@ -4665,7 +4711,7 @@ async function lmExecuterGeste() {
     }
   } catch (e) {
     console.error('[leadMgmt] geste', e);
-    alert('Le geste n\'a pas pu être enregistré : ' + ((e && e.message) || e));
+    lmToast('Le geste n\'a pas pu être enregistré : ' + ((e && e.message) || e), 'erreur');
   }
 }
 
@@ -5413,7 +5459,7 @@ function bindEvents() {
         //    Le module compose DÉJÀ par un lien `tel:` ailleurs dans ce
         //    fichier : on reprend ce qui marche.
         const tel = lead.telephone || lead.mobile || '';
-        if (!tel) { alert('Ce lead ne porte aucun numéro.'); return; }
+        if (!tel) { lmToast('Ce lead ne porte aucun numéro.', 'erreur'); return; }
         try {
           const w = (window.wwLib && wwLib.getFrontWindow && wwLib.getFrontWindow()) || window;
           w.open('tel:' + String(tel).replace(/[^0-9+]/g, ''), '_self');
@@ -5428,8 +5474,7 @@ function bindEvents() {
         // emmène le vendeur au bon endroit plutôt que de lui afficher
         // une erreur.
         if (!lead.id_client) {
-          alert('Ce lead n\'est rattaché à aucune fiche client : le compte rendu '
-            + 'ne peut pas être saisi.');
+          lmToast('Ce lead n\'est rattaché à aucune fiche client : le compte rendu ne peut pas être saisi.', 'erreur');
           return;
         }
         openClientFiche(lead.id_client, TAB_DEFAULT, null);
