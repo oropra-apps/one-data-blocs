@@ -81,7 +81,14 @@ OD.define('notif-badge', {
     const ids = await resolveUserIds();
     if (!ids.length) { s.count = 0; pushVar(0); return; }
     try {
-      const { data, error } = await c.rpc('get_user_notifications', { p_user_ids: ids });
+      // Le badge ne lit qu'un nombre : get_user_notifications_count le calcule
+      // sans construire les listes (jusqu'à 4 Mo de JSON pour un directeur).
+      // Repli sur l'ancienne fonction si la base n'a pas encore la nouvelle
+      // (migration 20260921224500 non appliquée) : l'ordre de livraison est libre.
+      let { data, error } = await c.rpc('get_user_notifications_count', { p_user_ids: ids });
+      if (error && (error.code === 'PGRST202' || /get_user_notifications_count/.test(error.message || ''))) {
+        ({ data, error } = await c.rpc('get_user_notifications', { p_user_ids: ids }));
+      }
       if (error) throw error;
       const counts = (data && data.counts) || {};
       s.count = Number(counts.a_traiter || 0) || 0;    // uniquement "à traiter"
