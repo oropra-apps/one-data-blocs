@@ -4564,7 +4564,9 @@ function lmModaleHtml() {
     titre = 'Prendre rendez-vous';
     valider = 'Créer le rendez-vous';
     corps = '<div class="g-champ" style="margin-top:0"><label>Objet</label>'
-      + '<input id="g-sujet" value="Rendez-vous — ' + escapeHtml(l.nom_affiche || 'client') + '"></div>'
+      // Le nom du client est déjà le TITRE du rendez-vous dans l'agenda :
+      // le répéter dans l'objet ne fait que l'allonger.
+      + '<input id="g-sujet" value="Rendez-vous"></div>'
       + lmCreneauHtml(true);
     if (s.distant === 'bacs') {
       corps += '<div style="margin-top:12px;font-size:11.5px;color:var(--text-soft)">'
