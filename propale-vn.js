@@ -43,6 +43,19 @@
       ST.C = C || {};
     } else ST.C = {};
 
+    // ⚠️ 21/09 : un VO ou un VD/VK proposé dans BACS n'a pas de configuration
+    //    VN. La vue affichait des tirets partout, sans photo, avec un badge
+    //    « VN » à tort. BACS nous a pourtant transmis le véhicule à la
+    //    proposition (PlanetVO) ; le stock complète. Lu par une fonction qui
+    //    vérifie le périmètre : la table source est sous RLS.
+    ST.V = null;
+    if (!P.id_configuration && (P.bacs_sf_id || P.id_affaire_bacs)) {
+      try {
+        const { data:V } = await sb.rpc('bacs_simulation_vehicule', { p_id_propale: idProp });
+        ST.V = (V && typeof V === 'object') ? V : null;
+      } catch (e) { ST.V = null; }
+    }
+
     if (P.id_client_vu) {
       const { data:cl } = await sb.from('CLIENT').select('*').eq('IDVu', P.id_client_vu).limit(1);
       ST.client = (cl && cl[0]) || {};
@@ -123,7 +136,11 @@
     const P = ST.P, C = ST.C || {}, cl = ST.client || {}, si = ST.site || {};
     const enStock = !!(P.VIN && String(P.VIN).trim());
 
-    const vehName  = [C.marque, C.famille, C.finition].filter(Boolean).join(' ') || (P.LABEL || '—');
+    const V = ST.V;   // véhicule d'une simulation BACS sans configuration (VO, VD/VK)
+    const univers = String(P.VN_VO || (V && V.univers) || 'VN').toUpperCase();
+    const vehName  = [C.marque, C.famille, C.finition].filter(Boolean).join(' ')
+      || (V && (V.libelle || [V.marque, V.modele].filter(Boolean).join(' ')))
+      || (P.LABEL || '—');
     const siteName = si.NomSite || si.SITE || si.RaisonSociale || ('Site #' + (P.id_site || '—'));
     const cName    = [cl.CIVILITE, cl.NOM, cl.PRENOM].filter(Boolean).join(' ') || ('Client #' + (P.id_client_vu || '—'));
     const cInit    = ((cl.PRENOM || '?')[0] + (cl.NOM || '?')[0]).toUpperCase();
@@ -140,12 +157,27 @@
         <div><div class="pv-cli-name">${esc(cName)}</div><div class="pv-cli-rows">${cliRows}</div></div></div>`);
 
     // -- Véhicule (config ou stock)
-    const photo = C.couleur_photo
-      ? `<img src="${esc(C.couleur_photo)}" alt="Aperçu véhicule" onerror="this.parentNode.textContent='aperçu véhicule'">`
+    const srcPhoto = C.couleur_photo || (V && V.photo) || null;
+    const photo = srcPhoto
+      ? `<img src="${esc(srcPhoto)}" alt="Aperçu véhicule" onerror="this.parentNode.textContent='aperçu véhicule'">`
       : 'aperçu véhicule';
     const attr = (k, v) => `<div class="pv-attr"><div class="k">${k}</div><div class="v">${v}</div></div>`;
     const swatch = c => `<span class="pv-sw" style="background:${c}"></span>`;
-    const vehAttrs = [
+    const kmFmt = n => (n != null && n !== '') ? Number(n).toLocaleString('fr-FR') + ' km' : '—';
+    const vehAttrs = V ? [
+      attr('Marque', esc(V.marque || '—')),
+      attr('Modèle', esc(V.modele || '—')),
+      attr('Version', esc(V.version || '—')),
+      attr('Énergie', esc(V.energie || '—')),
+      attr('Boîte', esc(V.boite || '—')),
+      attr('Carrosserie', esc(V.carrosserie || '—')),
+      attr('Couleur', esc(V.couleur || '—')),
+      attr('Kilométrage', kmFmt(V.km) + (V.km_type ? ' <span class="pv-empty">(' + esc(V.km_type) + ')</span>' : '')),
+      attr('1re immatriculation', V.mise_en_circulation ? fmtDate(V.mise_en_circulation) : '—'),
+      attr('Immatriculation', esc(V.immatriculation || '—')),
+      attr('Origine', esc(V.origine || '—')),
+      attr('Puissance fiscale', V.puissance_fiscale != null ? esc(V.puissance_fiscale) + ' CV' : '—')
+    ].join('') : [
       attr('Marque', esc(C.marque || 'Toyota')),
       attr('Famille', esc(C.famille || '—')),
       attr('Finition', esc(C.finition || '—')),
@@ -156,7 +188,10 @@
       attr('Couleur ext.', C.couleur_ext ? swatch('#8893a0') + esc(C.couleur_ext) : '<span class="pv-empty">non renseignée</span>'),
       attr('Intérieur', C.couleur_interieur ? swatch('#222') + esc(C.couleur_interieur) : '<span class="pv-empty">—</span>')
     ].join('');
-    const vehTitle = enStock ? `VÉHICULE — EN STOCK · VIN ${esc(P.VIN)}` : 'VÉHICULE — CONFIGURATION';
+    const vinAff = P.VIN || (V && V.vin);
+    const vehTitle = V
+      ? `VÉHICULE — ${esc(univers)}${vinAff ? ' · VIN ' + esc(vinAff) : ''}`
+      : (enStock ? `VÉHICULE — EN STOCK · VIN ${esc(P.VIN)}` : 'VÉHICULE — CONFIGURATION');
     const vehCard = card(vehTitle,
       `<div class="pv-veh"><div class="pv-veh-ph">${photo}</div><div class="pv-attrs">${vehAttrs}</div></div>`);
 
@@ -221,18 +256,21 @@
       ${reprise ? `<div class="pv-sl minus" style="margin-top:8px"><span>Reprise</span><b>− ${eur(reprise)}</b></div>` : ''}
       <div class="pv-reste"><span>RESTE À PAYER</span><b>${eur(reste)}</b></div>`;
 
-    const bacsUrl = P.bacs_sf_id ? `https://${BACS_DOMAIN}/bacs2/s/quote/${esc(P.bacs_sf_id)}` : null;
+    // L'adresse dépend de l'objet : 801 = commande, 006 = affaire, sinon devis.
+    // Toujours /quote/ menait une commande sur la page d'erreur de BACS.
+    const segBacs = s => { const x = String(s || '').slice(0, 3); return x === '801' ? 'order' : (x === '006' ? 'opportunity' : 'quote'); };
+    const bacsUrl = P.bacs_sf_id ? `https://${BACS_DOMAIN}/bacs2/s/${segBacs(P.bacs_sf_id)}/${esc(P.bacs_sf_id)}` : null;
     const actions = `
       ${bacsUrl ? `<a class="pv-btn pv-btn-blue" href="${bacsUrl}" target="_blank" rel="noopener">Ouvrir dans BACS ↗</a>` : ''}`;
 
     root.innerHTML = `<style>${CSS}</style><div class="pv-wrap">
       <div class="pv-top">
-        <span class="pv-tag">VN</span><span class="pv-title">Proposition</span>
+        <span class="pv-tag"${univers === 'VN' ? '' : ` style="background:${univers === 'VO' ? '#3a9e8a' : '#7c5cc4'}"`}>${esc(univers)}</span><span class="pv-title">Proposition</span>
         <div class="pv-ctx">
           <div class="pv-chip"><span>Véhicule</span><b>${esc(vehName)}</b></div>
           <div class="pv-sep"></div>
           <div class="pv-chip"><span>Point de vente</span><b>${esc(siteName)}</b></div>
-          <span class="pv-branch">${enStock ? '🚗 En stock' : '🔧 Configuration — à produire'}</span>
+          <span class="pv-branch">${V ? (V.statut_stock ? '🚗 En stock' : '🚗 Véhicule d\'occasion') : (enStock ? '🚗 En stock' : '🔧 Configuration — à produire')}</span>
         </div>
         <div class="pv-ht"><span class="on">TTC</span><div class="pv-switch"></div><span>HT</span></div>
       </div>
