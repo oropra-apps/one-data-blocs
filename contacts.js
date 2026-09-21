@@ -27,6 +27,90 @@ OD.define('contacts', {
   var formatDate = function (d) { if (!d) return ''; var dt = new Date(d); if (isNaN(dt)) return esc(d); var p=function(n){return String(n).padStart(2,'0');}; return p(dt.getDate())+'/'+p(dt.getMonth()+1)+'/'+dt.getFullYear()+'<br>'+p(dt.getHours())+':'+p(dt.getMinutes()); };
   var formatRdv = function (d) { if (!d) return ''; var dt = new Date(d); var p=function(n){return String(n).padStart(2,'0');}; return 'RDV '+p(dt.getDate())+'/'+p(dt.getMonth()+1)+'/'+dt.getFullYear(); };
   var truncate = function (str, n) { return str && str.length > n ? str.substring(0, n) + '\u2026' : (str || ''); };
+
+  // ── Le détail d'un lead ────────────────────────────────────────────
+  // Relevé le 21/09 : la carte d'un lead ne montrait qu'une ligne
+  // (« [Occasion · essai] Bonjour ») alors que la demande portait le
+  // véhicule exact, en stock, avec photo, km, prix, et les consentements.
+  // `lead_detail` assemble tout cela ; on le lit une fois par lead.
+  if (!window.__ldCache) window.__ldCache = {};
+  var LD_STATUT = {
+    recu:     { l: 'Reçu',        c: '#92400e', b: '#fef3c7', r: '#fcd34d' },
+    resolu:   { l: 'À attribuer', c: '#92400e', b: '#fef3c7', r: '#fcd34d' },
+    attribue: { l: 'À traiter',   c: '#92400e', b: '#fef3c7', r: '#fcd34d' },
+    contacte: { l: 'Contacté',    c: '#065f46', b: '#d1fae5', r: '#6ee7b7' },
+    converti: { l: 'Converti',    c: '#065f46', b: '#d1fae5', r: '#6ee7b7' },
+    perdu:    { l: 'Sans suite',  c: '#4b5563', b: '#f3f4f6', r: '#d1d5db' },
+    rejete:   { l: 'Rejeté',      c: '#4b5563', b: '#f3f4f6', r: '#d1d5db' }
+  };
+  var LD_TYPE = { essai: 'Demande d\'essai', offre: 'Demande d\'offre', info: 'Demande d\'information',
+                  reprise: 'Demande de reprise', rappel: 'Demande de rappel', rdv: 'Demande de rendez-vous' };
+  function ldEur(n) { var v = Number(n); return v ? v.toLocaleString('fr-FR') + ' \u20ac' : ''; }
+  function ldKm(n) { var v = Number(n); return v ? v.toLocaleString('fr-FR') + ' km' : ''; }
+  function ldPuce(txt, c, b, r) {
+    return '<span style="background:' + b + ';color:' + c + ';border:1px solid ' + r + ';border-radius:999px;'
+      + 'padding:2px 10px;font-size:12px;font-weight:500;white-space:nowrap;">' + txt + '</span>';
+  }
+  function ldDetailHtml(d) {
+    var h = '', dm = d.demande || {};
+    var type = LD_TYPE[String(dm.type || '').toLowerCase()] || dm.intitule || dm.type || '';
+    var ligne = [type, dm.univers].filter(Boolean).join(' \u00b7 ');
+    if (ligne) h += '<div style="font-size:13px;font-weight:600;color:#5b21b6;margin-bottom:6px;">' + esc(ligne) + '</div>';
+    (d.vehicules || []).forEach(function (v) {
+      var titre = [v.marque, v.modele, v.version].filter(Boolean).join(' ') || v.libelle || 'V\u00e9hicule';
+      var an = v.mise_en_circulation ? String(v.mise_en_circulation).slice(0, 4) : '';
+      var infos = [v.immatriculation, ldKm(v.km), an, v.energie].filter(Boolean).join(' \u00b7 ');
+      var prix = ldEur(v.prix || v.prix_annonce);
+      var stock = v.en_stock
+        ? ldPuce('\u25cf ' + (String(v.statut || '').toUpperCase() === 'DISPONIBLE' ? 'Disponible' : esc(v.statut || 'En stock'))
+                 + (v.site ? ' \u00b7 ' + esc(v.site) : ''), '#065f46', '#d1fae5', '#6ee7b7')
+        : (v.vin || v.immatriculation ? ldPuce('Plus en stock', '#92400e', '#fef3c7', '#fcd34d') : '');
+      h += '<div style="display:flex;gap:12px;align-items:center;background:#fff;border:1px solid #ddd6fe;'
+        + 'border-radius:10px;padding:8px;margin:4px 0 8px;">'
+        + (v.photo ? '<img src="' + esc(v.photo) + '" alt="" loading="lazy" style="width:96px;height:68px;object-fit:cover;'
+                     + 'border-radius:7px;flex-shrink:0;background:#f5f3ff;" onerror="this.style.display=\'none\'">' : '')
+        + '<div style="flex:1;min-width:0;">'
+        + '<div style="font-size:13.5px;font-weight:700;color:#1f2937;">' + esc(titre) + '</div>'
+        + (infos ? '<div style="font-size:12px;color:#6b7280;margin-top:2px;">' + esc(infos) + '</div>' : '')
+        + '<div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-top:5px;">' + stock + '</div>'
+        + '</div>'
+        + (prix ? '<div style="font-size:15px;font-weight:800;color:#5b21b6;white-space:nowrap;">' + prix + '</div>' : '')
+        + '</div>';
+    });
+    if (d.reprise && d.reprise.souhaitee) {
+      var rp = [d.reprise.marque, d.reprise.modele, d.reprise.annee, ldKm(d.reprise.km)].filter(Boolean).join(' \u00b7 ');
+      h += '<div style="font-size:12.5px;color:#4b5563;margin-bottom:6px;"><b>Reprise souhait\u00e9e</b>' + (rp ? ' : ' + esc(rp) : '') + '</div>';
+    }
+    if (dm.message) h += '<div style="font-size:13px;color:#374151;line-height:1.5;white-space:pre-wrap;word-break:break-word;'
+      + 'border-left:3px solid #c4b5fd;padding:2px 0 2px 10px;margin:4px 0;">' + esc(dm.message) + '</div>';
+    var extra = [];
+    if (dm.criteres) extra.push('Crit\u00e8re : ' + esc(dm.criteres));
+    if (dm.campagne) extra.push('Campagne : ' + esc(dm.campagne));
+    if (dm.rappel_le) extra.push('Rappel pr\u00e9vu le ' + formatDate(dm.rappel_le).replace('<br>', ' \u00e0 '));
+    if (d.consentements) {
+      var cs = d.consentements;
+      extra.push('Consentement marketing : ' + (cs.marketing === true ? 'oui' : 'non'));
+    }
+    if (extra.length) h += '<div style="font-size:11.5px;color:#9ca3af;margin-top:4px;">' + extra.join(' \u00b7 ') + '</div>';
+    if (d.qualification) h += '<div style="font-size:12.5px;color:#4b5563;margin-top:6px;"><b>Qualification</b> : ' + esc(d.qualification) + '</div>';
+    return h;
+  }
+
+  // Lit le détail des leads affichés qui ne l'ont pas encore, puis
+  // redessine. Une seule vague d'appels : pas de boucle de rendu.
+  window.__oropraLeadHydrate = async function (client, rows, rerender) {
+    if (!client || !rows) return;
+    var ids = rows.filter(function (r) { return r && r.media === 'LEAD_EXTERNE' && r.id_ligne && !window.__ldCache[r.id_ligne]; })
+                  .map(function (r) { return r.id_ligne; });
+    if (!ids.length) return;
+    await Promise.all(ids.map(function (id) {
+      return client.rpc('lead_detail', { p_id_lead: Number(id) }).then(function (res) {
+        // Même un échec est mis en cache : on ne redemande pas à chaque rendu.
+        window.__ldCache[id] = (res && !res.error && res.data) ? res.data : { ok: false };
+      }).catch(function () { window.__ldCache[id] = { ok: false }; });
+    }));
+    if (typeof rerender === 'function') rerender();
+  };
   var parseAttachments = function (raw) { try { if (Array.isArray(raw)) return raw; if (typeof raw === 'string' && raw) return JSON.parse(raw); } catch (e) {} return []; };
   // ---- Signature groupee des URL de stockage prive (A2) --------------------
   // Les buckets call-recordings et wa-attachments sont PRIVES : une URL
@@ -225,8 +309,24 @@ OD.define('contacts', {
       var isTraite=statutBrut==='traite';
       var statutChip=statutBrut?'<span style="background:'+(isTraite?'#d1fae5':'#fef3c7')+';color:'+(isTraite?'#065f46':'#92400e')+';border:1px solid '+(isTraite?'#6ee7b7':'#fcd34d')+';border-radius:999px;padding:2px 10px;font-size:12px;font-weight:500;white-space:nowrap;">'+(isTraite?'\u2713 Traite':'\u23f1 Non traite')+'</span>':'';
       var vehiculeChip=vehicule?'<span style="background:#f5f3ff;color:#5b21b6;border:1px solid #ddd6fe;border-radius:999px;padding:2px 10px;font-size:12px;white-space:nowrap;" title="'+esc(vehicule)+'">\ud83d\ude97 '+esc(truncate(vehicule,30))+'</span>':'';
+      var ld = window.__ldCache[item.id_ligne];
+      if (ld && ld.ok) {
+        // Statut du cycle de vie, pas l'ancien booléen `traite` qui
+        // restait « non traité » après le rappel du vendeur.
+        var st = LD_STATUT[ld.statut] || { l: esc(ld.statut || ''), c: '#4b5563', b: '#f3f4f6', r: '#d1d5db' };
+        statutChip = ld.statut ? ldPuce(st.l, st.c, st.b, st.r) : '';
+        var srcLib = ld.apporteur ? (ld.apporteur.charAt(0).toUpperCase() + ld.apporteur.slice(1)) : (ld.source_libelle || source);
+        sourceChip = '<span style="background:#ede9fe;color:#5b21b6;border:1px solid #c4b5fd;border-radius:999px;padding:2px 10px;font-size:12px;font-weight:500;white-space:nowrap;">' + esc(srcLib) + '</span>';
+        vehiculeChip = '';   // le véhicule est détaillé dans le corps
+        // La vraie date de réception, pas l'heure d'ingestion.
+        if (ld.recu_le) dateContact = ld.recu_le;
+      }
       headerMiddle='<div style="display:flex;flex-wrap:wrap;gap:5px;align-items:center;flex:1;min-width:0;">'+sourceChip+statutChip+vehiculeChip+'</div>';
-      if (contenuL || phone) {
+      if (ld && ld.ok) {
+        var phoneHtmlD=phone?'<div style="font-size:12px;color:#6b7280;margin-top:6px;"><a href="tel:'+esc(phone)+'" style="color:#7C3AED;text-decoration:none;">'+esc(phone)+'</a></div>':'';
+        contentHtml='<div>'+ldDetailHtml(ld)+phoneHtmlD+'</div>';
+      }
+      else if (contenuL || phone) {
         var sidl='le_'+uid, sTl=contenuL.length>80, rl=truncate(contenuL,80);
         var phoneHtml=phone?'<div style="font-size:12px;color:#6b7280;margin-top:4px;"><a href="tel:'+esc(phone)+'" style="color:#7C3AED;text-decoration:none;">'+esc(phone)+'</a></div>':'';
         contentHtml='<div style="font-size:13px;color:#4b5563;line-height:1.5;word-break:break-word;">'+(contenuL?'<span id="sum_'+sidl+'">'+esc(rl)+'</span>'+(sTl?toggleBtn(sidl):'')+'<span id="ful_'+sidl+'" style="display:none;white-space:pre-wrap;">'+esc(contenuL)+(sTl?toggleBtn(sidl,'voir moins'):'')+'</span>':'')+phoneHtml+'</div>';
@@ -308,6 +408,8 @@ OD.define('contacts', {
     if (state.err) { root.innerHTML = STYLE + '<div class="ct-msg ct-err">Erreur : ' + esc(state.err) + '</div>'; return; }
     if (!state.rows || !state.rows.length) { root.innerHTML = STYLE + '<div class="ct-msg">Aucun \u00e9change sur le cycle en cours.</div>'; return; }
     root.innerHTML = STYLE + '<div class="ct-wrap">' + state.rows.map(renderItem).join('') + '</div>';
+    // Les leads affichés sans leur détail le reçoivent, puis on redessine.
+    window.__oropraLeadHydrate(sb, state.rows, render);
   }
 
   // surveillance du changement de client (le shell ne détruit plus le panneau)
