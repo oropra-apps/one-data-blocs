@@ -703,6 +703,33 @@ const LM_GESTES_CSS = `
 #lead-mgmt-root .g-champ input, #lead-mgmt-root .g-champ textarea,
 #lead-mgmt-root .g-champ select { width:100%; border:1px solid var(--border); border-radius:6px;
   padding:8px; font-family:inherit; font-size:13px; color:var(--text); background:var(--card); }
+/* Boutons de la modale. ⚠️ La classe « lmf-btn » était utilisée ici mais
+   définie NULLE PART : « Annuler » et « Créer » s'affichaient en texte
+   brut (relevé le 21/09). */
+#lead-mgmt-root .g-act { border:1px solid var(--border); background:var(--card); color:var(--blue-dk);
+  border-radius:8px; padding:9px 18px; font-size:13px; font-weight:600; font-family:inherit; cursor:pointer; }
+#lead-mgmt-root .g-act:hover { background:var(--blue-bg); }
+#lead-mgmt-root .g-act.p { background:var(--blue); border-color:var(--blue); color:#fff; }
+#lead-mgmt-root .g-act.p:hover { background:var(--blue-dk); }
+#lead-mgmt-root .g-act:disabled { opacity:.5; cursor:not-allowed; }
+
+/* Créneaux : un jour, une heure, une durée — trois clics au lieu de
+   trois sélecteurs natifs. */
+#lead-mgmt-root .g-lab { font-size:10.5px; text-transform:uppercase; letter-spacing:.06em; font-weight:700;
+  color:var(--text-mut); margin:14px 0 7px; }
+#lead-mgmt-root .g-chips { display:flex; flex-wrap:wrap; gap:6px; }
+#lead-mgmt-root .g-chip { border:1px solid var(--border); background:var(--card); color:var(--text);
+  border-radius:7px; padding:7px 11px; font-size:12.5px; font-family:inherit; cursor:pointer;
+  font-variant-numeric:tabular-nums; line-height:1.2; text-align:center; }
+#lead-mgmt-root .g-chip small { display:block; font-size:10.5px; color:var(--text-mut); margin-top:1px; }
+#lead-mgmt-root .g-chip:hover:not(:disabled) { border-color:var(--blue-line); background:var(--blue-bg); }
+#lead-mgmt-root .g-chip.on { background:var(--blue); border-color:var(--blue); color:#fff; }
+#lead-mgmt-root .g-chip.on small { color:#dbe6f5; }
+#lead-mgmt-root .g-chip:disabled { opacity:.35; cursor:not-allowed; }
+#lead-mgmt-root .g-heures { display:grid; grid-template-columns:repeat(6, 1fr); gap:6px; }
+@media (max-width:520px) { #lead-mgmt-root .g-heures { grid-template-columns:repeat(4, 1fr); } }
+#lead-mgmt-root .g-recap { margin-top:14px; padding:10px 13px; border-radius:8px; background:var(--blue-bg);
+  color:var(--blue-dk); font-size:13px; font-weight:600; }
 #lead-mgmt-root .g-note { background:#fdf6e6; border-left:3px solid #b8851a; padding:10px 13px;
   border-radius:0 5px 5px 0; font-size:12px; color:#7a5a12; margin-bottom:14px; }
 `;
@@ -4413,6 +4440,85 @@ async function lmSitesCibles() {
   } catch (e) { return []; }
 }
 
+// Les 8 prochains jours, puis une date libre. Les heures par demi-heure,
+// de 8 h à 19 h 30 — les horaires d'une concession.
+const LM_JOURS_COURTS = ['Dim', 'Lun', 'Mar', 'Mer', 'Jeu', 'Ven', 'Sam'];
+function lmIsoJour(d) {
+  return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+}
+function lmCreneauHtml(avecDuree) {
+  const auj = new Date(); auj.setHours(0, 0, 0, 0);
+  let h = '<div class="g-lab">Jour</div><div class="g-chips">';
+  for (let i = 0; i < 8; i++) {
+    const d = new Date(auj.getTime() + i * 86400000);
+    const titre = i === 0 ? 'Aujourd\'hui' : i === 1 ? 'Demain' : LM_JOURS_COURTS[d.getDay()];
+    h += '<button type="button" class="g-chip' + (i === 1 ? ' on' : '') + '" data-gjour="' + lmIsoJour(d) + '">'
+      + titre + '<small>' + d.getDate() + '/' + String(d.getMonth() + 1).padStart(2, '0') + '</small></button>';
+  }
+  h += '<label class="g-chip" style="display:inline-flex;align-items:center;gap:6px">Autre'
+    + '<input type="date" id="g-date-libre" style="border:none;font:inherit;color:inherit;background:none;'
+    + 'padding:0;width:122px"></label></div>';
+
+  h += '<div class="g-lab">Heure</div><div class="g-heures">';
+  for (let m = 8 * 60; m <= 19 * 60 + 30; m += 30) {
+    const hh = String(Math.floor(m / 60)).padStart(2, '0') + ':' + String(m % 60).padStart(2, '0');
+    h += '<button type="button" class="g-chip' + (hh === '10:00' ? ' on' : '') + '" data-gheure="' + hh + '">'
+      + hh.replace(':', ' h ') + '</button>';
+  }
+  h += '</div>';
+
+  if (avecDuree) {
+    h += '<div class="g-lab">Durée</div><div class="g-chips">';
+    [[30, '30 min'], [60, '1 h'], [90, '1 h 30'], [120, '2 h']].forEach(([v, l]) => {
+      h += '<button type="button" class="g-chip' + (v === 60 ? ' on' : '') + '" data-gduree="' + v + '">' + l + '</button>';
+    });
+    h += '</div>';
+  }
+  h += '<div class="g-recap" id="g-recap"></div>';
+  return h;
+}
+
+// Lit le créneau choisi. Rend { debut, fin } en Date, ou null.
+function lmCreneauLu() {
+  const libre = root.querySelector('#g-date-libre');
+  const jourChip = root.querySelector('[data-gjour].on');
+  const jour = (libre && libre.value) ? libre.value : (jourChip ? jourChip.getAttribute('data-gjour') : null);
+  const heureChip = root.querySelector('[data-gheure].on');
+  const dureeChip = root.querySelector('[data-gduree].on');
+  if (!jour || !heureChip) return null;
+  const debut = new Date(jour + 'T' + heureChip.getAttribute('data-gheure') + ':00');
+  if (isNaN(debut.getTime())) return null;
+  const duree = dureeChip ? Number(dureeChip.getAttribute('data-gduree')) : 0;
+  return { debut: debut, fin: new Date(debut.getTime() + duree * 60000), duree: duree };
+}
+
+// Met à jour le récapitulatif et grise les heures déjà passées.
+function lmCreneauMaj() {
+  const libre = root.querySelector('#g-date-libre');
+  const jourChip = root.querySelector('[data-gjour].on');
+  const jour = (libre && libre.value) ? libre.value : (jourChip ? jourChip.getAttribute('data-gjour') : null);
+  const estAuj = jour === lmIsoJour(new Date());
+  const seuil = Date.now() + 15 * 60000;
+  root.querySelectorAll('[data-gheure]').forEach(b => {
+    const passe = estAuj && new Date(jour + 'T' + b.getAttribute('data-gheure') + ':00').getTime() < seuil;
+    b.disabled = passe;
+    if (passe) b.classList.remove('on');
+  });
+  const c = lmCreneauLu();
+  const rec = root.querySelector('#g-recap');
+  const ok = root.querySelector('[data-gvalider]');
+  if (rec) {
+    if (!c) { rec.textContent = 'Choisissez un jour et une heure.'; }
+    else {
+      const f = c.debut.toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long' });
+      const hd = c.debut.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
+      const hf = c.duree ? ' – ' + c.fin.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' }) : '';
+      rec.textContent = f.charAt(0).toUpperCase() + f.slice(1) + ', ' + hd + hf;
+    }
+  }
+  if (ok) ok.disabled = !c;
+}
+
 function lmModaleHtml() {
   if (!lmModale) return '';
   const l = lmModale.lead, s = lmSource(l.source);
@@ -4445,15 +4551,9 @@ function lmModaleHtml() {
   } else if (lmModale.type === 'rdv') {
     titre = 'Prendre rendez-vous';
     valider = 'Créer le rendez-vous';
-    const d = new Date(Date.now() + 86400000);
-    const j = d.toISOString().slice(0, 10);
-    corps = '<div class="g-champ"><label>Objet</label>'
+    corps = '<div class="g-champ" style="margin-top:0"><label>Objet</label>'
       + '<input id="g-sujet" value="Rendez-vous — ' + escapeHtml(l.nom_affiche || 'client') + '"></div>'
-      + '<div class="g-champ"><label>Date</label><input id="g-date" type="date" value="' + j + '"></div>'
-      + '<div class="g-champ"><label>Heure de début</label>'
-      + '<input id="g-h1" type="time" value="10:00"></div>'
-      + '<div class="g-champ"><label>Heure de fin</label>'
-      + '<input id="g-h2" type="time" value="11:00"></div>';
+      + lmCreneauHtml(true);
     if (s.distant === 'bacs') {
       corps += '<div style="margin-top:12px;font-size:11.5px;color:var(--text-soft)">'
         + 'Le rendez-vous sera créé dans BACS, au nom du vendeur attribué.</div>';
@@ -4462,10 +4562,7 @@ function lmModaleHtml() {
   } else if (lmModale.type === 'relance') {
     titre = 'Programmer une relance';
     valider = 'Programmer';
-    const d = new Date(Date.now() + 86400000);
-    corps = '<div class="g-champ"><label>Date de rappel</label>'
-      + '<input id="g-date" type="date" value="' + d.toISOString().slice(0, 10) + '"></div>'
-      + '<div class="g-champ"><label>Heure</label><input id="g-h1" type="time" value="10:00"></div>';
+    corps = lmCreneauHtml(false);
 
   } else if (lmModale.type === 'perdre') {
     titre = 'Classer sans suite';
@@ -4487,8 +4584,8 @@ function lmModaleHtml() {
     + (l.vehicule_interet ? ' — ' + escapeHtml(l.vehicule_interet) : '') + '</p></div>'
     + '<div class="g-modal-b">' + corps + '</div>'
     + '<div class="g-modal-f">'
-    + '<button type="button" class="lmf-btn" data-gfermer="1">Annuler</button>'
-    + '<button type="button" class="lmf-btn lmf-btn-p" data-gvalider="1">' + valider + '</button>'
+    + '<button type="button" class="g-act" data-gfermer="1">Annuler</button>'
+    + '<button type="button" class="g-act p" data-gvalider="1">' + valider + '</button>'
     + '</div></div></div>';
 }
 
@@ -4524,16 +4621,15 @@ async function lmExecuterGeste() {
     }
 
     if (type === 'rdv' || type === 'relance') {
-      const j = lmChampVal('g-date'), h1 = lmChampVal('g-h1');
-      if (!j || !h1) { alert('Renseignez la date et l\'heure.'); return; }
-      const debut = new Date(j + 'T' + h1 + ':00');
-      if (isNaN(debut.getTime())) { alert('Date invalide.'); return; }
+      const cr = lmCreneauLu();
+      if (!cr) { alert('Choisissez un jour et une heure.'); return; }
+      const debut = cr.debut;
 
       if (s.distant === 'bacs') {
         const charge = (type === 'rdv')
           ? { sujet: lmChampVal('g-sujet') || 'Rendez-vous',
               debut: debut.toISOString(),
-              fin: new Date(j + 'T' + (lmChampVal('g-h2') || h1) + ':00').toISOString(),
+              fin: cr.fin.toISOString(),
               owner_bacs: null }
           : { date: debut.toISOString() };
         const { error } = await sb.rpc('bacs_sortant_deposer', {
@@ -5362,6 +5458,26 @@ function bindEvents() {
       lmModale = null; renderAll();
     });
   });
+  // Créneaux : un seul choix par groupe ; la date libre remplace les jours.
+  [['data-gjour'], ['data-gheure'], ['data-gduree']].forEach(([attr]) => {
+    root.querySelectorAll('[' + attr + ']').forEach(el => {
+      el.addEventListener('click', (ev) => {
+        ev.stopPropagation();
+        if (el.disabled) return;
+        root.querySelectorAll('[' + attr + ']').forEach(x => x.classList.remove('on'));
+        el.classList.add('on');
+        if (attr === 'data-gjour') { const lib = root.querySelector('#g-date-libre'); if (lib) lib.value = ''; }
+        lmCreneauMaj();
+      });
+    });
+  });
+  const lib = root.querySelector('#g-date-libre');
+  if (lib) lib.addEventListener('change', () => {
+    if (lib.value) root.querySelectorAll('[data-gjour]').forEach(x => x.classList.remove('on'));
+    lmCreneauMaj();
+  });
+  if (root.querySelector('#g-recap')) lmCreneauMaj();
+
   root.querySelectorAll('.g-site').forEach(el => {
     el.addEventListener('click', () => {
       root.querySelectorAll('.g-site').forEach(x => x.classList.remove('on'));
