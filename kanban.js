@@ -176,10 +176,25 @@ OD.define('kanban', {
         const ids = state.cards.filter(estBacs).map(c => c.id_propale_bdc);
         if (ids.length) {
           const rb = await supabase.from('PROPALE_BDC')
-            .select('id_propale_bdc,statut_bacs,num_commande_constructeur').in('id_propale_bdc', ids);
+            .select('id_propale_bdc,statut_bacs,num_commande_constructeur,id_user_creation').in('id_propale_bdc', ids);
           const ix = {}; (rb.data || []).forEach(x => { ix[x.id_propale_bdc] = x; });
           state.cards.forEach(c => { const x = ix[c.id_propale_bdc];
-            if (x) { c.statut_bacs = x.statut_bacs; c.num_commande_constructeur = x.num_commande_constructeur; } });
+            if (x) { c.statut_bacs = x.statut_bacs; c.num_commande_constructeur = x.num_commande_constructeur;
+                     c.id_user_creation = x.id_user_creation; } });
+
+          // VD/VK (21/09) : filtré et coloré comme VN ou VO selon le vendeur.
+          // VO pour un vendeur VO ; VN pour un vendeur VN, polyvalent ou sans
+          // spécialité — même règle que les objectifs (vn_vo_objectif).
+          const vdvk = state.cards.filter(c => c.vn_vo === 'VD/VK');
+          if (vdvk.length) {
+            const uids = Array.from(new Set(vdvk.map(c => c.id_user_creation).filter(v => v != null)));
+            const spec = {};
+            if (uids.length) {
+              const ru = await supabase.from('USER').select('ID_User,VN_VO').in('ID_User', uids);
+              (ru.data || []).forEach(u => { spec[u.ID_User] = String(u.VN_VO || '').toUpperCase(); });
+            }
+            vdvk.forEach(c => { c.vn_vo_effectif = spec[c.id_user_creation] === 'VO' ? 'VO' : 'VN'; });
+          }
         }
       } catch (e) { /* les pastilles sont un confort */ }
     } catch (e) {
@@ -265,7 +280,7 @@ OD.define('kanban', {
   }
 
   function passFilters(c) {
-    if (state.fType !== 'tous' && c.vn_vo !== state.fType) return false;
+    if (state.fType !== 'tous' && (c.vn_vo_effectif || c.vn_vo) !== state.fType) return false;
     if (state.fClient !== 'tous' && c.client_type !== state.fClient) return false;
     if (state.fFin !== 'tous' && c.financement !== state.fFin) return false;
     return true;
@@ -557,7 +572,8 @@ OD.define('kanban', {
   }
 
   function renderCard(c) {
-    const vt = c.vn_vo === 'VN' ? 'vn' : (c.vn_vo === 'VO' ? 'vo' : 'na');
+    const vnvo = c.vn_vo_effectif || c.vn_vo;   // VD/VK : l'univers du vendeur
+    const vt = vnvo === 'VN' ? 'vn' : (vnvo === 'VO' ? 'vo' : 'na');
     // Plusieurs documents de meme nature dans l'affaire : on affiche leur nombre
     // et on ouvre la liste au clic, plutot qu'un contenu arbitraire.
     // Ce qui distingue les deux presentations n'est PAS le neuf et l'occasion,
