@@ -515,12 +515,15 @@ const LM_V3_CSS = `
    ton change, sinon le vendeur croit le dossier acquis. */
 #lead-mgmt-root .v3-verrou.piscine { background:#fdf5e4; color:#b8851a; }
 #lead-mgmt-root .v3-verrou.pris { background:#e6f6f0; color:#0f9b6c; }
-#lead-mgmt-root .v3-haut { display:flex; gap:16px; padding:16px 18px;
-  border-bottom:1px solid var(--border,#e3e6ea); align-items:flex-start; }
+#lead-mgmt-root .v3-haut { display:flex; gap:18px; padding:16px 18px;
+  border-bottom:1px solid var(--border,#e3e6ea); align-items:center; }
+#lead-mgmt-root .v3-qui { min-width:0; flex:1; }
 #lead-mgmt-root .v3-min { flex:0 0 auto; }
-#lead-mgmt-root .v3-min-v { width:76px; height:76px; border-radius:50%; display:grid;
-  place-items:center; font-size:21px; font-weight:800; letter-spacing:-.02em;
-  border:3px solid var(--ok-dk,#0f9b6c); color:var(--ok-dk,#0f9b6c); line-height:1; }
+#lead-mgmt-root .v3-min-v { width:72px; height:72px; border-radius:50%; display:flex;
+  flex-direction:column; align-items:center; justify-content:center; gap:1px;
+  font-size:20px; font-weight:800; letter-spacing:-.03em; line-height:1;
+  border:3px solid var(--ok-dk,#0f9b6c); color:var(--ok-dk,#0f9b6c);
+  overflow:hidden; flex:0 0 auto; }
 #lead-mgmt-root .v3-min-v.ko { border-color:var(--red-dk,#c02626); color:var(--red-dk,#c02626); }
 #lead-mgmt-root .v3-min-v span { display:block; font-size:9.5px; font-weight:600;
   text-transform:uppercase; letter-spacing:.06em; opacity:.75; }
@@ -583,13 +586,16 @@ const LM_V3_CSS = `
 #lead-mgmt-root .v3-file ul { list-style:none; margin:0; padding:0 8px 8px; }
 #lead-mgmt-root .v3-file li { display:flex; gap:10px; align-items:center; padding:8px;
   font-size:13px; }
+#lead-mgmt-root .v3-file li > div { min-width:0; flex:1; }
+#lead-mgmt-root .v3-file li b { display:block; white-space:nowrap; overflow:hidden;
+  text-overflow:ellipsis; }
 #lead-mgmt-root .v3-file li + li { border-top:1px solid var(--border,#e3e6ea); }
 #lead-mgmt-root .v3-file li.occ { opacity:.5; }
 #lead-mgmt-root .v3-file li b { font-weight:600; }
 #lead-mgmt-root .v3-file li small { display:block; font-size:11.5px;
   color:var(--text-mut,#6b7684); }
 #lead-mgmt-root .v3-file li .t { margin-left:auto; font-weight:650; font-size:12.5px;
-  font-variant-numeric:tabular-nums; }
+  font-variant-numeric:tabular-nums; white-space:nowrap; flex:0 0 auto; }
 #lead-mgmt-root .v3-file li.v3-rien { color:var(--text-mut,#6b7684); }
 #lead-mgmt-root .v3-pied { padding:10px 15px; border-top:1px solid var(--border,#e3e6ea);
   font-size:11.5px; color:var(--text-mut,#6b7684); background:#fafbfd; }
@@ -5787,11 +5793,26 @@ function v3Relais() {
     + '</section>';
 }
 
+/* 🐛 Les durées venaient de la base en minutes DÉCIMALES : l'écran affichait
+   « 107661.03061945 min », qui débordait de sa pastille et ne se lisait pas.
+   Un délai de soixante-quinze jours ne se dit pas en minutes. */
 function v3Duree(mn) {
   if (mn == null) return '—';
-  if (mn < 60) return Math.round(mn) + ' min';
-  const h = mn / 60;
-  return (h < 10 ? h.toFixed(1).replace('.0', '') : Math.round(h)) + ' h';
+  const m = Math.round(Number(mn));
+  if (!isFinite(m)) return '—';
+  if (m < 60) return m + ' min';
+  if (m < 1440) { const h = m / 60; return (h < 10 ? h.toFixed(1).replace('.0', '') : Math.round(h)) + ' h'; }
+  const j = Math.round(m / 1440);
+  return j + ' j';
+}
+
+/* Version COMPACTE pour la pastille du minuteur : deux ou trois caractères,
+   l'unité en dessous. « 75 j » tient, « 107661 min » non. */
+function v3DureeCourte(mn) {
+  const m = Math.round(Number(mn) || 0);
+  if (m < 60)   return { v: String(m), u: 'min' };
+  if (m < 1440) return { v: String(Math.round(m / 60)), u: 'h' };
+  return { v: String(Math.round(m / 1440)), u: 'j' };
 }
 
 /* ══════════════════════════════════════════════════════════════════════════
@@ -5930,6 +5951,30 @@ function v3OuvrirCanal(act, lead) {
   } catch (e) { console.error('[lead-mgmt] ouverture du canal ' + act, e); }
 }
 
+/* `v_lead_sla` ne porte ni téléphone, ni message, ni véhicule : elle sert au
+   pilotage, pas à l'action. On lit donc le détail du SEUL dossier affiché —
+   une ligne, pas trois cents — et on le met en cache sur le lead. */
+async function v3EnsureDetail(idLead) {
+  const V = state.v3;
+  if (V.detailEnCours === idLead) return;
+  V.detailEnCours = idLead;
+  try {
+    const { data, error } = await sb.from('LEADS_EXTERNES')
+      .select('id_lead,nom,prenom,email,telephone,message,vehicule_interet,id_client,'
+            + 'id_cycle_comm,verrou_par,verrou_jusqu')
+      .eq('id_lead', idLead).maybeSingle();
+    if (error) throw error;
+    const l = (state.mafileData || []).find(x => Number(x.id_lead) === Number(idLead));
+    if (l && data) Object.assign(l, data, { detail: true });
+  } catch (e) {
+    console.error('[lead-mgmt] detail du lead', e);
+    const l = (state.mafileData || []).find(x => Number(x.id_lead) === Number(idLead));
+    if (l) l.detail = true;   // on n'insiste pas : la carte restera sobre
+  } finally {
+    V.detailEnCours = null; renderAll();
+  }
+}
+
 /* ── La vue ──────────────────────────────────────────────────────────── */
 function v3Prochain() {
   const V = state.v3;
@@ -5955,6 +6000,9 @@ function v3Prochain() {
       + '</div></div>';
   }
 
+  // Le détail se charge à la demande, pour le dossier présenté seulement.
+  if (!d.detail) v3EnsureDetail(d.id_lead);
+
   const aMoi = d.verrou_par && Number(d.verrou_par) === Number(userId);
   const actifs = libre ? !!aMoi : true;
   const sla = Number(d.sla_minutes) || 60;
@@ -5974,7 +6022,7 @@ function v3Prochain() {
 
     + '<div class="v3-haut">'
     + '<div class="v3-min"><div class="v3-min-v ' + (reste > 0 ? '' : 'ko') + '">'
-    + att + '<span>min</span></div></div>'
+    + v3DureeCourte(att).v + '<span>' + v3DureeCourte(att).u + '</span></div></div>'
     + '<div class="v3-qui"><h3>' + escapeHtml(nom) + '</h3><div class="v3-meta">'
     + (d.telephone ? '<span>' + V3_IC.tel + escapeHtml(d.telephone) + '</span>' : '')
     + (d.email ? '<span>' + V3_IC.mail + escapeHtml(d.email) + '</span>' : '')
@@ -5999,8 +6047,9 @@ function v3Prochain() {
     + (libre && aMoi ? 'Rendre à la piscine' : 'Passer')
     + '</button></div>'
 
-    + '<div class="v3-rappel">Délai attendu : ' + sla + ' min. '
-    + (reste > 0 ? 'Il reste <b>' + reste + ' min</b>.' : 'Dépassé de <b>' + (-reste) + ' min</b>.')
+    + '<div class="v3-rappel">Délai attendu : ' + v3Duree(sla) + '. '
+    + (reste > 0 ? 'Il reste <b>' + v3Duree(reste) + '</b>.'
+                 : 'Dépassé de <b>' + v3Duree(-reste) + '</b>.')
     + '</div></article>'
 
     + '<aside class="v3-file"><h4>' + (libre ? 'La piscine' : 'Votre file')
@@ -6011,7 +6060,7 @@ function v3Prochain() {
         return '<li class="' + (occupe ? 'occ' : '') + '">'
           + '<div><b>' + escapeHtml(n) + '</b><small>'
           + escapeHtml(x.source_libelle || x.source || '') + '</small></div>'
-          + '<span class="t">' + (occupe ? 'pris' : (x.attente_min || 0) + ' min') + '</span></li>';
+          + '<span class="t">' + (occupe ? 'pris' : v3Duree(x.attente_min)) + '</span></li>';
       }).join('') || '<li class="v3-rien">Plus rien après celui-ci.</li>')
     + '</ul><div class="v3-pied">'
     + (libre
