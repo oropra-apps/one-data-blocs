@@ -6202,6 +6202,17 @@ function renderAll() {
   //    DERNIER, quel que soit le rôle : c'est une lecture d'analyse, pas un
   //    écran de travail. Ce qui ouvre, c'est ce qu'on fait maintenant.
   v3Init();
+  // 🐛 Le fil se figeait sur le premier site du périmètre et ignorait le site
+  //    choisi en topnav : un chef positionné sur Arcueil voyait « L'Haÿ » dans
+  //    son fil. Le bus de site fait autorité — c'est lui que l'utilisateur
+  //    manipule.
+  if (state.busSite && state.v2
+      && (state.v2.niveau === 'site' || state.v2.niveau === 'groupe')
+      && Number(state.v2.cle) !== Number(state.busSite)) {
+    state.v2.niveau = 'site';
+    state.v2.cle = Number(state.busSite);
+    v2Ref = null;
+  }
   const W = state.v3;
   const vues = v3VuesDuRole();
   if (!vues.some(x => x[0] === W.vue)) W.vue = vues[0][0];
@@ -6211,7 +6222,11 @@ function renderAll() {
         + (W.vue === x[0] ? 'on' : '') + '">' + escapeHtml(x[1]) + '</button>').join('')
     + '</div>';
 
-  if (W.vue === 'mur')         html += v2Bandeau() + v3Mur() + v3Panneau();
+  // ⚠️ `v2Bandeau` décrit la FILE de l'utilisateur, pas le mur : affiché
+  //    au-dessus du mur, il annonçait « Aucun lead en attente » juste avant
+  //    d'en montrer deux cents. Deux mesures différentes ne peuvent pas se
+  //    superposer sans se contredire.
+  if (W.vue === 'mur')         html += v3Mur() + v3Panneau();
   else if (W.vue === 'relais') html += v3Relais();
   else                         html += v3Prochain();
   html += renderRegles();
