@@ -6159,7 +6159,7 @@ function renderAll() {
 
   html += '<div class="v2-vues">'
     + vues.map(x => '<button type="button" data-v3vue="' + x[0] + '" class="'
-        + (W.vue === x[0] ? 'on' : '') + '">' + esc(x[1]) + '</button>').join('')
+        + (W.vue === x[0] ? 'on' : '') + '">' + escapeHtml(x[1]) + '</button>').join('')
     + '</div>';
 
   if (W.vue === 'mur')         html += v2Bandeau() + v3Mur() + v3Panneau();
