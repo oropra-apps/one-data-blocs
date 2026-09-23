@@ -167,11 +167,6 @@ function profilDuRole(r) {
 
 const PROFIL   = profilDuRole(userRole);
 const SECTIONS_ROLE = PROFILS[PROFIL].sections;
-
-// 90 jours : au-delà, une demande n'est plus un lead à rappeler en priorité
-// mais une affaire à requalifier. Déclarée ICI, en tête : fetchMaFile peut
-// s'exécuter avant que le module n'atteigne le bloc des gestes (TDZ).
-const LM_ARRIERE_MIN = 90 * 1440;
 // Un manager qui n'a pas « mon_equipe » n'est pas un chef : le drapeau
 // sert à décider des boutons (réaffecter), pas des sections.
 const PEUT_REAFFECTER = PROFIL === 'chef' || PROFIL === 'directeur';
@@ -360,63 +355,228 @@ const LM_ROLE_CSS = `
   padding:11px 15px; border-radius:0 5px 5px 0; font-size:12px; color:#7a5a12; margin:16px 0 0; }
 `;
 
+/* 📌 PIÈGE DE LA TDZ, QUATRIÈME FOIS : cette constante est interpolée dans le
+   bloc « --- 3. Style » plus bas. Déclarée APRÈS lui, elle lève une
+   ReferenceError et l'écran reste ENTIÈREMENT vide. */
+const LM_V3_CSS = `
+#lead-mgmt-root .v3-bloc { background:#fff; border:1px solid var(--border,#e3e6ea);
+  border-radius:12px; overflow:hidden; margin-top:14px; }
+#lead-mgmt-root .v3-niv { margin-left:8px; font-size:11px; font-weight:650;
+  padding:2px 8px; border-radius:999px; background:var(--blue-bg,#eaf0ff);
+  color:var(--blue-dk,#2a5ea9); }
+#lead-mgmt-root .v3-reglages { padding:13px 18px; border-bottom:1px solid var(--border,#e3e6ea);
+  display:flex; gap:18px; flex-wrap:wrap; align-items:flex-end; }
+#lead-mgmt-root .v3-champ label { display:block; font-size:10.5px; text-transform:uppercase;
+  letter-spacing:.06em; color:var(--text-mut,#6b7684); font-weight:650; margin-bottom:5px; }
+#lead-mgmt-root .v3-seg { display:flex; gap:3px; background:#f4f5f7;
+  border:1px solid var(--border,#e3e6ea); border-radius:9px; padding:3px; }
+#lead-mgmt-root .v3-seg button { border:0; background:none; padding:6px 11px; border-radius:6px;
+  font-size:12.5px; font-weight:600; color:var(--text-mut,#6b7684); cursor:pointer; }
+#lead-mgmt-root .v3-seg button.on { background:#fff; color:var(--text,#12171f);
+  box-shadow:0 1px 2px rgba(16,24,40,.08); }
+#lead-mgmt-root .v3-expli { flex:1 1 240px; margin:0; font-size:12px; line-height:1.5;
+  color:var(--text-mut,#6b7684); min-width:200px; }
+#lead-mgmt-root .v3-tab { overflow:auto; }
+#lead-mgmt-root .v3-tab table { border-collapse:collapse; width:100%; min-width:560px; }
+#lead-mgmt-root .v3-tab th { font-size:10.5px; text-transform:uppercase; letter-spacing:.06em;
+  color:var(--text-mut,#6b7684); font-weight:650; padding:12px 10px; text-align:center;
+  border-bottom:1px solid var(--border,#e3e6ea); }
+#lead-mgmt-root .v3-tab th:first-child { text-align:left; padding-left:18px; }
+#lead-mgmt-root .v3-tab td { padding:8px 10px; text-align:center;
+  border-bottom:1px solid var(--border,#e3e6ea); }
+#lead-mgmt-root .v3-tab td:first-child { text-align:left; font-size:13.5px; font-weight:600; }
+#lead-mgmt-root .v3-tab td:first-child small { display:block; font-weight:400; font-size:11.5px;
+  color:var(--text-mut,#6b7684); margin-left:23px; }
+#lead-mgmt-root .v3-tab tr:last-child td { border-bottom:0; }
+#lead-mgmt-root .v3-tab tr.v3-lv-marque td { background:var(--blue-bg,#eaf0ff); font-weight:700; }
+#lead-mgmt-root .v3-tab tr.v3-lv-affaire td { background:#fafbfd; }
+#lead-mgmt-root .v3-exp { width:18px; height:18px; border:0; background:none; padding:0;
+  margin-right:5px; font-size:11px; line-height:1; color:var(--text-mut,#6b7684); cursor:pointer; }
+#lead-mgmt-root .v3-exp.vide { visibility:hidden; display:inline-block; }
+#lead-mgmt-root .v3-pas { width:38px; height:38px; border-radius:50%; display:inline-grid;
+  place-items:center; font-size:12.5px; font-weight:700; border:1.5px solid; cursor:pointer;
+  transition:transform .12s; }
+#lead-mgmt-root .v3-pas:hover { transform:scale(1.12); }
+#lead-mgmt-root .v3-pas.vide { border-style:dashed; border-color:var(--border,#e3e6ea);
+  color:#97a1ad; font-weight:500; cursor:default; }
+#lead-mgmt-root .v3-pas.vide:hover { transform:none; }
+#lead-mgmt-root .v3-entete { padding:15px 18px; border-bottom:1px solid var(--border,#e3e6ea); }
+#lead-mgmt-root .v3-entete h3 { margin:0; font-size:15px; }
+#lead-mgmt-root .v3-entete p { margin:5px 0 0; font-size:12.5px; line-height:1.55;
+  color:var(--text-mut,#6b7684); max-width:74ch; }
+#lead-mgmt-root .v3-piste { padding:15px 18px; border-bottom:1px solid var(--border,#e3e6ea); }
+#lead-mgmt-root .v3-piste:last-of-type { border-bottom:0; }
+#lead-mgmt-root .v3-p1 { display:flex; align-items:baseline; gap:10px; flex-wrap:wrap; }
+#lead-mgmt-root .v3-p1 b { font-size:14.5px; }
+#lead-mgmt-root .v3-n { font-size:12px; color:var(--text-mut,#6b7684); }
+#lead-mgmt-root .v3-part { margin-left:auto; font-size:12px; font-weight:650;
+  color:var(--text-mut,#6b7684); }
+#lead-mgmt-root .v3-part.fort { color:var(--red-dk,#c02626); }
+#lead-mgmt-root .v3-baton { display:flex; align-items:center; gap:2px; height:32px; margin-top:10px; }
+#lead-mgmt-root .v3-sg { height:32px; display:flex; align-items:center; justify-content:center;
+  font-size:11.5px; font-weight:700; color:#fff; overflow:hidden; white-space:nowrap;
+  border-radius:8px; }
+/* Sans propriétaire : gris hachuré. On voit au premier coup d'œil que ce
+   segment n'est imputable à personne. */
+#lead-mgmt-root .v3-sg.sans { background:#97a1ad;
+  background-image:repeating-linear-gradient(45deg, rgba(255,255,255,.25) 0 5px,
+    transparent 5px 10px); }
+#lead-mgmt-root .v3-leg { display:flex; gap:14px; margin-top:8px; font-size:11.5px;
+  color:var(--text-mut,#6b7684); flex-wrap:wrap; }
+#lead-mgmt-root .v3-leg span { display:flex; align-items:center; gap:5px; }
+#lead-mgmt-root .v3-leg i { width:9px; height:9px; border-radius:3px; display:block; }
+#lead-mgmt-root .v3-leg i.hach { background:#97a1ad;
+  background-image:repeating-linear-gradient(45deg, rgba(255,255,255,.35) 0 3px,
+    transparent 3px 6px); }
+#lead-mgmt-root .v3-leg em { font-style:normal; color:#97a1ad; }
+#lead-mgmt-root .v3-nm { color:#97a1ad; }
+#lead-mgmt-root .v3-reserve { margin:0; padding:12px 18px; font-size:11.5px; line-height:1.55;
+  color:var(--text-mut,#6b7684); background:#fafbfd; border-top:1px solid var(--border,#e3e6ea); }
+#lead-mgmt-root .v3-vide { padding:38px 20px; text-align:center; font-size:12.5px;
+  color:var(--text-mut,#6b7684); }
+#lead-mgmt-root .v3-vide b { display:block; font-size:15px; color:var(--text,#12171f);
+  margin-bottom:6px; }
 
-const LM_REGLES_CSS = `
-/* --- Regles d'attribution : bouton du fil + modale ---------- */
-#lead-mgmt-root .v2-regles-b { background:var(--blue-bg); border:1px solid var(--border);
-  color:var(--blue); border-radius:8px; padding:5px 11px; font-size:11px; font-weight:700;
-  cursor:pointer; margin-left:auto; white-space:nowrap; }
-#lead-mgmt-root .v2-regles-b:hover { background:var(--blue); color:#fff; }
-#lead-mgmt-root .rg-ovl { position:fixed; inset:0; background:rgba(20,40,70,.42); z-index:900; }
-#lead-mgmt-root .rg-mod { position:fixed; z-index:901; top:50%; left:50%;
-  transform:translate(-50%,-50%); width:720px; max-width:94vw; max-height:90vh;
-  background:var(--card); border-radius:14px; box-shadow:0 24px 70px -18px rgba(20,40,70,.45);
-  display:flex; flex-direction:column; overflow:hidden; }
-#lead-mgmt-root .rg-h { padding:15px 20px; border-bottom:1px solid var(--border);
-  display:flex; align-items:flex-start; gap:12px; }
-#lead-mgmt-root .rg-h b { font-size:15px; }
-#lead-mgmt-root .rg-h .n { font-size:11px; color:var(--text-mut); margin-top:5px; line-height:1.5; }
-#lead-mgmt-root .rg-site { display:flex; align-items:center; gap:7px; margin-top:6px; }
-#lead-mgmt-root .rg-site > span { color:var(--text-mut); font-size:11px; }
-#lead-mgmt-root .rg-site select { padding:4px 8px; border:1px solid var(--border);
-  border-radius:7px; font:inherit; font-size:12px; font-weight:700; color:var(--text);
-  background:var(--card); max-width:340px; }
-#lead-mgmt-root .rg-x { margin-left:auto; background:none; border:none; font-size:22px;
-  line-height:1; color:var(--text-mut); cursor:pointer; padding:0 4px; }
-#lead-mgmt-root .rg-b { padding:14px 20px 18px; overflow-y:auto; flex:1; }
-#lead-mgmt-root .rg-sec { margin-bottom:16px; }
-#lead-mgmt-root .rg-sec > .t { font-size:10px; text-transform:uppercase; letter-spacing:.07em;
-  color:var(--text-mut); font-weight:700; margin-bottom:7px; }
-#lead-mgmt-root .rg-opt { display:flex; align-items:flex-start; gap:9px; padding:8px 10px;
-  border:1px solid var(--border); border-radius:9px; margin-bottom:6px; cursor:pointer;
-  font-size:12px; line-height:1.5; }
-#lead-mgmt-root .rg-opt.on { border-color:var(--blue); background:var(--blue-bg); }
-#lead-mgmt-root .rg-opt input { margin-top:2px; flex:0 0 auto; }
-#lead-mgmt-root .rg-opt .d { display:block; color:var(--text-mut); font-size:11px; margin-top:2px; }
-#lead-mgmt-root .rg-num { display:flex; align-items:center; gap:8px; font-size:12px;
-  margin:8px 0 0 28px; color:var(--text-mut); }
-#lead-mgmt-root .rg-num input { width:64px; padding:4px 7px; border:1px solid var(--border);
-  border-radius:6px; font:inherit; font-size:12px; color:var(--text); }
-#lead-mgmt-root .rg-tab { width:100%; border-collapse:collapse; font-size:12px; }
-#lead-mgmt-root .rg-tab th { text-align:left; font-size:10px; text-transform:uppercase;
-  letter-spacing:.06em; color:var(--text-mut); padding:5px 8px; border-bottom:1px solid var(--border); }
-#lead-mgmt-root .rg-tab td { padding:6px 8px; border-bottom:1px solid var(--border); }
-#lead-mgmt-root .rg-tab tr.suiv td { background:var(--blue-bg); font-weight:700; }
-#lead-mgmt-root .rg-tab tr.exclu td { color:var(--text-mut); text-decoration:line-through; }
-#lead-mgmt-root .rg-tab .rg-ex { background:none; border:1px solid var(--border); border-radius:6px;
-  padding:2px 8px; font-size:11px; cursor:pointer; color:var(--text-mut); }
-#lead-mgmt-root .rg-tab .rg-ex:hover { border-color:var(--blue); color:var(--blue); }
-#lead-mgmt-root .rg-note { background:#fdf6e6; border-left:3px solid #b8851a; padding:9px 13px;
-  border-radius:0 5px 5px 0; font-size:11px; color:#7a5a12; line-height:1.55; margin-top:8px; }
-#lead-mgmt-root .rg-f { padding:11px 20px; border-top:1px solid var(--border); display:flex;
-  gap:9px; align-items:center; }
-#lead-mgmt-root .rg-f .msg { font-size:11px; color:var(--text-mut); flex:1; }
-#lead-mgmt-root .rg-f button { padding:8px 16px; border-radius:8px; font:inherit; font-size:12px;
-  font-weight:700; cursor:pointer; border:1px solid var(--border); background:var(--card);
-  color:var(--text); }
-#lead-mgmt-root .rg-f button.ok { background:var(--blue); border-color:var(--blue); color:#fff; }
-#lead-mgmt-root .rg-f button[disabled] { opacity:.5; cursor:default; }
-@media(max-width:620px){ #lead-mgmt-root .rg-mod { width:100%; max-height:96vh; } }
+/* ── « Le prochain » ─────────────────────────────────────────────────── */
+#lead-mgmt-root .v3-scene { display:grid; grid-template-columns:1fr 280px; gap:16px;
+  align-items:start; margin-top:14px; }
+@media (max-width:920px){ #lead-mgmt-root .v3-scene { grid-template-columns:1fr; } }
+#lead-mgmt-root .v3-dossier { background:#fff; border:1px solid var(--border,#e3e6ea);
+  border-radius:12px; overflow:hidden; }
+#lead-mgmt-root .v3-verrou { display:flex; align-items:center; gap:8px; padding:9px 18px;
+  font-size:12.5px; font-weight:650; background:#f0eafd; color:#7a4ddb;
+  border-bottom:1px solid var(--border,#e3e6ea); }
+#lead-mgmt-root .v3-verrou span { font-weight:500; opacity:.85; }
+/* En piscine, le bandeau n'annonce pas une réservation mais une COURSE : le
+   ton change, sinon le vendeur croit le dossier acquis. */
+#lead-mgmt-root .v3-verrou.piscine { background:#fdf5e4; color:#b8851a; }
+#lead-mgmt-root .v3-verrou.pris { background:#e6f6f0; color:#0f9b6c; }
+#lead-mgmt-root .v3-haut { display:flex; gap:16px; padding:16px 18px;
+  border-bottom:1px solid var(--border,#e3e6ea); align-items:flex-start; }
+#lead-mgmt-root .v3-min { flex:0 0 auto; }
+#lead-mgmt-root .v3-min-v { width:76px; height:76px; border-radius:50%; display:grid;
+  place-items:center; font-size:21px; font-weight:800; letter-spacing:-.02em;
+  border:3px solid var(--ok-dk,#0f9b6c); color:var(--ok-dk,#0f9b6c); line-height:1; }
+#lead-mgmt-root .v3-min-v.ko { border-color:var(--red-dk,#c02626); color:var(--red-dk,#c02626); }
+#lead-mgmt-root .v3-min-v span { display:block; font-size:9.5px; font-weight:600;
+  text-transform:uppercase; letter-spacing:.06em; opacity:.75; }
+#lead-mgmt-root .v3-qui h3 { margin:0; font-size:21px; font-weight:800; letter-spacing:-.4px;
+  color:#1F4A85; }
+#lead-mgmt-root .v3-meta { display:flex; flex-wrap:wrap; gap:18px; font-size:13px;
+  color:#7a98c5; font-weight:600; margin-top:6px; }
+#lead-mgmt-root .v3-meta span { display:inline-flex; align-items:center; gap:6px; }
+#lead-mgmt-root .v3-meta svg { width:14px; height:14px; opacity:.8; }
+#lead-mgmt-root .v3-pi { display:flex; gap:6px; flex-wrap:wrap; margin-top:9px; }
+#lead-mgmt-root .v3-p { font-size:11.5px; font-weight:650; padding:3px 9px; border-radius:999px;
+  border:1px solid var(--border,#e3e6ea); color:var(--text-mut,#6b7684); background:#f4f5f7; }
+#lead-mgmt-root .v3-p.src { border-color:transparent; background:var(--blue-bg,#eaf0ff);
+  color:var(--blue-dk,#2a5ea9); }
+#lead-mgmt-root .v3-corps { padding:15px 18px; }
+#lead-mgmt-root .v3-dem { font-size:15px; line-height:1.6; border-left:3px solid
+  var(--border,#e3e6ea); padding-left:13px; }
+#lead-mgmt-root .v3-veh { margin-top:12px; padding:10px 12px; background:#f4f5f7;
+  border-radius:9px; font-size:13.5px; }
+
+/* Barre de communication : COPIE de `.fs-btn` (fiche-shell.js). Mêmes paires
+   couleur / bordure / survol, pour qu'un vendeur n'ait rien à réapprendre. */
+#lead-mgmt-root .v3-gestes { display:flex; flex-wrap:wrap; gap:10px; padding:14px 18px 16px;
+  align-items:center; }
+#lead-mgmt-root .v3-canaux { display:flex; flex-wrap:wrap; gap:10px; }
+#lead-mgmt-root .v3-canaux.inerte { opacity:.4; filter:grayscale(.7); }
+#lead-mgmt-root .v3-cm { display:inline-flex; align-items:center; gap:8px;
+  border:1.5px solid var(--border,#e3e6ea); background:#fff; border-radius:10px;
+  padding:9px 16px; font:inherit; font-size:14px; font-weight:700; cursor:pointer;
+  transition:.15s; color:#1F4A85; }
+#lead-mgmt-root .v3-cm svg { width:17px; height:17px; flex:0 0 auto; }
+#lead-mgmt-root .v3-cm .num { font-weight:600; font-size:12px; opacity:.65; }
+#lead-mgmt-root .v3-cm[disabled] { cursor:not-allowed; }
+#lead-mgmt-root .v3-cm.call { color:#2a5ea9; border-color:#c9d9ee; }
+#lead-mgmt-root .v3-cm.call:hover { background:#eef4fc; }
+#lead-mgmt-root .v3-cm.wa   { color:#1f9d63; border-color:#bfe6cf; }
+#lead-mgmt-root .v3-cm.wa:hover { background:#eafaf1; }
+#lead-mgmt-root .v3-cm.mail { color:#1F4A85; border-color:#d7dfe9; }
+#lead-mgmt-root .v3-cm.mail:hover { background:#f2f5f9; }
+#lead-mgmt-root .v3-cm.sms  { color:#e6a817; border-color:#f0dca6; }
+#lead-mgmt-root .v3-cm.sms:hover { background:#fdf7e8; }
+#lead-mgmt-root .v3-cm.rpv  { color:#e24b4a; border-color:#f2c4c4; }
+#lead-mgmt-root .v3-cm.rpv:hover { background:#fdf1f1; }
+/* Les gestes de FLUX ne sont pas des canaux : « Passer » ne doit jamais
+   ressembler à « Appeler ». */
+#lead-mgmt-root .v3-flux { padding:9px 15px; border-radius:6px; font-size:12.5px;
+  font-weight:500; cursor:pointer; border:1px solid #2a5ea9; background:transparent;
+  color:#2a5ea9; font:inherit; font-size:12.5px; text-transform:uppercase;
+  letter-spacing:.3px; }
+#lead-mgmt-root .v3-flux:hover { background:#f2f6fc; }
+#lead-mgmt-root .v3-flux.p { background:#53bda7; border-color:#53bda7; color:#fff; }
+#lead-mgmt-root .v3-flux.p:hover { background:#45a791; }
+#lead-mgmt-root .v3-rappel { padding:10px 18px; border-top:1px solid var(--border,#e3e6ea);
+  font-size:12.5px; color:var(--text-mut,#6b7684); background:#fafbfd; }
+
+#lead-mgmt-root .v3-file { background:#fff; border:1px solid var(--border,#e3e6ea);
+  border-radius:12px; overflow:hidden; position:sticky; top:12px; }
+#lead-mgmt-root .v3-file h4 { margin:0; padding:13px 15px 9px; font-size:12px;
+  text-transform:uppercase; letter-spacing:.07em; color:var(--text-mut,#6b7684); }
+#lead-mgmt-root .v3-file ul { list-style:none; margin:0; padding:0 8px 8px; }
+#lead-mgmt-root .v3-file li { display:flex; gap:10px; align-items:center; padding:8px;
+  font-size:13px; }
+#lead-mgmt-root .v3-file li + li { border-top:1px solid var(--border,#e3e6ea); }
+#lead-mgmt-root .v3-file li.occ { opacity:.5; }
+#lead-mgmt-root .v3-file li b { font-weight:600; }
+#lead-mgmt-root .v3-file li small { display:block; font-size:11.5px;
+  color:var(--text-mut,#6b7684); }
+#lead-mgmt-root .v3-file li .t { margin-left:auto; font-weight:650; font-size:12.5px;
+  font-variant-numeric:tabular-nums; }
+#lead-mgmt-root .v3-file li.v3-rien { color:var(--text-mut,#6b7684); }
+#lead-mgmt-root .v3-pied { padding:10px 15px; border-top:1px solid var(--border,#e3e6ea);
+  font-size:11.5px; color:var(--text-mut,#6b7684); background:#fafbfd; }
+
+/* ── Panneau d'une cellule ───────────────────────────────────────────── */
+#lead-mgmt-root .v3-voile { position:fixed; inset:0; background:rgba(16,24,40,.42);
+  z-index:50; }
+#lead-mgmt-root .v3-pan { position:fixed; top:0; right:0; bottom:0; width:420px;
+  max-width:94vw; z-index:51; background:#fff; border-left:1px solid var(--border,#e3e6ea);
+  display:flex; flex-direction:column; box-shadow:-18px 0 50px -24px rgba(16,24,40,.5); }
+#lead-mgmt-root .v3-pan-h { padding:15px 16px; border-bottom:1px solid var(--border,#e3e6ea);
+  display:flex; gap:10px; align-items:flex-start; }
+#lead-mgmt-root .v3-pan-h b { font-size:15px; display:block; }
+#lead-mgmt-root .v3-pan-h small { display:block; margin-top:3px; font-size:12px;
+  color:var(--text-mut,#6b7684); }
+#lead-mgmt-root .v3-pan-h .x { margin-left:auto; border:0; background:none; font-size:22px;
+  line-height:1; color:var(--text-mut,#6b7684); cursor:pointer; padding:0 4px; }
+#lead-mgmt-root .v3-pan-b { flex:1; overflow-y:auto; padding:8px 10px 14px; }
+#lead-mgmt-root .v3-pan-f { padding:10px 16px; border-top:1px solid var(--border,#e3e6ea);
+  font-size:11.5px; color:var(--text-mut,#6b7684); background:#fafbfd; }
+#lead-mgmt-root .v3-ld { display:flex; gap:10px; align-items:center; padding:10px 8px;
+  border-radius:9px; }
+#lead-mgmt-root .v3-ld + .v3-ld { border-top:1px solid var(--border,#e3e6ea); }
+#lead-mgmt-root .v3-ld.prem { background:var(--blue-bg,#eaf0ff); }
+#lead-mgmt-root .v3-ld .q { flex:1; min-width:0; }
+#lead-mgmt-root .v3-ld .q b { display:block; font-size:13.5px; font-weight:650;
+  white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+#lead-mgmt-root .v3-ld .q small { font-size:11.5px; color:var(--text-mut,#6b7684); }
+#lead-mgmt-root .v3-ld .q em { font-style:normal; font-weight:700;
+  color:var(--blue-dk,#2a5ea9); }
+#lead-mgmt-root .v3-ld .a { font-weight:650; font-size:12.5px;
+  font-variant-numeric:tabular-nums; flex:0 0 auto; }
+#lead-mgmt-root .v3-ld .occ { font-size:11.5px; font-weight:600; color:#7a4ddb;
+  flex:0 0 auto; }
+#lead-mgmt-root .v3-ld .pr { border:1px solid #2a5ea9; background:#2a5ea9; color:#fff;
+  border-radius:8px; padding:6px 11px; font-size:12px; font-weight:650; cursor:pointer;
+  flex:0 0 auto; }
+#lead-mgmt-root .v3-ld .al { border:1px solid #2a5ea9; background:transparent;
+  color:#2a5ea9; border-radius:8px; padding:6px 11px; font-size:12px; font-weight:600;
+  cursor:pointer; flex:0 0 auto; margin-right:4px; }
+#lead-mgmt-root .v3-choix { display:flex; gap:6px; flex-wrap:wrap; align-items:center;
+  padding:9px 10px 11px; background:var(--blue-bg,#eaf0ff); border-radius:9px;
+  margin:0 0 6px; }
+#lead-mgmt-root .v3-choix span { font-size:11.5px; font-weight:650;
+  color:var(--blue-dk,#2a5ea9); }
+#lead-mgmt-root .v3-choix button { border:1px solid var(--border,#e3e6ea); background:#fff;
+  border-radius:8px; padding:5px 10px; font-size:12px; font-weight:600; cursor:pointer; }
+#lead-mgmt-root .v3-choix button.ann { border-style:dashed;
+  color:var(--text-mut,#6b7684); font-weight:500; }
+#lead-mgmt-root .v3-pan-note { margin:10px 8px 0; padding:10px 12px; border-radius:9px;
+  background:#fdf5e4; color:#b8851a; font-size:11.5px; line-height:1.5; font-weight:500; }
 `;
 
 const LM_V2_CSS = `
@@ -630,113 +790,6 @@ const LM_V2_CSS = `
 #lead-mgmt-root .v2-warn { color:#b8851a; font-weight:700; }
 #lead-mgmt-root .v2-ko { color:var(--red-soft); font-weight:700; }
 #lead-mgmt-root .v2-sous { font-size:11px; color:var(--text-mut); font-weight:400; }
-`;
-
-const LM_GESTES_CSS = `
-/* ⚠️ RELEVÉ LE 21/09 : --blue, --blue-line et --blue-pale étaient
-   utilisées mais JAMAIS définies. Tout ce qui en dépendait devenait
-   transparent, texte blanc compris : le bouton « Créer le rendez-vous »
-   et chaque créneau sélectionné n'apparaissaient qu'au survol. */
-#lead-mgmt-root { --blue:#2a5ea9; --blue-hover:#1f4a87; --blue-line:#acc5e4; --blue-pale:#f5f8fc; }
-#lead-mgmt-root .g-bandeau { display:flex; align-items:center; gap:11px; padding:11px 16px;
-  border-radius:10px; margin-bottom:14px; font-size:13px; }
-#lead-mgmt-root .g-bandeau.off { background:#fdf6e6; border:1px solid #b8851a; color:#7a5a12; }
-#lead-mgmt-root .g-bandeau.on { background:var(--green-bg,#e1f5ee); border:1px solid #53bda7;
-  color:var(--green); font-size:12px; padding:7px 14px; }
-#lead-mgmt-root .g-bandeau b { color:#5d4409; }
-#lead-mgmt-root .g-pastille { width:9px; height:9px; border-radius:50%; flex-shrink:0; }
-#lead-mgmt-root .g-bandeau.off .g-pastille { background:var(--red-soft); animation:gpulse 1.6s infinite; }
-#lead-mgmt-root .g-bandeau.on .g-pastille { background:#53bda7; }
-@keyframes gpulse { 50% { opacity:.35; } }
-#lead-mgmt-root .g-bandeau .g-act { margin-left:auto; background:#b8851a; color:#fff;
-  border:none; padding:6px 14px; border-radius:5px; font-size:12px; font-weight:600;
-  font-family:inherit; cursor:pointer; white-space:nowrap; }
-
-/* La source : une pastille discrète, jamais un pavé coloré. */
-#lead-mgmt-root .g-src { display:inline-flex; align-items:center; gap:5px; font-size:10px;
-  font-weight:700; padding:2px 8px; border-radius:10px; background:#f1efe8; color:#5f5e5a; }
-#lead-mgmt-root .g-src i { width:6px; height:6px; border-radius:50%; background:currentColor;
-  font-style:normal; }
-#lead-mgmt-root .g-src.bacs { background:#e8eef7; color:#2a5ea9; }
-#lead-mgmt-root .g-src.lbc { background:#fdeee6; color:#c2410c; }
-#lead-mgmt-root .g-src.centrale { background:#e9e7f8; color:#4c3fa8; }
-#lead-mgmt-root .g-src.stock { background:#e6f2ef; color:#166b56; }
-#lead-mgmt-root .g-src.web { background:var(--blue-bg); color:var(--blue-dk); }
-
-/* Les gestes : ce que la source PERMET. */
-#lead-mgmt-root .v2-lead { cursor:pointer; }
-#lead-mgmt-root .v2-lead-on { background:var(--blue-bg); border-left-width:4px; }
-#lead-mgmt-root .v2-lead-g { margin-top:10px; padding-top:10px;
-  border-top:1px solid var(--border); }
-#lead-mgmt-root .g-grille { display:grid; grid-template-columns:1fr 1fr; gap:8px; }
-@media (max-width:560px) { #lead-mgmt-root .g-grille { grid-template-columns:1fr; } }
-#lead-mgmt-root .g-btn { border:1px solid var(--border); border-radius:8px; padding:10px 12px;
-  background:var(--card); text-align:left; display:flex; flex-direction:column; gap:3px;
-  font-family:inherit; cursor:pointer; }
-#lead-mgmt-root .g-btn:hover:not(:disabled) { border-color:var(--blue-line); background:var(--blue-bg); }
-#lead-mgmt-root .g-btn b { font-size:12.5px; font-weight:600; color:var(--text); }
-#lead-mgmt-root .g-btn i { font-style:normal; font-size:10.5px; color:var(--text-mut); }
-#lead-mgmt-root .g-btn:disabled { opacity:.45; cursor:not-allowed; }
-#lead-mgmt-root .g-ou { font-size:9px; font-weight:700; padding:1px 5px; border-radius:8px;
-  margin-left:6px; vertical-align:1px; }
-#lead-mgmt-root .g-ou.bacs { color:var(--blue); background:var(--blue-bg); }
-#lead-mgmt-root .g-ou.od { color:var(--green); background:#e1f5ee; }
-
-/* Modale : transfert, rendez-vous, relance. */
-#lead-mgmt-root .g-modal { position:fixed; inset:0; background:rgba(28,43,61,.38); z-index:10000;
-  display:flex; align-items:center; justify-content:center; padding:20px; }
-#lead-mgmt-root .g-modal-c { background:var(--card); border-radius:12px; width:520px;
-  max-width:100%; max-height:88vh; display:flex; flex-direction:column;
-  box-shadow:0 12px 40px rgba(28,43,61,.28); }
-#lead-mgmt-root .g-modal-h { padding:16px 20px; border-bottom:1px solid var(--border); }
-#lead-mgmt-root .g-modal-h b { font-size:16px; }
-#lead-mgmt-root .g-modal-h p { margin:4px 0 0; font-size:12px; color:var(--text-soft); }
-#lead-mgmt-root .g-modal-b { padding:16px 20px; overflow-y:auto; }
-#lead-mgmt-root .g-modal-f { padding:14px 20px; border-top:1px solid var(--border);
-  display:flex; gap:8px; justify-content:flex-end; }
-#lead-mgmt-root .g-site { display:flex; align-items:center; gap:11px; padding:11px 13px;
-  border:1px solid var(--border); border-radius:8px; margin-bottom:7px; cursor:pointer; }
-#lead-mgmt-root .g-site:hover { background:var(--blue-pale,#f5f8fc); }
-#lead-mgmt-root .g-site.on { border-color:var(--blue); background:var(--blue-bg); }
-#lead-mgmt-root .g-site b { font-size:13px; display:block; }
-#lead-mgmt-root .g-site i { font-style:normal; font-size:11px; color:var(--text-mut); }
-#lead-mgmt-root .g-site .g-charge { margin-left:auto; font-size:11px; color:var(--text-soft);
-  white-space:nowrap; }
-#lead-mgmt-root .g-champ { margin-top:12px; }
-#lead-mgmt-root .g-champ label { font-size:11.5px; color:var(--text-mut); display:block;
-  margin-bottom:5px; }
-#lead-mgmt-root .g-champ input, #lead-mgmt-root .g-champ textarea,
-#lead-mgmt-root .g-champ select { width:100%; border:1px solid var(--border); border-radius:6px;
-  padding:8px; font-family:inherit; font-size:13px; color:var(--text); background:var(--card); }
-/* Boutons de la modale. ⚠️ La classe « lmf-btn » était utilisée ici mais
-   définie NULLE PART : « Annuler » et « Créer » s'affichaient en texte
-   brut (relevé le 21/09). */
-#lead-mgmt-root .g-act { border:1px solid var(--border); background:var(--card); color:var(--blue-dk);
-  border-radius:8px; padding:9px 18px; font-size:13px; font-weight:600; font-family:inherit; cursor:pointer; }
-#lead-mgmt-root .g-act:hover { background:var(--blue-bg); }
-#lead-mgmt-root .g-act.p { background:var(--blue); border-color:var(--blue); color:#fff; }
-#lead-mgmt-root .g-act.p:hover { background:var(--blue-hover); border-color:var(--blue-hover); }
-#lead-mgmt-root .g-act:disabled { opacity:.5; cursor:not-allowed; }
-
-/* Créneaux : un jour, une heure, une durée — trois clics au lieu de
-   trois sélecteurs natifs. */
-#lead-mgmt-root .g-lab { font-size:10.5px; text-transform:uppercase; letter-spacing:.06em; font-weight:700;
-  color:var(--text-mut); margin:14px 0 7px; }
-#lead-mgmt-root .g-chips { display:flex; flex-wrap:wrap; gap:6px; }
-#lead-mgmt-root .g-chip { border:1px solid var(--border); background:var(--card); color:var(--text);
-  border-radius:7px; padding:7px 11px; font-size:12.5px; font-family:inherit; cursor:pointer;
-  font-variant-numeric:tabular-nums; line-height:1.2; text-align:center; }
-#lead-mgmt-root .g-chip small { display:block; font-size:10.5px; color:var(--text-mut); margin-top:1px; }
-#lead-mgmt-root .g-chip:hover:not(:disabled) { border-color:var(--blue-line); background:var(--blue-bg); }
-#lead-mgmt-root .g-chip.on { background:var(--blue); border-color:var(--blue); color:#fff; }
-#lead-mgmt-root .g-chip.on small { color:#dbe6f5; }
-#lead-mgmt-root .g-chip:disabled { opacity:.35; cursor:not-allowed; }
-#lead-mgmt-root .g-heures { display:grid; grid-template-columns:repeat(6, 1fr); gap:6px; }
-@media (max-width:520px) { #lead-mgmt-root .g-heures { grid-template-columns:repeat(4, 1fr); } }
-#lead-mgmt-root .g-recap { margin-top:14px; padding:10px 13px; border-radius:8px; background:var(--blue-bg);
-  color:var(--blue-dk); font-size:13px; font-weight:600; }
-#lead-mgmt-root .g-note { background:#fdf6e6; border-left:3px solid #b8851a; padding:10px 13px;
-  border-radius:0 5px 5px 0; font-size:12px; color:#7a5a12; margin-bottom:14px; }
 `;
 
 // --- 3. Style (injection forcée) ----------------------------
@@ -1099,9 +1152,8 @@ styleEl.textContent = `
 
 ${LM_SLA_CSS}
 ${LM_ROLE_CSS}
-${LM_REGLES_CSS}
 ${LM_V2_CSS}
-${LM_GESTES_CSS}
+${LM_V3_CSS}
 `;
 doc.head.appendChild(styleEl);
 
@@ -3094,36 +3146,17 @@ async function fetchMaFile() {
             + 'delai_reponse_min,sla_tenu,id_user_attribue,attribution_regle')
       .in('statut', ['recu', 'resolu', 'attribue'])
       .order('attente_min', { ascending: false })
-      .limit(500);
-    // ⚠️ RELEVÉ LE 18/09 : la file était coupée à 300 lignes triées de la
-    //    PLUS ANCIENNE à la plus récente. Avec des dossiers de 900 jours en
-    //    tête, les demandes du jour — les seules encore gagnables — tombaient
-    //    hors de la limite. L'arriéré (> 90 jours) est donc écarté par
-    //    défaut et compté à part ; le vendeur peut l'afficher d'un clic.
-    if (!state.voirArriere) q = q.lte('attente_min', LM_ARRIERE_MIN);
+      .limit(300);
     if (cible) q = q.eq('id_user_attribue', cible);
     if (state.busSite) q = q.eq('id_site', Number(state.busSite));
     const { data, error } = await q;
     if (error) throw error;
-
-    // Combien de dossiers dorment au-delà de 90 jours : on ne les montre
-    // pas, mais on ne les cache pas non plus.
-    try {
-      let qa = sb.from('v_lead_sla').select('id_lead', { count: 'exact', head: true })
-        .in('statut', ['recu', 'resolu', 'attribue'])
-        .gt('attente_min', LM_ARRIERE_MIN);
-      if (cible) qa = qa.eq('id_user_attribue', cible);
-      if (state.busSite) qa = qa.eq('id_site', Number(state.busSite));
-      const ra = await qa;
-      state.mafileArriere = ra.count || 0;
-    } catch (e) { state.mafileArriere = null; }
     state.mafileData = (data || []).map(r => ({
       id_lead:            r.id_lead,
       source:             r.source,
       source_libelle:     r.source_libelle,
       id_site:            r.id_site,
       id_client:          r.id_client,
-      id_cycle_comm:      r.id_cycle_comm,
       statut:             r.statut,
       sla_minutes:        Number(r.sla_minutes) || 60,
       attente_min:        r.attente_min != null ? Number(r.attente_min) : null,
@@ -3151,20 +3184,14 @@ async function enrichirMaFile() {
   const ids = rows.map(r => r.id_lead);
   try {
     const { data } = await sb.from('LEADS_EXTERNES')
-      .select('id_lead,nom,prenom,vehicule_interet,telephone,email,joignable')
-      .in('id_lead', ids);
+      .select('id_lead,nom,prenom,vehicule_interet').in('id_lead', ids);
     const idx = {};
     (data || []).forEach(r => { idx[r.id_lead] = r; });
     rows.forEach(r => {
       const s = idx[r.id_lead];
       if (!s) return;
       r.nom_affiche      = [s.prenom, s.nom].filter(Boolean).join(' ').trim() || null;
-      r.nom = s.nom; r.prenom = s.prenom;
       r.vehicule_interet = s.vehicule_interet || null;
-      // Nécessaires pour savoir QUELS GESTES sont possibles.
-      r.telephone = s.telephone || null;
-      r.email     = s.email || null;
-      r.joignable = s.joignable;
     });
   } catch (e) { /* le nom est un confort, pas un bloquant */ }
 }
@@ -3303,11 +3330,11 @@ async function ouvrirReaffectation(idLead) {
     if (error) throw error;
     cibles = data || [];
   } catch (e) {
-    lmToast('Impossible de charger les vendeurs : ' + ((e && e.message) || 'erreur'), 'erreur');
+    alert('Impossible de charger les vendeurs : ' + ((e && e.message) || 'erreur'));
     return;
   }
   if (!cibles.length) {
-    lmToast('Aucun vendeur disponible sur ce site, ou vous n\'avez pas le droit de réaffecter ce lead.', 'erreur');
+    alert('Aucun vendeur disponible sur ce site, ou vous n\'avez pas le droit de réaffecter ce lead.');
     return;
   }
   const lignes = cibles.map(function (c, i) {
@@ -3316,7 +3343,7 @@ async function ouvrirReaffectation(idLead) {
   const rep = prompt('Réaffecter ce lead à :\n\n' + lignes + '\n\nNuméro du vendeur :');
   if (!rep) return;
   const idx = parseInt(rep, 10) - 1;
-  if (isNaN(idx) || idx < 0 || idx >= cibles.length) { lmToast('Choix invalide.', 'erreur'); return; }
+  if (isNaN(idx) || idx < 0 || idx >= cibles.length) { alert('Choix invalide.'); return; }
   const motif = prompt('Motif de la réaffectation (facultatif) :') || null;
   try {
     const { error } = await sb.rpc('lead_reaffecter', {
@@ -3328,7 +3355,7 @@ async function ouvrirReaffectation(idLead) {
     fetchMaFile();
   } catch (e) {
     // 42501 = la RPC a refuse : l'appelant n'encadre pas ce site.
-    lmToast('Réaffectation refusée : ' + ((e && e.message) || 'droits insuffisants'), 'erreur');
+    alert('Réaffectation refusée : ' + ((e && e.message) || 'droits insuffisants'));
   }
 }
 
@@ -3744,266 +3771,7 @@ function v2Fil() {
   // Le sélecteur de dates est CELUI DU MODULE (state.period, calendrier
   // deux clics) : une seule mécanique de période dans toute la page.
   h += '<span class="v2-per">' + renderPeriodBar() + '</span>';
-  // Le parametrage vit LA, dans la barre de perimetre : le chef regle les
-  // regles a l endroit meme ou il en constate les effets, et le perimetre
-  // courant repond deja a « pour quel site ? ».
-  if (PEUT_PARAMETRER) {
-    h += '<button type="button" class="v2-regles-b" data-rgouvrir="1">'
-      + 'Règles d\'attribution</button>';
-  }
   h += '</div>';
-  return h;
-}
-
-
-// --- REGLES D'ATTRIBUTION -----------------------------------
-// Le tour de role n'est plus une regle du code : le management la pose,
-// pour SON perimetre. La modale montre en direct le classement des
-// vendeurs, pour que le chef voie EXACTEMENT ce que la machine deciderait.
-const PEUT_PARAMETRER = [ROLE_ADMIN, ROLE_DIRECTEUR, ROLE_CHEF_VENTES,
-  ROLE_DIR_PLAQUE, ROLE_DIR_MARQUE, ROLE_DIR_GROUPE].indexOf(userRole) >= 0;
-// La regle par defaut du groupe releve de la direction : un chef des ventes
-// regle SON site, pas celui des autres.
-const PEUT_PARAMETRER_DEFAUT = [ROLE_ADMIN, ROLE_DIRECTEUR,
-  ROLE_DIR_PLAQUE, ROLE_DIR_MARQUE, ROLE_DIR_GROUPE].indexOf(userRole) >= 0;
-
-const RG_REPARTITION = [
-  { k:'charge', l:'Au moins chargé',
-    d:'Le vendeur qui a le moins de leads en cours. Répartition la plus égale.' },
-  { k:'sequentiel', l:'Tour de rôle séquentiel',
-    d:'Chacun son tour, dans l\u2019ordre : le dernier servi repasse en queue.' },
-  { k:'conversion', l:'Au meilleur taux de conversion',
-    d:'La charge reste le premier critère : à charge égale, le lead part à celui qui transforme le mieux.' }
-];
-
-// Quel SITE la modale parametre-t-elle ? Le fil d Ariane repond deja :
-// au niveau site on prend ce site, au niveau vendeur celui de son site,
-// au-dessus il n y a pas de site unique -> regle par defaut du groupe.
-function reglesSiteCourant() {
-  const v = state.v2 || {};
-  if (v.niveau === 'site') return Number(v.cle);
-  if (v.niveau === 'vendeur') {
-    const e = (dataEquipe || []).find(x => Number(x.id_user) === Number(v.cle));
-    if (e && e.id_site != null) return Number(e.id_site);
-  }
-  return null;
-}
-
-let rgEtat = null;   // { idSite, regles, vendeurs, msg, enCours, charge }
-
-function rgNomSite(idSite) {
-  if (idSite == null) return 'Tous les sites (règle par défaut)';
-  const s = (dataSites || []).find(x => Number(x.id_site) === Number(idSite));
-  return (s && s.nom_site) || ('Site ' + idSite);
-}
-
-async function ouvrirRegles(idSiteForce) {
-  const idSite = (idSiteForce !== undefined) ? idSiteForce : reglesSiteCourant();
-  if (idSite == null && !PEUT_PARAMETRER_DEFAUT) {
-    // Un chef des ventes au-dessus de son site : on ne le laisse pas croire
-    // qu il va regler le groupe. On le renvoie a SON site.
-    rgEtat = { idSite:null, regles:null, vendeurs:[], charge:false, refus:true };
-    renderAll();
-    return;
-  }
-  rgEtat = { idSite, regles:null, vendeurs:[], msg:'', enCours:false, charge:true };
-  renderAll();
-  try {
-    const { data, error } = await sb.rpc('lead_regles', { p_id_site: idSite });
-    if (error) throw error;
-    rgEtat.regles = Array.isArray(data) ? data[0] : data;
-    if (idSite != null) {
-      const r2 = await sb.rpc('lead_classement_vendeurs', { p_id_site: idSite, p_vn_vo: null });
-      if (!r2.error) rgEtat.vendeurs = r2.data || [];
-    }
-  } catch (e) {
-    rgEtat.msg = 'Lecture impossible : ' + (e.message || e);
-  }
-  rgEtat.charge = false;
-  renderAll();
-}
-
-function fermerRegles() { rgEtat = null; renderAll(); }
-
-async function enregistrerRegles() {
-  if (!rgEtat || !rgEtat.regles) return;
-  rgEtat.enCours = true; rgEtat.msg = 'Enregistrement…'; renderAll();
-  const r = rgEtat.regles;
-  try {
-    const { error } = await sb.rpc('lead_regles_enregistrer', {
-      p_regles: {
-        id_site: rgEtat.idSite,
-        mode: r.mode,
-        priorite_cycle: !!r.priorite_cycle,
-        vendeur_habituel: !!r.vendeur_habituel,
-        vendeur_habituel_mois: Number(r.vendeur_habituel_mois) || 12,
-        repartition: r.repartition,
-        conversion_mois: Number(r.conversion_mois) || 6,
-        conversion_min_leads: Number(r.conversion_min_leads) || 20,
-        filtre_vn_vo: !!r.filtre_vn_vo
-      }
-    });
-    if (error) throw error;
-    rgEtat.msg = 'Règles enregistrées.';
-    // Le classement change avec la regle : on le relit pour que l ecran
-    // montre la nouvelle decision, pas l ancienne.
-    if (rgEtat.idSite != null) {
-      const r2 = await sb.rpc('lead_classement_vendeurs',
-        { p_id_site: rgEtat.idSite, p_vn_vo: null });
-      if (!r2.error) rgEtat.vendeurs = r2.data || [];
-    }
-  } catch (e) {
-    rgEtat.msg = 'Refus : ' + (e.message || e);
-  }
-  rgEtat.enCours = false; renderAll();
-}
-
-async function basculerExclusion(idUser, exclu) {
-  if (!rgEtat || rgEtat.idSite == null) return;
-  rgEtat.enCours = true; renderAll();
-  try {
-    const { error } = await sb.rpc('lead_exclusion_poser', {
-      p_id_site: rgEtat.idSite, p_id_user: Number(idUser),
-      p_motif: exclu ? null : 'Écarté depuis le lead management',
-      p_du: null, p_au: null, p_retirer: !!exclu
-    });
-    if (error) throw error;
-    const r2 = await sb.rpc('lead_classement_vendeurs',
-      { p_id_site: rgEtat.idSite, p_vn_vo: null });
-    if (!r2.error) rgEtat.vendeurs = r2.data || [];
-    rgEtat.msg = '';
-  } catch (e) {
-    rgEtat.msg = 'Refus : ' + (e.message || e);
-  }
-  rgEtat.enCours = false; renderAll();
-}
-
-function rgOpt(champ, valeur, libelle, desc, type) {
-  const r = rgEtat.regles, coche = (type === 'radio') ? (r[champ] === valeur) : !!r[champ];
-  return '<label class="rg-opt' + (coche ? ' on' : '') + '">'
-    + '<input type="' + (type || 'checkbox') + '"' + (coche ? ' checked' : '')
-    + ' data-rgc="' + champ + '" data-rgv="' + escapeHtml(String(valeur)) + '"'
-    + (type === 'radio' ? ' name="rg-' + champ + '"' : '') + '>'
-    + '<span><b>' + escapeHtml(libelle) + '</b>'
-    + (desc ? '<span class="d">' + escapeHtml(desc) + '</span>' : '') + '</span></label>';
-}
-
-function rgNum(champ, libelle, min, max, unite) {
-  return '<div class="rg-num"><span>' + escapeHtml(libelle) + '</span>'
-    + '<input type="number" min="' + min + '" max="' + max + '" value="'
-    + (rgEtat.regles[champ] == null ? '' : rgEtat.regles[champ])
-    + '" data-rgn="' + champ + '">'
-    + (unite ? '<span>' + escapeHtml(unite) + '</span>' : '') + '</div>';
-}
-
-function renderRegles() {
-  if (!rgEtat) return '';
-  let h = '<div class="rg-ovl" data-rgfermer="1"></div><div class="rg-mod">';
-
-  if (rgEtat.refus) {
-    return h + '<div class="rg-h"><div><b>Regles d attribution</b>'
-      + '<div class="n">Descendez jusqu\u2019à un site pour régler ses règles. '
-      + 'La règle valable pour tout le groupe relève de la direction.</div></div>'
-      + '<button type="button" class="rg-x" data-rgfermer="1">&times;</button></div>'
-      + '<div class="rg-f"><span class="msg"></span>'
-      + '<button type="button" data-rgfermer="1">Fermer</button></div></div>';
-  }
-
-  // Le badge de la topnav (site de rattachement) et le fil d'Ariane (perimetre
-  // explore) sont DEUX choses differentes. Suivre l'un en silence, c'est
-  // promettre a un chef qu'il regle un site et en regler un autre : on affiche
-  // donc le site vise, et on le rend choisissable.
-  h += '<div class="rg-h"><div style="flex:1"><b>Règles d\u2019attribution</b>'
-    + '<div class="rg-site"><span>Pour&nbsp;:</span><select data-rgsite>'
-    + (PEUT_PARAMETRER_DEFAUT
-        ? '<option value=""' + (rgEtat.idSite == null ? ' selected' : '')
-          + '>Tous les sites (règle par défaut)</option>' : '')
-    + (dataSites || []).map(s =>
-        '<option value="' + s.id_site + '"'
-        + (Number(s.id_site) === Number(rgEtat.idSite) ? ' selected' : '') + '>'
-        + escapeHtml(s.nom_site || ('Site ' + s.id_site)) + '</option>').join('')
-    + '</select></div>'
-    + '<div class="n">Ces règles décident à quel vendeur part un lead entrant. '
-    + 'Elles ne touchent pas aux leads déjà attribués.</div></div>'
-    + '<button type="button" class="rg-x" data-rgfermer="1">&times;</button></div>'
-    + '<div class="rg-b">';
-
-  if (rgEtat.charge || !rgEtat.regles) {
-    h += '<div class="lm-empty" style="padding:30px;font-size:12px">'
-      + '<span class="lm-spin"></span>Lecture des règles…</div>';
-    return h + '</div><div class="rg-f"><span class="msg">'
-      + escapeHtml(rgEtat.msg || '') + '</span>'
-      + '<button type="button" data-rgfermer="1">Fermer</button></div></div>';
-  }
-
-  h += '<div class="rg-sec"><div class="t">Comment les leads sont attribués</div>'
-    + rgOpt('mode', 'auto', 'Automatiquement',
-        'Chaque lead part vers un vendeur dès son arrivée.', 'radio')
-    + rgOpt('mode', 'manuel', 'À la main',
-        'Les leads arrivent dans « À attribuer » et vous les répartissez vous-même.', 'radio')
-    + '</div>';
-
-  h += '<div class="rg-sec"><div class="t">À qui en priorité</div>'
-    + rgOpt('priorite_cycle', true, 'Au vendeur qui suit déjà le client',
-        'Si un dossier est ouvert pour ce client sur ce site, le lead revient à celui qui le suit.')
-    + rgOpt('vendeur_habituel', true, 'A son vendeur habituel',
-        'Celui qui a eu un contact sortant avec ce client sur la période ci-dessous.')
-    + rgNum('vendeur_habituel_mois', 'Sur les', 1, 60, 'derniers mois') + '</div>';
-
-  h += '<div class="rg-sec"><div class="t">Sinon, comment répartir</div>'
-    + RG_REPARTITION.map(o => rgOpt('repartition', o.k, o.l, o.d, 'radio')).join('');
-  if (rgEtat.regles.repartition === 'conversion') {
-    h += rgNum('conversion_mois', 'Conversion mesurée sur les', 1, 36, 'derniers mois')
-      + rgNum('conversion_min_leads', 'À partir de', 1, 500, 'leads sur la période')
-      + '<div class="rg-note">Sous ce nombre de leads, le taux d\u2019un vendeur n\u2019est pas '
-      + 'calculé : un vendeur à 2 leads dont 2 vendus afficherait 100 %. La charge '
-      + 'reste le premier critère — la conversion ne fait que départager les '
-      + 'vendeurs à égalité, pour qu\u2019un seul ne sature pas.</div>';
-  }
-  h += rgOpt('filtre_vn_vo', true, 'Respecter la spécialité VN / VO',
-        'Un lead sur un véhicule d\u2019occasion ne part qu\u2019à un vendeur VO.')
-    + '</div>';
-
-  if (rgEtat.idSite != null) {
-    h += '<div class="rg-sec"><div class="t">Qui recevrait le prochain lead</div>';
-    if (!rgEtat.vendeurs.length) {
-      h += '<div class="lm-empty" style="padding:18px;font-size:12px">Aucun vendeur '
-        + 'rattaché à ce site. Les leads resteront visibles, sans destinataire.</div>';
-    } else {
-      h += '<table class="rg-tab"><tr><th>Vendeur</th><th>Leads en cours</th>'
-        + '<th>Conversion</th><th></th></tr>';
-      let premier = true;
-      rgEtat.vendeurs.forEach(v => {
-        const ex = !!v.exclu, suiv = !ex && premier;
-        if (!ex) premier = false;
-        h += '<tr class="' + (ex ? 'exclu' : (suiv ? 'suiv' : '')) + '">'
-          + '<td>' + escapeHtml(v.nom || ('Vendeur ' + v.id_user))
-          + (suiv ? ' &larr; le suivant' : '') + '</td>'
-          + '<td>' + (v.charge == null ? '—' : v.charge) + '</td>'
-          + '<td>' + (v.conversion == null
-              ? '<span style="color:var(--text-mut)">pas assez de leads</span>'
-              : v.conversion + ' %') + '</td>'
-          + '<td style="text-align:right"><button type="button" class="rg-ex" '
-          + 'data-rgex="' + v.id_user + '" data-rgexo="' + (ex ? '1' : '0') + '">'
-          + (ex ? 'Réintégrer' : 'Écarter') + '</button></td></tr>';
-      });
-      h += '</table><div class="rg-note">Un vendeur écarté ne reçoit plus de nouveau '
-        + 'lead, mais conserve ceux qu\u2019il a déjà. À utiliser pour un congé ou une '
-        + 'formation.</div>';
-    }
-    h += '</div>';
-  }
-
-  h += '<div class="rg-sec"><div class="t">Non modifiable</div>'
-    + '<div class="rg-note">Quand un même client redépose une demande sur le même site '
-    + 'en moins de 24 heures, elle repart au vendeur qui a déjà la première. Ce n\u2019est '
-    + 'pas une politique commerciale mais une protection : sans elle, deux vendeurs de '
-    + 'la même concession rappellent le même client.</div></div>';
-
-  h += '</div><div class="rg-f"><span class="msg">' + escapeHtml(rgEtat.msg || '') + '</span>'
-    + '<button type="button" data-rgfermer="1">Fermer</button>'
-    + '<button type="button" class="ok" data-rgok="1"'
-    + (rgEtat.enCours ? ' disabled' : '') + '>Enregistrer</button></div></div>';
   return h;
 }
 
@@ -4233,512 +4001,6 @@ function v2Reactivite() {
 // lui, le mur montre où ça coince sans jamais dire QUI — il désigne un
 // problème sans donner prise dessus.
 
-// ============================================================
-//  LES GESTES SUR UN LEAD, ET LE CANAL BACS      (17/09/2026)
-//
-//  PRINCIPE : le vendeur voit les MÊMES boutons quelle que soit la
-//  source. Un lead LeBonCoin et un lead Toyota se traitent pareil.
-//  La source ne décide que de deux choses — le délai attendu, et OÙ le
-//  geste sera écrit.
-//
-//  Les leads BACS passent par la file `bacs_sortant` : One Data ne peut
-//  pas écrire dans Salesforce, il faut une session vivante dans un
-//  navigateur. Les autres écrivent directement dans One Data.
-// ============================================================
-
-
-
-// Ce que chaque source permet, et où le geste s'écrit.
-// `distant: 'bacs'` => le geste part dans la file sortante.
-const LM_SOURCES = {
-  bacs_constructeur:{ l:'Toyota.fr',        cls:'bacs',     distant:'bacs' },
-  bacs_campagne:    { l:'Campagne BACS',    cls:'bacs',     distant:'bacs' },
-  bacs_atelier:     { l:'Trafic atelier',   cls:'bacs',     distant:'bacs' },
-  bacs_showroom:    { l:'Showroom',         cls:'bacs',     distant:'bacs' },
-  bacs_autre:       { l:'Autre BACS',       cls:'bacs',     distant:'bacs' },
-  leboncoin:        { l:'LeBonCoin',        cls:'lbc',      distant:null },
-  la_centrale:      { l:'La Centrale',      cls:'centrale', distant:null },
-  stockspark:       { l:'StockSpark',       cls:'stock',    distant:null },
-  autoscout:        { l:'AutoScout24',      cls:'stock',    distant:null },
-  site_web:         { l:'Site du groupe',   cls:'web',      distant:null },
-  wa_entrant:       { l:'WhatsApp',         cls:'web',      distant:null },
-  tel_traceur:      { l:'Tél. traceur',     cls:'web',      distant:null },
-  transfert_plateau:{ l:'Transféré',        cls:'web',      distant:null }
-};
-// ⚠️ Toyota anonymise les clients au titre du droit à l'effacement :
-//    le nom devient un jeton (« 3Rgia YIyXdZH6 »). L'afficher tel quel
-//    laisse croire à un vrai nom mal orthographié. On le DIT.
-function lmEstAnonymise(l) {
-  const n = String(l.nom || '') + ' ' + String(l.prenom || '');
-  if (/anonymized|\.rtbf/i.test(String(l.email || ''))) return true;
-  // Un jeton mêle chiffres et casse au milieu d'un mot : « YIyXdZH6 ».
-  return /[A-Za-z][0-9][A-Za-z]|[0-9][A-Za-z][0-9]/.test(n) && !/\s[A-ZÉÈÀ]{2,}/.test(n);
-}
-function lmNomLisible(l) {
-  if (lmEstAnonymise(l)) return 'Client anonymisé';
-  return l.nom_affiche || [l.prenom, l.nom].filter(Boolean).join(' ') || 'Sans nom';
-}
-
-function lmSource(code) {
-  return LM_SOURCES[code] || { l: code || 'Source inconnue', cls:'', distant:null };
-}
-
-// --- Le canal BACS : joignable ou non ------------------------
-let bacsJoignable = null;   // null = pas encore su
-let bacsDernierTest = 0;
-
-async function ensureBacsJoignable() {
-  // ⚠️ RELEVÉ LE 18/09 : le bandeau restait VERT plusieurs minutes après
-  //    la fermeture de BACS. Deux délais s'additionnaient — ce cache, et
-  //    la fenêtre de 3 min de `bacs_est_joignable`. Un bandeau qui ment
-  //    est pire qu'absent : le vendeur agit et perd son geste.
-  //    On interroge donc toutes les 10 s, et la base a resserré sa
-  //    fenêtre à 90 s.
-  if (Date.now() - bacsDernierTest < 10000 && bacsJoignable !== null) return;
-  bacsDernierTest = Date.now();
-  try {
-    const { data, error } = await sb.rpc('bacs_est_joignable');
-    if (error) throw error;
-    const avant = bacsJoignable;
-    bacsJoignable = data === true;
-    if (avant !== bacsJoignable && window.__renderLeadMgmt) window.__renderLeadMgmt();
-  } catch (e) {
-    bacsJoignable = false;
-  }
-}
-
-
-function lmArriereHtml() {
-  const n = state.mafileArriere;
-  if (!n) return '';
-  return '<div style="display:flex;align-items:center;gap:10px;padding:8px 14px;'
-    + 'margin-bottom:12px;border-radius:8px;background:var(--blue-pale,#f5f8fc);'
-    + 'border:1px solid var(--border);font-size:12.5px;color:var(--text-soft)">'
-    + (state.voirArriere
-        ? '<span>L\'arriéré est affiché : <b>' + n + '</b> dossier' + (n > 1 ? 's' : '')
-          + ' de plus de 90 jours.</span>'
-        : '<span><b>' + n + '</b> dossier' + (n > 1 ? 's' : '') + ' de plus de 90 jours '
-          + (n > 1 ? 'sont masqués' : 'est masqué') + ' pour laisser voir les demandes récentes.</span>')
-    + '<button type="button" data-arriere="1" style="margin-left:auto;background:none;'
-    + 'border:1px solid var(--border);border-radius:5px;padding:4px 11px;font-size:12px;'
-    + 'font-family:inherit;color:var(--blue-dk);cursor:pointer;white-space:nowrap">'
-    + (state.voirArriere ? 'Masquer l\'arriéré' : 'Afficher l\'arriéré') + '</button></div>';
-}
-
-// ⚠️ Sans horloge, l'état ne serait relu qu'au prochain rendu — donc
-//    jamais si le vendeur laisse l'écran ouvert. C'est exactement ce qui
-//    s'est produit le 18/09.
-let bacsHorloge = null;
-function lmDemarrerHorlogeBacs() {
-  if (bacsHorloge) return;
-  bacsHorloge = setInterval(() => {
-    if (!document.getElementById('lead-mgmt-root')) {
-      clearInterval(bacsHorloge); bacsHorloge = null; return;
-    }
-    ensureBacsJoignable();
-  }, 12000);
-}
-
-// Le bandeau. ⚠️ Pas de croix quand BACS est fermé : seule la connexion
-// le referme. Un bandeau qu'on peut faire taire ne protège de rien —
-// le vendeur le fermerait et perdrait ses gestes sans le savoir.
-function lmBandeauBacs() {
-  ensureBacsJoignable();
-  lmDemarrerHorlogeBacs();
-  if (bacsJoignable === null) return '';
-  if (bacsJoignable) {
-    return '<div class="g-bandeau on"><span class="g-pastille"></span>'
-      + 'BACS connecté — rendez-vous, relances et transferts partent directement.</div>';
-  }
-  return '<div class="g-bandeau off"><span class="g-pastille"></span>'
-    + '<span><b>BACS n\'est pas ouvert.</b> Les leads Toyota restent consultables, mais aucun '
-    + 'rendez-vous, relance ou transfert ne peut leur être appliqué. Ouvrez BACS et '
-    + 'reconnectez-vous — ce message disparaîtra seul.</span>'
-    + '<button type="button" class="g-act" data-bacs-ouvrir="1">Ouvrir BACS</button></div>';
-}
-
-// --- Les gestes ---------------------------------------------
-const LM_GESTES = [
-  { k:'appel',     l:'Appeler',                 d:'Ouvre le composeur',     local:true },
-  { k:'rdv',       l:'Prendre rendez-vous',     d:'Agenda du vendeur' },
-  { k:'relance',   l:'Programmer une relance',  d:'Rappel daté' },
-  { k:'rpv',       l:'Saisir un compte rendu',  d:'Rapport vendeur',        local:true },
-  { k:'transfert', l:'Transférer à un site',    d:'Change de concession',   manager:true },
-  { k:'perdre',    l:'Classer sans suite',      d:'Avec un motif' }
-];
-
-// Même règle que `lead_tel_exploitable` côté base : Toyota remplace les
-// numéros anonymisés par 00.00.00.00.00 — un champ rempli n'est pas un
-// numéro.
-function lmTelExploitable(tel) {
-  const n = String(tel || '').replace(/[^0-9]/g, '');
-  if (n.length < 6) return false;
-  if (/^(.)\1+$/.test(n)) return false;
-  if (/^0?123456789/.test(n)) return false;
-  return true;
-}
-
-// ⚠️ RELEVÉ LE 18/09 : les gestes étaient proposés sans regarder la
-//    donnée. « Appeler » s'affichait sur un lead sans numéro, « Compte
-//    rendu » sur un lead sans fiche client. Un bouton qui ne peut pas
-//    aboutir ne doit pas être proposé — ou doit dire POURQUOI.
-//    Rend { ok, raison } : la raison s'affiche sous le bouton grisé.
-function lmGesteDispo(lead, g) {
-  const s = lmSource(lead.source);
-  const bacs = (s.distant === 'bacs');
-  if (g.manager && PROFIL === 'vendeur') return { ok: false, cache: true };
-
-  if (g.k === 'appel') {
-    return lmTelExploitable(lead.telephone)
-      ? { ok: true } : { ok: false, raison: 'Aucun numéro exploitable' };
-  }
-  if (g.k === 'rpv') {
-    return lead.id_client
-      ? { ok: true } : { ok: false, raison: 'Aucune fiche client' };
-  }
-  // Le rendez-vous s'inscrit d'abord dans l'agenda One Data : il ne
-  // dépend que d'une fiche client. Pour un lead BACS, la poussée vers
-  // Salesforce attend en file si l'onglet est fermé — rien ne se perd.
-  if (g.k === 'rdv') {
-    return lead.id_client
-      ? { ok: true } : { ok: false, raison: 'Aucune fiche client' };
-  }
-  if (g.k === 'relance') {
-    if (bacs) {
-      return bacsJoignable === false
-        ? { ok: false, raison: 'BACS doit être ouvert' } : { ok: true };
-    }
-    // Hors BACS, rendez-vous et relance se posent dans l'agenda de la
-    // fiche client : sans fiche, il n'y a nulle part où les écrire.
-    return lead.id_client
-      ? { ok: true } : { ok: false, raison: 'Aucune fiche client' };
-  }
-  if (g.k === 'transfert') {
-    return (bacs && bacsJoignable === false)
-      ? { ok: false, raison: 'BACS doit être ouvert' } : { ok: true };
-  }
-  return { ok: true };   // classer sans suite : toujours possible
-}
-
-function lmGestesHtml(lead) {
-  const s = lmSource(lead.source);
-  let h = '<div class="g-grille">';
-  LM_GESTES.forEach(g => {
-    const d = lmGesteDispo(lead, g);
-    if (d.cache) return;   // un geste réservé au manager n'est pas montré au vendeur
-    // Où le geste s'écrit. « Classer sans suite » reste LOCAL : la
-    // clôture n'est pas encore poussée vers BACS (geste non reconnu).
-    const versBacs = (s.distant === 'bacs') && !g.local && g.k !== 'perdre';
-    const ou = g.local ? '' :
-      (versBacs ? '<span class="g-ou bacs">BACS</span>' : '<span class="g-ou od">One Data</span>');
-    h += '<button type="button" class="g-btn" ' + (d.ok ? '' : 'disabled')
-      + ' data-geste="' + g.k + '" data-lead="' + lead.id_lead + '">'
-      + '<b>' + g.l + ou + '</b>'
-      + '<i>' + escapeHtml(d.ok ? g.d : (d.raison || 'Indisponible')) + '</i></button>';
-  });
-  h += '</div>';
-  return h;
-}
-
-// --- Les modales --------------------------------------------
-let lmModale = null;   // { type, lead }
-let lmLeadSel = null;  // le lead choisi dans le volet
-
-async function lmSitesCibles() {
-  try {
-    const { data, error } = await sb.from('v_lead_sites').select('*');
-    if (error) throw error;
-    return (data || []).filter(s => userSiteIds.map(Number).indexOf(Number(s.id_site)) >= 0);
-  } catch (e) { return []; }
-}
-
-// Les 8 prochains jours, puis une date libre. Les heures par demi-heure,
-// de 8 h à 19 h 30 — les horaires d'une concession.
-const LM_JOURS_COURTS = ['Dim', 'Lun', 'Mar', 'Mer', 'Jeu', 'Ven', 'Sam'];
-function lmIsoJour(d) {
-  return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
-}
-function lmCreneauHtml(avecDuree) {
-  const auj = new Date(); auj.setHours(0, 0, 0, 0);
-  let h = '<div class="g-lab">Jour</div><div class="g-chips">';
-  for (let i = 0; i < 8; i++) {
-    const d = new Date(auj.getTime() + i * 86400000);
-    const titre = i === 0 ? 'Aujourd\'hui' : i === 1 ? 'Demain' : LM_JOURS_COURTS[d.getDay()];
-    h += '<button type="button" class="g-chip' + (i === 1 ? ' on' : '') + '" data-gjour="' + lmIsoJour(d) + '">'
-      + titre + '<small>' + d.getDate() + '/' + String(d.getMonth() + 1).padStart(2, '0') + '</small></button>';
-  }
-  h += '<label class="g-chip" style="display:inline-flex;align-items:center;gap:6px">Autre'
-    + '<input type="date" id="g-date-libre" style="border:none;font:inherit;color:inherit;background:none;'
-    + 'padding:0;width:122px"></label></div>';
-
-  h += '<div class="g-lab">Heure</div><div class="g-heures">';
-  for (let m = 8 * 60; m <= 19 * 60 + 30; m += 30) {
-    const hh = String(Math.floor(m / 60)).padStart(2, '0') + ':' + String(m % 60).padStart(2, '0');
-    h += '<button type="button" class="g-chip' + (hh === '10:00' ? ' on' : '') + '" data-gheure="' + hh + '">'
-      + hh.replace(':', ' h ') + '</button>';
-  }
-  h += '</div>';
-
-  if (avecDuree) {
-    h += '<div class="g-lab">Durée</div><div class="g-chips">';
-    [[30, '30 min'], [60, '1 h'], [90, '1 h 30'], [120, '2 h']].forEach(([v, l]) => {
-      h += '<button type="button" class="g-chip' + (v === 60 ? ' on' : '') + '" data-gduree="' + v + '">' + l + '</button>';
-    });
-    h += '</div>';
-  }
-  h += '<div class="g-recap" id="g-recap"></div>';
-  return h;
-}
-
-// Lit le créneau choisi. Rend { debut, fin } en Date, ou null.
-function lmCreneauLu() {
-  const libre = root.querySelector('#g-date-libre');
-  const jourChip = root.querySelector('[data-gjour].on');
-  const jour = (libre && libre.value) ? libre.value : (jourChip ? jourChip.getAttribute('data-gjour') : null);
-  const heureChip = root.querySelector('[data-gheure].on');
-  const dureeChip = root.querySelector('[data-gduree].on');
-  if (!jour || !heureChip) return null;
-  const debut = new Date(jour + 'T' + heureChip.getAttribute('data-gheure') + ':00');
-  if (isNaN(debut.getTime())) return null;
-  const duree = dureeChip ? Number(dureeChip.getAttribute('data-gduree')) : 0;
-  return { debut: debut, fin: new Date(debut.getTime() + duree * 60000), duree: duree };
-}
-
-// Met à jour le récapitulatif et grise les heures déjà passées.
-function lmCreneauMaj() {
-  const libre = root.querySelector('#g-date-libre');
-  const jourChip = root.querySelector('[data-gjour].on');
-  const jour = (libre && libre.value) ? libre.value : (jourChip ? jourChip.getAttribute('data-gjour') : null);
-  const estAuj = jour === lmIsoJour(new Date());
-  const seuil = Date.now() + 15 * 60000;
-  root.querySelectorAll('[data-gheure]').forEach(b => {
-    const passe = estAuj && new Date(jour + 'T' + b.getAttribute('data-gheure') + ':00').getTime() < seuil;
-    b.disabled = passe;
-    if (passe) b.classList.remove('on');
-  });
-  const c = lmCreneauLu();
-  const rec = root.querySelector('#g-recap');
-  const ok = root.querySelector('[data-gvalider]');
-  if (rec) {
-    if (!c) { rec.textContent = 'Choisissez un jour et une heure.'; }
-    else {
-      const f = c.debut.toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long' });
-      const hd = c.debut.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
-      const hf = c.duree ? ' – ' + c.fin.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' }) : '';
-      rec.textContent = f.charAt(0).toUpperCase() + f.slice(1) + ', ' + hd + hf;
-    }
-  }
-  if (ok) ok.disabled = !c;
-}
-
-function lmModaleHtml() {
-  if (!lmModale) return '';
-  const l = lmModale.lead, s = lmSource(l.source);
-  let corps = '', titre = '', valider = 'Valider';
-
-  if (lmModale.type === 'transfert') {
-    titre = 'Transférer vers une concession';
-    valider = 'Transférer';
-    corps = '<div class="g-note">Le délai ne repart PAS à zéro : il court depuis la réception '
-      + 'de la demande. Transférer ne rend pas un lead neuf.</div>';
-    (lmModale.sites || []).forEach((st, i) => {
-      corps += '<label class="g-site' + (i === 0 ? ' on' : '') + '">'
-        + '<input type="radio" name="g-site" value="' + st.id_site + '"' + (i === 0 ? ' checked' : '') + '>'
-        + '<span><b>' + escapeHtml(st.nom_site || ('Site ' + st.id_site)) + '</b>'
-        + '<i>' + (st.vendeurs || 0) + ' vendeurs</i></span>'
-        + '<span class="g-charge">' + (st.leads_en_file || 0) + ' leads en cours</span></label>';
-    });
-    if (!(lmModale.sites || []).length) {
-      corps += '<div style="color:var(--text-mut);font-size:12px">Aucun autre site dans votre '
-        + 'périmètre.</div>';
-    }
-    corps += '<div class="g-champ"><label>Qualification (transmise au vendeur)</label>'
-      + '<textarea id="g-qualif" rows="3" placeholder="Client joint, souhaite un essai samedi. '
-      + 'Budget 32 000 €, reprise Clio 2019."></textarea></div>';
-    if (s.distant === 'bacs') {
-      corps += '<div style="margin-top:12px;font-size:11.5px;color:var(--text-soft)">'
-        + 'Le site et le propriétaire seront aussi mis à jour dans BACS.</div>';
-    }
-
-  } else if (lmModale.type === 'rdv') {
-    titre = 'Prendre rendez-vous';
-    valider = 'Créer le rendez-vous';
-    corps = '<div class="g-champ" style="margin-top:0"><label>Objet</label>'
-      // Le nom du client est déjà le TITRE du rendez-vous dans l'agenda :
-      // le répéter dans l'objet ne fait que l'allonger.
-      + '<input id="g-sujet" value="Rendez-vous"></div>'
-      + lmCreneauHtml(true);
-    if (s.distant === 'bacs') {
-      corps += '<div style="margin-top:12px;font-size:11.5px;color:var(--text-soft)">'
-        + 'Le rendez-vous sera inscrit dans l\'agenda One Data et dans BACS, au nom du vendeur attribué.</div>';
-    }
-
-  } else if (lmModale.type === 'relance') {
-    titre = 'Programmer une relance';
-    valider = 'Programmer';
-    corps = lmCreneauHtml(false);
-
-  } else if (lmModale.type === 'perdre') {
-    titre = 'Classer sans suite';
-    valider = 'Classer';
-    corps = '<div class="g-champ"><label>Motif</label><select id="g-motif">'
-      + '<option value="injoignable">Injoignable</option>'
-      + '<option value="pas_interesse">Plus intéressé</option>'
-      + '<option value="concurrent">Parti à la concurrence</option>'
-      + '<option value="hors_perimetre">Hors périmètre</option>'
-      + '<option value="doublon">Doublon</option>'
-      + '</select></div>'
-      + '<div class="g-champ"><label>Précision (facultatif)</label>'
-      + '<textarea id="g-detail" rows="2"></textarea></div>';
-  }
-
-  return '<div class="g-modal" data-gfermer="1"><div class="g-modal-c" data-stop="1">'
-    + '<div class="g-modal-h"><b>' + titre + '</b><p>'
-    + escapeHtml(l.nom_affiche || 'Lead ' + l.id_lead)
-    + (l.vehicule_interet ? ' — ' + escapeHtml(l.vehicule_interet) : '') + '</p></div>'
-    + '<div class="g-modal-b">' + corps + '</div>'
-    + '<div class="g-modal-f">'
-    + '<button type="button" class="g-act" data-gfermer="1">Annuler</button>'
-    + '<button type="button" class="g-act p" data-gvalider="1">' + valider + '</button>'
-    + '</div></div></div>';
-}
-
-// --- L'exécution --------------------------------------------
-// Notification intégrée, à la place des boîtes d'alerte du navigateur.
-// ⚠️ Accrochée au DOCUMENT et non à #lead-mgmt-root : chaque rendu
-//    réécrit l'écran, et une notification qui y vivrait disparaîtrait
-//    au premier rafraîchissement.
-function lmToast(message, genre) {
-  try {
-    const d = (typeof doc !== 'undefined' && doc) ? doc : document;
-    let zone = d.getElementById('lm-toasts');
-    if (!zone) {
-      zone = d.createElement('div');
-      zone.id = 'lm-toasts';
-      zone.style.cssText = 'position:fixed;top:18px;left:50%;transform:translateX(-50%);z-index:100000;'
-        + 'display:flex;flex-direction:column;gap:8px;align-items:center;pointer-events:none;'
-        + 'font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;';
-      d.body.appendChild(zone);
-    }
-    const couleurs = {
-      ok:     ['#e1f5ee', '#1d6e5f', '#53bda7', '✓'],
-      attente:['#eaf0f9', '#1f4a87', '#acc5e4', '↗'],
-      erreur: ['#fcebeb', '#a32d2d', '#e3a6a0', '!']
-    }[genre || 'ok'];
-    const el = d.createElement('div');
-    el.style.cssText = 'pointer-events:auto;display:flex;align-items:center;gap:10px;max-width:460px;'
-      + 'padding:11px 16px;border-radius:10px;font-size:13px;line-height:1.4;'
-      + 'box-shadow:0 8px 24px rgba(28,43,61,.18);transition:opacity .25s,transform .25s;'
-      + 'opacity:0;transform:translateY(-6px);'
-      + 'background:' + couleurs[0] + ';color:' + couleurs[1] + ';border:1px solid ' + couleurs[2] + ';';
-    el.innerHTML = '<span style="width:20px;height:20px;border-radius:50%;flex-shrink:0;display:flex;'
-      + 'align-items:center;justify-content:center;font-weight:700;font-size:12px;background:'
-      + couleurs[1] + ';color:#fff">' + couleurs[3] + '</span><span>' + escapeHtml(message) + '</span>';
-    zone.appendChild(el);
-    requestAnimationFrame(() => { el.style.opacity = '1'; el.style.transform = 'none'; });
-    const duree = genre === 'erreur' ? 7000 : 4000;
-    setTimeout(() => {
-      el.style.opacity = '0'; el.style.transform = 'translateY(-6px)';
-      setTimeout(() => el.remove(), 300);
-    }, duree);
-    el.addEventListener('click', () => el.remove());
-  } catch (e) {
-    try { alert(message); } catch (e2) {}
-  }
-}
-
-function lmChampVal(id) {
-  const el = root.querySelector('#' + id);
-  return el ? el.value : null;
-}
-
-async function lmExecuterGeste() {
-  if (!lmModale) return;
-  const l = lmModale.lead, type = lmModale.type;
-  const s = lmSource(l.source);
-  try {
-    if (type === 'transfert') {
-      const r = root.querySelector('input[name="g-site"]:checked');
-      if (!r) { lmToast('Choisissez une concession.', 'erreur'); return; }
-      const { data, error } = await sb.rpc('lead_transferer_site', {
-        p_id_lead: Number(l.id_lead),
-        p_id_site: Number(r.value),
-        p_qualification: lmChampVal('g-qualif') || null,
-        p_id_user_cible: null
-      });
-      if (error) throw error;
-      lmModale = null;
-      // Le transfert change le périmètre du lead : on recharge la file.
-      state.mafileKey = null; state.mafileData = null;
-      fetchMaFile();
-      if (data && data.ok) lmToast('Lead transféré.' + (data.pousse_vers_bacs ? ' La mise à jour BACS suivra.' : ''), 'ok');
-      else lmToast('Transfert impossible : ' + ((data && data.motif) || 'raison inconnue'), 'erreur');
-      return;
-    }
-
-    if (type === 'rdv' || type === 'relance') {
-      const cr = lmCreneauLu();
-      if (!cr) { lmToast('Choisissez un jour et une heure.', 'erreur'); return; }
-      const debut = cr.debut;
-
-      // ⚠️ RELEVÉ LE 21/09 : les rendez-vous pris ici arrivaient dans BACS
-      //    mais PAS dans l'agenda One Data — où le vendeur travaille. Ils
-      //    passent désormais par `lead_rdv_creer`, qui les inscrit dans
-      //    l'agenda (même logique que le module agenda) et, pour un lead
-      //    BACS, dépose en plus le geste vers Salesforce, lié.
-      //    Heures LOCALES, au format de l'agenda.
-      if (type === 'rdv') {
-        const loc = (d) => d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-'
-          + String(d.getDate()).padStart(2, '0') + ' ' + String(d.getHours()).padStart(2, '0') + ':'
-          + String(d.getMinutes()).padStart(2, '0') + ':00';
-        const { data, error } = await sb.rpc('lead_rdv_creer', {
-          p_id_lead: Number(l.id_lead), p_start: loc(debut), p_end: loc(cr.fin),
-          p_sujet: lmChampVal('g-sujet') || 'Rendez-vous' });
-        if (error) throw error;
-        lmModale = null;
-        renderAll();
-        lmToast(data && data.vers_bacs
-          ? 'Rendez-vous inscrit dans l\'agenda. Il partira aussi dans BACS dès que l\'onglet répondra.'
-          : 'Rendez-vous inscrit dans l\'agenda.', data && data.vers_bacs ? 'attente' : 'ok');
-        return;
-      }
-
-      if (s.distant === 'bacs') {
-        const charge = { date: debut.toISOString() };
-        const { error } = await sb.rpc('bacs_sortant_deposer', {
-          p_geste: type, p_id_lead: Number(l.id_lead), p_charge: charge });
-        if (error) throw error;
-        lmModale = null;
-        renderAll();
-        // ⚠️ On annonce une MISE EN FILE, pas une réussite : le geste
-        //    part dans BACS quand l'onglet répond, pas à l'instant du clic.
-        lmToast('Relance transmise à BACS.', 'attente');
-        return;
-      }
-      // Source sans système distant : on écrit dans One Data.
-      lmModale = null;
-      renderAll();
-      lmToast('Cette source n\'a pas de système distant : le rendez-vous se prend dans l\'agenda One Data.', 'attente');
-      return;
-    }
-
-    if (type === 'perdre') {
-      const { error } = await sb.from('LEADS_EXTERNES')
-        .update({ statut: 'perdu', motif_fin: lmChampVal('g-motif'),
-                  clos_le: new Date().toISOString() })
-        .eq('id_lead', Number(l.id_lead));
-      if (error) throw error;
-      lmModale = null;
-      state.mafileKey = null; state.mafileData = null;
-      fetchMaFile();
-      return;
-    }
-  } catch (e) {
-    console.error('[leadMgmt] geste', e);
-    lmToast('Le geste n\'a pas pu être enregistré : ' + ((e && e.message) || e), 'erreur');
-  }
-}
-
 function v2Panneau() {
   const V = state.v2;
   if (!V || !V.sel) return '';
@@ -4768,35 +4030,13 @@ function v2PanneauCorps() {
     const r = lmfReste(l);
     const cls = n === 'retard' ? 'ko' : n === 'bientot' ? 'warn' : 'ok';
     const tps = (r == null) ? 'traité' : (r < 0 ? '+ ' + lmfDuree(-r) : lmfDuree(r));
-    // ⚠️ Le clic SÉLECTIONNE le lead et montre ses gestes. Il n'ouvre
-    //    PLUS la fiche client : un vendeur qui clique veut agir, et la
-    //    navigation lui faisait perdre l'écran (relevé le 18/09).
-    //    La fiche reste accessible par un bouton dédié.
-    const choisi = (lmLeadSel != null && Number(lmLeadSel) === Number(l.id_lead));
-    h += '<div class="v2-lead ' + cls + (choisi ? ' v2-lead-on' : '') + '"'
-      + ' data-v2lead="' + l.id_lead + '">'
-      + '<div class="v2-lead-h"><b>' + escapeHtml(lmNomLisible(l)) + '</b>'
+    h += '<div class="v2-lead ' + cls + '"'
+      + (l.id_client ? ' data-v2client="' + l.id_client + '"' : '') + '>'
+      + '<div class="v2-lead-h"><b>' + escapeHtml(l.nom_affiche || 'Sans nom') + '</b>'
       + '<em class="' + cls + '">' + tps + '</em></div>'
       + '<div class="v2-lead-m"><span class="v2-tag">'
       + escapeHtml(l.source_libelle || l.source || '?') + '</span> '
       + escapeHtml(l.vehicule_interet || '') + '</div>';
-    // Les gestes s'ouvrent SOUS le lead choisi : le vendeur garde sa
-    // liste sous les yeux au lieu de changer d'écran.
-    if (choisi) {
-      h += '<div class="v2-lead-g">' + lmGestesHtml(l);
-      if (l.id_client) {
-        h += '<button type="button" class="g-btn" style="margin-top:8px" '
-          + 'data-v2client="' + l.id_client + '"><b>Ouvrir la fiche client</b>'
-          + '<i>Historique, véhicules, contacts</i></button>';
-      } else {
-        // ⚠️ Sans fiche client, la navigation échouait et faisait
-        //    clignoter l'écran. On le DIT au lieu de laisser essayer.
-        h += '<div style="margin-top:8px;font-size:11.5px;color:var(--text-mut);'
-          + 'padding:8px 10px;background:var(--blue-pale,#f5f8fc);border-radius:6px">'
-          + 'Aucune fiche client rattachée à ce lead.</div>';
-      }
-      h += '</div>';
-    }
     if (PEUT_REAFFECTER) {
       h += '<button type="button" class="v2-reaff" data-v2reaff="' + l.id_lead + '">'
         + 'Réaffecter</button>';
@@ -4804,7 +4044,7 @@ function v2PanneauCorps() {
     h += '</div>';
   });
   h += '</div>';
-  h += '<div class="v2-pan-f">Cliquez un dossier pour voir ce que vous pouvez en faire. '
+  h += '<div class="v2-pan-f">Cliquez un client pour ouvrir sa fiche. '
     + 'Échap ou le fond pour refermer.</div></div>';
   return h;
 }
@@ -5189,8 +4429,703 @@ function sectionEst(nom) {
 // Chaque vue ne charge QUE ce qu'elle lit. Le périmètre et l'équipe
 // servent au mur comme au rapport ; les campagnes ont leurs propres RPC,
 // bornées par state.period.
+/* ══════════════════════════════════════════════════════════════════════════
+   V3 — « LE RELAIS »  (23/09/2026)
+   ══════════════════════════════════════════════════════════════════════════
+   Remplace les trois lectures v2 (mur / rapport / campagnes) par trois écrans
+   qui suivent le PARCOURS RÉEL d'un lead chez Team Colin :
+
+     Le prochain · Le mur · Le relais          (le relais TOUJOURS en dernier :
+                                                c'est une lecture d'analyse,
+                                                pas un écran de travail)
+
+   TROIS PARTIS PRIS, chacun né d'un constat sur les données réelles :
+
+   1. LE GESTE AVANT LA LISTE. Pour celui qui agit, un seul dossier plein
+      cadre. Un vendeur qui a quatre minutes entre deux clients ne doit pas
+      commencer par choisir lequel traiter.
+
+   2. LE DOUBLE LIBRE-SERVICE. Chez Team Colin personne n'attribue :
+      l'opérateur VROOM PREND un lead dans la piscine BACS, le pousse vers un
+      site, où il retombe dans une piscine — premier arrivé, premier servi.
+      D'où le mode `libre` des règles, et d'où la RÉSERVATION : sans elle,
+      deux personnes appellent le même client.
+
+   3. L'ATTENTE QUE PERSONNE NE S'IMPUTE. Mesuré sur 414 leads réels :
+      le plateau traite en 20 à 50 minutes, mais le lead a attendu 10 h en
+      piscine avant qu'il le prenne — 93 à 99 % du délai total. Le relais
+      montre donc les segments SANS PROPRIÉTAIRE à part, en gris.
+
+   📌 Piège de la TDZ, quatrième fois : `LM_V3_CSS` est déclarée AVANT le bloc
+      « --- 3. Style » qui l'interpole. Déclarée après, elle lève une
+      ReferenceError et l'écran reste ENTIÈREMENT vide.
+   ══════════════════════════════════════════════════════════════════════════ */
+
+const V3_TRANCHES = ['< 15 min', '15-30 min', '30-60 min', '1-4 h', '+ 4 h'];
+const V3_SEUIL_PISCINE = 20, V3_SEUIL_VROOM = 15, V3_SEUIL_VENDEUR = 30;
+
+/* Les canaux de la fiche client, repris de `fiche-shell.js` : mêmes classes,
+   mêmes couleurs, mêmes tracés. Un vendeur qui retrouve EXACTEMENT ses
+   boutons n'a rien à réapprendre — argument d'adoption, pas d'esthétique. */
+const V3_SVG = p => '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor"'
+  + ' stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">' + p + '</svg>';
+const V3_IC = {
+  tel : V3_SVG('<path d="M22 16.9v3a2 2 0 0 1-2.2 2 19.8 19.8 0 0 1-8.6-3.1 19.5 19.5 0 0 1-6-6 19.8 19.8 0 0 1-3.1-8.7A2 2 0 0 1 4.1 2h3a2 2 0 0 1 2 1.7c.1 1 .4 1.9.7 2.8a2 2 0 0 1-.5 2.1L8.1 9.9a16 16 0 0 0 6 6l1.3-1.2a2 2 0 0 1 2.1-.5c.9.3 1.8.6 2.8.7a2 2 0 0 1 1.7 2z"/>'),
+  wa  : V3_SVG('<path d="M12 3a9 9 0 0 0-7.7 13.6L3 21l4.5-1.3A9 9 0 1 0 12 3z"/><path d="M8.5 8.8c.2-.5.4-.5.6-.5h.5c.2 0 .4 0 .6.4l.7 1.6c0 .2.1.3 0 .5l-.4.5c-.1.2-.2.3 0 .5.6 1 1.4 1.6 2.3 2 .2.1.4.1.5 0l.5-.6c.1-.2.3-.2.5-.1l1.5.7c.2.1.3.2.3.4 0 .5-.7 1.3-1.2 1.4-1.3.2-2.9-.7-4-1.7-.8-.8-1.6-1.9-1.7-3 0-.4 0-.8.2-1z" fill="currentColor" stroke="none"/>'),
+  mail: V3_SVG('<rect x="2.5" y="4.5" width="19" height="15" rx="2"/><path d="m3 6 9 6.5L21 6"/>'),
+  sms : V3_SVG('<path d="M4 4.5h16a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1H8l-4 3.5v-3.5H4a1 1 0 0 1-1-1v-9a1 1 0 0 1 1-1z"/>'),
+  rpv : V3_SVG('<path d="M10 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8z"/><path d="M2.5 21a7.5 7.5 0 0 1 13-5.1"/><path d="M17.5 15v6M20.5 18h-6"/>'),
+  user: V3_SVG('<path d="M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8z"/><path d="M4 21a8 8 0 0 1 16 0"/>')
+};
+const V3_CANAUX = [
+  { act:'appel', cls:'call', ic:'tel',  lib:'Appeler',  titre:'Appel Twilio' },
+  { act:'wa',    cls:'wa',   ic:'wa',   lib:'WhatsApp', titre:'Ouvrir la conversation WhatsApp' },
+  { act:'mail',  cls:'mail', ic:'mail', lib:'Email',    titre:'Écrire un e-mail' },
+  { act:'sms',   cls:'sms',  ic:'sms',  lib:'SMS',      titre:'Envoyer un SMS' },
+  { act:'rpv',   cls:'rpv',  ic:'rpv',  lib:'RPV',      titre:'Saisir un rapport de visite' }
+];
+
+/* ── État ────────────────────────────────────────────────────────────────
+   `ouvert` est indexé par CHEMIN (`m:Toyota|a:Team Toy 75`) et non par index
+   de ligne : il survit à un changement de période ou de périmètre. */
+function v3Init() {
+  if (state.v3) return;
+  state.v3 = {
+    vue: (PROFIL === 'vendeur' || PROFIL === 'chef') ? 'prochain' : 'mur',
+    depuis: 'site',          // 'site' | 'vroom' : depuis quelle arrivée on compte
+    ouvert: {},              // chemins dépliés de l'arbre
+    cellule: null,           // { chemin, tranche } ouverte dans le panneau
+    alerteSur: null,         // index de ligne dont on choisit le destinataire
+    curseur: 0,              // position dans la file « Le prochain »
+    mur: null, murKey: null, murLoading: false,
+    parcours: null, parcoursKey: null,
+    cell: null, cellLoading: false,
+    mode: null               // 'libre' | 'auto' | 'manuel', lu en base
+  };
+}
+
+const V3_VUES = [['prochain', 'Le prochain'], ['mur', 'Le mur'], ['relais', 'Le relais']];
+function v3VuesDuRole() {
+  // Les directions pilotent, elles ne décrochent pas : pas de file.
+  if (PROFIL === 'directeur' || PROFIL === 'marketing')
+    return V3_VUES.filter(v => v[0] !== 'prochain');
+  return V3_VUES;
+}
+
+/* ── Chargements ─────────────────────────────────────────────────────── */
+function v3Cle() {
+  const V = state.v3;
+  return [state.period.from, state.period.to, V.depuis].join('|');
+}
+
+async function v3EnsureMur() {
+  const V = state.v3, k = v3Cle();
+  if (V.murKey === k || V.murLoading) return;
+  V.murLoading = true;
+  try {
+    const { data, error } = await sb.rpc('lead_mur', {
+      p_depuis: V.depuis,
+      p_de: state.period.from + 'T00:00:00',
+      p_a:  state.period.to   + 'T23:59:59'
+    });
+    if (error) throw error;
+    V.mur = (data || []).map(r => ({
+      id: Number(r.id_site), nom: r.site || ('Site ' + r.id_site),
+      affaire: r.affaire || '(Sans affaire)', marque: r.marque || '(Sans marque)',
+      c: [Number(r.t0)||0, Number(r.t1)||0, Number(r.t2)||0, Number(r.t3)||0, Number(r.t4)||0]
+    }));
+    V.murKey = k;
+  } catch (e) {
+    console.error('[lead-mgmt] lead_mur', e);
+    V.mur = []; V.murKey = k;
+  } finally {
+    V.murLoading = false; renderAll();
+  }
+}
+
+async function v3EnsureParcours() {
+  const V = state.v3, k = v3Cle();
+  if (V.parcoursKey === k) return;
+  V.parcoursKey = k;
+  try {
+    const { data, error } = await sb.rpc('lead_parcours', {
+      p_de: state.period.from + 'T00:00:00',
+      p_a:  state.period.to   + 'T23:59:59'
+    });
+    if (error) throw error;
+    V.parcours = (data || []).map(r => ({
+      id: Number(r.id_site), nom: r.site, affaire: r.affaire, marque: r.marque,
+      n: Number(r.n) || 0,
+      att_bacs: r.att_bacs_min == null ? null : Number(r.att_bacs_min),
+      vroom:    r.vroom_min    == null ? null : Number(r.vroom_min),
+      // ⚠️ NULL et non zéro : ces deux segments ne sont PAS mesurables depuis
+      //    BACS (le temps côté concession se joue dans UpYourLeads). L'écran
+      //    doit afficher « non mesuré », jamais un zéro qui passerait pour un
+      //    résultat.
+      att_site: r.att_site_min == null ? null : Number(r.att_site_min),
+      vendeur:  r.vendeur_min  == null ? null : Number(r.vendeur_min),
+      total: Number(r.total_min) || 0,
+      part: r.part_attente == null ? null : Number(r.part_attente)
+    }));
+  } catch (e) {
+    console.error('[lead-mgmt] lead_parcours', e);
+    V.parcours = [];
+  }
+  renderAll();
+}
+
+/* ── L'ARBRE, repris de `performances.js` ────────────────────────────────
+   Marque › affaire › site › vendeur, avec la règle d'escamotage :
+   UN NIVEAU À UN SEUL ENFANT N'EST PAS AFFICHÉ. Faire cliquer un directeur
+   de marque sur « Toyota » pour atteindre ses affaires lui coûterait un geste
+   pour une information qu'il a déjà.
+   Les agrégats sont des SOMMES des feuilles, jamais des valeurs stockées. */
+function v3Arbre(lignesSite) {
+  const vide = () => [0, 0, 0, 0, 0];
+  const som = (a, b) => a.map((x, i) => x + b[i]);
+  const parM = {};
+  (lignesSite || []).forEach(s => {
+    const M = parM[s.marque] || (parM[s.marque] =
+      { niveau:'marque', cle:s.marque, nom:s.marque, c:vide(), sites:[], enf:{} });
+    M.c = som(M.c, s.c); M.sites.push(s.id);
+    const A = M.enf[s.affaire] || (M.enf[s.affaire] =
+      { niveau:'affaire', cle:s.affaire, nom:s.affaire, c:vide(), sites:[], enf:{} });
+    A.c = som(A.c, s.c); A.sites.push(s.id);
+    A.enf[s.id] = { niveau:'site', cle:s.id, nom:s.nom, sous:s.affaire,
+                    c:s.c.slice(), sites:[s.id] };
+  });
+  const tri = o => Object.keys(o).map(k => o[k])
+    .sort((a, b) => String(a.nom).localeCompare(String(b.nom)));
+  const M = tri(parM);
+  M.forEach(m => { m.enf = tri(m.enf); m.enf.forEach(a => { a.enf = tri(a.enf); }); });
+  return M;
+}
+
+function v3Lignes() {
+  const V = state.v3, out = [];
+  const marques = v3Arbre(V.mur || []);
+  const uneMarque = marques.length === 1;
+  marques.forEach(M => {
+    if (!uneMarque) {
+      out.push({ n:M, chemin:'m:' + M.cle, prof:0, pliable:true });
+      if (!V.ouvert['m:' + M.cle]) return;
+    }
+    const uneAffaire = M.enf.length === 1;
+    M.enf.forEach(A => {
+      const cA = 'm:' + M.cle + '|a:' + A.cle;
+      if (!uneAffaire) {
+        out.push({ n:A, chemin:cA, prof:uneMarque ? 0 : 1, pliable:true });
+        if (!V.ouvert[cA]) return;
+      }
+      const unSite = A.enf.length === 1;
+      A.enf.forEach(S => {
+        // Périmètre d'un seul site : on n'affiche pas une ligne « Arcueil » à
+        // quelqu'un qui ne voit qu'Arcueil — sauf si c'est la SEULE ligne
+        // possible, auquel cas l'escamotage laisserait un écran vide.
+        if (unSite && uneAffaire && uneMarque) return;
+        out.push({ n:S, chemin:cA + '|s:' + S.cle,
+                   prof:(uneMarque ? 0 : 1) + (uneAffaire ? 0 : 1), pliable:false });
+      });
+    });
+  });
+
+  // 🐛 GARDE-FOU : sans lui, un périmètre MONO-SITE — un vendeur, un chef,
+  //    c'est-à-dire la grande majorité des comptes — voyait un mur
+  //    entièrement vide. L'escamotage doit alléger l'écran, jamais le vider.
+  if (!out.length) {
+    v3Arbre(state.v3.mur || []).forEach(M => M.enf.forEach(A => A.enf.forEach(S => {
+      out.push({ n:S, chemin:'m:' + M.cle + '|a:' + A.cle + '|s:' + S.cle,
+                 prof:0, pliable:false });
+    })));
+  }
+  return out;
+}
+
+function v3NiveauLibelle() {
+  const l = v3Lignes();
+  if (!l.length) return (state.v3.mur || []).length === 1 ? 'site' : 'périmètre';
+  return { marque:'marques', affaire:'affaires', site:'sites' }[l[0].n.niveau] || 'sites';
+}
+
+/* ── Le fil : il dit ce qu'on COMPARE, pas seulement où l'on est ──────── */
+function v3Fil() {
+  // On réutilise le fil v2 (sélecteur de périmètre + période, déjà éprouvé)
+  // et on lui ajoute UNE information : ce que les lignes comparent. Sans
+  // elle, l'escamotage d'un niveau surprend au lieu de se lire.
+  const h = v2Fil();
+  const i = h.lastIndexOf('</div>');
+  if (i < 0) return h;
+  return h.slice(0, i)
+    + '<span class="v3-niv">comparaison par ' + esc(v3NiveauLibelle()) + '</span>'
+    + h.slice(i);
+}
+
+/* ── Vue : le mur ────────────────────────────────────────────────────── */
+function v3Mur() {
+  const V = state.v3;
+  if (V.mur == null) { v3EnsureMur();
+    return '<div class="lm-empty"><span class="lm-spin"></span>Chargement du mur…</div>'; }
+
+  const lignes = v3Lignes();
+  if (!lignes.length && !(V.mur || []).length) {
+    // Règle d'écran : jamais de vide muet. Un écran sans données dit POURQUOI.
+    return '<div class="v3-bloc"><div class="v3-vide"><b>Aucun lead en attente.</b>'
+      + 'Sur cette période, tous les leads de votre périmètre ont reçu un premier '
+      + 'contact. Le mur ne montre que ce qui attend.</div></div>';
+  }
+
+  let max = 0;
+  lignes.forEach(l => l.n.c.forEach(n => { if (n > max) max = n; }));
+  const titre = { marque:'Marque', affaire:'Affaire', site:'Site' }[lignes[0].n.niveau] || 'Site';
+  const expli = V.depuis === 'vroom'
+    ? 'Ancienneté comptée depuis l\'<b>arrivée du lead chez VROOM</b> : c\'est le délai '
+      + 'vécu par le client, plateau compris. Un site peut paraître en retard alors que '
+      + 'le temps a été consommé avant lui.'
+    : 'Ancienneté comptée depuis l\'<b>arrivée du lead sur le site</b> : c\'est le délai '
+      + 'dont la concession répond. Le temps passé au plateau n\'y figure pas.';
+
+  return '<section class="v3-bloc">'
+    + '<div class="v3-reglages"><div class="v3-champ">'
+    + '<label>Ancienneté comptée depuis</label><div class="v3-seg">'
+    + '<button type="button" data-v3depuis="vroom" class="' + (V.depuis === 'vroom' ? 'on' : '')
+      + '">Arrivée VROOM</button>'
+    + '<button type="button" data-v3depuis="site" class="' + (V.depuis === 'site' ? 'on' : '')
+      + '">Arrivée site</button></div></div>'
+    + '<p class="v3-expli">' + expli + '</p></div>'
+    + '<div class="v3-tab"><table><thead><tr><th>' + esc(titre) + '</th>'
+    + V3_TRANCHES.map(t => '<th>' + esc(t) + '</th>').join('')
+    + '</tr></thead><tbody>'
+    + lignes.map(l => {
+        const n = l.n, plie = l.pliable && !V.ouvert[l.chemin];
+        return '<tr class="v3-lv-' + n.niveau + '">'
+          + '<td style="padding-left:' + (16 + l.prof * 20) + 'px">'
+          + (l.pliable
+              ? '<button type="button" class="v3-exp" data-v3exp="' + esc(l.chemin) + '">'
+                + (plie ? '▸' : '▾') + '</button>'
+              : '<span class="v3-exp vide"></span>')
+          + esc(n.nom)
+          + (n.sous ? '<small>' + esc(n.sous) + '</small>'
+                    : (n.sites.length > 1 ? '<small>' + n.sites.length + ' sites</small>' : ''))
+          + '</td>'
+          + n.c.map((v, i) => {
+              if (!v) return '<td><span class="v3-pas vide">·</span></td>';
+              // 📌 Un compteur qu'on ne peut pas ouvrir désigne un problème
+              //    sans donner prise dessus. Chaque pastille est un bouton.
+              const c = v3Couleur(i), t = 26 + Math.round(Math.sqrt(v / max) * 16);
+              return '<td><button type="button" class="v3-pas"'
+                + ' data-v3cell="' + esc(l.chemin) + '~' + i + '"'
+                + ' title="Voir les ' + v + ' leads"'
+                + ' style="width:' + t + 'px;height:' + t + 'px;border-color:' + c.t
+                + ';background:' + c.f + ';color:' + c.t + '">' + v + '</button></td>';
+            }).join('')
+          + '</tr>';
+      }).join('')
+    + '</tbody></table></div></section>';
+}
+
+/* Une SEULE fonction décide de la couleur, et elle ne regarde QUE le temps.
+   Si le rouge pouvait dire autre chose qu'un retard, il ne dirait plus rien. */
+function v3Couleur(iTranche) {
+  const p = [
+    { t:'var(--ok-dk,#0f9b6c)',      f:'var(--ok-bg,#e6f6f0)' },
+    { t:'var(--warn-dk,#b8851a)',    f:'var(--warn-bg,#fdf5e4)' },
+    { t:'var(--warn-dk,#d4532a)',    f:'#fdeee8' },
+    { t:'var(--red-dk,#c02626)',     f:'var(--red-bg,#fdeaea)' },
+    { t:'var(--red-dk,#c02626)',     f:'var(--red-bg,#fdeaea)' }
+  ];
+  return p[Math.min(iTranche, p.length - 1)];
+}
+
+/* ── Vue : le relais ─────────────────────────────────────────────────── */
+function v3Relais() {
+  const V = state.v3;
+  if (V.parcours == null) { v3EnsureParcours();
+    return '<div class="lm-empty"><span class="lm-spin"></span>Chargement du parcours…</div>'; }
+  if (!V.parcours.length) {
+    return '<div class="v3-bloc"><div class="v3-vide"><b>Aucun parcours mesurable.</b>'
+      + 'Le parcours se reconstruit depuis l\'historique BACS : il faut qu\'un opérateur '
+      + 'VROOM ait pris des leads sur la période. Élargissez la période, ou attendez que '
+      + 'One Data porte lui-même la piscine du site.</div></div>';
+  }
+
+  // Le relais suit le même niveau que le mur : on agrège par nœud.
+  const parSite = {}; V.parcours.forEach(p => { parSite[p.id] = p; });
+  const lignes = v3Lignes();
+  const noeuds = lignes.length ? lignes : V.parcours.map(p => ({
+    n:{ niveau:'site', nom:p.nom, sites:[p.id] }, prof:0 }));
+
+  return '<section class="v3-bloc">'
+    + '<div class="v3-entete"><h3>Le parcours d\'un lead</h3>'
+    + '<p>Chez Team Colin, personne n\'attribue : le lead attend dans la piscine BACS '
+    + 'qu\'un opérateur VROOM le prenne, puis dans la piscine du site qu\'un vendeur le '
+    + 'prenne. <b>Les segments d\'attente n\'appartiennent à personne</b> — ce sont ceux '
+    + 'où les leads pourrissent, et les seuls que personne ne se voit reprocher. Ils sont '
+    + 'en gris hachuré : la couleur du temps désigne une responsabilité.</p></div>'
+    + noeuds.map(l => {
+        let n = 0, sa = 0, sv = 0, mesurables = 0;
+        (l.n.sites || []).forEach(id => {
+          const p = parSite[id]; if (!p) return;
+          n += p.n;
+          // Moyennes PONDÉRÉES par le volume : un site qui traite 9 leads ne
+          // pèse pas autant qu'un site qui en traite 150.
+          if (p.att_bacs != null) { sa += p.att_bacs * p.n; mesurables += p.n; }
+          if (p.vroom != null) sv += p.vroom * p.n;
+        });
+        if (!n || !mesurables) return '';
+        const att = Math.round(sa / mesurables), vr = Math.round(sv / mesurables);
+        const tot = att + vr, part = Math.round(100 * att / (tot || 1));
+        const lg = Math.max(8, Math.round(att / tot * 100));
+        const cv = vr > V3_SEUIL_VROOM ? 'var(--red-dk,#c02626)' : 'var(--ok-dk,#0f9b6c)';
+        return '<div class="v3-piste" style="padding-left:' + (16 + l.prof * 20) + 'px">'
+          + '<div class="v3-p1"><b>' + esc(l.n.nom) + '</b>'
+          + '<span class="v3-n">' + n + ' leads pris par VROOM'
+          + ((l.n.sites || []).length > 1 ? ' · ' + l.n.sites.length + ' sites' : '') + '</span>'
+          + '<span class="v3-part' + (part >= 80 ? ' fort' : '') + '">'
+          + part + ' % du délai en attente</span></div>'
+          + '<div class="v3-baton">'
+          + '<div class="v3-sg sans" style="flex:0 0 ' + lg + '%" title="Attente en piscine BACS">'
+          + v3Duree(att) + '</div>'
+          + '<div class="v3-sg" style="background:' + cv + ';flex:1 1 auto" title="Traitement VROOM">'
+          + v3Duree(vr) + '</div></div>'
+          + '<div class="v3-leg">'
+          + '<span><i class="hach"></i>Attente piscine BACS · ' + v3Duree(att)
+          + ' <em>sans propriétaire</em></span>'
+          + '<span><i style="background:' + cv + '"></i>Traitement VROOM · ' + v3Duree(vr) + '</span>'
+          + '<span class="v3-nm">Piscine du site et traitement vendeur : <b>non mesurés</b></span>'
+          + '</div></div>';
+      }).join('')
+    // ⚠️ Cette réserve n'est pas décorative : sans elle, un chef croira que la
+    //    concession ne compte pas dans le délai.
+    + '<p class="v3-reserve">Les deux segments côté concession ne sont pas mesurables '
+    + 'depuis BACS : <code>premier_contact_le</code> y vaut l\'appel de VROOM lui-même, '
+    + 'et le temps du vendeur se joue dans UpYourLeads. Ils apparaîtront quand One Data '
+    + 'portera la piscine du site.</p>'
+    + '</section>';
+}
+
+function v3Duree(mn) {
+  if (mn == null) return '—';
+  if (mn < 60) return Math.round(mn) + ' min';
+  const h = mn / 60;
+  return (h < 10 ? h.toFixed(1).replace('.0', '') : Math.round(h)) + ' h';
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
+   V3 · « LE PROCHAIN » — l'écran de celui qui agit
+   ══════════════════════════════════════════════════════════════════════════
+   Un SEUL dossier, plein cadre. Un vendeur qui dispose de quatre minutes
+   entre deux clients ne doit pas commencer par choisir lequel traiter : la
+   file est déjà ordonnée par ce qui brûle, et le choix lui coûterait plus
+   cher que l'appel lui-même.
+
+   🔑 DEUX MODES, parce que Team Colin fonctionne en PISCINE :
+      · libre  — premier arrivé, premier servi. Les canaux restent INERTES
+                 tant que le lead n'est pas pris : sinon deux vendeurs
+                 composent le même numéro.
+      · auto   — One Data attribue ; le dossier est réservé nominativement.
+      Le mode est lu en base (`lead_mode_site`), il n'est pas deviné.
+
+   🔑 LA RÉSERVATION EST POSÉE EN BASE, PAS DANS LE NAVIGATEUR. Un verrou côté
+      client bloquerait un dossier sur un onglet laissé ouvert. `lead_reserver`
+      pose une expiration ; un verrou périmé se reprend.
+   ══════════════════════════════════════════════════════════════════════════ */
+
+/* Le mode du périmètre courant. Lu une fois, puis mémorisé : c'est un réglage,
+   pas une donnée qui bouge à la minute. */
+async function v3EnsureMode() {
+  const V = state.v3;
+  if (V.mode !== null) return;
+  V.mode = 'auto';
+  try {
+    const site = state.busSite ? Number(state.busSite)
+               : (userSiteIds && userSiteIds.length === 1 ? Number(userSiteIds[0]) : null);
+    const { data, error } = await sb.rpc('lead_mode_site', { p_id_site: site });
+    if (error) throw error;
+    if (data) V.mode = String(data);
+  } catch (e) {
+    console.warn('[lead-mgmt] lead_mode_site indisponible, repli sur auto', e);
+  }
+  renderAll();
+}
+
+/* La file de CE rôle : ce qui attend un premier contact sur son périmètre.
+   En mode libre, on montre TOUT ce qui est disponible — y compris ce qui
+   n'est attribué à personne, puisque c'est justement le principe. */
+function v3File() {
+  const rows = state.mafileData || [];
+  return rows.filter(r => !r.premier_contact_le)
+             .sort((a, b) => (b.attente_min || 0) - (a.attente_min || 0));
+}
+
+/* Le dossier présenté. On saute ceux qu'un collègue tient : les voir sans
+   pouvoir les traiter n'apporte rien, et les lui prendre serait pire. */
+function v3Courant() {
+  const f = v3File().filter(r => !r.verrou_par || Number(r.verrou_par) === Number(userId));
+  return f[Math.min(state.v3.curseur, Math.max(0, f.length - 1))] || null;
+}
+
+async function v3Reserver(idLead) {
+  try {
+    const { data, error } = await sb.rpc('lead_reserver', { p_id_lead: Number(idLead) });
+    if (error) throw error;
+    const r = data || {};
+    const l = (state.mafileData || []).find(x => Number(x.id_lead) === Number(idLead));
+    if (l) {
+      if (r.action === 'reserve') { l.verrou_par = Number(userId); l.verrou_jusqu = r.jusqu; }
+      // « occupe » : quelqu'un a été plus rapide. On le dit et on passe au
+      // suivant plutôt que de laisser l'utilisateur appeler dans le vide.
+      else { l.verrou_par = r.par; state.v3.curseur++; }
+    }
+    return r.action;
+  } catch (e) {
+    console.error('[lead-mgmt] lead_reserver', e);
+    return 'erreur';
+  } finally { renderAll(); }
+}
+
+async function v3Liberer(idLead) {
+  try { await sb.rpc('lead_liberer', { p_id_lead: Number(idLead) }); }
+  catch (e) { console.error('[lead-mgmt] lead_liberer', e); }
+  const l = (state.mafileData || []).find(x => Number(x.id_lead) === Number(idLead));
+  if (l) { l.verrou_par = null; l.verrou_jusqu = null; }
+  state.v3.curseur++; renderAll();
+}
+
+async function v3Alerter(idLead, idUser) {
+  try {
+    const { error } = await sb.rpc('lead_alerter',
+      { p_id_lead: Number(idLead), p_id_user: Number(idUser), p_motif: null });
+    if (error) throw error;
+    state.v3.alerteSur = null;
+    if (state.v3.cell) {
+      const l = state.v3.cell.find(x => Number(x.id_lead) === Number(idLead));
+      const v = (dataEquipe || []).find(x => Number(x.id_user) === Number(idUser));
+      if (l) l.alerte_user = v ? (v.nom_complet || v.vendeur_nom || ('User ' + idUser)) : ('User ' + idUser);
+    }
+  } catch (e) {
+    console.error('[lead-mgmt] lead_alerter', e);
+    alert('Alerte impossible : ' + ((e && e.message) || 'erreur'));
+  }
+  renderAll();
+}
+
+/* Les canaux, à l'identique de `fiche-shell.js`. On ne réimplémente RIEN :
+   on ouvre les modules déjà en place avec le client du lead. */
+function v3BarreCanaux(lead, actifs) {
+  return '<div class="v3-canaux' + (actifs ? '' : ' inerte') + '">'
+    + V3_CANAUX.map(k =>
+        '<button type="button" class="v3-cm ' + k.cls + '" data-v3act="' + k.act + '"'
+        + ' data-v3lead="' + lead.id_lead + '" title="' + esc(k.titre) + '"'
+        + (actifs ? '' : ' disabled') + '>'
+        + V3_IC[k.ic] + esc(k.lib)
+        + (k.act === 'appel' && lead.telephone
+            ? '<span class="num">' + esc(lead.telephone) + '</span>' : '')
+        + '</button>').join('')
+    + '</div>';
+}
+
+function v3OuvrirCanal(act, lead) {
+  // Le client attendu par les modules : ils lisent IDVu, TEl_MOB, EMAIL.
+  const c = { IDVu: lead.id_client, TEl_MOB: lead.telephone, EMAIL: lead.email,
+              nom: lead.nom, prenom: lead.prenom };
+  try {
+    if (act === 'appel') {
+      const w = (window.parent && window.parent.__VOIP_UI__) || window.__VOIP_UI__;
+      if (w && w.call) w.call(lead.telephone, c);
+      else if (window.__ONE_DATA__ && window.__ONE_DATA__.device && lead.telephone)
+        window.__ONE_DATA__.device.connect({ params: { To: lead.telephone } });
+      else window.open('tel:' + String(lead.telephone || '').replace(/\s/g, ''), '_self');
+    }
+    else if (act === 'sms')  { (window.__SMS_UI__   || {}).open?.({ client: c }); }
+    else if (act === 'wa')   { (window.__WA_UI__    || {}).open?.({ client: c }); }
+    else if (act === 'mail') { (window.__EMAIL_UI__ || {}).open?.({ mode: 'new', client: c }); }
+    else if (act === 'rpv')  {
+      if (typeof window.rpvBoot === 'function') window.rpvBoot({ client: c, idCycle: lead.id_cycle_comm });
+      else console.warn('[lead-mgmt] module RPV absent');
+    }
+  } catch (e) { console.error('[lead-mgmt] ouverture du canal ' + act, e); }
+}
+
+/* ── La vue ──────────────────────────────────────────────────────────── */
+function v3Prochain() {
+  const V = state.v3;
+  if (V.mode === null) { v3EnsureMode(); }
+  if (state.mafileLoading && !state.mafileData)
+    return '<div class="lm-empty"><span class="lm-spin"></span>Chargement de la file…</div>';
+
+  const f = v3File();
+  const d = v3Courant();
+  const libre = (V.mode === 'libre');
+
+  if (!d) {
+    // Règle d'écran : jamais de vide muet. On distingue « rien à faire » de
+    // « tout est pris par quelqu'un d'autre » — ce n'est pas la même chose.
+    const pris = f.length;
+    return '<div class="v3-bloc"><div class="v3-vide">'
+      + (pris
+          ? '<b>Rien à traiter pour l\'instant.</b>Les ' + pris + ' dossiers de votre '
+            + 'périmètre sont ouverts par un collègue. Ils reviendront dans la file si '
+            + 'personne ne les traite.'
+          : '<b>Aucun lead en attente.</b>Tout ce qui est arrivé sur votre périmètre a '
+            + 'reçu un premier contact.')
+      + '</div></div>';
+  }
+
+  const aMoi = d.verrou_par && Number(d.verrou_par) === Number(userId);
+  const actifs = libre ? !!aMoi : true;
+  const sla = Number(d.sla_minutes) || 60;
+  const att = Number(d.attente_min) || 0;
+  const reste = sla - att;
+  const nom = [d.prenom, d.nom].filter(Boolean).join(' ') || d.nom_affiche || ('Lead ' + d.id_lead);
+
+  return '<div class="v3-scene"><article class="v3-dossier">'
+    // Le bandeau : la PREMIÈRE chose que lit celui qui ouvre l'écran.
+    + (libre
+        ? '<div class="v3-verrou ' + (aMoi ? 'pris' : 'piscine') + '">'
+          + (aMoi ? 'Vous avez pris ce dossier<span>· il est à vous</span>'
+                  : 'Dans la piscine<span>· premier arrivé, premier servi — personne ne vous l\'a attribué</span>')
+          + '</div>'
+        : '<div class="v3-verrou">Réservé pour vous'
+          + '<span>· libéré automatiquement si vous ne faites rien</span></div>')
+
+    + '<div class="v3-haut">'
+    + '<div class="v3-min"><div class="v3-min-v ' + (reste > 0 ? '' : 'ko') + '">'
+    + att + '<span>min</span></div></div>'
+    + '<div class="v3-qui"><h3>' + esc(nom) + '</h3><div class="v3-meta">'
+    + (d.telephone ? '<span>' + V3_IC.tel + esc(d.telephone) + '</span>' : '')
+    + (d.email ? '<span>' + V3_IC.mail + esc(d.email) + '</span>' : '')
+    + '<span>' + V3_IC.user + 'Lead n° ' + d.id_lead + '</span></div>'
+    + '<div class="v3-pi">'
+    + '<span class="v3-p src">' + esc(d.source_libelle || d.source || 'Source inconnue') + '</span>'
+    + (d.site_nom ? '<span class="v3-p">' + esc(d.site_nom) + '</span>' : '')
+    + '</div></div></div>'
+
+    + (d.message ? '<div class="v3-corps"><div class="v3-dem">' + esc(d.message) + '</div>'
+        + (d.vehicule_interet
+            ? '<div class="v3-veh"><b>' + esc(d.vehicule_interet) + '</b></div>' : '')
+        + '</div>' : '')
+
+    + '<div class="v3-gestes">'
+    + (libre && !aMoi
+        ? '<button type="button" class="v3-flux p" data-v3prendre="' + d.id_lead + '">'
+          + 'Prendre ce lead</button>'
+        : '')
+    + v3BarreCanaux(d, actifs)
+    + '<button type="button" class="v3-flux" data-v3rendre="' + d.id_lead + '">'
+    + (libre && aMoi ? 'Rendre à la piscine' : 'Passer')
+    + '</button></div>'
+
+    + '<div class="v3-rappel">Délai attendu : ' + sla + ' min. '
+    + (reste > 0 ? 'Il reste <b>' + reste + ' min</b>.' : 'Dépassé de <b>' + (-reste) + ' min</b>.')
+    + '</div></article>'
+
+    + '<aside class="v3-file"><h4>' + (libre ? 'La piscine' : 'Votre file')
+    + ' (' + f.length + ')</h4><ul>'
+    + (f.filter(x => x !== d).slice(0, 20).map(x => {
+        const occupe = x.verrou_par && Number(x.verrou_par) !== Number(userId);
+        const n = [x.prenom, x.nom].filter(Boolean).join(' ') || ('Lead ' + x.id_lead);
+        return '<li class="' + (occupe ? 'occ' : '') + '">'
+          + '<div><b>' + esc(n) + '</b><small>'
+          + esc(x.source_libelle || x.source || '') + '</small></div>'
+          + '<span class="t">' + (occupe ? 'pris' : (x.attente_min || 0) + ' min') + '</span></li>';
+      }).join('') || '<li class="v3-rien">Plus rien après celui-ci.</li>')
+    + '</ul><div class="v3-pied">'
+    + (libre
+        ? 'Ouverte à tous. Les dossiers grisés viennent d\'être pris par un collègue.'
+        : 'Ordonnée par ce qui brûle, pas par ordre d\'arrivée.')
+    + '</div></aside></div>';
+}
+
+/* ── Le panneau d'une cellule du mur ─────────────────────────────────── */
+async function v3EnsureCellule() {
+  const V = state.v3;
+  if (!V.cellule || V.cellLoading) return;
+  const l = v3Lignes().find(x => x.chemin === V.cellule.chemin);
+  if (!l) return;
+  V.cellLoading = true;
+  try {
+    const { data, error } = await sb.rpc('lead_cellule', {
+      p_site_ids: l.n.sites, p_tranche: V.cellule.tranche, p_depuis: V.depuis,
+      p_de: state.period.from + 'T00:00:00', p_a: state.period.to + 'T23:59:59',
+      p_limite: 100
+    });
+    if (error) throw error;
+    V.cell = data || [];
+  } catch (e) {
+    console.error('[lead-mgmt] lead_cellule', e); V.cell = [];
+  } finally { V.cellLoading = false; renderAll(); }
+}
+
+function v3Panneau() {
+  const V = state.v3;
+  if (!V.cellule) return '';
+  const l = v3Lignes().find(x => x.chemin === V.cellule.chemin);
+  if (!l) return '';
+  if (V.cell === null) { v3EnsureCellule();
+    return '<div class="v3-voile" data-v3fermer="1"></div><aside class="v3-pan">'
+      + '<div class="v3-pan-h"><b>' + esc(l.n.nom) + '</b>'
+      + '<button type="button" class="x" data-v3fermer="1">&times;</button></div>'
+      + '<div class="v3-pan-b"><span class="lm-spin"></span>Chargement…</div></aside>'; }
+
+  const unSite = (l.n.sites || []).length === 1;
+  const idSite = unSite ? l.n.sites[0] : null;
+  // On ne confie un dossier à quelqu'un qu'une fois descendu sur UN site :
+  // au niveau marque, on ne saurait pas à quelle équipe il appartient.
+  const peutAlerter = unSite && PEUT_REAFFECTER;
+  const peutPrendre = (PROFIL === 'vendeur' || PROFIL === 'chef');
+  const vendeurs = (dataEquipe || []).filter(v => !idSite || Number(v.id_site) === Number(idSite));
+  const libres = V.cell.filter(x => !x.verrou_par);
+
+  return '<div class="v3-voile" data-v3fermer="1"></div><aside class="v3-pan">'
+    + '<div class="v3-pan-h"><div><b>' + esc(l.n.nom) + ' · '
+    + esc(V3_TRANCHES[V.cellule.tranche]) + '</b>'
+    + '<small>' + V.cell.length + ' lead' + (V.cell.length > 1 ? 's' : '')
+    + ' · ancienneté depuis ' + (V.depuis === 'vroom' ? 'l\'arrivée VROOM' : 'l\'arrivée sur le site')
+    + '</small></div>'
+    + '<button type="button" class="x" data-v3fermer="1">&times;</button></div>'
+    + '<div class="v3-pan-b">'
+    + V.cell.map((x, i) => {
+        const n = [x.prenom, x.nom].filter(Boolean).join(' ') || ('Lead ' + x.id_lead);
+        const premier = !x.verrou_par && x === libres[0];
+        return '<div class="v3-ld' + (premier ? ' prem' : '') + '">'
+          + '<div class="q"><b>' + esc(n) + '</b><small>' + esc(x.source || '')
+          + (premier ? ' · <em>le plus ancien</em>' : '') + '</small></div>'
+          + '<span class="a">' + v3Duree(x.age_min) + '</span>'
+          + (x.alerte_user ? '<span class="occ">alerté · ' + esc(x.alerte_user) + '</span>'
+             : x.verrou_nom ? '<span class="occ">chez ' + esc(x.verrou_nom) + '</span>'
+             : (peutAlerter ? '<button type="button" class="al" data-v3alerte="' + i + '">Alerter</button>' : '')
+               + (peutPrendre ? '<button type="button" class="pr" data-v3prendre="' + x.id_lead + '">Prendre</button>' : ''))
+          + '</div>'
+          + (V.alerteSur === i
+              ? '<div class="v3-choix"><span>Alerter qui ?</span>'
+                + vendeurs.map(v => '<button type="button" data-v3vend="' + v.id_user + '"'
+                    + ' data-v3lead="' + x.id_lead + '">'
+                    + esc(v.nom_complet || v.vendeur_nom || ('User ' + v.id_user)) + '</button>').join('')
+                + '<button type="button" class="ann" data-v3alerte="-1">Annuler</button></div>'
+              : '');
+      }).join('')
+    + (peutAlerter && libres.length > 1
+        ? '<p class="v3-pan-note">Prendre un dossier plus récent que le plus ancien reste '
+          + 'possible, mais l\'écart apparaîtra dans la vue du chef des ventes. L\'ordre '
+          + 'n\'est pas imposé, il est rendu visible.</p>' : '')
+    + '</div><div class="v3-pan-f">'
+    + (peutAlerter
+        ? 'Alerter prévient le vendeur sans lui retirer le choix.'
+        : peutPrendre ? 'Prendre réserve le dossier à votre nom et l\'ouvre.'
+        : 'Vous pilotez ce périmètre sans y traiter les leads.')
+    + '</div></aside>';
+}
+
 function chargerSection() {
   ensureSites();
+  // V3 : chaque vue sait ce dont elle a besoin, et rien de plus. Une vue qui
+  // ne se charge pas elle-même finit par afficher un spinner sans fin (bug du
+  // 27/08 sur les campagnes).
+  v3Init();
+  const W = state.v3;
+  if (W.vue === 'prochain') v3EnsureMode();
+  if (W.vue === 'mur')    { v3EnsureMur(); }
+  if (W.vue === 'relais') { v3EnsureParcours(); return; }
   const V = state.v2 || {};
   if (V.vue === 'campagnes') { ensureCampagnes(); return; }
   if (V.vue === 'rapport') ensureReactivite();
@@ -5224,29 +5159,25 @@ function renderAll() {
   }
 
   html += v2Fil();
-  // Le canal BACS conditionne une partie des gestes : on le dit AVANT
-  // que le vendeur n'essaie, pas après.
-  html += lmBandeauBacs();
-  html += lmArriereHtml();
 
   // Trois lectures d'un même périmètre. Libellés IDENTIQUES pour tous
   // les rôles : ce sont les mêmes questions, à des échelles différentes.
+  // ── V3 : trois lectures du parcours réel. Le RELAIS EST TOUJOURS EN
+  //    DERNIER, quel que soit le rôle : c'est une lecture d'analyse, pas un
+  //    écran de travail. Ce qui ouvre, c'est ce qu'on fait maintenant.
+  v3Init();
+  const W = state.v3;
+  const vues = v3VuesDuRole();
+  if (!vues.some(x => x[0] === W.vue)) W.vue = vues[0][0];
+
   html += '<div class="v2-vues">'
-    + '<button type="button" data-v2vue="mur" class="' + (V.vue === 'mur' ? 'on' : '')
-      + '">Où ça coince</button>'
-    + '<button type="button" data-v2vue="rapport" class="' + (V.vue === 'rapport' ? 'on' : '')
-      + '">Ce que ça produit</button>'
-    + '<button type="button" data-v2vue="campagnes" class="' + (V.vue === 'campagnes' ? 'on' : '')
-      + '">Campagnes</button></div>';
+    + vues.map(x => '<button type="button" data-v3vue="' + x[0] + '" class="'
+        + (W.vue === x[0] ? 'on' : '') + '">' + esc(x[1]) + '</button>').join('')
+    + '</div>';
 
-  if (V.vue !== 'campagnes') html += v2Bandeau();
-
-  if (V.vue === 'campagnes')    html += v2Campagnes() + v2Panneau();
-  else if (V.vue === 'rapport') html += v2Rapport() + v2Panneau();
-  else                          html += v2Mur() + v2Panneau();
-  html += renderRegles();
-
-  html += lmModaleHtml();
+  if (W.vue === 'mur')         html += v2Bandeau() + v3Mur() + v3Panneau();
+  else if (W.vue === 'relais') html += v3Relais();
+  else                         html += v3Prochain();
 
   root.innerHTML = html;
   const __tBind = performance.now();
@@ -5344,40 +5275,80 @@ async function selectVendeurCible(idUser) {
 
 // --- 15. Bindings -------------------------------------------
 function bindEvents() {
-  // --- Regles d attribution : ouverture, saisie, enregistrement --
-  root.querySelectorAll('[data-rgouvrir]').forEach(el => {
-    el.addEventListener('click', ev => { ev.stopPropagation(); ouvrirRegles(); });
-  });
-  root.querySelectorAll('[data-rgfermer]').forEach(el => {
-    el.addEventListener('click', () => fermerRegles());
-  });
-  // La saisie ne part PAS en base a chaque frappe : elle alimente l etat
-  // local, et « Enregistrer » fait le seul appel. Sinon un clic sur une
-  // option enverrait une regle a moitie choisie.
-  root.querySelectorAll('[data-rgc]').forEach(el => {
-    el.addEventListener('change', () => {
-      if (!rgEtat || !rgEtat.regles) return;
-      const c = el.getAttribute('data-rgc'), v = el.getAttribute('data-rgv');
-      rgEtat.regles[c] = (el.type === 'radio') ? v : el.checked;
-      rgEtat.msg = ''; renderAll();
+  // --- V3 : bascule des trois vues, dépliage de l'arbre, cellules ------
+  root.querySelectorAll('.v2-vues button[data-v3vue]').forEach(el => {
+    el.addEventListener('click', () => {
+      state.v3.vue = el.getAttribute('data-v3vue');
+      // On referme le panneau : il portait sur une cellule de l'ancienne vue.
+      state.v3.cellule = null; state.v3.alerteSur = null;
+      renderAll(); chargerSection();
     });
   });
-  root.querySelectorAll('[data-rgn]').forEach(el => {
-    el.addEventListener('change', () => {
-      if (!rgEtat || !rgEtat.regles) return;
-      rgEtat.regles[el.getAttribute('data-rgn')] = Number(el.value);
-      rgEtat.msg = '';
+  root.querySelectorAll('[data-v3depuis]').forEach(el => {
+    el.addEventListener('click', () => {
+      // Changer l'origine du décompte change les CHIFFRES, pas le stock :
+      // il faut donc relire le mur, pas seulement le redessiner.
+      state.v3.depuis = el.getAttribute('data-v3depuis');
+      state.v3.murKey = null; state.v3.cellule = null;
+      renderAll(); chargerSection();
     });
   });
-  root.querySelectorAll('[data-rgex]').forEach(el => {
-    el.addEventListener('click', () => basculerExclusion(
-      el.getAttribute('data-rgex'), el.getAttribute('data-rgexo') === '1'));
+  root.querySelectorAll('[data-v3exp]').forEach(el => {
+    el.addEventListener('click', () => {
+      // Le dépliage est indexé par CHEMIN : il survit à un changement de
+      // période ou de périmètre, contrairement à un index de ligne.
+      const k = el.getAttribute('data-v3exp');
+      state.v3.ouvert[k] = !state.v3.ouvert[k];
+      renderAll();
+    });
   });
-  root.querySelectorAll('[data-rgsite]').forEach(el => {
-    el.addEventListener('change', () => ouvrirRegles(el.value ? Number(el.value) : null));
+  root.querySelectorAll('[data-v3fermer]').forEach(el => {
+    el.addEventListener('click', () => {
+      state.v3.cellule = null; state.v3.cell = null; state.v3.alerteSur = null;
+      renderAll();
+    });
   });
-  root.querySelectorAll('[data-rgok]').forEach(el => {
-    el.addEventListener('click', () => enregistrerRegles());
+  root.querySelectorAll('[data-v3prendre]').forEach(el => {
+    el.addEventListener('click', async () => {
+      const id = Number(el.getAttribute('data-v3prendre'));
+      const r = await v3Reserver(id);
+      // Depuis le panneau, prendre OUVRE le dossier : un dossier « pris » qui
+      // resterait dans une liste serait un dossier oublié.
+      if (r === 'reserve' && state.v3.cellule) {
+        state.v3.cellule = null; state.v3.cell = null;
+        state.v3.vue = 'prochain'; state.v3.curseur = 0;
+        renderAll(); chargerSection();
+      }
+    });
+  });
+  root.querySelectorAll('[data-v3rendre]').forEach(el => {
+    el.addEventListener('click', () => v3Liberer(Number(el.getAttribute('data-v3rendre'))));
+  });
+  root.querySelectorAll('[data-v3alerte]').forEach(el => {
+    el.addEventListener('click', () => {
+      const i = Number(el.getAttribute('data-v3alerte'));
+      state.v3.alerteSur = (i < 0 || state.v3.alerteSur === i) ? null : i;
+      renderAll();
+    });
+  });
+  root.querySelectorAll('[data-v3vend]').forEach(el => {
+    el.addEventListener('click', () => v3Alerter(
+      Number(el.getAttribute('data-v3lead')), Number(el.getAttribute('data-v3vend'))));
+  });
+  root.querySelectorAll('[data-v3act]').forEach(el => {
+    el.addEventListener('click', () => {
+      const id = Number(el.getAttribute('data-v3lead'));
+      const l = (state.mafileData || []).find(x => Number(x.id_lead) === id);
+      if (l) v3OuvrirCanal(el.getAttribute('data-v3act'), l);
+    });
+  });
+  root.querySelectorAll('[data-v3cell]').forEach(el => {
+    el.addEventListener('click', () => {
+      const p = String(el.getAttribute('data-v3cell')).split('~');
+      state.v3.cellule = { chemin: p[0], tranche: Number(p[1]) };
+      state.v3.alerteSur = null;
+      renderAll();
+    });
   });
 
   // --- Refonte v2 : fil de périmètre, bascule, descente ---------
@@ -5450,117 +5421,6 @@ function bindEvents() {
                            el.getAttribute('data-v2cvend'));
     });
   });
-  // --- Les gestes sur un lead ----------------------------------
-  root.querySelectorAll('[data-arriere]').forEach(el => {
-    el.addEventListener('click', () => {
-      state.voirArriere = !state.voirArriere;
-      state.mafileKey = null; state.mafileData = null;
-      fetchMaFile();
-    });
-  });
-
-  root.querySelectorAll('[data-v2lead]').forEach(el => {
-    el.addEventListener('click', (ev) => {
-      if (ev.target.closest('[data-geste]') || ev.target.closest('[data-v2client]')
-          || ev.target.closest('[data-v2reaff]')) return;
-      const id = Number(el.getAttribute('data-v2lead'));
-      lmLeadSel = (lmLeadSel === id) ? null : id;   // un second clic referme
-      renderAll();
-    });
-  });
-
-  root.querySelectorAll('[data-geste]').forEach(el => {
-    el.addEventListener('click', async (ev) => {
-      ev.stopPropagation();
-      if (el.disabled) return;
-      const k = el.getAttribute('data-geste');
-      const idl = Number(el.getAttribute('data-lead'));
-      const lead = (state.mafileData || []).find(x => Number(x.id_lead) === idl);
-      if (!lead) return;
-
-      if (k === 'appel') {
-        // ⚠️ J'avais inventé `window.__oropraAppeler`, qui n'existe pas.
-        //    Le module compose DÉJÀ par un lien `tel:` ailleurs dans ce
-        //    fichier : on reprend ce qui marche.
-        const tel = lead.telephone || lead.mobile || '';
-        if (!tel) { lmToast('Ce lead ne porte aucun numéro.', 'erreur'); return; }
-        try {
-          const w = (window.wwLib && wwLib.getFrontWindow && wwLib.getFrontWindow()) || window;
-          w.open('tel:' + String(tel).replace(/[^0-9+]/g, ''), '_self');
-        } catch (e) {
-          window.open('tel:' + String(tel).replace(/[^0-9+]/g, ''), '_self');
-        }
-        return;
-      }
-      if (k === 'rpv') {
-        // Le compte rendu vit dans la fiche client : le RPV est un
-        // module monté là-bas, pas une fonction appelable d'ici. On
-        // emmène le vendeur au bon endroit plutôt que de lui afficher
-        // une erreur.
-        if (!lead.id_client) {
-          lmToast('Ce lead n\'est rattaché à aucune fiche client : le compte rendu ne peut pas être saisi.', 'erreur');
-          return;
-        }
-        openClientFiche(lead.id_client, TAB_DEFAULT, null);
-        return;
-      }
-      // Hors BACS, le rendez-vous et la relance vivent dans l'agenda de
-      // la fiche client : on y emmène le vendeur plutôt que de lui
-      // afficher un message qui l'y renvoie.
-      if (k === 'relance' && lmSource(lead.source).distant !== 'bacs') {
-        if (lead.id_client) openClientFiche(lead.id_client, TAB_DEFAULT, null);
-        return;
-      }
-      lmModale = { type: k, lead: lead };
-      if (k === 'transfert') lmModale.sites = await lmSitesCibles();
-      renderAll();
-    });
-  });
-  root.querySelectorAll('[data-gvalider]').forEach(el => {
-    el.addEventListener('click', (ev) => { ev.stopPropagation(); lmExecuterGeste(); });
-  });
-  root.querySelectorAll('[data-gfermer]').forEach(el => {
-    el.addEventListener('click', (ev) => {
-      // Le clic DANS la boîte ne doit pas la fermer.
-      if (ev.target.closest('[data-stop]') && !el.hasAttribute('data-gfermer')) return;
-      if (ev.target !== el && !ev.target.closest('.g-modal-f')) return;
-      lmModale = null; renderAll();
-    });
-  });
-  // Créneaux : un seul choix par groupe ; la date libre remplace les jours.
-  [['data-gjour'], ['data-gheure'], ['data-gduree']].forEach(([attr]) => {
-    root.querySelectorAll('[' + attr + ']').forEach(el => {
-      el.addEventListener('click', (ev) => {
-        ev.stopPropagation();
-        if (el.disabled) return;
-        root.querySelectorAll('[' + attr + ']').forEach(x => x.classList.remove('on'));
-        el.classList.add('on');
-        if (attr === 'data-gjour') { const lib = root.querySelector('#g-date-libre'); if (lib) lib.value = ''; }
-        lmCreneauMaj();
-      });
-    });
-  });
-  const lib = root.querySelector('#g-date-libre');
-  if (lib) lib.addEventListener('change', () => {
-    if (lib.value) root.querySelectorAll('[data-gjour]').forEach(x => x.classList.remove('on'));
-    lmCreneauMaj();
-  });
-  if (root.querySelector('#g-recap')) lmCreneauMaj();
-
-  root.querySelectorAll('.g-site').forEach(el => {
-    el.addEventListener('click', () => {
-      root.querySelectorAll('.g-site').forEach(x => x.classList.remove('on'));
-      el.classList.add('on');
-    });
-  });
-  root.querySelectorAll('[data-bacs-ouvrir]').forEach(el => {
-    el.addEventListener('click', () => {
-      // On ne connaît pas l'URL du tenant BACS : on ouvre la page connue
-      // et l'utilisateur atterrit sur sa session.
-      window.open('https://toyota-france.my.site.com/bacs2/s/', '_blank');
-    });
-  });
-
   root.querySelectorAll('[data-v2fermer]').forEach(el => {
     el.addEventListener('click', () => { state.v2.sel = null; renderAll(); });
   });
