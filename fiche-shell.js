@@ -50,6 +50,34 @@ OD.define('fiche-shell', {
   function cap(s) { return (s || '').toString().toLowerCase().replace(/(^|[\s\-'])([a-zà-ÿ])/g, (m, sep, c) => sep + c.toUpperCase()); }
   function readVar(id) { try { return wwLib.wwVariable.getValue(id); } catch (e) { return null; } }
   function currentIdvu() { const c = readVar(SELECTED_CLIENT_VAR); return c && c.IDVu != null ? Number(c.IDVu) : null; }
+  // Arrivee par lien externe (integration 3CX, e-mail, SMS...) : ?idvu=123
+  // Les liens internes, eux, posent deja la variable avant de naviguer.
+  function idvuFromUrl() {
+    try {
+      const w = (wwLib.getFrontWindow && wwLib.getFrontWindow()) || window;
+      const q = new URLSearchParams(w.location.search || '');
+      const raw = q.get('idvu') || q.get('client') || q.get('id');
+      const n = raw != null ? Number(String(raw).replace(/[^0-9]/g, '')) : NaN;
+      return Number.isFinite(n) && n > 0 ? n : null;
+    } catch (e) { return null; }
+  }
+  function tabFromUrl() {
+    try {
+      const w = (wwLib.getFrontWindow && wwLib.getFrontWindow()) || window;
+      const t = new URLSearchParams(w.location.search || '').get('tab');
+      return t && TABS.some(x => x.key === t) ? t : null;
+    } catch (e) { return null; }
+  }
+  // Nettoie l'URL une fois le client charge (evite de re-forcer au retour arriere)
+  function cleanUrl() {
+    try {
+      const w = (wwLib.getFrontWindow && wwLib.getFrontWindow()) || window;
+      const u = new URL(w.location.href);
+      let touched = false;
+      ['idvu', 'client', 'id', 'tab'].forEach(k => { if (u.searchParams.has(k)) { u.searchParams.delete(k); touched = true; } });
+      if (touched) w.history.replaceState({}, '', u.pathname + (u.search || '') + (u.hash || ''));
+    } catch (e) {}
+  }
   function isSoc(c) { return c && (c.idmultivu === 1 || c.idmultivu === '1'); }
   function clientName(c) {
     if (!c) return '—';
@@ -307,6 +335,15 @@ OD.define('fiche-shell', {
   // ---------------------------------------------------------------- boot
   async function boot() {
     const root = __anchor; if (!root) return;
+    // Lien externe : le client demande dans l'URL prime au demarrage.
+    // On alimente la variable que lisent tous les modules de la fiche, puis on
+    // nettoie l'URL. Sans client dans l'URL, comportement inchange.
+    const urlIdvu = idvuFromUrl();
+    if (urlIdvu != null && urlIdvu !== currentIdvu()) {
+      try { wwLib.wwVariable.updateValue(SELECTED_CLIENT_VAR, { IDVu: urlIdvu }); } catch (e) {}
+    }
+    const urlTab = tabFromUrl();
+    if (urlTab) state.tab = urlTab;
     // Onglet demandé par un autre module avant navigation (lead-mgmt, kanban…).
     // Passé par un global à usage unique — l'ancienne variable WeWeb (fb2cad2c)
     // n'existe plus dans le projet. Accepte une clé ('pcom') ou un index (5).
@@ -316,12 +353,13 @@ OD.define('fiche-shell', {
       if (req != null) {
         try { delete w.__odFicheTab; } catch (e) { w.__odFicheTab = null; }
         if (typeof req === 'number') req = (TABS[req] || {}).key;
-        if (req && TABS.some(t => t.key === req)) state.tab = req;
+        if (req && TABS.some(t => t.key === req) && !tabFromUrl()) state.tab = req;
       }
     } catch (e) {}
     ensureCss();
     await loadClient();
     render();
+    if (urlIdvu != null) cleanUrl();
     // surveille le changement de client (navigation via historique / recherche).
     // Re-rendu complet : en-tête + jeu d'onglets (Entreprise masqué si société) +
     // panneaux recréés -> chaque module d'onglet se re-monte via son observateur.
