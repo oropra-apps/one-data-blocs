@@ -541,7 +541,7 @@ const LM_V3_CSS = `
 #lead-mgmt-root .v3-veh { margin-top:12px; padding:10px 12px; background:#f4f5f7;
   border-radius:9px; font-size:13.5px; }
 
-/* Barre de communication : COPIE de `.fs-btn` (fiche-shell.js). Mêmes paires
+/* Barre de communication : COPIE de « .fs-btn » (fiche-shell.js). Mêmes paires
    couleur / bordure / survol, pour qu'un vendeur n'ait rien à réapprendre. */
 #lead-mgmt-root .v3-gestes { display:flex; flex-wrap:wrap; gap:10px; padding:14px 18px 16px;
   align-items:center; }
