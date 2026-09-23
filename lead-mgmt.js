@@ -5640,7 +5640,7 @@ function v3Fil() {
   const i = h.lastIndexOf('</div>');
   if (i < 0) return h;
   return h.slice(0, i)
-    + '<span class="v3-niv">comparaison par ' + esc(v3NiveauLibelle()) + '</span>'
+    + '<span class="v3-niv">comparaison par ' + escapeHtml(v3NiveauLibelle()) + '</span>'
     + h.slice(i);
 }
 
@@ -5676,19 +5676,19 @@ function v3Mur() {
     + '<button type="button" data-v3depuis="site" class="' + (V.depuis === 'site' ? 'on' : '')
       + '">Arrivée site</button></div></div>'
     + '<p class="v3-expli">' + expli + '</p></div>'
-    + '<div class="v3-tab"><table><thead><tr><th>' + esc(titre) + '</th>'
-    + V3_TRANCHES.map(t => '<th>' + esc(t) + '</th>').join('')
+    + '<div class="v3-tab"><table><thead><tr><th>' + escapeHtml(titre) + '</th>'
+    + V3_TRANCHES.map(t => '<th>' + escapeHtml(t) + '</th>').join('')
     + '</tr></thead><tbody>'
     + lignes.map(l => {
         const n = l.n, plie = l.pliable && !V.ouvert[l.chemin];
         return '<tr class="v3-lv-' + n.niveau + '">'
           + '<td style="padding-left:' + (16 + l.prof * 20) + 'px">'
           + (l.pliable
-              ? '<button type="button" class="v3-exp" data-v3exp="' + esc(l.chemin) + '">'
+              ? '<button type="button" class="v3-exp" data-v3exp="' + escapeHtml(l.chemin) + '">'
                 + (plie ? '▸' : '▾') + '</button>'
               : '<span class="v3-exp vide"></span>')
-          + esc(n.nom)
-          + (n.sous ? '<small>' + esc(n.sous) + '</small>'
+          + escapeHtml(n.nom)
+          + (n.sous ? '<small>' + escapeHtml(n.sous) + '</small>'
                     : (n.sites.length > 1 ? '<small>' + n.sites.length + ' sites</small>' : ''))
           + '</td>'
           + n.c.map((v, i) => {
@@ -5697,7 +5697,7 @@ function v3Mur() {
               //    sans donner prise dessus. Chaque pastille est un bouton.
               const c = v3Couleur(i), t = 26 + Math.round(Math.sqrt(v / max) * 16);
               return '<td><button type="button" class="v3-pas"'
-                + ' data-v3cell="' + esc(l.chemin) + '~' + i + '"'
+                + ' data-v3cell="' + escapeHtml(l.chemin) + '~' + i + '"'
                 + ' title="Voir les ' + v + ' leads"'
                 + ' style="width:' + t + 'px;height:' + t + 'px;border-color:' + c.t
                 + ';background:' + c.f + ';color:' + c.t + '">' + v + '</button></td>';
@@ -5761,7 +5761,7 @@ function v3Relais() {
         const lg = Math.max(8, Math.round(att / tot * 100));
         const cv = vr > V3_SEUIL_VROOM ? 'var(--red-dk,#c02626)' : 'var(--ok-dk,#0f9b6c)';
         return '<div class="v3-piste" style="padding-left:' + (16 + l.prof * 20) + 'px">'
-          + '<div class="v3-p1"><b>' + esc(l.n.nom) + '</b>'
+          + '<div class="v3-p1"><b>' + escapeHtml(l.n.nom) + '</b>'
           + '<span class="v3-n">' + n + ' leads pris par VROOM'
           + ((l.n.sites || []).length > 1 ? ' · ' + l.n.sites.length + ' sites' : '') + '</span>'
           + '<span class="v3-part' + (part >= 80 ? ' fort' : '') + '">'
@@ -5899,11 +5899,11 @@ function v3BarreCanaux(lead, actifs) {
   return '<div class="v3-canaux' + (actifs ? '' : ' inerte') + '">'
     + V3_CANAUX.map(k =>
         '<button type="button" class="v3-cm ' + k.cls + '" data-v3act="' + k.act + '"'
-        + ' data-v3lead="' + lead.id_lead + '" title="' + esc(k.titre) + '"'
+        + ' data-v3lead="' + lead.id_lead + '" title="' + escapeHtml(k.titre) + '"'
         + (actifs ? '' : ' disabled') + '>'
-        + V3_IC[k.ic] + esc(k.lib)
+        + V3_IC[k.ic] + escapeHtml(k.lib)
         + (k.act === 'appel' && lead.telephone
-            ? '<span class="num">' + esc(lead.telephone) + '</span>' : '')
+            ? '<span class="num">' + escapeHtml(lead.telephone) + '</span>' : '')
         + '</button>').join('')
     + '</div>';
 }
@@ -5975,18 +5975,18 @@ function v3Prochain() {
     + '<div class="v3-haut">'
     + '<div class="v3-min"><div class="v3-min-v ' + (reste > 0 ? '' : 'ko') + '">'
     + att + '<span>min</span></div></div>'
-    + '<div class="v3-qui"><h3>' + esc(nom) + '</h3><div class="v3-meta">'
-    + (d.telephone ? '<span>' + V3_IC.tel + esc(d.telephone) + '</span>' : '')
-    + (d.email ? '<span>' + V3_IC.mail + esc(d.email) + '</span>' : '')
+    + '<div class="v3-qui"><h3>' + escapeHtml(nom) + '</h3><div class="v3-meta">'
+    + (d.telephone ? '<span>' + V3_IC.tel + escapeHtml(d.telephone) + '</span>' : '')
+    + (d.email ? '<span>' + V3_IC.mail + escapeHtml(d.email) + '</span>' : '')
     + '<span>' + V3_IC.user + 'Lead n° ' + d.id_lead + '</span></div>'
     + '<div class="v3-pi">'
-    + '<span class="v3-p src">' + esc(d.source_libelle || d.source || 'Source inconnue') + '</span>'
-    + (d.site_nom ? '<span class="v3-p">' + esc(d.site_nom) + '</span>' : '')
+    + '<span class="v3-p src">' + escapeHtml(d.source_libelle || d.source || 'Source inconnue') + '</span>'
+    + (d.site_nom ? '<span class="v3-p">' + escapeHtml(d.site_nom) + '</span>' : '')
     + '</div></div></div>'
 
-    + (d.message ? '<div class="v3-corps"><div class="v3-dem">' + esc(d.message) + '</div>'
+    + (d.message ? '<div class="v3-corps"><div class="v3-dem">' + escapeHtml(d.message) + '</div>'
         + (d.vehicule_interet
-            ? '<div class="v3-veh"><b>' + esc(d.vehicule_interet) + '</b></div>' : '')
+            ? '<div class="v3-veh"><b>' + escapeHtml(d.vehicule_interet) + '</b></div>' : '')
         + '</div>' : '')
 
     + '<div class="v3-gestes">'
@@ -6009,8 +6009,8 @@ function v3Prochain() {
         const occupe = x.verrou_par && Number(x.verrou_par) !== Number(userId);
         const n = [x.prenom, x.nom].filter(Boolean).join(' ') || ('Lead ' + x.id_lead);
         return '<li class="' + (occupe ? 'occ' : '') + '">'
-          + '<div><b>' + esc(n) + '</b><small>'
-          + esc(x.source_libelle || x.source || '') + '</small></div>'
+          + '<div><b>' + escapeHtml(n) + '</b><small>'
+          + escapeHtml(x.source_libelle || x.source || '') + '</small></div>'
           + '<span class="t">' + (occupe ? 'pris' : (x.attente_min || 0) + ' min') + '</span></li>';
       }).join('') || '<li class="v3-rien">Plus rien après celui-ci.</li>')
     + '</ul><div class="v3-pied">'
@@ -6047,7 +6047,7 @@ function v3Panneau() {
   if (!l) return '';
   if (V.cell === null) { v3EnsureCellule();
     return '<div class="v3-voile" data-v3fermer="1"></div><aside class="v3-pan">'
-      + '<div class="v3-pan-h"><b>' + esc(l.n.nom) + '</b>'
+      + '<div class="v3-pan-h"><b>' + escapeHtml(l.n.nom) + '</b>'
       + '<button type="button" class="x" data-v3fermer="1">&times;</button></div>'
       + '<div class="v3-pan-b"><span class="lm-spin"></span>Chargement…</div></aside>'; }
 
@@ -6061,8 +6061,8 @@ function v3Panneau() {
   const libres = V.cell.filter(x => !x.verrou_par);
 
   return '<div class="v3-voile" data-v3fermer="1"></div><aside class="v3-pan">'
-    + '<div class="v3-pan-h"><div><b>' + esc(l.n.nom) + ' · '
-    + esc(V3_TRANCHES[V.cellule.tranche]) + '</b>'
+    + '<div class="v3-pan-h"><div><b>' + escapeHtml(l.n.nom) + ' · '
+    + escapeHtml(V3_TRANCHES[V.cellule.tranche]) + '</b>'
     + '<small>' + V.cell.length + ' lead' + (V.cell.length > 1 ? 's' : '')
     + ' · ancienneté depuis ' + (V.depuis === 'vroom' ? 'l\'arrivée VROOM' : 'l\'arrivée sur le site')
     + '</small></div>'
@@ -6072,11 +6072,11 @@ function v3Panneau() {
         const n = [x.prenom, x.nom].filter(Boolean).join(' ') || ('Lead ' + x.id_lead);
         const premier = !x.verrou_par && x === libres[0];
         return '<div class="v3-ld' + (premier ? ' prem' : '') + '">'
-          + '<div class="q"><b>' + esc(n) + '</b><small>' + esc(x.source || '')
+          + '<div class="q"><b>' + escapeHtml(n) + '</b><small>' + escapeHtml(x.source || '')
           + (premier ? ' · <em>le plus ancien</em>' : '') + '</small></div>'
           + '<span class="a">' + v3Duree(x.age_min) + '</span>'
-          + (x.alerte_user ? '<span class="occ">alerté · ' + esc(x.alerte_user) + '</span>'
-             : x.verrou_nom ? '<span class="occ">chez ' + esc(x.verrou_nom) + '</span>'
+          + (x.alerte_user ? '<span class="occ">alerté · ' + escapeHtml(x.alerte_user) + '</span>'
+             : x.verrou_nom ? '<span class="occ">chez ' + escapeHtml(x.verrou_nom) + '</span>'
              : (peutAlerter ? '<button type="button" class="al" data-v3alerte="' + i + '">Alerter</button>' : '')
                + (peutPrendre ? '<button type="button" class="pr" data-v3prendre="' + x.id_lead + '">Prendre</button>' : ''))
           + '</div>'
@@ -6084,7 +6084,7 @@ function v3Panneau() {
               ? '<div class="v3-choix"><span>Alerter qui ?</span>'
                 + vendeurs.map(v => '<button type="button" data-v3vend="' + v.id_user + '"'
                     + ' data-v3lead="' + x.id_lead + '">'
-                    + esc(v.nom_complet || v.vendeur_nom || ('User ' + v.id_user)) + '</button>').join('')
+                    + escapeHtml(v.nom_complet || v.vendeur_nom || ('User ' + v.id_user)) + '</button>').join('')
                 + '<button type="button" class="ann" data-v3alerte="-1">Annuler</button></div>'
               : '');
       }).join('')
