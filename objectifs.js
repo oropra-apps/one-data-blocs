@@ -8,6 +8,11 @@
 //  (upsert PostgREST au moment de l'enregistrement).
 //  Tous les autres tenants gardent strictement le comportement précédent.
 //  Forçage manuel pour tester ailleurs : window.__OD_PERF_PROFILE__ = 'teamcolin'
+//  v8 (24/09/2026) : nom du site / du réseau / du vendeur lus directement dans
+//  v_objectifs(_tc) — la requête de hiérarchie sur la vue de performances est
+//  supprimée (elle coûtait un balayage complet de plus et laissait « Site 11 »
+//  quand elle échouait). Grille des taux corrigée (les libellés se chevauchaient)
+//  et tableau resserré.
 //  Rendu dans __anchor ; SUPABASE_URL/KEY -> ctx.tenant ; getUserJwt() ->
 //  session du client runtime ; doc -> __anchor.ownerDocument. User = oropraUser.
 //  Périmètre 100% v_mon_perimetre (VAR_SITES retirée). 0 vestige.
@@ -178,7 +183,9 @@ async function fetchHierarchy(ym) {
 function realiseFor(mapRef, idUser, col) { const types = state.vnvo === 'VNVO' ? ['VN', 'VO'] : [state.vnvo]; let s = 0; for (const t of types) { const e = mapRef[String(idUser) + '|' + t]; if (e) s += num(e[col]) } return s }
 function realiseCommandesM1(id) { return realiseFor(realM1, id, REAL_FIELDS.commandes) }
 function getUserName(r) { return r.vendeur_nom || (userMeta[r.id_user] && userMeta[r.id_user].nom) || ('Vendeur ' + r.id_user) }
-function enrichRows() { for (const r of data) { const sm = siteMeta[r.id_site]; r._reseau = (sm && sm.reseau) || 'Sans réseau'; r._affaire = (sm && sm.affaire) || 'Sans affaire'; r._site = (sm && sm.site) || ('Site ' + r.id_site); r._vendeur = getUserName(r) } }
+// La vue d'objectifs porte déjà site_nom / reseau / affaire / vendeur_nom :
+// on s'en sert d'abord, la hiérarchie n'est qu'un repli.
+function enrichRows() { for (const r of data) { const sm = siteMeta[r.id_site]; r._reseau = r.reseau || (sm && sm.reseau) || 'Sans réseau'; r._affaire = r.affaire || (sm && sm.affaire) || 'Sans affaire'; r._site = r.site_nom || (sm && sm.site) || ('Site ' + r.id_site); r._vendeur = getUserName(r) } }
 
 function paceStyle(re, ob, pr) { const r = num(re), o = num(ob); if (o <= 0) return { bg: '#f0f2f5', col: '#8a96a8', bar: '#dde2ea', txt: 'pas d\u2019objectif' }; const at = r / o; if (at >= pr) return { bg: '#e1f5ee', col: '#085041', bar: '#1d9e75', txt: 'dans les temps' }; if (at >= pr - 0.15) return { bg: '#faeeda', col: '#633806', bar: '#ef9f27', txt: 'léger retard' }; return { bg: '#fcebeb', col: '#791f1f', bar: '#e24b4a', txt: 'en retard' } }
 
@@ -366,11 +373,11 @@ function makeAtelier(doc) {
 
   const secWrap = doc.createElement('div')
   secWrap.innerHTML = '<div style="font-size:11px;color:#acc5e4;text-transform:uppercase;letter-spacing:.4px;margin-bottom:6px">Taux (pré-rempli M-1) → cible d\u2019équipe</div>'
-  const grid = doc.createElement('div'); grid.style.cssText = 'display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:8px'
+  const grid = doc.createElement('div'); grid.style.cssText = 'display:grid;grid-template-columns:repeat(auto-fit,minmax(215px,1fr));gap:8px'
   const refs = {}
   SECONDARY.forEach(function (s) {
-    const cell = doc.createElement('div'); cell.style.cssText = 'display:grid;grid-template-columns:88px 56px 14px 16px 66px;align-items:center;gap:6px;background:#f5f8fc;border-radius:8px;padding:7px 10px'
-    const lab = doc.createElement('span'); lab.style.cssText = 'font-size:11px;color:#7a9cc4;overflow:hidden;text-overflow:ellipsis;white-space:nowrap'; lab.textContent = s.label
+    const cell = doc.createElement('div'); cell.style.cssText = 'display:grid;grid-template-columns:minmax(0,1fr) 50px 10px 12px 56px;align-items:center;gap:5px;background:#f5f8fc;border-radius:8px;padding:6px 9px;min-width:0'
+    const lab = doc.createElement('span'); lab.style.cssText = 'font-size:11px;color:#7a9cc4;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0'; lab.textContent = s.label
     const taux = numInput(state.cap.taux[s.k], 56)
     const pc = doc.createElement('span'); pc.textContent = '%'; pc.style.cssText = 'font-size:11px;color:#acc5e4'
     const eq = doc.createElement('span'); eq.textContent = '→'; eq.style.cssText = 'font-size:12px;color:#acc5e4;text-align:center'
@@ -435,8 +442,8 @@ function updateBalanceBar() {
 // --- édition cellule (brouillon, pas de PATCH) ---
 function makeEditableCell(r, field, doc) {
   const td = doc.createElement('td')
-  if (!canEdit) { td.style.cssText = 'padding:6px 8px;text-align:center'; const s = doc.createElement('span'); s.style.cssText = 'color:#4a6a8a;font-size:12px'; s.textContent = r[field] || 0; td.appendChild(s); return td }
-  td.style.cssText = 'padding:6px 8px;text-align:center;cursor:pointer'; let editing = false
+  if (!canEdit) { td.style.cssText = 'padding:' + CELL_PAD + ';text-align:center'; const s = doc.createElement('span'); s.style.cssText = 'color:#4a6a8a;font-size:12px'; s.textContent = r[field] || 0; td.appendChild(s); return td }
+  td.style.cssText = 'padding:' + CELL_PAD + ';text-align:center;cursor:pointer'; let editing = false
   const dirty = function () { const o = originalSnap[rowKey(r)]; return o && num(o[field]) !== num(r[field]) }
   function span() { editing = false; td.innerHTML = ''; const s = doc.createElement('span'); s.style.cssText = 'font-size:12px;color:' + (dirty() ? '#2a5ea9' : '#4a6a8a') + ';font-weight:' + (dirty() ? '500' : '400'); s.textContent = r[field] || 0; td.appendChild(s); td.onmouseenter = function () { td.style.background = '#f5f8fc' }; td.onmouseleave = function () { td.style.background = '' } }
   function editor() {
@@ -449,6 +456,9 @@ function makeEditableCell(r, field, doc) {
 }
 
 // --- arbre périmètre ---
+// Densité du tableau : resserrée sur le profil Team Colin (7 colonnes chiffrées).
+const CELL_PAD = IS_TC ? '3px 6px' : '6px 8px'
+const COL_W = IS_TC ? '74px' : '90px'
 function aggNew() { const a = {}; GKEYS.forEach(function (k) { a[k.k] = 0 }); return a }
 function aggAdd(a, r) { GKEYS.forEach(function (k) { a[k.k] += num(r[k.k]) }) }
 function buildTree(rows) {
@@ -558,16 +568,16 @@ function renderTree(rootEl, doc) {
   const nbSites = tree.reduce(function (s, R) { return s + R.affaires.reduce(function (x, A) { return x + A.sitesArr.length }, 0) }, 0)
   const sitesDef = nbSites <= 3, oneR = tree.length === 1
   const table = doc.createElement('table'); table.className = 'obj-tree'; table.style.cssText = 'width:100%;border-collapse:collapse;font-size:12px;table-layout:fixed'
-  const cg = doc.createElement('colgroup');['230px'].concat(GKEYS.map(function () { return '90px' })).forEach(function (w) { const c = doc.createElement('col'); c.style.width = w; cg.appendChild(c) }); table.appendChild(cg)
+  const cg = doc.createElement('colgroup');[IS_TC ? '210px' : '230px'].concat(GKEYS.map(function () { return COL_W })).forEach(function (w) { const c = doc.createElement('col'); c.style.width = w; cg.appendChild(c) }); table.appendChild(cg)
   const th = doc.createElement('thead'), hr = doc.createElement('tr'); hr.style.cssText = 'background:#2a5ea9'
     ;['Périmètre'].concat(GKEYS.map(function (k) { return k.label })).forEach(function (h, i, arr) { const e = doc.createElement('th'); e.style.cssText = 'color:#fff;font-weight:400;padding:7px 8px;text-align:' + (i === 0 ? 'left' : 'center') + ';font-size:10px'; if (i === 0) e.style.borderRadius = '5px 0 0 5px'; if (i === arr.length - 1) e.style.borderRadius = '0 5px 5px 0'; e.textContent = h; hr.appendChild(e) })
   th.appendChild(hr); table.appendChild(th)
   const tb = doc.createElement('tbody'); table.appendChild(tb)
   function caret(open, key) { const c = doc.createElement('span'); c.textContent = open ? '▾ ' : '▸ '; c.style.cssText = 'color:#7a9cc4;cursor:pointer'; c.addEventListener('click', function (e) { e.stopPropagation(); state.expanded[key] = !open; renderObj() }); return c }
-  function sumTd(v, col, wt) { const td = doc.createElement('td'); td.style.cssText = 'padding:6px 8px;text-align:center;font-size:12px;color:' + col + ';font-weight:' + wt + ';font-variant-numeric:tabular-nums'; td.textContent = Math.round(v); return td }
+  function sumTd(v, col, wt) { const td = doc.createElement('td'); td.style.cssText = 'padding:' + CELL_PAD + ';text-align:center;font-size:12px;color:' + col + ';font-weight:' + wt + ';font-variant-numeric:tabular-nums'; td.textContent = Math.round(v); return td }
   function aggRow(label, key, agg, bg, pad, col, wt, open, selObj) {
     const tr = doc.createElement('tr'); tr.style.cssText = 'border-bottom:0.5px solid #eaf0f9;background:' + (selObj && selEquals(selObj.level, selObj) ? '#dde9f7' : bg) + ';cursor:pointer'
-    const td0 = doc.createElement('td'); td0.style.cssText = 'padding:6px 8px;padding-left:' + pad + 'px;font-size:12px;color:' + col + ';font-weight:' + wt + ';white-space:nowrap;overflow:hidden;text-overflow:ellipsis'
+    const td0 = doc.createElement('td'); td0.style.cssText = 'padding:' + CELL_PAD + ';padding-left:' + pad + 'px;font-size:12px;color:' + col + ';font-weight:' + wt + ';white-space:nowrap;overflow:hidden;text-overflow:ellipsis'
     td0.appendChild(caret(open, key)); td0.appendChild(doc.createTextNode(label)); tr.appendChild(td0)
     GKEYS.forEach(function (k) { tr.appendChild(sumTd(agg[k.k], col, wt)) })
     if (selObj) tr.addEventListener('click', function () { if (selObj.level === 'site') state.expanded[key] = true; setSel(selObj) })
@@ -575,7 +585,7 @@ function renderTree(rootEl, doc) {
   }
   function leaf(r, main, sub, pad) {
     const tr = doc.createElement('tr'); tr.style.cssText = 'border-bottom:0.5px solid #eaf0f9;background:#fff'
-    const td0 = doc.createElement('td'); td0.style.cssText = 'padding:6px 8px;padding-left:' + pad + 'px;overflow:hidden'
+    const td0 = doc.createElement('td'); td0.style.cssText = 'padding:' + CELL_PAD + ';padding-left:' + pad + 'px;overflow:hidden'
     const m = doc.createElement('div'); m.style.cssText = 'font-size:12px;color:#2a5ea9;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis'; m.textContent = main; td0.appendChild(m)
     if (sub) { const s = doc.createElement('div'); s.style.cssText = 'font-size:10px;color:#acc5e4;margin-top:1px'; s.textContent = sub; td0.appendChild(s) }
     tr.appendChild(td0); GKEYS.forEach(function (k) { tr.appendChild(makeEditableCell(r, k.k, doc)) }); tb.appendChild(tr)
@@ -586,7 +596,7 @@ function renderTree(rootEl, doc) {
     const selObj = { level: 'sitetype', id_site: site.id_site, type: label, label: label + ' — ' + site.label }
     const sel = selEquals('sitetype', selObj)
     const tr = doc.createElement('tr'); tr.style.cssText = 'border-bottom:0.5px solid #eaf0f9;background:' + (sel ? '#dde9f7' : '#fbfdff') + ';cursor:pointer'
-    const td0 = doc.createElement('td'); td0.style.cssText = 'padding:6px 8px;padding-left:60px;white-space:nowrap;overflow:hidden'
+    const td0 = doc.createElement('td'); td0.style.cssText = 'padding:' + CELL_PAD + ';padding-left:60px;white-space:nowrap;overflow:hidden'
     td0.appendChild(caret(open, key))
     const chip = doc.createElement('span'); chip.textContent = 'Objectifs ' + label
     chip.style.cssText = 'display:inline-block;padding:2px 9px;border-radius:6px;font-size:11px;font-weight:500;background:' + (isVN ? '#e1f5ee' : (isVO ? '#faeeda' : '#e6f1fb')) + ';color:' + (isVN ? '#085041' : (isVO ? '#633806' : '#0c447c'))
@@ -599,7 +609,7 @@ function renderTree(rootEl, doc) {
     if (V.rows.length === 1) { leaf(V.rows[0], V.label, marqueSub(V.rows[0]), vPad); return }
     const vKey = sKey + '|v:' + V.id_user, vOpen = isOpen(vKey, true)
     const tr = doc.createElement('tr'); tr.style.cssText = 'border-bottom:0.5px solid #eaf0f9;background:#fff'
-    const td0 = doc.createElement('td'); td0.style.cssText = 'padding:6px 8px;padding-left:' + vPad + 'px;font-size:12px;color:#4a6a8a;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis'
+    const td0 = doc.createElement('td'); td0.style.cssText = 'padding:' + CELL_PAD + ';padding-left:' + vPad + 'px;font-size:12px;color:#4a6a8a;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis'
     td0.appendChild(caret(vOpen, vKey)); td0.appendChild(doc.createTextNode(V.label + (realOk ? '  ·  M-1 ' + Math.round(realiseCommandesM1(V.id_user)) + ' cmd' : ''))); tr.appendChild(td0)
     GKEYS.forEach(function (k) { tr.appendChild(sumTd(V.agg[k.k], '#4a6a8a', 500)) }); tb.appendChild(tr)
     if (vOpen) V.rows.forEach(function (r) { leaf(r, r.marque || '—', null, mPad) })
@@ -633,7 +643,7 @@ function renderTree(rootEl, doc) {
   const td0 = doc.createElement('td'); td0.style.cssText = 'padding:7px 8px;color:#2a5ea9;font-weight:500;font-size:12px'; td0.textContent = 'Total — ' + (state.vnvo === 'VNVO' ? 'VN + VO' : state.vnvo); tr.appendChild(td0)
   GKEYS.forEach(function (k) { tr.appendChild(sumTd(tot[k.k], '#2a5ea9', 500)) }); ft.appendChild(tr); table.appendChild(ft)
   table.style.display = 'table'
-  table.style.minWidth = (230 + GKEYS.length * 90 + 20) + 'px'
+  table.style.minWidth = (parseInt(IS_TC ? '210' : '230') + GKEYS.length * parseInt(COL_W) + 20) + 'px'
   const objScroll = doc.createElement('div')
   objScroll.style.cssText = 'overflow-x:auto;-webkit-overflow-scrolling:touch;max-width:100%'
   objScroll.appendChild(table)
@@ -688,9 +698,9 @@ async function boot() {
   try {
     await loadPerimeter();
     const ymCur = ymOf(state.annee, state.mois), ymPrev = prevYM(state.annee, state.mois).ym
+    // fetchHierarchy n'est plus appelée : les noms viennent de la vue d'objectifs.
     const tasks = [fetchObjectifs(), fetchRealise(ymCur)]
-    if (canEdit) { tasks.push(fetchRealise(ymPrev)); tasks.push(fetchHierarchy(ymCur)) }
-    else if (!isVendeur) { tasks.push(Promise.resolve({ ok: true, map: {} })); tasks.push(fetchHierarchy(ymCur)) }
+    if (canEdit) tasks.push(fetchRealise(ymPrev))
     const out = await Promise.all(tasks)
     data = out[0]; const rc = out[1]; realCur = rc.map; realOk = rc.ok
     if (out[2]) realM1 = out[2].map || {}
