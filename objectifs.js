@@ -1,5 +1,13 @@
 // ============================================================================
 //  OBJECTIFS — module One Data (OD.define)  v1 (checklist)
+//  v7 (23/09/2026) PROFIL TEAM COLIN : sur le tenant onedata-teamcolin
+//  (ref ieztupavcdnubmpbjvuq), les indicateurs saisis sont ceux du reporting
+//  « COMMANDE 2026 » — Cde, FI, Pro, PHEV/EV, VU, Kinto, Arval — lus dans
+//  v_objectifs_tc et le réalisé dans v_performances_tc. Cde et FI restent
+//  stockés dans OBJECTIF ; les cinq autres dans la table objectif_kpi
+//  (upsert PostgREST au moment de l'enregistrement).
+//  Tous les autres tenants gardent strictement le comportement précédent.
+//  Forçage manuel pour tester ailleurs : window.__OD_PERF_PROFILE__ = 'teamcolin'
 //  Rendu dans __anchor ; SUPABASE_URL/KEY -> ctx.tenant ; getUserJwt() ->
 //  session du client runtime ; doc -> __anchor.ownerDocument. User = oropraUser.
 //  Périmètre 100% v_mon_perimetre (VAR_SITES retirée). 0 vestige.
@@ -55,10 +63,33 @@ function getSitesIds() {
   return perimSites;   // périmètre depuis v_mon_perimetre (VAR_SITES retirée)
 }
 
-const PERF_VIEW = 'v_performances_v2'
-const REAL_FIELDS = { commandes: 'commandes_realisees', financements: 'financements_realises', contrat_service: 'contrats_service_realises', waxoyl: 'waxoyls_realises', gravage: 'gravages_realises' }
-const FIELDS = ['commandes', 'gravage', 'financements', 'contrat_service', 'waxoyl', 'contacts_jour']
-const SECONDARY = [{ k: 'financements', label: 'Financement' }, { k: 'contrat_service', label: 'CS' }, { k: 'waxoyl', label: 'Waxoyl' }, { k: 'gravage', label: 'Gravage' }]
+// --- PROFIL TENANT ------------------------------------------------------------
+// Team Colin est reconnu par la ref de son projet Supabase. Aucun autre tenant
+// n'est concerné : tout ce qui suit retombe sur les constantes historiques.
+const TC_REF = 'ieztupavcdnubmpbjvuq'
+const IS_TC = (function () {
+  try {
+    if (window.__OD_PERF_PROFILE__ === 'teamcolin') return true
+    const t = ctx.tenant || {}
+    if (String(t.supabase_url || '').indexOf(TC_REF) !== -1) return true
+    const slug = String(t.slug || t.code || t.tenant_slug || t.name || '').toLowerCase().replace(/[^a-z]/g, '')
+    return slug === 'teamcolin'
+  } catch (e) { return false }
+})()
+
+const PERF_VIEW = IS_TC ? 'v_performances_tc' : 'v_performances_v2'
+const OBJ_VIEW = IS_TC ? 'v_objectifs_tc' : 'v_objectifs'
+// Colonnes portées par la table OBJECTIF (PATCH direct) et, pour Team Colin,
+// colonnes portées par objectif_kpi (upsert séparé).
+const OBJ_TABLE_FIELDS = IS_TC ? ['commandes', 'financements'] : ['commandes', 'gravage', 'financements', 'contrat_service', 'waxoyl', 'contacts_jour']
+const KPI_TABLE_FIELDS = IS_TC ? ['pro', 'phev_ev', 'vu', 'kinto', 'arval'] : []
+const REAL_FIELDS = IS_TC
+  ? { commandes: 'commandes_realisees', financements: 'financements_realises', pro: 'pro_realises', phev_ev: 'phev_ev_realises', vu: 'vu_realises', kinto: 'kinto_realises', arval: 'arval_realises' }
+  : { commandes: 'commandes_realisees', financements: 'financements_realises', contrat_service: 'contrats_service_realises', waxoyl: 'waxoyls_realises', gravage: 'gravages_realises' }
+const FIELDS = OBJ_TABLE_FIELDS.concat(KPI_TABLE_FIELDS)
+const SECONDARY = IS_TC
+  ? [{ k: 'financements', label: 'FI' }, { k: 'pro', label: 'Pro' }, { k: 'phev_ev', label: 'PHEV / EV' }, { k: 'vu', label: 'VU' }, { k: 'kinto', label: 'Kinto' }, { k: 'arval', label: 'Arval' }]
+  : [{ k: 'financements', label: 'Financement' }, { k: 'contrat_service', label: 'CS' }, { k: 'waxoyl', label: 'Waxoyl' }, { k: 'gravage', label: 'Gravage' }]
 
 const userConnected = ((wwLib.getFrontWindow && wwLib.getFrontWindow()) || window).oropraUser
 const role = Number(userConnected?.ID_Role)
@@ -85,8 +116,12 @@ window.__objState = state
 
 let data = [], realCur = {}, realM1 = {}, realOk = true, siteMeta = {}, userMeta = {}, originalSnap = {}, loading = false
 const MOIS_NOMS = ['Janvier', 'Février', 'Mars', 'Avril', 'Mai', 'Juin', 'Juillet', 'Août', 'Septembre', 'Octobre', 'Novembre', 'Décembre']
-const GKEYS = [{ k: 'commandes', label: 'Commandes' }, { k: 'gravage', label: 'Gravages' }, { k: 'financements', label: 'Financements' }, { k: 'contrat_service', label: 'CS' }, { k: 'waxoyl', label: 'Waxoyl' }, { k: 'contacts_jour', label: 'Contacts/j' }]
-const KPIS_SUIVI = [{ k: 'commandes', label: 'Commandes' }, { k: 'financements', label: 'Financements' }, { k: 'contrat_service', label: 'Contrat de service' }, { k: 'waxoyl', label: 'Waxoyl' }, { k: 'gravage', label: 'Gravage' }]
+const GKEYS = IS_TC
+  ? [{ k: 'commandes', label: 'Cde' }, { k: 'financements', label: 'FI' }, { k: 'pro', label: 'Pro' }, { k: 'phev_ev', label: 'PHEV / EV' }, { k: 'vu', label: 'VU' }, { k: 'kinto', label: 'Kinto' }, { k: 'arval', label: 'Arval' }]
+  : [{ k: 'commandes', label: 'Commandes' }, { k: 'gravage', label: 'Gravages' }, { k: 'financements', label: 'Financements' }, { k: 'contrat_service', label: 'CS' }, { k: 'waxoyl', label: 'Waxoyl' }, { k: 'contacts_jour', label: 'Contacts/j' }]
+const KPIS_SUIVI = IS_TC
+  ? [{ k: 'commandes', label: 'Commandes' }, { k: 'financements', label: 'Financement' }, { k: 'pro', label: 'Pro' }, { k: 'phev_ev', label: 'PHEV / EV' }, { k: 'vu', label: 'VU' }, { k: 'kinto', label: 'Kinto' }, { k: 'arval', label: 'Arval' }]
+  : [{ k: 'commandes', label: 'Commandes' }, { k: 'financements', label: 'Financements' }, { k: 'contrat_service', label: 'Contrat de service' }, { k: 'waxoyl', label: 'Waxoyl' }, { k: 'gravage', label: 'Gravage' }]
 
 // --- nombres / dates ---
 function num(v) { if (v == null) return 0; if (typeof v === 'number') return isNaN(v) ? 0 : v; const n = parseFloat(String(v).replace(',', '.').trim()); return isNaN(n) ? 0 : n }
@@ -101,7 +136,7 @@ function joursOuvresRestants(a, m) { const deb = new Date(a, m - 1, 1), fin = ne
 // --- fetch ---
 async function fetchObjectifs() {
   const sites = getSitesIds()
-  let url = SUPABASE_URL + '/rest/v1/v_objectifs?annee=eq.' + state.annee + '&mois=eq.' + state.mois
+  let url = SUPABASE_URL + '/rest/v1/' + OBJ_VIEW + '?annee=eq.' + state.annee + '&mois=eq.' + state.mois
   if (sites.length) url += '&id_site=in.(' + sites.join(',') + ')'
   const jwt = getUserJwt()
   const res = await fetch(url, { headers: { 'apikey': SUPABASE_KEY, 'Authorization': 'Bearer ' + (jwt || SUPABASE_KEY) } })
@@ -164,9 +199,13 @@ async function saveDraft(btn) {
   const withId = rows.filter(function (r) { return r.id_objectif != null }), without = rows.filter(function (r) { return r.id_objectif == null })
   let okN = 0, errN = 0, refusN = 0
   await Promise.all(withId.map(async function (r) {
-    const body = {}; FIELDS.forEach(function (f) { body[f] = parseInt(r[f]) || 0 })
+    const body = {}; OBJ_TABLE_FIELDS.forEach(function (f) { body[f] = parseInt(r[f]) || 0 })
     try {
       const jwt = getUserJwt()
+      // Les KPI propres à Team Colin vivent dans objectif_kpi : upsert d'abord,
+      // pour que l'échec éventuel soit compté comme une erreur de la ligne.
+      let kpiOk = true
+      if (KPI_TABLE_FIELDS.length) kpiOk = await saveKpiRow(r, jwt)
       const res = await fetch(SUPABASE_URL + '/rest/v1/OBJECTIF?id_objectif=eq.' + r.id_objectif, { method: 'PATCH', headers: { 'apikey': SUPABASE_KEY, 'Authorization': 'Bearer ' + (jwt || SUPABASE_KEY), 'Content-Type': 'application/json', 'Prefer': 'return=representation' }, body: JSON.stringify(body) })
       // return=representation renvoie les lignes RÉELLEMENT modifiées.
       // Une policy RLS qui ne matche pas filtre sans lever d'erreur : res.ok
@@ -174,8 +213,10 @@ async function saveDraft(btn) {
       // jeton pendant quatre mois — on compte donc les lignes, pas le statut.
       let modif = []
       if (res.ok) { try { modif = await res.json() } catch (e) { modif = [] } }
-      if (res.ok && Array.isArray(modif) && modif.length) {
+      if (res.ok && Array.isArray(modif) && modif.length && kpiOk) {
         okN++; const o = {}; FIELDS.forEach(function (f) { o[f] = num(r[f]) }); originalSnap[rowKey(r)] = o
+      } else if (res.ok && !kpiOk) {
+        errN++; console.error('objectif_kpi non enregistré', r.id_user, r.vn_vo)
       } else if (res.ok) {
         refusN++; console.warn('PATCH OBJECTIF refusé (droits insuffisants)', r.id_objectif)
       } else {
@@ -189,6 +230,25 @@ async function saveDraft(btn) {
   if (without.length) pb.push(without.length + ' sans id_objectif non créés')
   state._saveMsg = (okN ? ('Objectifs enregistrés (' + okN + ')') : 'Aucun objectif enregistré') + (pb.length ? (' · ' + pb.join(' · ')) : '')
   btn.textContent = old; btn.disabled = false; renderObj()
+}
+
+// Upsert des KPI Team Colin (une ligne par indicateur dans objectif_kpi).
+// PostgREST : POST + on_conflict + Prefer resolution=merge-duplicates.
+async function saveKpiRow(r, jwt) {
+  const rows = KPI_TABLE_FIELDS.map(function (f) {
+    return { annee: state.annee, mois: state.mois, id_user: r.id_user, id_site: r.id_site, vn_vo: String(r.vn_vo).toUpperCase(), kpi: f, valeur: parseInt(r[f]) || 0 }
+  })
+  try {
+    const res = await fetch(SUPABASE_URL + '/rest/v1/objectif_kpi?on_conflict=annee,mois,id_user,id_site,vn_vo,kpi', {
+      method: 'POST',
+      headers: { 'apikey': SUPABASE_KEY, 'Authorization': 'Bearer ' + (jwt || SUPABASE_KEY), 'Content-Type': 'application/json', 'Prefer': 'resolution=merge-duplicates,return=representation' },
+      body: JSON.stringify(rows)
+    })
+    if (!res.ok) { console.error('objectif_kpi HTTP ' + res.status); return false }
+    let out = []; try { out = await res.json() } catch (e) { out = [] }
+    // Zéro ligne renvoyée = policy RLS qui ne matche pas (même piège que OBJECTIF).
+    return Array.isArray(out) && out.length === rows.length
+  } catch (e) { console.error('objectif_kpi', e); return false }
 }
 
 // --- cap d'équipe ---
@@ -227,7 +287,7 @@ async function reconduireM1Draft(btn) {
   try {
     const u = [...new Set(rows.map(function (r) { return r.id_user }))].join(','), si = [...new Set(rows.map(function (r) { return r.id_site }))].join(',')
     const jwt = getUserJwt()
-    const res = await fetch(SUPABASE_URL + '/rest/v1/OBJECTIF?annee=eq.' + p.annee + '&mois=eq.' + p.mois + '&id_site=in.(' + si + ')&id_user=in.(' + u + ')&select=id_user,id_site,vn_vo,' + FIELDS.join(','), { headers: { 'apikey': SUPABASE_KEY, 'Authorization': 'Bearer ' + (jwt || SUPABASE_KEY) } })
+    const res = await fetch(SUPABASE_URL + '/rest/v1/' + OBJ_VIEW + '?annee=eq.' + p.annee + '&mois=eq.' + p.mois + '&id_site=in.(' + si + ')&id_user=in.(' + u + ')&select=id_user,id_site,vn_vo,' + FIELDS.join(','), { headers: { 'apikey': SUPABASE_KEY, 'Authorization': 'Bearer ' + (jwt || SUPABASE_KEY) } })
     const prev = await res.json()
     if (!Array.isArray(prev) || !prev.length) { btn.textContent = 'Aucun objectif M-1'; setTimeout(function () { btn.textContent = old; btn.disabled = false }, 2000); return }
     rows.forEach(function (cur) { const pr = prev.find(function (x) { return x.id_user === cur.id_user && String(x.id_site) === String(cur.id_site) && String(x.vn_vo).toUpperCase() === String(cur.vn_vo).toUpperCase() }); if (pr) FIELDS.forEach(function (f) { if (pr[f] !== undefined) cur[f] = pr[f] }) })
@@ -573,7 +633,7 @@ function renderTree(rootEl, doc) {
   const td0 = doc.createElement('td'); td0.style.cssText = 'padding:7px 8px;color:#2a5ea9;font-weight:500;font-size:12px'; td0.textContent = 'Total — ' + (state.vnvo === 'VNVO' ? 'VN + VO' : state.vnvo); tr.appendChild(td0)
   GKEYS.forEach(function (k) { tr.appendChild(sumTd(tot[k.k], '#2a5ea9', 500)) }); ft.appendChild(tr); table.appendChild(ft)
   table.style.display = 'table'
-  table.style.minWidth = '770px'
+  table.style.minWidth = (230 + GKEYS.length * 90 + 20) + 'px'
   const objScroll = doc.createElement('div')
   objScroll.style.cssText = 'overflow-x:auto;-webkit-overflow-scrolling:touch;max-width:100%'
   objScroll.appendChild(table)
@@ -605,7 +665,7 @@ function renderVendeur(rootEl, doc) {
     grid.appendChild(card)
   }
   rootEl.appendChild(grid)
-  const cj = aggObjectif('contacts_jour')
+  const cj = IS_TC ? 0 : aggObjectif('contacts_jour')
   if (cj > 0) { const ref = doc.createElement('div'); ref.style.cssText = 'background:#fff;border:0.5px solid #eaf0f9;border-radius:10px;padding:12px 16px;margin-top:12px;display:flex;align-items:center;justify-content:space-between'; ref.innerHTML = '<span style="font-size:12px;color:#7a9cc4">Objectif de contacts par jour</span><span style="font-size:18px;font-weight:500;color:#2a5ea9">' + Math.round(cj) + ' / jour</span>'; rootEl.appendChild(ref) }
   const note = doc.createElement('div'); note.style.cssText = 'font-size:11px;color:#acc5e4;margin-top:12px;text-align:center'; note.textContent = 'Le trait bleu sur chaque barre marque le rythme attendu au prorata du mois.'; rootEl.appendChild(note)
 }
