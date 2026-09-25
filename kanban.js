@@ -98,10 +98,14 @@ OD.define('kanban', {
   // demande d'approbation — se fait dans BACS ; seul le chef transmet /
   // valide ou abandonne une commande en demande d'approbation. Aucun retour
   // en arrière à la main : One Data et BACS divergeraient.
+  // 25/09 : le seul deplacement autorise a la main est simulation -> commande.
+  // Tout le reste (edition, approbation, transmission, abandon) se fait dans
+  // BACS ; One Data reflete. Un glisser-deposer de plus ferait diverger les
+  // deux outils.
   const TRANSITIONS_BACS = {
-    draft: { propale: 'V', lose: 'V' },
-    propale: { lose: 'V' },
-    bdc: { win: 'M', lose: 'M' },
+    draft: { propale: 'V' },
+    propale: {},
+    bdc: {},
     win: {},
     lose: {}
   };
@@ -543,8 +547,16 @@ OD.define('kanban', {
       const list = cardsOf(col.key);
       const total = list.reduce((s, c) => s + (c.montant || 0), 0);
       const conv = conversion(idx);
+      // Compteur : une carte regroupe les documents d'une meme affaire. On
+      // affiche donc le nombre d'AFFAIRES (= cartes = opportunites) et, entre
+      // parentheses, le nombre de DOCUMENTS reels (simulations ou commandes).
+      const nbAffaires = list.length;
+      const nbDocs = list.reduce((s, c) => s + Math.max(1, Number(c.nb_versions || 1)), 0);
+      const compteur = (nbDocs > nbAffaires)
+        ? nbAffaires + '<span class="kc-n-docs">/' + nbDocs + '</span>'
+        : String(nbAffaires);
       h += '<div class="kan-col" data-col="' + col.key + '">';
-      h += '<div class="kc-head kc-' + col.key + '"><div class="kc-title"><span class="kc-dot"></span>' + esc(col.label) + '<span class="kc-n">' + list.length + '</span></div><div class="kc-sum">' + eur(total) + (conv != null ? '<span class="kc-conv">' + conv + '% ↗</span>' : '') + '</div></div>';
+      h += '<div class="kc-head kc-' + col.key + '"><div class="kc-title"><span class="kc-dot"></span>' + esc(col.label) + '<span class="kc-n" title="' + nbAffaires + ' affaire(s), ' + nbDocs + ' document(s)">' + compteur + '</span></div><div class="kc-sum">' + eur(total) + (conv != null ? '<span class="kc-conv">' + conv + '% ↗</span>' : '') + '</div></div>';
       h += '<div class="kc-body">';
       if (!list.length) h += '<div class="kc-empty">—</div>';
       list.forEach(c => { h += renderCard(c); });
@@ -649,16 +661,21 @@ OD.define('kanban', {
     }
 
     h += '<div class="kc-actions">';
-    if (isPdf) h += '<button class="kc-ic" data-pdf="' + c.id_propale_bdc + ':' + pdfType + '" data-maj="' + esc(c.maj || '') + '" title="PDF">' + ICON_PDF + '</button>';
+    // 25/09 : plus de bouton PDF sur les cartes — le document de reference est
+    // celui de BACS, qu'on ouvre par le bouton « B ».
     // La consultation vaut aussi pour une COMMANDE : c'est le document qu'on a
     // le plus de raisons de relire. En VN elle reste une lecture — le
     // configurateur est chez le constructeur, One Data reflete.
-    if (c.status === 'propale' || c.status === 'draft' || c.status === 'bdc') {
+    // 25/09 : la loupe est disponible sur TOUTES les colonnes — une commande
+    // transmise ou abandonnee se consulte autant qu'une simulation. Sur une
+    // carte plurale, c'est la liste des versions qui donne acces a chacune.
+    if (!vnMulti) {
       if (deBacs) {
-        // Document du constructeur : One Data reflete, il ne modifie pas.
-        if (!vnMulti) h += '<button class="kc-ic" data-modif="' + c.id_propale_bdc + '" title="Consulter">' + ICON_SEARCH_VN + '</button>';
-      } else if (c.status !== 'bdc') {
+        h += '<button class="kc-ic" data-modif="' + c.id_propale_bdc + '" title="Consulter">' + ICON_SEARCH_VN + '</button>';
+      } else if (c.status === 'propale' || c.status === 'draft') {
         h += '<button class="kc-ic" data-modif="' + c.id_propale_bdc + '" title="Modifier">' + ICON_EDIT + '</button>';
+      } else {
+        h += '<button class="kc-ic" data-modif="' + c.id_propale_bdc + '" title="Consulter">' + ICON_SEARCH_VN + '</button>';
       }
     }
     // Une affaire qui porte deja une commande ne peut pas etre abandonnee dans
@@ -672,7 +689,11 @@ OD.define('kanban', {
     // de la liste qui tranchent, une commande a la fois.
     const cmdUnitaire = (c.nature === 'commande' && !!c.bacs_sf_id
                          && /^801/.test(String(c.bacs_sf_id)) && Number(c.nb_versions || 1) <= 1);
-    if ((canArchive(c.status) && abandonPossible) || cmdUnitaire)
+    // 25/09 : la corbeille n'existe QUE dans les colonnes Simulations et
+    // Commandes. Au-dela (approbation lancee, transmise, abandonnee), c'est
+    // BACS qui tranche.
+    const colonneAvecCorbeille = (c.status === 'draft' || c.status === 'propale');
+    if (colonneAvecCorbeille && ((canArchive(c.status) && abandonPossible) || cmdUnitaire))
       h += '<button class="kc-ic" data-archive="' + c.id_propale_bdc + '" title="'
          + (cmdUnitaire ? 'Abandonner la commande' : 'Archiver') + '">' + ICON_TRASH + '</button>';
     // Renvoi vers BACS : l'affaire si la carte est plurale (plusieurs documents),
@@ -2875,6 +2896,9 @@ OD.define('kanban', {
     '#kanban-root .kc-win .kc-dot{background:#53bda7}' +
     '#kanban-root .kc-lose .kc-dot{background:#d97070}' +
     '#kanban-root .kc-n{margin-left:auto;font-size:12px;font-weight:700;color:#888780;background:#fff;border-radius:20px;padding:1px 9px}' +
+    // Nombre de documents (simulations / commandes) quand il depasse le nombre
+    // d'affaires : une carte peut en regrouper plusieurs.
+    '#kanban-root .kc-n-docs{font-weight:600;color:#b4b1a9;margin-left:1px}' +
     '#kanban-root .kc-sum{font-size:12px;color:#888780;margin-top:3px;display:flex;align-items:center;gap:8px}' +
     '#kanban-root .kc-conv{color:#2c7a68;font-weight:700}' +
     '#kanban-root .kc-body{display:flex;flex-direction:column;gap:8px;min-height:40px}' +
