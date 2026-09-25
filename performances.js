@@ -12,6 +12,10 @@
 //  chef des ventes : elles sont désormais isolables au lieu d'être noyées dans
 //  des totaux sans objectif en face. Le segment vient de la colonne `segment`
 //  de v_performances_tc, alimentée par la table vendeur_segment.
+//  v4.9 (25/09/2026) : le graphique d'atteinte juge chaque vendeur sur SON
+//  objectif. Un vendeur société n'a pas d'objectif de commandes mais un
+//  objectif Pro : il était affiché « sans objectif », il l'est désormais sur
+//  Pro, avec l'indicateur retenu en suffixe de son nom.
 //  (la vue v_performances_tc doit alors exister sur le tenant).
 //  Rendu dans __anchor ; SUPABASE_URL/clé/JWT via ctx (tenant + session runtime) ;
 //  gardes arguments.callee et ensureRenderedPerf retirés (le loader possède le
@@ -60,7 +64,7 @@ OD.define('performances', {
 
   const doc = __anchor.ownerDocument || document;
   function getRoot() { return __anchor; }
-  try { window.__perfVer = 'v4.8-teamcolin'; } catch (e) { }
+  try { window.__perfVer = 'v4.9-teamcolin'; } catch (e) { }
 
   // --- PROFIL TENANT -----------------------------------------------------------
   // Team Colin est reconnu par la ref de son projet Supabase (source sûre), ou
@@ -1125,7 +1129,7 @@ OD.define('performances', {
     const rows = rowsForSelection();
     const d = effectiveChildDim(rows);
     if (d.dim === 'kpi') return 'Atteinte par indicateur';
-    return 'Atteinte commandes par ' + d.title;
+    return IS_TC ? ('Atteinte de l\'objectif par ' + d.title) : ('Atteinte commandes par ' + d.title);
   }
   function chart2Data(rows) {
     const d = effectiveChildDim(rows);
@@ -1138,18 +1142,22 @@ OD.define('performances', {
         obj: KPIS_OBJ.map(k => num(a[k.o]))
       };
     }
+    // Chaque vendeur est jugé sur SON objectif : les commandes quand il en a
+    // un, sinon l'indicateur sur lequel son objectif porte réellement — un
+    // vendeur société n'a pas d'objectif de commandes mais un objectif Pro.
     const m = {};
     for (const r of rows) {
       const k = d.keyFn(r); if (k == null || k === '') continue;
-      if (!m[k]) m[k] = { label: d.labelFn(r), rea: 0, obj: 0 };
-      m[k].rea += num(r.commandes_realisees);
-      m[k].obj += num(r.objectif_commandes);
+      if (!m[k]) { m[k] = { label: d.labelFn(r) }; for (const kp of KPIS_OBJ) m[k][kp.r] = 0, m[k][kp.o] = 0; }
+      for (const kp of KPIS_OBJ) { m[k][kp.r] += num(r[kp.r]); m[k][kp.o] += num(r[kp.o]); }
     }
-    // Un vendeur sans objectif tombait à 0 % : barre vide alors qu'il a vendu.
-    // On le signale au lieu de le laisser passer pour un vendeur à zéro.
-    const arr = Object.values(m)
-      .map(x => ({ label: x.obj > 0 ? x.label : x.label + ' · sans objectif', p: pct(x.rea, x.obj), rea: x.rea, obj: x.obj }))
-      .sort((a, b) => (b.obj > 0) - (a.obj > 0) || b.p - a.p || b.rea - a.rea).slice(0, 15);
+    const arr = Object.values(m).map(x => {
+      let kp = KPIS_OBJ[0];
+      if (num(x[kp.o]) <= 0) kp = KPIS_OBJ.find(z => num(x[z.o]) > 0) || kp;
+      const rea = num(x[kp.r]), obj = num(x[kp.o]);
+      const suffixe = obj <= 0 ? ' · sans objectif' : (kp === KPIS_OBJ[0] ? '' : ' · ' + kp.label);
+      return { label: x.label + suffixe, p: pct(rea, obj), rea: rea, obj: obj };
+    }).sort((a, b) => (b.obj > 0) - (a.obj > 0) || b.p - a.p || b.rea - a.rea).slice(0, 15);
     return {
       labels: arr.map(x => x.label),
       values: arr.map(x => x.p),
