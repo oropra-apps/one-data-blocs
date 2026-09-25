@@ -13,6 +13,10 @@
 //  supprimée (elle coûtait un balayage complet de plus et laissait « Site 11 »
 //  quand elle échouait). Grille des taux corrigée (les libellés se chevauchaient)
 //  et tableau resserré.
+//  v9 (25/09/2026) : les vendeurs grands comptes (table vendeur_segment,
+//  colonne `segment` de v_objectifs_tc) sont écartés de la saisie — pas
+//  d'objectifs pour les grands comptes. Ils restent suivis dans Performances
+//  via le sélecteur d'activité.
 //  Rendu dans __anchor ; SUPABASE_URL/KEY -> ctx.tenant ; getUserJwt() ->
 //  session du client runtime ; doc -> __anchor.ownerDocument. User = oropraUser.
 //  Périmètre 100% v_mon_perimetre (VAR_SITES retirée). 0 vestige.
@@ -702,7 +706,10 @@ async function boot() {
     const tasks = [fetchObjectifs(), fetchRealise(ymCur)]
     if (canEdit) tasks.push(fetchRealise(ymPrev))
     const out = await Promise.all(tasks)
-    data = out[0]; const rc = out[1]; realCur = rc.map; realOk = rc.ok
+    data = out[0]
+    // Pas d'objectifs pour les grands comptes : on les sort de la saisie.
+    if (IS_TC) data = data.filter(r => (r.segment || 'reseau') !== 'grand_compte')
+    const rc = out[1]; realCur = rc.map; realOk = rc.ok
     if (out[2]) realM1 = out[2].map || {}
     siteMeta = {}; userMeta = {}; const h = out[3]; if (h) { siteMeta = h.sites || {}; userMeta = h.users || {} }
     enrichRows(); snapshot(); state.cap = null
