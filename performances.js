@@ -7,6 +7,11 @@
 //  Gravage, Reprises, Accessoires HT). Tous les autres tenants gardent
 //  strictement le comportement v4.4 (v_performances_v2, 5 KPI).
 //  Forçage manuel pour tester ailleurs : window.__OD_PERF_PROFILE__ = 'teamcolin'
+//  v4.8 (25/09/2026) : sélecteur « Réseau / Grands comptes / Tous » sur le
+//  profil Team Colin. Les ventes sociétés sont volontairement hors du suivi du
+//  chef des ventes : elles sont désormais isolables au lieu d'être noyées dans
+//  des totaux sans objectif en face. Le segment vient de la colonne `segment`
+//  de v_performances_tc, alimentée par la table vendeur_segment.
 //  (la vue v_performances_tc doit alors exister sur le tenant).
 //  Rendu dans __anchor ; SUPABASE_URL/clé/JWT via ctx (tenant + session runtime) ;
 //  gardes arguments.callee et ensureRenderedPerf retirés (le loader possède le
@@ -55,7 +60,7 @@ OD.define('performances', {
 
   const doc = __anchor.ownerDocument || document;
   function getRoot() { return __anchor; }
-  try { window.__perfVer = 'v4.5-teamcolin'; } catch (e) { }
+  try { window.__perfVer = 'v4.8-teamcolin'; } catch (e) { }
 
   // --- PROFIL TENANT -----------------------------------------------------------
   // Team Colin est reconnu par la ref de son projet Supabase (source sûre), ou
@@ -111,6 +116,7 @@ OD.define('performances', {
   // --- État -------------------------------------------------------------------
   const state = window.__perf || {};
   if (state.vnvo === undefined) state.vnvo = 'ALL';   // ALL | VN | VO
+  if (state.segment === undefined) state.segment = 'reseau';  // reseau | grand_compte | ALL
   if (state.mois === undefined) state.mois = 'ALL';   // ALL | 'YYYY-MM'
   if (state.selection === undefined) state.selection = { level: 'all', key: null, label: 'Tout le périmètre' };
   if (state.expanded === undefined) state.expanded = {};
@@ -337,11 +343,15 @@ OD.define('performances', {
   async function getUserJwt() { try { const s = await ctx.supabase.auth.getSession(); return s?.data?.session?.access_token || null; } catch (e) { return null; } }
 
   // --- Filtrage : VN/VO + mois + périmètre --------------------------------------
+  function segOk(r) {
+    if (!IS_TC || state.segment === 'ALL') return true;
+    return (r.segment || 'reseau') === state.segment;
+  }
   function baseRows() {
     let rows = allRawData;
     if (state.vnvo !== 'ALL') rows = rows.filter(r => r.vn_vo === state.vnvo);
     if (state.mois !== 'ALL') rows = rows.filter(r => r.periode_ym === state.mois);
-    return rows;
+    return rows.filter(segOk);
   }
   function moisDispos() {
     const set = new Set();
@@ -380,7 +390,7 @@ OD.define('performances', {
   }
   function rowsForSelection() { return filterByEntity(baseRows(), state.selection.level, state.selection.key); }
   function rowsScopeNoMois() {
-    let rows = allRawData;
+    let rows = allRawData.filter(segOk);
     if (state.vnvo !== 'ALL') rows = rows.filter(r => r.vn_vo === state.vnvo);
     return filterByEntity(rows, state.selection.level, state.selection.key);
   }
@@ -494,7 +504,7 @@ OD.define('performances', {
 #perf-root .pf-tree th.th-libre { background:#f3f7fc; }
 #perf-root .pf-tree td.td-libre { background:rgba(230,241,251,.25); }
 #perf-root .pf-cell.libre { min-width:70px; }
-#perf-root .pf-chart-wrap-tc { position:relative; height:220px; min-width:0; }
+#perf-root .pf-chart-wrap-tc { position:relative; height:320px; min-width:0; }
 
 #perf-root .pf-charts { display:grid; grid-template-columns:1fr 1fr; gap:16px; margin-bottom:16px; }
 #perf-root .pf-charts > * { min-width:0; }   /* sans ça, les cellules de grille ne rétrécissent pas -> le canvas déborde */
@@ -798,6 +808,14 @@ OD.define('performances', {
     for (const o of [{ k: 'ALL', l: 'Tous' }, { k: 'VN', l: 'VN' }, { k: 'VO', l: 'VO' }, { k: 'VNVO', l: 'VNVO' }])
       html += '<button type="button" class="' + (state.vnvo === o.k ? 'active' : '') + '" data-vnvo="' + o.k + '">' + o.l + '</button>';
     html += '</div>';
+    if (IS_TC) {
+      html += '<span class="pf-sep"></span>';
+      html += '<span class="pf-label">Activité</span>';
+      html += '<div class="pf-toggle">';
+      for (const o of [{ k: 'reseau', l: 'Réseau' }, { k: 'grand_compte', l: 'Grands comptes' }, { k: 'ALL', l: 'Tous' }])
+        html += '<button type="button" class="' + (state.segment === o.k ? 'active' : '') + '" data-seg="' + o.k + '" title="Les ventes sociétés sont suivies à part : elles n\'ont pas d\'objectif dans le fichier du chef des ventes">' + o.l + '</button>';
+      html += '</div>';
+    }
     html += '<span class="pf-sep"></span>';
     html += '<button type="button" class="pf-ico-btn" id="pf-export" title="Exporter en Excel">' +
       '<svg width="22" height="22" viewBox="0 0 24 24" aria-hidden="true">' +
@@ -841,7 +859,9 @@ OD.define('performances', {
     if (state.compare.active) html += renderCompare();
 
     html += '<div class="pf-card">';
-    html += shead('var(--blue-dk)', 'Performance — ' + scopeLabel, periodResume(curDeb, curFin) + ' · vs ' + Math.round(__prorata * 100) + '% du mois');
+    const segTxt = (IS_TC && state.segment !== 'ALL')
+      ? ' · ' + (state.segment === 'grand_compte' ? 'grands comptes' : 'réseau (hors grands comptes)') : '';
+    html += shead('var(--blue-dk)', 'Performance — ' + scopeLabel, periodResume(curDeb, curFin) + ' · vs ' + Math.round(__prorata * 100) + '% du mois' + segTxt);
     html += '<div class="pf-kpi-grid' + (IS_TC ? ' tc' : '') + '">';
     for (const k of KPIS_OBJ) {
       // Meme regle que l'arbre : le realise est le VOLUME TOTAL du perimetre.
@@ -888,8 +908,9 @@ OD.define('performances', {
     html += '<div class="pf-card" style="margin-bottom:0">' + shead('var(--green)', chart2Title()) + '<div class="pf-chart-wrap"><canvas id="pf-c2"></canvas></div></div>';
     html += '</div>';
     if (IS_TC) {
+      const nTc = KPIS.filter(k => k !== KPI_CDE && k.mode !== 'euro').length;
       html += '<div class="pf-card">' + shead('var(--orange)', 'Taux d\'équipement — % des commandes', scopeLabel + (state.vnvo !== 'ALL' ? ' · ' + state.vnvo : '')) +
-        '<div class="pf-chart-wrap-tc"><canvas id="pf-c4"></canvas></div></div>';
+        '<div class="pf-chart-wrap-tc" style="height:' + (nTc * 26 + 46) + 'px"><canvas id="pf-c4"></canvas></div></div>';
     }
 
     if (mois.length > 1) {
@@ -1124,8 +1145,11 @@ OD.define('performances', {
       m[k].rea += num(r.commandes_realisees);
       m[k].obj += num(r.objectif_commandes);
     }
-    const arr = Object.values(m).map(x => ({ label: x.label, p: pct(x.rea, x.obj), rea: x.rea, obj: x.obj }))
-      .sort((a, b) => b.p - a.p).slice(0, 15);
+    // Un vendeur sans objectif tombait à 0 % : barre vide alors qu'il a vendu.
+    // On le signale au lieu de le laisser passer pour un vendeur à zéro.
+    const arr = Object.values(m)
+      .map(x => ({ label: x.obj > 0 ? x.label : x.label + ' · sans objectif', p: pct(x.rea, x.obj), rea: x.rea, obj: x.obj }))
+      .sort((a, b) => (b.obj > 0) - (a.obj > 0) || b.p - a.p || b.rea - a.rea).slice(0, 15);
     return {
       labels: arr.map(x => x.label),
       values: arr.map(x => x.p),
@@ -1198,11 +1222,13 @@ OD.define('performances', {
     const c2 = doc.getElementById('pf-c2');
     if (c2) {
       const d = chart2Data(rows);
-      const colors = d.values.map((v, i) => kpiColorPro(d.rea[i], d.obj[i]).bar);
+      const colors = d.values.map((v, i) => (num(d.obj[i]) <= 0 && num(d.rea[i]) > 0) ? '#cbd5e1' : kpiColorPro(d.rea[i], d.obj[i]).bar);
       const display = d.values.map((v, i) => {
         const o = num(d.obj[i]), r = num(d.rea[i]);
         if (o > 0 && r <= 0) return 4;
-        if (o <= 0 && r <= 0) return 0;
+        // Sans objectif, l'atteinte n'a pas de sens : barre grise minimale,
+        // le volume reste lisible dans l'infobulle.
+        if (o <= 0) return r > 0 ? 4 : 0;
         return v;
       });
       __c2 = new Chart(c2.getContext('2d'), {
@@ -1213,7 +1239,11 @@ OD.define('performances', {
           plugins: {
             legend: { display: false }, tooltip: {
               callbacks: {
-                label: i => { const j = i.dataIndex; return d.rea[j] + ' / ' + d.obj[j] + ' · ' + d.values[j] + '%'; }
+                label: i => {
+                  const j = i.dataIndex;
+                  if (num(d.obj[j]) <= 0) return d.rea[j] + ' commande(s) · pas d\'objectif fixé';
+                  return d.rea[j] + ' / ' + d.obj[j] + ' · ' + d.values[j] + '%';
+                }
               }
             }
           },
@@ -1429,6 +1459,7 @@ OD.define('performances', {
     const rangeBtn = root.querySelector('#pf-range');
     if (rangeBtn) rangeBtn.addEventListener('click', () => openRangePickerPf(rangeBtn));
     root.querySelectorAll('[data-vnvo]').forEach(b => b.addEventListener('click', () => { state.vnvo = b.getAttribute('data-vnvo'); render(); }));
+    root.querySelectorAll('[data-seg]').forEach(b => b.addEventListener('click', () => { state.segment = b.getAttribute('data-seg'); render(); }));
     root.querySelectorAll('[data-mois]').forEach(b => b.addEventListener('click', () => { state.mois = b.getAttribute('data-mois'); render(); }));
     const clear = root.querySelector('#pf-clear');
     if (clear) clear.addEventListener('click', () => { state.selection = { level: 'all', key: null, label: 'Tout le périmètre' }; render(); });
