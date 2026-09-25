@@ -16,6 +16,9 @@
 //  objectif. Un vendeur société n'a pas d'objectif de commandes mais un
 //  objectif Pro : il était affiché « sans objectif », il l'est désormais sur
 //  Pro, avec l'indicateur retenu en suffixe de son nom.
+//  v4.10 (25/09/2026) : en vue « Grands comptes », aucun objectif n'existe —
+//  les deux graphiques du haut passent en volumes (« Volume par indicateur »
+//  et « Commandes par vendeur ») au lieu d'afficher des barres vides.
 //  (la vue v_performances_tc doit alors exister sur le tenant).
 //  Rendu dans __anchor ; SUPABASE_URL/clé/JWT via ctx (tenant + session runtime) ;
 //  gardes arguments.callee et ensureRenderedPerf retirés (le loader possède le
@@ -64,7 +67,7 @@ OD.define('performances', {
 
   const doc = __anchor.ownerDocument || document;
   function getRoot() { return __anchor; }
-  try { window.__perfVer = 'v4.9-teamcolin'; } catch (e) { }
+  try { window.__perfVer = 'v4.10-teamcolin'; } catch (e) { }
 
   // --- PROFIL TENANT -----------------------------------------------------------
   // Team Colin est reconnu par la ref de son projet Supabase (source sûre), ou
@@ -908,7 +911,7 @@ OD.define('performances', {
     html += '</div>';
 
     html += '<div class="pf-charts">';
-    html += '<div class="pf-card" style="margin-bottom:0">' + shead('var(--blue-dk)', 'Réalisé vs Objectif') + '<div class="pf-chart-wrap"><canvas id="pf-c1"></canvas></div></div>';
+    html += '<div class="pf-card" style="margin-bottom:0">' + shead('var(--blue-dk)', modeVolume() ? 'Volume par indicateur' : 'Réalisé vs Objectif') + '<div class="pf-chart-wrap"><canvas id="pf-c1"></canvas></div></div>';
     html += '<div class="pf-card" style="margin-bottom:0">' + shead('var(--green)', chart2Title()) + '<div class="pf-chart-wrap"><canvas id="pf-c2"></canvas></div></div>';
     html += '</div>';
     if (IS_TC) {
@@ -1125,10 +1128,15 @@ OD.define('performances', {
     return { dim: chain[chain.length - 1], ...dimDef[chain[chain.length - 1]] };
   }
 
+  // En vue « Grands comptes », aucun objectif n'existe : comparer à zéro ou
+  // afficher des taux d'atteinte n'a aucun sens. On bascule les deux
+  // graphiques sur des volumes.
+  function modeVolume() { return IS_TC && state.segment === 'grand_compte'; }
   function chart2Title() {
     const rows = rowsForSelection();
     const d = effectiveChildDim(rows);
-    if (d.dim === 'kpi') return 'Atteinte par indicateur';
+    if (d.dim === 'kpi') return modeVolume() ? 'Volume par indicateur' : 'Atteinte par indicateur';
+    if (modeVolume()) return 'Commandes par ' + d.title;
     return IS_TC ? ('Atteinte de l\'objectif par ' + d.title) : ('Atteinte commandes par ' + d.title);
   }
   function chart2Data(rows) {
@@ -1157,7 +1165,7 @@ OD.define('performances', {
       const rea = num(x[kp.r]), obj = num(x[kp.o]);
       const suffixe = obj <= 0 ? ' · sans objectif' : (kp === KPIS_OBJ[0] ? '' : ' · ' + kp.label);
       return { label: x.label + suffixe, p: pct(rea, obj), rea: rea, obj: obj };
-    }).sort((a, b) => (b.obj > 0) - (a.obj > 0) || b.p - a.p || b.rea - a.rea).slice(0, 15);
+    }).sort((a, b) => modeVolume() ? (b.rea - a.rea) : ((b.obj > 0) - (a.obj > 0) || b.p - a.p || b.rea - a.rea)).slice(0, 15);
     return {
       labels: arr.map(x => x.label),
       values: arr.map(x => x.p),
@@ -1211,14 +1219,16 @@ OD.define('performances', {
       __c1 = new Chart(c1.getContext('2d'), {
         type: 'bar',
         data: {
-          labels: KPIS_OBJ.map(k => k.label), datasets: [
-            { label: 'Réalisé', data: KPIS_OBJ.map(k => agg[k.r]), backgroundColor: '#2a5ea9', borderRadius: 3, maxBarThickness: 28 },
-            { label: 'Objectif', data: KPIS_OBJ.map(k => agg[k.o]), backgroundColor: '#d4e3f5', borderRadius: 3, maxBarThickness: 28 }
-          ]
+          labels: KPIS_OBJ.map(k => k.label), datasets: modeVolume()
+            ? [{ label: 'Réalisé', data: KPIS_OBJ.map(k => volTotal(agg, k)), backgroundColor: '#2a5ea9', borderRadius: 3, maxBarThickness: 28 }]
+            : [
+              { label: 'Réalisé', data: KPIS_OBJ.map(k => agg[k.r]), backgroundColor: '#2a5ea9', borderRadius: 3, maxBarThickness: 28 },
+              { label: 'Objectif', data: KPIS_OBJ.map(k => agg[k.o]), backgroundColor: '#d4e3f5', borderRadius: 3, maxBarThickness: 28 }
+            ]
         },
         options: {
           responsive: true, maintainAspectRatio: false,
-          plugins: { legend: { position: 'top', labels: { font: { size: 10 }, color: '#4a6a8a', boxWidth: 10, usePointStyle: true } } },
+          plugins: { legend: { display: !modeVolume(), position: 'top', labels: { font: { size: 10 }, color: '#4a6a8a', boxWidth: 10, usePointStyle: true } } },
           scales: {
             x: { ticks: { font: { size: 10 }, color: '#7a9cc4' }, grid: { display: false } },
             y: { beginAtZero: true, ticks: { font: { size: 9 }, color: '#7a9cc4', precision: 0 }, grid: { color: '#eaf0f9' } }
@@ -1230,7 +1240,9 @@ OD.define('performances', {
     const c2 = doc.getElementById('pf-c2');
     if (c2) {
       const d = chart2Data(rows);
-      const colors = d.values.map((v, i) => (num(d.obj[i]) <= 0 && num(d.rea[i]) > 0) ? '#cbd5e1' : kpiColorPro(d.rea[i], d.obj[i]).bar);
+      const vol = modeVolume();
+      const colors = vol ? d.rea.map(() => '#2a5ea9')
+        : d.values.map((v, i) => (num(d.obj[i]) <= 0 && num(d.rea[i]) > 0) ? '#cbd5e1' : kpiColorPro(d.rea[i], d.obj[i]).bar);
       const display = d.values.map((v, i) => {
         const o = num(d.obj[i]), r = num(d.rea[i]);
         if (o > 0 && r <= 0) return 4;
@@ -1241,7 +1253,7 @@ OD.define('performances', {
       });
       __c2 = new Chart(c2.getContext('2d'), {
         type: 'bar',
-        data: { labels: d.labels, datasets: [{ label: '% atteinte', data: display, backgroundColor: colors, borderRadius: 3, maxBarThickness: 20 }] },
+        data: { labels: vol ? d.labels.map(l => l.replace(' · sans objectif', '')) : d.labels, datasets: [{ label: vol ? 'Commandes' : '% atteinte', data: vol ? d.rea : display, backgroundColor: colors, borderRadius: 3, maxBarThickness: 20 }] },
         options: {
           indexAxis: 'y', responsive: true, maintainAspectRatio: false,
           plugins: {
@@ -1249,6 +1261,7 @@ OD.define('performances', {
               callbacks: {
                 label: i => {
                   const j = i.dataIndex;
+                  if (vol) return d.rea[j] + ' commande(s)';
                   if (num(d.obj[j]) <= 0) return d.rea[j] + ' commande(s) · pas d\'objectif fixé';
                   return d.rea[j] + ' / ' + d.obj[j] + ' · ' + d.values[j] + '%';
                 }
@@ -1256,7 +1269,9 @@ OD.define('performances', {
             }
           },
           scales: {
-            x: { beginAtZero: true, suggestedMax: 100, ticks: { font: { size: 9 }, color: '#7a9cc4', callback: v => v + '%' }, grid: { color: '#eaf0f9' } },
+            x: vol
+              ? { beginAtZero: true, ticks: { font: { size: 9 }, color: '#7a9cc4', precision: 0 }, grid: { color: '#eaf0f9' } }
+              : { beginAtZero: true, suggestedMax: 100, ticks: { font: { size: 9 }, color: '#7a9cc4', callback: v => v + '%' }, grid: { color: '#eaf0f9' } },
             y: { ticks: { font: { size: 10 }, color: '#4a6a8a' }, grid: { display: false } }
           }
         }
