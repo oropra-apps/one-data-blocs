@@ -19,6 +19,9 @@
 //  v4.10 (25/09/2026) : en vue « Grands comptes », aucun objectif n'existe —
 //  les deux graphiques du haut passent en volumes (« Volume par indicateur »
 //  et « Commandes par vendeur ») au lieu d'afficher des barres vides.
+//  v4.11 (25/09/2026) : correctif export Excel — `await` manquant sur
+//  getUserJwt, l'appel à export-xslx partait avec un en-tête d'autorisation
+//  invalide (HTTP 401). Bug présent sur tous les tenants.
 //  (la vue v_performances_tc doit alors exister sur le tenant).
 //  Rendu dans __anchor ; SUPABASE_URL/clé/JWT via ctx (tenant + session runtime) ;
 //  gardes arguments.callee et ensureRenderedPerf retirés (le loader possède le
@@ -67,7 +70,7 @@ OD.define('performances', {
 
   const doc = __anchor.ownerDocument || document;
   function getRoot() { return __anchor; }
-  try { window.__perfVer = 'v4.10-teamcolin'; } catch (e) { }
+  try { window.__perfVer = 'v4.11-teamcolin'; } catch (e) { }
 
   // --- PROFIL TENANT -----------------------------------------------------------
   // Team Colin est reconnu par la ref de son projet Supabase (source sûre), ou
@@ -761,7 +764,9 @@ OD.define('performances', {
     btn.disabled = true; btn.classList.add('is-busy'); btn.classList.remove('is-err');
     try {
       if (!SUPABASE_KEY) SUPABASE_KEY = getSupabaseKey();
-      const jwt = getUserJwt();
+      // getUserJwt est asynchrone : sans await, l'en-tête valait
+      // « Bearer [object Promise] » et la passerelle renvoyait 401.
+      const jwt = await getUserJwt();
       const deb = String(getPeriode('deb') || '').slice(0, 10);
       const fin = String(getPeriode('fin') || '').slice(0, 10);
       const scope = (state.selection.level === 'all' ? 'perimetre' : state.selection.label)
