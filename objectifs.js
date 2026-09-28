@@ -17,6 +17,10 @@
 //  colonne `segment` de v_objectifs_tc) sont écartés de la saisie — pas
 //  d'objectifs pour les grands comptes. Ils restent suivis dans Performances
 //  via le sélecteur d'activité.
+//  v10 (28/09/2026) : la grille de saisie est préparée avant lecture (RPC
+//  objectifs_tc_preparer). Un vendeur VN reçoit une ligne VN, un vendeur VO
+//  une ligne VO, un vendeur polyvalent les deux — USER."VN_VO" décide. Les
+//  lignes restées à zéro ne s'affichent plus dans Performances.
 //  Rendu dans __anchor ; SUPABASE_URL/KEY -> ctx.tenant ; getUserJwt() ->
 //  session du client runtime ; doc -> __anchor.ownerDocument. User = oropraUser.
 //  Périmètre 100% v_mon_perimetre (VAR_SITES retirée). 0 vestige.
@@ -143,7 +147,28 @@ function prorataFor(a, m) { const deb = new Date(a, m - 1, 1), fin = new Date(a,
 function joursOuvresRestants(a, m) { const deb = new Date(a, m - 1, 1), fin = new Date(a, m, 0); let s = new Date(); if (s < deb) s = deb; if (s > fin) return 0; return joursOuvres(s, fin) }
 
 // --- fetch ---
+// Team Colin : la grille de saisie doit exister avant d'être lue. Un vendeur
+// VN reçoit une seule ligne VN, un vendeur VO une seule ligne VO, un vendeur
+// polyvalent (VNVO) les deux — c'est USER."VN_VO" qui décide. La fonction ne
+// crée que les lignes manquantes, à zéro, et reste bornée au périmètre
+// d'écriture de l'appelant : un vendeur n'en déclenche aucune.
+async function preparerGrilleTC() {
+  if (!IS_TC || isVendeur) return
+  try {
+    const jwt = getUserJwt()
+    const res = await fetch(SUPABASE_URL + '/rest/v1/rpc/objectifs_tc_preparer', {
+      method: 'POST',
+      headers: { 'apikey': SUPABASE_KEY, 'Authorization': 'Bearer ' + (jwt || SUPABASE_KEY), 'Content-Type': 'application/json' },
+      body: JSON.stringify({ p_annee: state.annee, p_mois: state.mois })
+    })
+    if (!res.ok) { console.warn('[objectifs] préparation de la grille HTTP ' + res.status); return }
+    const n = await res.json()
+    if (n) console.info('[objectifs] ' + n + ' ligne(s) de saisie créée(s)')
+  } catch (e) { console.warn('[objectifs] préparation de la grille', e) }
+}
+
 async function fetchObjectifs() {
+  await preparerGrilleTC()
   const sites = getSitesIds()
   let url = SUPABASE_URL + '/rest/v1/' + OBJ_VIEW + '?annee=eq.' + state.annee + '&mois=eq.' + state.mois
   if (sites.length) url += '&id_site=in.(' + sites.join(',') + ')'
