@@ -345,6 +345,16 @@ OD.define('performances', {
     if (p == null) return '';
     return p + '% ' + (k.penDen ? 'hors loueurs' : 'des cdes');
   }
+  // Version courte pour la grille Team Colin : le pourcentage seul, sur la même
+  // ligne que le chiffre. L'énoncé complet (« des commandes hors loueurs »)
+  // passe dans l'infobulle — répété sur quatre colonnes et treize lignes, il
+  // faisait doubler la hauteur des lignes sans rien apprendre.
+  function penCourt(agg, k) {
+    if (!k.pen) return null;
+    const p = tauxCde(agg, k);
+    if (p == null) return null;
+    return { txt: p + '%', titre: p + ' % des commandes' + (k.penDen ? ' hors loueurs' : '') };
+  }
 
   // --- PRORATA TEMPS (jours ouvrés lun-sam) ------------------------------------
   let __prorata = 1;   // recalculé à chaque render
@@ -606,18 +616,22 @@ OD.define('performances', {
 #perf-root .pf-tree-wrap.tc .pf-tree td { padding:3px 5px; }
 
 /* Une cellule = un chiffre et un fond. */
-#perf-root .pf-c { border-radius:7px; padding:7px 10px; text-align:right; font-variant-numeric:tabular-nums; }
+/* Une seule ligne par cellule, hauteur identique partout : le chiffre, son
+   objectif et son pourcentage se lisent d'un seul balayage horizontal, et les
+   lignes du tableau cessent de respirer différemment selon la colonne. */
+#perf-root .pf-c { border-radius:7px; padding:6px 9px; text-align:right; font-variant-numeric:tabular-nums;
+                   white-space:nowrap; line-height:19px; }
 #perf-root .pf-c[data-kpi-click] { cursor:pointer; }
 #perf-root .pf-c[data-kpi-click]:hover { box-shadow:inset 0 0 0 1.5px var(--blue-lt); }
 #perf-root .pf-c .v { font-size:14px; font-weight:700; }
 #perf-root .pf-c .o { font-size:11.5px; font-weight:400; color:#97a4ba; }
-#perf-root .pf-c .pen { display:block; font-size:10px; font-weight:600; color:#97a4ba; margin-top:1px; letter-spacing:.01em; }
+#perf-root .pf-c .pen { font-size:10.5px; font-weight:600; color:#97a4ba; margin-left:5px; letter-spacing:.01em; }
 #perf-root .pf-c.bien   { background:#e1f5ee; } #perf-root .pf-c.bien .v   { color:#1c7a66; }
 #perf-root .pf-c.alerte { background:#fdf3e0; } #perf-root .pf-c.alerte .v { color:#8a5c0a; }
 #perf-root .pf-c.retard { background:#fbeded; } #perf-root .pf-c.retard .v { color:#a63f3f; }
 #perf-root .pf-c.sans .v { color:#aab6c8; font-weight:600; }
 #perf-root .pf-tree th.th-reste, #perf-root .pf-tree td.td-reste { border-left:1px solid var(--border); }
-#perf-root .pf-c .v.ok { color:#53bda7; font-size:12.5px; font-weight:800; }
+#perf-root .pf-c .v.ok { color:#53bda7; font-size:12px; font-weight:800; }
 #perf-root .pf-c .v.du { color:#d97070; font-weight:800; }
 
 /* --- Panneau de détail Team Colin : une pile de cartes du kanban ------------- */
@@ -798,9 +812,10 @@ OD.define('performances', {
       corps = '<span class="v">' + num(agg[k.r]) + '</span>';
       cls = 'sans';
     }
-    const pen = k.pen ? penLine(agg, k) : '';
-    return '<div class="pf-c ' + cls + '"' + (clic ? ' data-kpi-click="1"' : '') + idsAttr + '>'
-      + corps + (pen ? '<span class="pen">' + esc(pen) + '</span>' : '') + '</div>';
+    const pen = penCourt(agg, k);
+    const titre = ' title="' + esc(kpiLabel + (pen ? ' — ' + pen.titre : '')) + '"';
+    return '<div class="pf-c ' + cls + '"' + titre + (clic ? ' data-kpi-click="1"' : '') + idsAttr + '>'
+      + corps + (pen ? '<span class="pen">' + esc(pen.txt) + '</span>' : '') + '</div>';
   }
 
   // Reste à faire : l'objectif du mois entier moins le réalisé — un nombre de
@@ -818,14 +833,14 @@ OD.define('performances', {
   }
   function celluleReste(agg) {
     const k = kpiPivot(agg);
-    if (!k) return '<td class="td-reste"><div class="pf-c sans"><span class="v">—</span>'
-      + '<span class="pen">pas d\u2019objectif</span></div></td>';
+    if (!k) return '<td class="td-reste"><div class="pf-c sans" title="pas d’objectif saisi"><span class="v">—</span>'
+      + '</div></td>';
     const r = num(agg[k.o]) - volTotal(agg, k);
-    const sfx = (k === PIVOTS[0]) ? '' : ' \u00b7 ' + k.label;
-    if (r <= 0) return '<td class="td-reste"><div class="pf-c"><span class="v ok">atteint</span>'
-      + '<span class="pen">+' + (-r) + ' au-del\u00e0' + esc(sfx) + '</span></div></td>';
-    return '<td class="td-reste"><div class="pf-c"><span class="v du">' + r + '</span>'
-      + '<span class="pen">commande' + (r > 1 ? 's' : '') + esc(sfx) + '</span></div></td>';
+    const sur = 'Objectif ' + k.label + ' : ' + num(agg[k.o]) + ', r\u00e9alis\u00e9 ' + volTotal(agg, k);
+    if (r <= 0) return '<td class="td-reste"><div class="pf-c" title="' + esc(sur) + '">'
+      + '<span class="v ok">atteint</span><span class="pen">+' + (-r) + '</span></div></td>';
+    return '<td class="td-reste"><div class="pf-c" title="' + esc(sur) + '">'
+      + '<span class="v du">' + r + '</span><span class="pen">cde' + (r > 1 ? 's' : '') + '</span></div></td>';
   }
 
   function kpiCellsTree(agg, label) {
