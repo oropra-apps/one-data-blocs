@@ -1,5 +1,21 @@
 // ============================================================================
 //  PERFORMANCES ÉQUIPE — module One Data (OD.define)  v1
+//  v4.12 (28/09/2026) TEAM COLIN — refonte de la lecture de la grille :
+//   · deux vues au lieu de treize colonnes — « Pilotage » (ce qui porte un
+//     objectif) et « Mix produit » (ce qui décrit la vente). Le défilement
+//     horizontal emportait la colonne des noms : elle est désormais figée.
+//   · une cellule = un chiffre et un fond. Le pourcentage et la barre
+//     répétaient ce que la couleur dit déjà.
+//   · le chiffre se compare à l'objectif du MOIS ENTIER ; seule la couleur
+//     tient compte du rythme écoulé (orange en deçà de 80 % de ce rythme).
+//   · colonne « Reste à faire » : le nombre de commandes à aller chercher.
+//   · vendeurs classés par reste à faire, les sans-objectif en fin de liste.
+//   · clic sur un chiffre : panneau à gauche, les commandes empilées en cartes
+//     identiques à celles du kanban (mêmes pastilles BACS, mêmes gestes —
+//     fiche client, consultation en surcouche, renvoi vers BACS).
+//   · KPI Gravage renommé « Roole » : le gravage a été remplacé par le Pack
+//     Roole courant 2025.
+//  Les autres tenants gardent strictement le comportement précédent.
 //  v4.5 (22/09/2026) PROFIL TEAM COLIN : sur le tenant onedata-teamcolin
 //  (ref ieztupavcdnubmpbjvuq), le module lit v_performances_tc et affiche les
 //  KPI du reporting « COMMANDE 2026 » des chefs des ventes (Cde, Pro,
@@ -133,6 +149,7 @@ OD.define('performances', {
   if (state.busSite === undefined) state.busSite = null;
   if (state.busSelPending === undefined) state.busSelPending = true;
   if (state.compare === undefined) state.compare = { active: false, items: [] };  // comparateur
+  if (state.vueTC === undefined) state.vueTC = 'pilotage';   // Team Colin : pilotage | mix
   window.__perf = state;
 
   const viewerIdUser = allRawData[0]?.viewer_id_user || null;
@@ -190,22 +207,31 @@ OD.define('performances', {
   // Team Colin — ordre et libellés du reporting « COMMANDE 2026 » (onglet Total).
   // Objectifs Cde et FI : table OBJECTIF ; Pro, PHEV/EV, VU, Kinto, Arval : objectif_kpi.
   const KPIS_TC = [
-    { r: 'commandes_realisees', o: 'objectif_commandes', label: 'Cde', mode: 'obj' },
-    { r: 'pro_realises', o: 'objectif_pro', label: 'Pro', mode: 'obj', pen: true },
-    { r: 'phev_ev_realises', o: 'objectif_phev_ev', label: 'PHEV / EV', mode: 'obj', pen: true },
-    { r: 'financements_realises', o: 'objectif_financements', label: 'FI', mode: 'obj', pen: true },
-    { r: 'vu_realises', o: 'objectif_vu', label: 'VU', mode: 'obj' },
-    { r: 'kinto_realises', o: 'objectif_kinto', label: 'Kinto', mode: 'obj' },
-    { r: 'arval_realises', o: 'objectif_arval', label: 'Arval', mode: 'obj' },
-    { r: 'vdvk_realises', label: 'dont VD/VK', mode: 'taux' },
-    { r: 'loa_realises', label: 'LOA / Easy', mode: 'taux' },
-    { r: 'pack_premium_realises', label: 'Pack Premium', mode: 'taux' },
-    { r: 'gravages_realises', label: 'Gravage', mode: 'taux' },
-    { r: 'reprises_realises', label: 'Reprises', mode: 'taux' },
-    { r: 'accessoires_ht', label: 'Accessoires HT', mode: 'euro' }
+    { r: 'commandes_realisees', o: 'objectif_commandes', label: 'Cde', mode: 'obj', vue: 'pilotage' },
+    { r: 'pro_realises', o: 'objectif_pro', label: 'Pro', mode: 'obj', vue: 'pilotage' },
+    { r: 'phev_ev_realises', o: 'objectif_phev_ev', label: 'PHEV / EV', mode: 'obj', vue: 'pilotage' },
+    // Le financement se lit en volume ET en part des commandes ; LOA/Easy suit
+    // FI parce que c'est la même famille, sans objectif en face.
+    { r: 'financements_realises', o: 'objectif_financements', label: 'FI', mode: 'obj', pen: true, vue: 'pilotage' },
+    { r: 'loa_realises', label: 'LOA / Easy', mode: 'taux', pen: true, vue: 'pilotage' },
+    { r: 'vu_realises', o: 'objectif_vu', label: 'VU', mode: 'obj', vue: 'pilotage' },
+    { r: 'kinto_realises', o: 'objectif_kinto', label: 'Kinto', mode: 'obj', vue: 'pilotage' },
+    { r: 'arval_realises', o: 'objectif_arval', label: 'Arval', mode: 'obj', vue: 'pilotage' },
+    { r: 'vdvk_realises', label: 'dont VD/VK', mode: 'taux', vue: 'mix' },
+    { r: 'pack_premium_realises', label: 'Pack Premium', mode: 'taux', vue: 'mix' },
+    // Le gravage a été remplacé par le Pack Roole courant 2025 : le KPI compte
+    // désormais Roole, gravage et carte fidélité ensemble (cf. calc_bdc_attributs_tc).
+    { r: 'gravages_realises', label: 'Roole', mode: 'taux', vue: 'mix' },
+    { r: 'reprises_realises', label: 'Reprises', mode: 'taux', vue: 'mix' },
+    { r: 'accessoires_ht', label: 'Accessoires HT', mode: 'euro', vue: 'mix' }
   ];
   const KPIS = IS_TC ? KPIS_TC : KPIS_STD;
   const KPIS_OBJ = KPIS.filter(k => k.mode === 'obj');
+  // Treize colonnes dans une seule grille imposaient un défilement horizontal
+  // qui emportait la colonne des noms : on ne savait plus de qui on parlait.
+  // Chez Team Colin la grille se lit donc en deux temps — « Pilotage », ce qui
+  // porte un objectif, et « Mix produit », ce qui décrit la vente.
+  function kpisVue() { return IS_TC ? KPIS.filter(k => k.vue === state.vueTC) : KPIS; }
   const KPI_CDE = KPIS[0];   // dénominateur des taux : toujours les commandes
   // --- VOLUME vs ATTEINTE -----------------------------------------------------
   // Arbitrage du 21/08/2026 : une commande signée par un chef des ventes EST
@@ -332,7 +358,10 @@ OD.define('performances', {
     }
     const at = r / o;
     if (at >= __prorata) return { bg: '#e1f5ee', text: '#085041', bar: '#53bda7' };
-    if (at >= __prorata - 0.15) return { bg: '#faeeda', text: '#633806', bar: '#fac055' };
+    // Seuil arrêté le 28/09 : orange en deçà de 80 % du rythme attendu, en
+    // relatif — un écart absolu de 15 points ne voulait pas dire la même chose
+    // en début et en fin de mois.
+    if (at >= __prorata * 0.80) return { bg: '#faeeda', text: '#633806', bar: '#fac055' };
     return { bg: '#fcebeb', text: '#791f1f', bar: '#f09595' };
   }
   function pctLabel(realise, objectif) {
@@ -530,6 +559,80 @@ OD.define('performances', {
 #perf-root .pf-tree td { padding:6px 8px; font-size:12px; border-bottom:.5px solid var(--border); vertical-align:middle; }
 #perf-root .pf-tree td:first-child { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:300px; }
 #perf-root .pf-tree tr { cursor:pointer; }
+
+/* --- Team Colin : grille resserrée ------------------------------------------
+   La colonne des noms reste visible quand on fait défiler : sans elle, on
+   perdait de vue à qui appartenait la ligne qu'on lisait. */
+#perf-root .pf-tree-wrap.tc { position:relative; }
+#perf-root .pf-tree-wrap.tc .pf-tree th:first-child,
+#perf-root .pf-tree-wrap.tc .pf-tree td:first-child {
+  position:sticky; left:0; z-index:2; background:#fff; border-right:1px solid var(--border); }
+#perf-root .pf-tree-wrap.tc .pf-tree thead th:first-child { z-index:3; background:#f9fbfd; }
+#perf-root .pf-tree-wrap.tc .pf-tree tr.lv-reseau td:first-child,
+#perf-root .pf-tree-wrap.tc .pf-tree tr.lv-affaire td:first-child,
+#perf-root .pf-tree-wrap.tc .pf-tree tr.lv-site td:first-child,
+#perf-root .pf-tree-wrap.tc .pf-tree tr.lv-type td:first-child { background:inherit; }
+#perf-root .pf-tree-wrap.tc .pf-tree th { white-space:nowrap; }
+#perf-root .pf-tree-wrap.tc .pf-tree td { padding:3px 5px; }
+
+/* Une cellule = un chiffre et un fond. */
+#perf-root .pf-c { border-radius:7px; padding:7px 10px; text-align:right; font-variant-numeric:tabular-nums; }
+#perf-root .pf-c[data-kpi-click] { cursor:pointer; }
+#perf-root .pf-c[data-kpi-click]:hover { box-shadow:inset 0 0 0 1.5px var(--blue-lt); }
+#perf-root .pf-c .v { font-size:14px; font-weight:700; }
+#perf-root .pf-c .o { font-size:11.5px; font-weight:400; color:#97a4ba; }
+#perf-root .pf-c .pen { display:block; font-size:10px; font-weight:600; color:#97a4ba; margin-top:1px; letter-spacing:.01em; }
+#perf-root .pf-c.bien   { background:#e1f5ee; } #perf-root .pf-c.bien .v   { color:#1c7a66; }
+#perf-root .pf-c.alerte { background:#fdf3e0; } #perf-root .pf-c.alerte .v { color:#8a5c0a; }
+#perf-root .pf-c.retard { background:#fbeded; } #perf-root .pf-c.retard .v { color:#a63f3f; }
+#perf-root .pf-c.sans .v { color:#aab6c8; font-weight:600; }
+#perf-root .pf-tree th.th-reste, #perf-root .pf-tree td.td-reste { border-left:1px solid var(--border); }
+#perf-root .pf-c .v.ok { color:#53bda7; font-size:12.5px; font-weight:800; }
+#perf-root .pf-c .v.du { color:#d97070; font-weight:800; }
+
+/* --- Panneau de détail Team Colin : une pile de cartes du kanban ------------- */
+#perf-drawer .pfd-voile { position:fixed; inset:0; background:rgba(28,43,69,.28); z-index:9998; }
+#perf-drawer .pfd { position:fixed; top:0; left:0; bottom:0; width:min(470px,100%); z-index:9999;
+  background:#fff; box-shadow:12px 0 40px -16px rgba(28,43,69,.32); display:flex; flex-direction:column;
+  font-family:'Nunito Sans',sans-serif; color:#1c2b45; }
+#perf-drawer .pfd header { padding:18px 20px 14px; border-bottom:1px solid #e2e9f3; }
+#perf-drawer .pfd-x { float:right; background:none; border:0; cursor:pointer; color:#6b7a94; font-size:22px; line-height:1; padding:0 2px; }
+#perf-drawer .pfd-kpi { font-size:12px; font-weight:800; color:#2a5ea9; letter-spacing:.02em; padding-right:26px; }
+#perf-drawer .pfd-n { display:flex; gap:18px; flex-wrap:wrap; margin-top:9px; font-size:12px; color:#6b7a94; }
+#perf-drawer .pfd-n b { font-size:15px; font-weight:800; color:#1c2b45; font-variant-numeric:tabular-nums; }
+#perf-drawer .pfd-corps { overflow-y:auto; flex:1; }
+#perf-drawer .pfd-pile { display:flex; flex-direction:column; gap:10px; padding:14px 18px 22px; }
+#perf-drawer .pfd-vide { padding:26px 20px; color:#6b7a94; font-size:13px; }
+#perf-drawer .pfk-card { position:relative; background:#fff; border:.5px solid #ece9e1;
+  border-left:3px solid #cfcdc5; border-radius:10px; padding:10px 12px; transition:box-shadow .12s; }
+#perf-drawer .pfk-card:hover { box-shadow:0 4px 14px rgba(42,94,169,.10); }
+#perf-drawer .pfk-card.vt-vn { border-left-color:#53bda7; }
+#perf-drawer .pfk-card.vt-vo { border-left-color:#fac055; }
+#perf-drawer .pfk-past { display:inline-block; font-size:10.5px; font-weight:800; border-radius:999px; padding:2px 9px; margin:0 6px 6px 0; }
+#perf-drawer .pfk-num { display:inline-block; font-size:10.5px; color:#888780; margin-bottom:6px; }
+#perf-drawer .pfk-cli { font-size:14px; font-weight:800; display:flex; align-items:center; gap:6px; flex-wrap:wrap; }
+#perf-drawer .pfk-cli-l { background:none; border:0; padding:0; font:inherit; font-weight:800; color:#1c2b45; cursor:pointer; text-align:left; }
+#perf-drawer .pfk-cli-l:hover { color:#2a5ea9; text-decoration:underline; }
+#perf-drawer .pfk-ctype { font-size:10px; font-weight:700; color:#888780; background:#f7f6f2; border-radius:5px; padding:1px 6px; }
+#perf-drawer .pfk-veh { font-size:12px; color:#888780; margin:3px 0 8px; display:flex; align-items:center; gap:6px; }
+#perf-drawer .pfk-dot { width:7px; height:7px; border-radius:50%; background:#cfcdc5; flex:none; }
+#perf-drawer .vt-vn .pfk-dot { background:#53bda7; } #perf-drawer .vt-vo .pfk-dot { background:#fac055; }
+#perf-drawer .pfk-vt { font-size:10px; font-weight:800; color:#888780; }
+#perf-drawer .pfk-row { display:flex; align-items:center; gap:8px; }
+#perf-drawer .pfk-eur { font-size:14px; font-weight:800; font-variant-numeric:tabular-nums; margin-right:auto; }
+#perf-drawer .pfk-date { font-size:11px; color:#97a4ba; font-variant-numeric:tabular-nums; }
+#perf-drawer .pfk-age { font-size:10.5px; font-weight:800; border-radius:999px; padding:2px 8px; }
+#perf-drawer .pfk-age.ok { background:rgba(83,189,167,.16); color:#2c7a68; }
+#perf-drawer .pfk-age.warn { background:rgba(250,192,85,.22); color:#8a6410; }
+#perf-drawer .pfk-age.late { background:rgba(217,112,112,.16); color:#b23433; }
+#perf-drawer .pfk-tags { display:flex; gap:5px; flex-wrap:wrap; margin-top:8px; }
+#perf-drawer .pfk-tag { font-size:10.5px; font-weight:700; padding:2px 6px; border-radius:4px; background:#f1f4f9; color:#6b7a94; }
+#perf-drawer .pfk-tag.on { background:#acc5e4; color:#1c2b45; }
+#perf-drawer .pfk-act { display:flex; align-items:center; gap:6px; margin-top:9px; padding-top:8px; border-top:1px solid #f1efe8; }
+#perf-drawer .pfk-ic { width:28px; height:28px; border-radius:7px; border:1px solid #ece9e1; background:#fff;
+  color:#2a5ea9; cursor:pointer; display:inline-flex; align-items:center; justify-content:center; padding:0; }
+#perf-drawer .pfk-ic:hover { background:rgba(42,94,169,.08); border-color:#2a5ea9; }
+#perf-drawer .pfk-b { font-weight:800; font-size:12px; }
 #perf-root .pf-tree tr.lv-reseau  { background:#f5f8fc; }
 #perf-root .pf-tree tr.lv-affaire { background:#fafbfd; }
 #perf-root .pf-tree tr.lv-site, #perf-root .pf-tree tr.lv-vendeur { background:#fff; }
@@ -643,8 +746,60 @@ OD.define('performances', {
       (v.enc ? '<div class="pf-cell-enc">' + esc(v.enc) + '</div>' : '') +
       '</div>';
   }
+  // Cellule Team Colin : un chiffre et un fond, rien d'autre. Le pourcentage
+  // et la barre de l'ancienne cellule répétaient ce que la couleur dit déjà ;
+  // empilés sur treize colonnes, ils rendaient la grille illisible.
+  // Le chiffre se compare à l'objectif du MOIS ENTIER ; seule la couleur tient
+  // compte du rythme écoulé.
+  function kpiCellTC(agg, k, kpiLabel) {
+    const ids = agg._ids;
+    const clic = Array.isArray(ids) && ids.length > 0;
+    const idsAttr = clic ? ' data-kpi-ids="' + esc(ids.join(',')) + '" data-kpi-label="' + esc(kpiLabel) + '" data-kpi-key="' + esc(k.r) + '"' : '';
+    let corps, cls;
+    if (k.mode === 'euro') {
+      corps = '<span class="v">' + esc(fmtEur(agg[k.r])) + '</span>';
+      cls = 'sans';
+    } else if (k.mode === 'obj') {
+      const reel = volTotal(agg, k), obj = num(agg[k.o]);
+      const c = kpiColorPro(reel, obj);
+      cls = obj <= 0 ? 'sans' : (c.bar === '#53bda7' ? 'bien' : (c.bar === '#fac055' ? 'alerte' : 'retard'));
+      corps = '<span class="v">' + reel + '</span>' + (obj > 0 ? '<span class="o"> / ' + obj + '</span>' : '');
+    } else {
+      corps = '<span class="v">' + num(agg[k.r]) + '</span>';
+      cls = 'sans';
+    }
+    const pen = k.pen ? penLine(agg, k) : '';
+    return '<div class="pf-c ' + cls + '"' + (clic ? ' data-kpi-click="1"' : '') + idsAttr + '>'
+      + corps + (pen ? '<span class="pen">' + esc(pen) + '</span>' : '') + '</div>';
+  }
+
+  // Reste à faire : l'objectif du mois entier moins le réalisé — un nombre de
+  // commandes à aller chercher, pas un pourcentage à interpréter. Le vendeur
+  // est jugé sur son objectif de commandes ou, à défaut, sur le premier qui en
+  // porte un : Adrien Thivillon Oliva est suivi sur le Pro.
+  function kpiPivot(agg) {
+    for (const k of KPIS_OBJ) if (num(agg[k.o]) > 0) return k;
+    return null;
+  }
+  function celluleReste(agg) {
+    const k = kpiPivot(agg);
+    if (!k) return '<td class="td-reste"><div class="pf-c sans"><span class="v">—</span>'
+      + '<span class="pen">pas d\u2019objectif</span></div></td>';
+    const r = num(agg[k.o]) - volTotal(agg, k);
+    const sfx = (k === KPIS_OBJ[0]) ? '' : ' \u00b7 ' + k.label;
+    if (r <= 0) return '<td class="td-reste"><div class="pf-c"><span class="v ok">atteint</span>'
+      + '<span class="pen">+' + (-r) + ' au-del\u00e0' + esc(sfx) + '</span></div></td>';
+    return '<td class="td-reste"><div class="pf-c"><span class="v du">' + r + '</span>'
+      + '<span class="pen">commande' + (r > 1 ? 's' : '') + esc(sfx) + '</span></div></td>';
+  }
+
   function kpiCellsTree(agg, label) {
     let h = '';
+    if (IS_TC) {
+      for (const k of kpisVue()) h += '<td>' + kpiCellTC(agg, k, (label ? label + ' \u00b7 ' : '') + k.label) + '</td>';
+      if (state.vueTC === 'pilotage') h += celluleReste(agg);
+      return h;
+    }
     // Le réalisé affiché est le VOLUME TOTAL de la concession : vendeurs +
     // encadrement. Demande d'Antoine du 25/08/2026 — « je veux total Lyon
     // Part-Dieu = 28 sur objectif 24 ». Une commande signée par un chef des
@@ -826,6 +981,14 @@ OD.define('performances', {
       html += '<div class="pf-toggle">';
       for (const o of [{ k: 'reseau', l: 'Réseau' }, { k: 'grand_compte', l: 'Grands comptes' }, { k: 'ALL', l: 'Tous' }])
         html += '<button type="button" class="' + (state.segment === o.k ? 'active' : '') + '" data-seg="' + o.k + '" title="Les ventes sociétés sont suivies à part : elles n\'ont pas d\'objectif dans le fichier du chef des ventes">' + o.l + '</button>';
+      html += '</div>';
+    }
+    if (IS_TC) {
+      html += '<span class="pf-sep"></span>';
+      html += '<div class="pf-toggle">';
+      for (const o of [{ k: 'pilotage', l: 'Pilotage' }, { k: 'mix', l: 'Mix produit' }])
+        html += '<button type="button" class="' + (state.vueTC === o.k ? 'active' : '') + '" data-vuetc="' + o.k + '" title="'
+          + (o.k === 'pilotage' ? 'Ce qui porte un objectif' : 'Ce qui décrit la vente, sans objectif') + '">' + o.l + '</button>';
       html += '</div>';
     }
     html += '<span class="pf-sep"></span>';
@@ -1061,6 +1224,17 @@ OD.define('performances', {
     doc.head.appendChild(st);
   }
 
+  function resteAFaire(agg) {
+    const k = kpiPivot(agg);
+    return k ? num(agg[k.o]) - volTotal(agg, k) : null;
+  }
+  function resteDesc(a, b) {
+    const ra = resteAFaire(a.agg), rb = resteAFaire(b.agg);
+    if (ra === null && rb === null) return volTotal(b.agg, KPI_CDE) - volTotal(a.agg, KPI_CDE);
+    if (ra === null) return 1;
+    if (rb === null) return -1;
+    return rb - ra;
+  }
   function renderTree(rows) {
     const tree = buildTree(rows);
     if (!tree.length) return '<div class="pf-empty">Aucune donnée pour ce filtre.</div>';
@@ -1092,15 +1266,19 @@ OD.define('performances', {
             if (!collapseT)
               body += '<tr class="lv-type' + cls('vntype', tSelKey) + '" data-exp="' + esc(tKey) + '" data-lvl="vntype" data-key="' + esc(tSelKey) + '" data-label="' + esc(T.label + ' — ' + S.label) + '"><td>' + expIcon(tOpen) + '<span class="pf-type-chip pf-type-' + esc(T.key) + '">' + esc(T.label) + '</span></td>' + kpiCellsTree(T.agg, S.label + ' ' + T.label) + '</tr>';
             if (!tOpen) continue;
-            for (const V of T.vend) {
+            // Le plus en retard en tête : ce qui appelle une décision se lit
+            // en premier, et les vendeurs sans objectif ferment la marche.
+            const vend = IS_TC ? T.vend.slice().sort(resteDesc) : T.vend;
+            for (const V of vend) {
               body += '<tr class="lv-vendeur' + (collapseT ? '' : ' deep') + cls('vendeur', V.key) + '" data-lvl="vendeur" data-key="' + esc(V.key) + '" data-label="' + esc(V.label) + '"><td>' + esc(V.label) + (V.fonction ? ' <span class="fct">· ' + esc(V.fonction) + '</span>' : '') + '</td>' + kpiCellsTree(V.agg, V.label) + '</tr>';
             }
           }
         }
       }
     }
-    let h = '<div class="pf-tree-wrap"><table class="pf-tree"><thead><tr><th>Périmètre</th>';
-    for (const k of KPIS) h += '<th' + (k.mode !== 'obj' ? ' class="th-libre" title="Sans objectif — en % des commandes"' : '') + '>' + esc(k.label) + '</th>';
+    let h = '<div class="pf-tree-wrap' + (IS_TC ? ' tc' : '') + '"><table class="pf-tree"><thead><tr><th>Périmètre</th>';
+    for (const k of kpisVue()) h += '<th' + (k.mode !== 'obj' ? ' class="th-libre" title="Sans objectif — en % des commandes"' : '') + '>' + esc(k.label) + '</th>';
+    if (IS_TC && state.vueTC === 'pilotage') h += '<th class="th-reste">Reste à faire</th>';
     h += '</tr></thead><tbody>' + body + '</tbody></table></div>';
     return h;
   }
@@ -1359,6 +1537,192 @@ OD.define('performances', {
     if (s === 'VO' || s === 'OCCASION' || s === 'O') return 'VO';
     return s;
   }
+  // --- PANNEAU DE DÉTAIL TEAM COLIN ----------------------------------------------
+  // Les commandes s'empilent sous forme de cartes identiques à celles du
+  // kanban : mêmes couleurs, mêmes pastilles de statut BACS, mêmes gestes —
+  // le nom du client ouvre sa fiche, la loupe la consultation, « B » BACS.
+  // Les gestes de pilotage du kanban (déplacer, archiver) n'y sont pas : depuis
+  // Performances on consulte une vente déjà faite.
+  const PASTILLES_BACS_TC = {
+    'Printed':            ['Éditée', '#8a5a00', '#fdf2dd'],
+    'Awaiting Approval':  ['Approbation lancée', '#1f4a87', '#eaf0f9'],
+    'Refused':            ['Refusée', '#a32d2d', '#fcebeb'],
+    'Transmitted to TFR': ['Transmise à TFR', '#1d6e5f', '#e1f5ee'],
+    'Validated':          ['Validée', '#1d6e5f', '#e1f5ee'],
+    'Delivered':          ['Livrée', '#1d6e5f', '#e1f5ee']
+  };
+  const DRAPEAUX_TC = [
+    ['est_pro', 'Pro', 'pro_realises'], ['est_phev_ev', 'PHEV/EV', 'phev_ev_realises'],
+    ['est_fi', 'FI', 'financements_realises'], ['est_vu', 'VU', 'vu_realises'],
+    ['est_kinto', 'Kinto', 'kinto_realises'], ['est_arval', 'Arval', 'arval_realises'],
+    ['est_vdvk', 'VD/VK', 'vdvk_realises'], ['est_loa', 'LOA', 'loa_realises'],
+    ['est_pack_premium', 'Pack Premium', 'pack_premium_realises'],
+    ['est_gravage', 'Roole', 'gravages_realises'], ['est_reprise', 'Reprise', 'reprises_realises']
+  ];
+  const ICO_LOUPE = '<svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><circle cx="7" cy="7" r="4.5"/><path d="M10.5 10.5L14 14"/></svg>';
+
+  function ageJoursTC(jour) {
+    if (!jour) return null;
+    const d = new Date(jour + 'T12:00:00');
+    return Math.max(0, Math.round((Date.now() - d.getTime()) / 86400000));
+  }
+  function carteTC(c, kpiKey) {
+    const vt = String(c.vn_vo || '').toUpperCase() === 'VO' ? 'vo' : 'vn';
+    const p = PASTILLES_BACS_TC[c.statut_bacs];
+    const j = ageJoursTC(c.jour_win);
+    let h = '<div class="pfk-card vt-' + vt + '">';
+    let bandeau = '';
+    if (p) bandeau += '<span class="pfk-past" style="color:' + p[1] + ';background:' + p[2] + '">' + esc(p[0]) + '</span>';
+    if (c.num_commande) bandeau += '<span class="pfk-num">Cde ' + esc(c.num_commande) + '</span>';
+    if (bandeau) h += '<div>' + bandeau + '</div>';
+    h += '<div class="pfk-cli">'
+      + (c.id_client_vu != null
+          ? '<button type="button" class="pfk-cli-l" data-fiche="' + esc(c.id_client_vu) + '" title="Ouvrir la fiche client">' + esc(c.nom_client) + '</button>'
+          : '<span>' + esc(c.nom_client) + '</span>')
+      + '<span class="pfk-ctype">' + (c.est_pro ? 'Société' : 'Particulier') + '</span></div>';
+    h += '<div class="pfk-veh"><span class="pfk-dot"></span>' + esc(c.libelle_vehicule || '—')
+      + ' <span class="pfk-vt">' + esc(c.vn_vo || '') + '</span></div>';
+    h += '<div class="pfk-row"><span class="pfk-eur">' + esc(fmtEur(c.montant)) + '</span>'
+      + '<span class="pfk-date">' + (c.jour_win ? new Date(c.jour_win + 'T12:00:00').toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit' }) : '') + '</span>'
+      + (j == null ? '' : '<span class="pfk-age ' + (j <= 7 ? 'ok' : (j <= 21 ? 'warn' : 'late')) + '">' + j + ' j</span>') + '</div>';
+    const tags = DRAPEAUX_TC.map(d => c[d[0]]
+      ? '<span class="pfk-tag' + (d[2] === kpiKey ? ' on' : '') + '">' + esc(d[1]) + '</span>' : '').join('');
+    if (tags) h += '<div class="pfk-tags">' + tags + '</div>';
+    h += '<div class="pfk-act">'
+      + '<button type="button" class="pfk-ic" data-consulter="' + esc(c.id_propale_bdc) + '" title="Consulter la commande">' + ICO_LOUPE + '</button>'
+      + (c.bacs_sf_id ? '<button type="button" class="pfk-ic pfk-b" data-bacs="' + esc(c.bacs_sf_id) + '" title="Ouvrir dans BACS">B</button>' : '')
+      + '</div>';
+    return h + '</div>';
+  }
+
+  function closeDrawerTC() { const e = doc.getElementById('perf-drawer'); if (e) e.remove(); }
+  if (!window.__perfEscTC) {
+    window.__perfEscTC = true;
+    doc.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeDrawerTC(); });
+  }
+
+  async function openDrawerTC(ids, titleLabel, kpiKey) {
+    closeDrawerTC();
+    if (!ids || !ids.length) return;
+    if (!SUPABASE_KEY) SUPABASE_KEY = getSupabaseKey();
+    const userJwt = await getUserJwt();
+    if (!userJwt) { console.error('[perf] panneau : pas de jeton de session'); return; }
+
+    const wrap = doc.createElement('div'); wrap.id = 'perf-drawer';
+    wrap.innerHTML = '<div class="pfd-voile"></div><aside class="pfd" role="dialog" aria-modal="true" aria-label="Détail des commandes">'
+      + '<header><button type="button" class="pfd-x" aria-label="Fermer">&times;</button>'
+      + '<div class="pfd-kpi">' + esc(titleLabel) + '</div>'
+      + '<div class="pfd-n">Chargement…</div></header>'
+      + '<div class="pfd-corps"></div></aside>';
+    doc.body.appendChild(wrap);
+    wrap.querySelector('.pfd-voile').addEventListener('click', closeDrawerTC);
+    wrap.querySelector('.pfd-x').addEventListener('click', closeDrawerTC);
+
+    let cartes = [];
+    try {
+      const res = await fetch(SUPABASE_URL + '/rest/v1/rpc/bdc_cartes_tc', {
+        method: 'POST',
+        headers: { 'apikey': SUPABASE_KEY, 'Authorization': 'Bearer ' + userJwt, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ p_ids: [...new Set(ids)].map(Number) })
+      });
+      if (!res.ok) throw new Error('HTTP ' + res.status);
+      cartes = await res.json();
+    } catch (e) { console.error('[perf] bdc_cartes_tc', e); }
+    if (!doc.getElementById('perf-drawer')) return;   // fermé entre-temps
+
+    const nb = cartes.length;
+    const total = cartes.reduce((a, c) => a + num(c.montant), 0);
+    const acc = cartes.reduce((a, c) => a + num(c.accessoires_ht), 0);
+    wrap.querySelector('.pfd-n').innerHTML =
+      '<span><b>' + nb + '</b> commande' + (nb > 1 ? 's' : '') + '</span>'
+      + '<span><b>' + esc(fmtEur(total)) + '</b></span>'
+      + '<span><b>' + esc(fmtEur(acc)) + '</b> accessoires HT</span>';
+    wrap.querySelector('.pfd-corps').innerHTML = nb
+      ? '<div class="pfd-pile">' + cartes.map(c => carteTC(c, kpiKey)).join('') + '</div>'
+      : '<p class="pfd-vide">Aucune commande sur ce critère.</p>';
+
+    wrap.addEventListener('click', (e) => {
+      const f = e.target.closest('[data-fiche]');
+      if (f) { ouvrirFicheClient(f.getAttribute('data-fiche')); return; }
+      const v = e.target.closest('[data-consulter]');
+      if (v) { ouvrirConsultation(v.getAttribute('data-consulter')); return; }
+      const b = e.target.closest('[data-bacs]');
+      if (b) { window.open(BACS_BASE + 'detail/' + b.getAttribute('data-bacs'), '_blank', 'noopener'); return; }
+    });
+  }
+
+  const BACS_BASE = 'https://toyota-france.my.site.com/bacs2/s/';
+
+  // Navigation : exactement les chemins du kanban, repris de kanban.js v47 —
+  // deux écrans qui ouvrent la même commande ne doivent pas diverger.
+  const PAGE_FICHE_ID = '259f1951-a2d4-4b90-ac83-0b3febe1d4ec';
+  const PATH_FICHE_CLIENT = '/fr/fiche-client';
+  const TAB_PCOM = 5;                                        // onglet Propositions commerciales
+  const VAR_ID_PROPALE = 'aac565e9-ad32-4f81-bf8d-adb611322e62';
+  const PROPALE_VN_URL = 'https://cdn.jsdelivr.net/gh/oropra-apps/one-data-blocs@d9068ea41e5bf7964b640c6bd789fa6cdf489695/propale-vn.js';
+
+  function inEditorPf() { try { return window.self !== window.top; } catch (e) { return true; } }
+  function pfGoTo(pageId, path) {
+    if (inEditorPf()) { try { if (pageId) { wwLib.wwApp.goTo(pageId); return; } } catch (e) { } }
+    try { if (path) { wwLib.goTo(path); return; } } catch (e) { }
+    try { if (pageId) { wwLib.wwApp.goTo(pageId); } } catch (e) { }
+  }
+  function ouvrirFicheClient(idClientVu) {
+    if (!idClientVu) return;
+    try {
+      // fiche-shell lit l'IDVu dans SA variable et recharge le client lui-même ;
+      // l'onglet voulu passe par un global.
+      try { wwLib.wwVariable.updateValue(VAR_CLIENT, { IDVu: Number(idClientVu) }); } catch (e) { }
+      try { const w = (wwLib.getFrontWindow && wwLib.getFrontWindow()) || window; w.__odFicheTab = TAB_PCOM; } catch (e) { }
+      pfGoTo(PAGE_FICHE_ID, PATH_FICHE_CLIENT);
+    } catch (e) { console.error('[perf] fiche client', e); }
+  }
+
+  // L'adresse du module VN est celle que le socle résout pour ce tenant ;
+  // l'adresse figée n'est qu'un repli (même précaution que le kanban, où une
+  // version publiée n'était jamais chargée).
+  function chargerPropaleVN() {
+    if (window.oropraPropaleVN) return Promise.resolve();
+    if (window.__oropraPropaleVNChargement) return window.__oropraPropaleVNChargement;
+    window.__oropraPropaleVNChargement = new Promise((resolve, reject) => {
+      const man = window.OD && window.OD.manifest && window.OD.manifest['propale-vn'];
+      const url = (man && man.cdn_url) || PROPALE_VN_URL;
+      const sc = doc.createElement('script'); sc.src = url; sc.async = true;
+      sc.onload = () => resolve(); sc.onerror = () => reject(new Error('propale-vn.js introuvable'));
+      doc.head.appendChild(sc);
+    });
+    return window.__oropraPropaleVNChargement;
+  }
+  // Consultation en surcouche, comme la loupe du kanban : on reste dans
+  // Performances, le panneau et la grille sont retrouvés en fermant.
+  async function ouvrirConsultation(idPropale) {
+    const prev = doc.getElementById('vn-edit-overlay'); if (prev) prev.remove();
+    const ov = doc.createElement('div');
+    ov.id = 'vn-edit-overlay';
+    ov.style.cssText = 'position:fixed;inset:0;z-index:2000;display:flex;align-items:flex-start;justify-content:center;padding:20px;background:rgba(31,74,133,.45);overflow-y:auto';
+    const modal = doc.createElement('div');
+    modal.style.cssText = 'background:#fff;border-radius:18px;width:100%;max-width:1220px;box-shadow:0 30px 80px rgba(31,74,133,.35);margin:auto;position:relative;padding:20px';
+    const close = doc.createElement('button');
+    close.type = 'button'; close.textContent = '✕';
+    close.style.cssText = 'position:absolute;top:-12px;right:-12px;width:34px;height:34px;border-radius:50%;border:1.5px solid #e2eaf5;background:#fff;cursor:pointer;color:#7a98c5;font-size:16px;line-height:1;display:flex;align-items:center;justify-content:center;padding:0;box-shadow:0 2px 8px rgba(31,74,133,.25);z-index:20';
+    const anchor = doc.createElement('div');
+    const fermer = () => { try { ov.remove(); } catch (e) { } };
+    close.addEventListener('click', fermer);
+    ov.addEventListener('mousedown', e => { if (e.target === ov) fermer(); });
+    modal.appendChild(close); modal.appendChild(anchor); ov.appendChild(modal); doc.body.appendChild(ov);
+    anchor.innerHTML = '<div style="padding:36px;color:#7a98c5;text-align:center">Chargement de la proposition…</div>';
+    try {
+      try { wwLib.wwVariable.updateValue(VAR_ID_PROPALE, Number(idPropale)); } catch (e) { }
+      await chargerPropaleVN();
+      const m = window.oropraPropaleVN;
+      if (!m || !m.mount) throw new Error('module VN indisponible');
+      await m.mount(anchor, Object.assign({}, ctx, { onClose: fermer }));
+      anchor.addEventListener('click', e => { const a = e.target.closest('a[target="_blank"]'); if (a) fermer(); });
+    } catch (e) {
+      anchor.innerHTML = '<div style="padding:24px;color:#e24b4a;font-weight:600">Impossible de charger la consultation : ' + esc((e && e.message) || String(e)) + '</div>';
+    }
+  }
+
   async function openPopup(ids, titleLabel) {
     closePopup();
     if (!ids || !ids.length) return;
@@ -1487,6 +1851,7 @@ OD.define('performances', {
     const rangeBtn = root.querySelector('#pf-range');
     if (rangeBtn) rangeBtn.addEventListener('click', () => openRangePickerPf(rangeBtn));
     root.querySelectorAll('[data-vnvo]').forEach(b => b.addEventListener('click', () => { state.vnvo = b.getAttribute('data-vnvo'); render(); }));
+    root.querySelectorAll('[data-vuetc]').forEach(b => b.addEventListener('click', () => { state.vueTC = b.getAttribute('data-vuetc'); render(); }));
     root.querySelectorAll('[data-seg]').forEach(b => b.addEventListener('click', () => { state.segment = b.getAttribute('data-seg'); render(); }));
     root.querySelectorAll('[data-mois]').forEach(b => b.addEventListener('click', () => { state.mois = b.getAttribute('data-mois'); render(); }));
     const clear = root.querySelector('#pf-clear');
@@ -1514,7 +1879,9 @@ OD.define('performances', {
           const label = cell.getAttribute('data-kpi-label') || 'Détail';
           if (idsAttr) {
             const ids = idsAttr.split(',').map(x => x.trim()).filter(Boolean);
-            openPopup(ids, label + (state.vnvo !== 'ALL' ? ' · ' + state.vnvo : ''));
+            const titre = label + (state.vnvo !== 'ALL' ? ' · ' + state.vnvo : '');
+            if (IS_TC) openDrawerTC(ids, titre, cell.getAttribute('data-kpi-key'));
+            else openPopup(ids, titre);
           }
           return;
         }
