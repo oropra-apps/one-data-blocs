@@ -440,6 +440,27 @@ const LM_V3_CSS = `
   box-shadow:0 1px 2px rgba(16,24,40,.08); }
 #lead-mgmt-root .v3-expli { flex:1 1 240px; margin:0; font-size:12px; line-height:1.5;
   color:var(--text-mut,#6b7684); min-width:200px; }
+/* Les puces de source. Multi-sélection : plusieurs sources peuvent cohabiter,
+   contrairement au segment « depuis », qui est un choix exclusif. */
+#lead-mgmt-root .v3-src { display:flex; gap:5px; flex-wrap:wrap; align-items:center; }
+#lead-mgmt-root .v3-src button { border:1px solid var(--border,#e3e6ea); background:#fff;
+  padding:5px 10px; border-radius:999px; font-size:12px; font-weight:600; font-family:inherit;
+  color:var(--text-mut,#6b7684); cursor:pointer; display:inline-flex; align-items:center;
+  gap:6px; line-height:1.3; }
+#lead-mgmt-root .v3-src button:hover { border-color:#b9c2cd; }
+#lead-mgmt-root .v3-src button.on { background:var(--blue-bg,#eaf0ff);
+  border-color:var(--blue-dk,#2a5ea9); color:var(--blue-dk,#2a5ea9); }
+#lead-mgmt-root .v3-src button i { font-style:normal; font-size:11px; font-weight:700;
+  padding:1px 5px; border-radius:999px; background:#f1f3f6; color:#6b7684; }
+#lead-mgmt-root .v3-src button.on i { background:#fff; color:var(--blue-dk,#2a5ea9); }
+/* Une source que le groupe ne suit pas : visiblement à part, jamais cachée. */
+#lead-mgmt-root .v3-src button.hors { border-style:dashed; color:#97a1ad; }
+#lead-mgmt-root .v3-src button.hors.on { border-style:solid; background:#fdf6e6;
+  border-color:#b8851a; color:#7a5a12; }
+#lead-mgmt-root .v3-src button.hors.on i { color:#7a5a12; }
+#lead-mgmt-root .v3-ecarte { margin:8px 0 0; font-size:11.5px; line-height:1.5;
+  color:var(--text-mut,#6b7684); }
+#lead-mgmt-root .v3-ecarte b { color:#7a5a12; }
 #lead-mgmt-root .v3-tab { overflow:auto; }
 #lead-mgmt-root .v3-tab table { border-collapse:collapse; width:100%; min-width:560px; }
 #lead-mgmt-root .v3-tab th { font-size:10.5px; text-transform:uppercase; letter-spacing:.06em;
@@ -3309,7 +3330,10 @@ async function fetchMaFile() {
   //    `null` = « tout le perimetre ».
   const cible = (state.mafileCible === null) ? null
               : (state.mafileCible === undefined ? userId : state.mafileCible);
-  const key   = [cible, state.busSite || 'tous'].join('|');
+  // ⚠️ Le filtre de source fait partie de la CLÉ : sans lui, basculer une
+  //    puce laisserait la file en cache et l'écran mentirait en silence.
+  const key   = [cible, state.busSite || 'tous',
+                 (state.v3 ? v3SrcSignature() : '*')].join('|');
   // ⚠️ Tester `mafileData` NE SUFFIT PAS : au montage, le bus de site se
   // lie juste apres et rappelle fetchMaFile alors que la premiere requete
   // est ENCORE EN VOL — d'ou deux appels reseau identiques (releve par
@@ -3334,6 +3358,13 @@ async function fetchMaFile() {
     if (!state.voirArriere) q = q.lte('attente_min', LM_ARRIERE_MIN);
     if (cible) q = q.eq('id_user_attribue', cible);
     if (state.busSite) q = q.eq('id_site', Number(state.busSite));
+    // Les sources que le groupe ne suit pas en interne (trafic atelier) sont
+    // hors file par défaut : elles y fabriquaient un compteur faux — 105
+    // dossiers annoncés dont l'immense majorité n'était pas à traiter. Le
+    // filtre permet de les rappeler explicitement.
+    const srcChoix = state.v3 ? v3SrcParam() : null;
+    if (srcChoix) q = q.in('source', srcChoix);
+    else         q = q.eq('suivi_interne', true);
     const { data, error } = await q;
     if (error) throw error;
 
@@ -3345,6 +3376,10 @@ async function fetchMaFile() {
         .gt('attente_min', LM_ARRIERE_MIN);
       if (cible) qa = qa.eq('id_user_attribue', cible);
       if (state.busSite) qa = qa.eq('id_site', Number(state.busSite));
+      // Le décompte de l'arriéré doit suivre le MÊME filtre que la file,
+      // sinon le bandeau annonce des dossiers cachés que le filtre exclut.
+      if (srcChoix) qa = qa.in('source', srcChoix);
+      else          qa = qa.eq('suivi_interne', true);
       const ra = await qa;
       state.mafileArriere = ra.count || 0;
     } catch (e) { state.mafileArriere = null; }
@@ -4225,6 +4260,36 @@ function renderRegles() {
     h += '</div>';
   }
 
+  // Quelles sources alimentent le travail des équipes. Ce réglage vaut pour
+  // TOUT le groupe, donc il est réservé à la direction — un chef des ventes
+  // règle son site, pas celui des autres.
+  if (PEUT_PARAMETRER_DEFAUT) {
+    const L = (state.v3 && state.v3.srcListe) || [];
+    h += '<div class="rg-sec"><div class="t">Quelles sources sont suivies en interne</div>';
+    if (!L.length) {
+      h += '<div class="rg-note">Aucune source relev\u00e9e sur la p\u00e9riode affich\u00e9e. '
+        + 'Ouvrez le mur ou la file pour que la liste se charge.</div>';
+    } else {
+      h += '<table class="rg-tab"><tr><th>Source</th><th>Re\u00e7us</th>'
+        + '<th>\u00c0 traiter</th><th></th></tr>';
+      L.forEach(s => {
+        h += '<tr class="' + (s.suivi ? '' : 'exclu') + '">'
+          + '<td>' + escapeHtml(s.libelle) + '</td>'
+          + '<td>' + s.n + '</td><td>' + s.aTraiter + '</td>'
+          + '<td style="text-align:right"><button type="button" class="rg-ex" '
+          + 'data-rgsrc="' + escapeHtml(s.code) + '" data-rgsrcv="'
+          + (s.suivi ? '0' : '1') + '">'
+          + (s.suivi ? '\u00c9carter' : 'Suivre') + '</button></td></tr>';
+      });
+      h += '</table><div class="rg-note">Une source \u00e9cart\u00e9e reste collect\u00e9e et '
+        + 'consultable, mais ses leads sortent de la file, du mur et des d\u00e9lais : '
+        + 'ils y fabriquaient du retard que personne n\u2019avait \u00e0 traiter. '
+        + 'Le trafic atelier en est l\u2019exemple. Chacun peut les rappeler d\u2019un clic '
+        + 'depuis le filtre du mur ou de la file. Ce r\u00e9glage prend effet '
+        + 'imm\u00e9diatement, pour tout le groupe.</div></div>';
+    }
+  }
+
   h += '<div class="rg-sec"><div class="t">Non modifiable</div>'
     + '<div class="rg-note">Quand un même client redépose une demande sur le même site '
     + 'en moins de 24 heures, elle repart au vendeur qui a déjà la première. Ce n\u2019est '
@@ -4518,6 +4583,16 @@ function lmSource(code) {
 let bacsJoignable = null;   // null = pas encore su
 let bacsDernierTest = 0;
 
+// ⚠️ RELEVÉ LE 28/09 : le bandeau annonçait « BACS n'est pas ouvert »
+//    alors que BACS était ouvert à l'écran, et invitait à le rouvrir —
+//    le seul geste sans effet. Ce qu'on mesure n'est pas BACS : c'est le
+//    battement du PONT (l'extension dans l'onglet Salesforce), qui écrit
+//    dans `bacs_presence`. Mesure du jour : dernier battement 204 min plus
+//    tôt, sous un AUTRE compte One Data que celui qui regardait.
+//    Un booléen ne peut pas porter cette nuance : on lit désormais
+//    `bacs_canal_etat()`, qui dit aussi POURQUOI c'est muet.
+let bacsEtat = null;        // le détail renvoyé par la base
+
 async function ensureBacsJoignable() {
   // ⚠️ RELEVÉ LE 18/09 : le bandeau restait VERT plusieurs minutes après
   //    la fermeture de BACS. Deux délais s'additionnaient — ce cache, et
@@ -4528,14 +4603,30 @@ async function ensureBacsJoignable() {
   if (Date.now() - bacsDernierTest < 10000 && bacsJoignable !== null) return;
   bacsDernierTest = Date.now();
   try {
-    const { data, error } = await sb.rpc('bacs_est_joignable');
+    const { data, error } = await sb.rpc('bacs_canal_etat');
     if (error) throw error;
-    const avant = bacsJoignable;
-    bacsJoignable = data === true;
-    if (avant !== bacsJoignable && window.__renderLeadMgmt) window.__renderLeadMgmt();
+    const avant = JSON.stringify(bacsEtat);
+    bacsEtat = (data && typeof data === 'object') ? data : {};
+    // `bacsJoignable` reste la porte des gestes : ne pas le débrancher.
+    bacsJoignable = bacsEtat.joignable === true;
+    if (avant !== JSON.stringify(bacsEtat) && window.__renderLeadMgmt) window.__renderLeadMgmt();
   } catch (e) {
+    // Une base injoignable n'est pas un pont fermé. On le distingue, sinon
+    // le bandeau accuse encore le mauvais maillon.
+    bacsEtat = { joignable: false, panne_lecture: true };
     bacsJoignable = false;
   }
+}
+
+// Délai en clair, depuis des secondes. Le bandeau doit dire « il y a 3 h »,
+// pas « il y a 12388 s » : c'est ce chiffre qui dit si le pont vient de
+// tomber ou s'il dort depuis ce matin.
+function bacsDepuis(s) {
+  const v = Math.round(Number(s) || 0);
+  if (v < 90)    return 'il y a moins d\u2019une minute';
+  if (v < 5400)  return 'il y a ' + Math.round(v / 60) + ' min';
+  if (v < 86400) return 'il y a ' + Math.round(v / 3600) + ' h';
+  return 'il y a ' + Math.round(v / 86400) + ' j';
 }
 
 
@@ -4577,15 +4668,52 @@ function lmBandeauBacs() {
   ensureBacsJoignable();
   lmDemarrerHorlogeBacs();
   if (bacsJoignable === null) return '';
+  const e = bacsEtat || {};
+
   if (bacsJoignable) {
+    // Le pont peut tourner chez quelqu'un d'autre : une session vivante
+    // suffit à exécuter. Le dire évite qu'un vendeur croie tenir le canal
+    // et ferme son onglet.
     return '<div class="g-bandeau on"><span class="g-pastille"></span>'
-      + 'BACS connecté — rendez-vous, relances et transferts partent directement.</div>';
+      + 'Canal BACS ouvert'
+      + (e.par_moi === false && e.par
+           ? ' via ' + escapeHtml(String(e.par)) : '')
+      + ' — rendez-vous, relances et transferts partent directement.</div>';
   }
+
+  // Le corps du message nomme le maillon qui manque. Trois causes, trois
+  // gestes différents : sans cette distinction on envoie le vendeur rouvrir
+  // un BACS déjà ouvert.
+  let corps, bouton = '';
+  if (e.panne_lecture) {
+    corps = '<b>État du canal BACS inconnu.</b> One Data n\'a pas pu lire l\'état du '
+          + 'pont. Les gestes BACS sont suspendus le temps que la lecture revienne.';
+  } else if (e.aucun_pont) {
+    corps = '<b>Le pont BACS n\'est installé sur aucun poste.</b> Les leads Toyota restent '
+          + 'consultables, mais aucun rendez-vous, relance ni transfert ne peut partir '
+          + 'vers BACS. L\'extension One Data doit être installée sur au moins un poste '
+          + 'qui garde BACS ouvert.';
+  } else if (e.moi_session_ok === false) {
+    corps = '<b>BACS refuse la session du pont.</b> L\'onglet est ouvert, mais Salesforce '
+          + 'n\'y reconnaît plus de session valide. Reconnectez-vous à BACS dans cet '
+          + 'onglet — ce message disparaîtra seul.';
+    bouton = '<button type="button" class="g-act" data-bacs-ouvrir="1">Ouvrir BACS</button>';
+  } else if (e.moi_jamais) {
+    corps = '<b>Le pont BACS n\'a jamais répondu sous ce compte.</b> Les leads Toyota '
+          + 'restent consultables, mais aucun rendez-vous, relance ni transfert ne peut '
+          + 'partir. Ouvrez BACS dans un onglet de ce navigateur, avec l\'extension '
+          + 'One Data active — ce message disparaîtra seul.';
+    bouton = '<button type="button" class="g-act" data-bacs-ouvrir="1">Ouvrir BACS</button>';
+  } else {
+    corps = '<b>Le pont BACS ne répond plus</b> (dernier signe de vie '
+          + bacsDepuis(e.moi_il_y_a_s) + '). BACS peut être ouvert à l\'écran sans que '
+          + 'l\'extension One Data y tourne encore : rechargez l\'onglet BACS. Les '
+          + 'gestes restent suspendus tant que le pont est muet.';
+    bouton = '<button type="button" class="g-act" data-bacs-ouvrir="1">Ouvrir BACS</button>';
+  }
+
   return '<div class="g-bandeau off"><span class="g-pastille"></span>'
-    + '<span><b>BACS n\'est pas ouvert.</b> Les leads Toyota restent consultables, mais aucun '
-    + 'rendez-vous, relance ou transfert ne peut leur être appliqué. Ouvrez BACS et '
-    + 'reconnectez-vous — ce message disparaîtra seul.</span>'
-    + '<button type="button" class="g-act" data-bacs-ouvrir="1">Ouvrir BACS</button></div>';
+    + '<span>' + corps + '</span>' + bouton + '</div>';
 }
 
 // --- Les gestes ---------------------------------------------
@@ -4637,7 +4765,7 @@ function lmGesteDispo(lead, g) {
   if (g.k === 'relance') {
     if (bacs) {
       return bacsJoignable === false
-        ? { ok: false, raison: 'BACS doit être ouvert' } : { ok: true };
+        ? { ok: false, raison: 'Pont BACS muet' } : { ok: true };
     }
     // Hors BACS, rendez-vous et relance se posent dans l'agenda de la
     // fiche client : sans fiche, il n'y a nulle part où les écrire.
@@ -4646,7 +4774,7 @@ function lmGesteDispo(lead, g) {
   }
   if (g.k === 'transfert') {
     return (bacs && bacsJoignable === false)
-      ? { ok: false, raison: 'BACS doit être ouvert' } : { ok: true };
+      ? { ok: false, raison: 'Pont BACS muet' } : { ok: true };
   }
   return { ok: true };   // classer sans suite : toujours possible
 }
@@ -5491,6 +5619,11 @@ function v3Init() {
     mur: null, murKey: null, murLoading: false,
     parcours: null, parcoursKey: null,
     cell: null, cellLoading: false,
+    // Le filtre de source. `null` = le défaut de la base : les sources que
+    // le groupe suit en interne. Un tableau = ces codes exactement, y
+    // compris une source écartée qu'on veut rappeler.
+    src: null,
+    srcListe: null, srcKey: null, srcLoading: false,
     mode: null               // 'libre' | 'auto' | 'manuel', lu en base
   };
 }
@@ -5506,7 +5639,112 @@ function v3VuesDuRole() {
 /* ── Chargements ─────────────────────────────────────────────────────── */
 function v3Cle() {
   const V = state.v3;
-  return [state.period.from, state.period.to, V.depuis].join('|');
+  // ⚠️ Sans le filtre dans la clé, changer de source ne rechargerait RIEN :
+  //    le cache rendrait l'ancien mur et l'écran mentirait en silence.
+  return [state.period.from, state.period.to, V.depuis, v3SrcSignature()].join('|');
+}
+
+/* La signature du filtre, stable quel que soit l'ordre des clics. */
+function v3SrcSignature() {
+  const s = state.v3.src;
+  return (s && s.length) ? s.slice().sort().join(',') : '*';
+}
+
+/* Y a-t-il des leads écartés par le défaut ? Sert aux messages de vide :
+   « aucun lead » n'a pas le même sens selon qu'on écarte 89 dossiers ou zéro. */
+function v3AEcartes() {
+  const V = state.v3;
+  if (V.src) return false;              // sélection explicite : rien n'est « écarté »
+  return (V.srcListe || []).some(s => !s.suivi && s.aTraiter > 0);
+}
+
+/* Ce qu'on passe aux RPC : `null` laisse la base appliquer son défaut. */
+function v3SrcParam() {
+  const s = state.v3.src;
+  return (s && s.length) ? s.slice() : null;
+}
+
+/* Les sources réellement présentes dans le périmètre et la période. On ne
+   devine aucune liste : une source absente ne s'affiche pas, et une source
+   écartée s'affiche AVEC son volume, pour qu'on sache ce qu'on rappelle. */
+async function v3EnsureSources() {
+  const V = state.v3;
+  const k = [state.period.from, state.period.to].join('|');
+  if (V.srcKey === k || V.srcLoading) return;
+  V.srcLoading = true;
+  try {
+    const { data, error } = await sb.rpc('lead_sources_file', {
+      p_de: state.period.from + 'T00:00:00',
+      p_a:  state.period.to   + 'T23:59:59'
+    });
+    if (error) throw error;
+    V.srcListe = (data || []).map(r => ({
+      code: r.code, libelle: r.libelle || r.code,
+      suivi: r.suivi_interne !== false,
+      n: Number(r.n) || 0, aTraiter: Number(r.n_a_traiter) || 0
+    }));
+    V.srcKey = k;
+  } catch (e) {
+    console.error('[lead-mgmt] lead_sources_file', e);
+    // Sans la liste, on n'affiche pas de filtre : mieux vaut pas de filtre
+    // qu'un filtre qui prétend connaître les sources.
+    V.srcListe = []; V.srcKey = k;
+  } finally {
+    V.srcLoading = false; renderAll();
+  }
+}
+
+/* La bande de filtre pour les vues qui n'ont pas de barre de réglages
+   (« Le prochain », « Le relais »). Rien quand il n'y a rien à filtrer. */
+function v3BandeFiltre() {
+  const h = v3FiltreHtml();
+  if (!h) return '';
+  return '<section class="v3-bloc"><div class="v3-reglages">' + h + '</div></section>';
+}
+
+/* La barre de filtre. Rendue au-dessus de la file comme du mur, pour que le
+   même geste vaille partout. */
+function v3FiltreHtml() {
+  const V = state.v3;
+  v3EnsureSources();
+  const L = V.srcListe;
+  if (!L || L.length < 2) return '';   // une seule source : rien à filtrer
+
+  const choisies = V.src || null;
+  const parDefaut = !choisies;
+  const horsSuivi = L.filter(s => !s.suivi);
+
+  let h = '<div class="v3-champ" style="flex:1 1 320px">'
+    + '<label>Sources affichées</label><div class="v3-src">'
+    + '<button type="button" data-v3src="*" class="' + (parDefaut ? 'on' : '') + '">'
+    + 'Suivies en interne</button>';
+  L.forEach(s => {
+    // ⚠️ En mode défaut, les sources suivies sont AFFICHÉES : elles doivent
+    //    donc paraître allumées. Sinon l'écran montre des leads dont aucune
+    //    puce ne rend compte, et le clic ne se lit plus comme une bascule.
+    const on = choisies ? choisies.indexOf(s.code) >= 0 : s.suivi;
+    h += '<button type="button" data-v3src="' + escapeHtml(s.code) + '"'
+       + ' class="' + (s.suivi ? '' : 'hors ') + (on ? 'on' : '') + '"'
+       + ' title="' + escapeHtml(s.libelle)
+       + (s.suivi ? '' : ' — source non suivie en interne')
+       + ' : ' + s.aTraiter + ' à traiter sur ' + s.n + ' reçus">'
+       + escapeHtml(s.libelle) + '<i>' + s.aTraiter + '</i></button>';
+  });
+  h += '</div>';
+
+  // ⚠️ Ne JAMAIS écarter en silence : c'est l'angle mort qu'on vient de
+  //    fermer sur le bandeau BACS. On dit toujours ce qu'on ne montre pas.
+  if (parDefaut && horsSuivi.length) {
+    const n = horsSuivi.reduce((t, s) => t + s.aTraiter, 0);
+    h += '<p class="v3-ecarte"><b>' + n + '</b> lead' + (n > 1 ? 's' : '')
+       + ' écarté' + (n > 1 ? 's' : '') + ' : '
+       + horsSuivi.map(s => escapeHtml(s.libelle)).join(', ')
+       + ' — source' + (horsSuivi.length > 1 ? 's' : '')
+       + ' que le groupe ne suit pas en interne. Cliquez-la'
+       + (horsSuivi.length > 1 ? 'es' : '') + ' pour '
+       + (horsSuivi.length > 1 ? 'les' : 'la') + ' voir.</p>';
+  }
+  return h + '</div>';
 }
 
 async function v3EnsureMur() {
@@ -5517,7 +5755,8 @@ async function v3EnsureMur() {
     const { data, error } = await sb.rpc('lead_mur', {
       p_depuis: V.depuis,
       p_de: state.period.from + 'T00:00:00',
-      p_a:  state.period.to   + 'T23:59:59'
+      p_a:  state.period.to   + 'T23:59:59',
+      p_sources: v3SrcParam()
     });
     if (error) throw error;
     V.mur = (data || []).map(r => ({
@@ -5541,7 +5780,8 @@ async function v3EnsureParcours() {
   try {
     const { data, error } = await sb.rpc('lead_parcours', {
       p_de: state.period.from + 'T00:00:00',
-      p_a:  state.period.to   + 'T23:59:59'
+      p_a:  state.period.to   + 'T23:59:59',
+      p_sources: v3SrcParam()
     });
     if (error) throw error;
     V.parcours = (data || []).map(r => ({
@@ -5681,6 +5921,7 @@ function v3Mur() {
       + '">Arrivée VROOM</button>'
     + '<button type="button" data-v3depuis="site" class="' + (V.depuis === 'site' ? 'on' : '')
       + '">Arrivée site</button></div></div>'
+    + v3FiltreHtml()
     + '<p class="v3-expli">' + expli + '</p></div>'
     + '<div class="v3-tab"><table><thead><tr><th>' + escapeHtml(titre) + '</th>'
     + V3_TRANCHES.map(t => '<th>' + escapeHtml(t) + '</th>').join('')
@@ -5731,8 +5972,9 @@ function v3Relais() {
   const V = state.v3;
   if (V.parcours == null) { v3EnsureParcours();
     return '<div class="lm-empty"><span class="lm-spin"></span>Chargement du parcours…</div>'; }
+  const bande = v3BandeFiltre();
   if (!V.parcours.length) {
-    return '<div class="v3-bloc"><div class="v3-vide"><b>Aucun parcours mesurable.</b>'
+    return bande + '<div class="v3-bloc"><div class="v3-vide"><b>Aucun parcours mesurable.</b>'
       + 'Le parcours se reconstruit depuis l\'historique BACS : il faut qu\'un opérateur '
       + 'VROOM ait pris des leads sur la période. Élargissez la période, ou attendez que '
       + 'One Data porte lui-même la piscine du site.</div></div>';
@@ -5744,7 +5986,7 @@ function v3Relais() {
   const noeuds = lignes.length ? lignes : V.parcours.map(p => ({
     n:{ niveau:'site', nom:p.nom, sites:[p.id] }, prof:0 }));
 
-  return '<section class="v3-bloc">'
+  return bande + '<section class="v3-bloc">'
     + '<div class="v3-entete"><h3>Le parcours d\'un lead</h3>'
     + '<p>Chez Team Colin, personne n\'attribue : le lead attend dans la piscine BACS '
     + 'qu\'un opérateur VROOM le prenne, puis dans la piscine du site qu\'un vendeur le '
@@ -5982,6 +6224,7 @@ function v3Prochain() {
   if (state.mafileLoading && !state.mafileData)
     return '<div class="lm-empty"><span class="lm-spin"></span>Chargement de la file…</div>';
 
+  const bande = v3BandeFiltre();
   const f = v3File();
   const d = v3Courant();
   const libre = (V.mode === 'libre');
@@ -5990,13 +6233,18 @@ function v3Prochain() {
     // Règle d'écran : jamais de vide muet. On distingue « rien à faire » de
     // « tout est pris par quelqu'un d'autre » — ce n'est pas la même chose.
     const pris = f.length;
-    return '<div class="v3-bloc"><div class="v3-vide">'
+    return bande + '<div class="v3-bloc"><div class="v3-vide">'
       + (pris
           ? '<b>Rien à traiter pour l\'instant.</b>Les ' + pris + ' dossiers de votre '
             + 'périmètre sont ouverts par un collègue. Ils reviendront dans la file si '
             + 'personne ne les traite.'
+          // ⚠️ « Aucun lead » est vrai pour les sources SUIVIES. Sans cette
+          //    nuance, un vendeur croirait sa piscine vide alors que le
+          //    filtre écarte des dossiers — et la bande au-dessus les
+          //    annonce juste au-dessus, ce qui paraîtrait contradictoire.
           : '<b>Aucun lead en attente.</b>Tout ce qui est arrivé sur votre périmètre a '
-            + 'reçu un premier contact.')
+            + 'reçu un premier contact'
+            + (v3AEcartes() ? ', hors les sources que le groupe ne suit pas.' : '.'))
       + '</div></div>';
   }
 
@@ -6010,7 +6258,7 @@ function v3Prochain() {
   const reste = sla - att;
   const nom = [d.prenom, d.nom].filter(Boolean).join(' ') || d.nom_affiche || ('Lead ' + d.id_lead);
 
-  return '<div class="v3-scene"><article class="v3-dossier">'
+  return bande + '<div class="v3-scene"><article class="v3-dossier">'
     // Le bandeau : la PREMIÈRE chose que lit celui qui ouvre l'écran.
     + (libre
         ? '<div class="v3-verrou ' + (aMoi ? 'pris' : 'piscine') + '">'
@@ -6080,7 +6328,11 @@ async function v3EnsureCellule() {
     const { data, error } = await sb.rpc('lead_cellule', {
       p_site_ids: l.n.sites, p_tranche: V.cellule.tranche, p_depuis: V.depuis,
       p_de: state.period.from + 'T00:00:00', p_a: state.period.to + 'T23:59:59',
-      p_limite: 100
+      p_limite: 100,
+      // ⚠️ Le MEME filtre que le mur : sans lui, ouvrir une pastille de 12
+      //    rendrait 97 lignes. Une liste qui contredit le compteur qui l'a
+      //    ouverte fait douter des deux.
+      p_sources: v3SrcParam()
     });
     if (error) throw error;
     V.cell = data || [];
@@ -6347,6 +6599,40 @@ function bindEvents() {
       renderAll(); chargerSection();
     });
   });
+  root.querySelectorAll('[data-v3src]').forEach(el => {
+    el.addEventListener('click', () => {
+      const code = el.getAttribute('data-v3src');
+      const V = state.v3;
+      if (code === '*') V.src = null;                 // retour au défaut
+      else {
+        // ⚠️ Le premier clic doit BASCULER ce qu'on voit, pas repartir de
+        //    zéro. On matérialise donc d'abord l'état courant — en mode
+        //    défaut, l'ensemble des sources suivies — puis on bascule la
+        //    source cliquée. Cliquer une puce allumée l'éteint, cliquer une
+        //    puce éteinte l'allume : rien d'autre ne bouge.
+        const l = V.src ? V.src.slice()
+                        : (V.srcListe || []).filter(x => x.suivi).map(x => x.code);
+        const i = l.indexOf(code);
+        if (i >= 0) l.splice(i, 1); else l.push(code);
+        // Tout décoché : on revient au défaut plutôt que de vider l'écran.
+        // Et si la sélection redevient exactement l'ensemble des sources
+        // suivies, c'est le défaut : on y revient pour de bon, sinon
+        // l'écran afficherait la même chose avec la puce « Suivies en
+        // interne » éteinte, et une clé de cache différente pour rien.
+        const suivies = (V.srcListe || []).filter(x => x.suivi).map(x => x.code);
+        const memeQueDefaut = l.length === suivies.length
+                           && suivies.every(c => l.indexOf(c) >= 0);
+        V.src = (!l.length || memeQueDefaut) ? null : l;
+      }
+      // Changer de source change le STOCK, pas seulement les chiffres : il
+      // faut relire la file, le mur, le parcours et refermer le panneau,
+      // qui portait sur une cellule de l'ancien filtre.
+      V.murKey = null; V.parcoursKey = null; V.cellule = null; V.cell = null;
+      V.curseur = 0;
+      state.mafileKey = null; state.mafileData = null;
+      renderAll(); chargerSection();
+    });
+  });
   root.querySelectorAll('[data-v3exp]').forEach(el => {
     el.addEventListener('click', () => {
       // Le dépliage est indexé par CHEMIN : il survit à un changement de
@@ -6415,6 +6701,39 @@ function bindEvents() {
   // La saisie ne part PAS en base a chaque frappe : elle alimente l etat
   // local, et « Enregistrer » fait le seul appel. Sinon un clic sur une
   // option enverrait une regle a moitie choisie.
+  root.querySelectorAll('[data-rgsrc]').forEach(el => {
+    el.addEventListener('click', async () => {
+      const code = el.getAttribute('data-rgsrc');
+      const vers = el.getAttribute('data-rgsrcv') === '1';
+      el.disabled = true;
+      try {
+        const { data, error } = await sb.rpc('lead_source_suivi',
+          { p_code: code, p_suivi: vers });
+        if (error) throw error;
+        if (!data || data.ok !== true) {
+          // La base refuse : on le DIT. Un bouton qui retombe en silence
+          // laisse croire que le r\u00e9glage est pass\u00e9.
+          rgEtat.msg = 'Refus\u00e9 : ' + ((data && data.motif) || 'raison inconnue');
+        } else {
+          rgEtat.msg = '';
+          // Le drapeau a chang\u00e9 en base : tout ce qui en d\u00e9pend est p\u00e9rim\u00e9.
+          const V = state.v3;
+          if (V) {
+            V.srcKey = null; V.srcListe = null; V.src = null;
+            V.murKey = null; V.parcoursKey = null;
+            V.cellule = null; V.cell = null; V.curseur = 0;
+          }
+          state.mafileKey = null; state.mafileData = null;
+        }
+      } catch (e) {
+        console.error('[lead-mgmt] lead_source_suivi', e);
+        rgEtat.msg = 'Erreur : ' + ((e && e.message) || 'r\u00e9glage non enregistr\u00e9');
+      } finally {
+        el.disabled = false;
+        renderAll(); chargerSection();
+      }
+    });
+  });
   root.querySelectorAll('[data-rgc]').forEach(el => {
     el.addEventListener('change', () => {
       if (!rgEtat || !rgEtat.regles) return;
