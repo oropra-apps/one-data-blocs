@@ -1,1282 +1,968 @@
 // ============================================================================
-//  DASHBOARD « Tour de contrôle » — module One Data (OD.define)
-//  SOCLE v6 — ZÉRO NOUVEAU SQL.
+//  DASHBOARD — module One Data (OD.define)   v26 — PROFIL TEAM COLIN
 //
-//  Tout provient de fonctions DÉJÀ EN PRODUCTION :
-//    • get_dashboard(p_viewer_id_user, p_date_from, p_date_to)
-//        → 1 ligne par (vendeur × site) : réalisés, objectifs, cycles, RDV, funnel tx
-//    • get_activite_equipe(p_viewer_id_user, p_date_from, p_date_to)
-//        → 1 ligne par (vendeur × site × JOUR) : contacts, canaux, chocs/relances/
-//          abandons, propales, bdc, wins.  jour IS NULL = vendeur SANS activité.
-//    • get_stock_synthese(p_viewer_id_user)        (chef / directeur)
-//    • get_dashboard_leads(p_viewer_id_user)       (vendeur / chef / marketing)
+//  Cette version est réservée au tenant Team Colin (ref ieztupavcdnubmpbjvuq),
+//  où elle est épinglée. Le défaut du registre reste la v25 « Tour de
+//  contrôle » : aucun autre tenant ne charge ce fichier. Par sécurité, si la
+//  v26 était servie ailleurs, le module se contente d'un message et rend la
+//  main sans rien casser.
 //
-//  COHÉRENCE PAR CONSTRUCTION : la courbe « réalisé » est la somme des nb_wins
-//  de get_activite_equipe ; get_dashboard.commandes_realisees compte les mêmes
-//  PROPALE_BDC (status='win', Archived=false, datées updated_at) sur le même
-//  périmètre. Les deux ne peuvent pas diverger. Un garde-fou le vérifie quand même.
+//  CE QUE LA PAGE FAIT
+//  Elle rassemble les indicateurs que Team Colin regarde tous les jours, rangés
+//  en six familles, et chaque tuile s'ouvre sur ce que son chiffre ne dit pas :
+//  la série sur douze mois, le détail par vendeur, et le constat qui en sort.
 //
-//  AGENDA : window.__dash.rawData + .viewerRole sont posés DÈS le retour du 1er
-//  RPC, avant tout rendu lourd. agenda.js les récupère via son poll (600 ms).
-//  rawData conserve id_user / nom_complet / fonction / vn_vo / id_site, les 5
-//  champs que son sélecteur de collaborateur consomme.
+//    1. Production commerciale — commandes, financement, LOA, accessoires,
+//       Roole, reprises, PHEV/EV, VU
+//    2. Pipe et relances       — affaires ouvertes, à relancer, pipe valorisé
+//    3. Livraisons             — à livrer, dossiers à clôturer
+//    4. Activité commerciale   — rapports vendeurs, rendez-vous
+//    5. Leads                  — reçus, jamais contactés, délai de premier contact
+//    6. Qualité de la base     — injoignables, file de fusion, Bloctel
+//
+//  Une pastille devant chaque famille dit l'état de sa source : alimentée,
+//  partielle, ou sans donnée. Une famille sans source n'est pas masquée — une
+//  tuile vide dit ce qui manque, une tuile absente ne dit rien.
+//
+//  SOURCE UNIQUE
+//  Un seul aller-retour réseau : la RPC dashboard_tc(annee, mois) renvoie tout
+//  en un jsonb, bornée par propale_visible_user_ids() — un vendeur ne voit que
+//  lui, un chef son site, la direction les trois. Les grands comptes sont
+//  exclus partout, comme dans Performances. La famille « qualité de la base »
+//  est un sujet de groupe : elle n'est servie qu'aux rôles 1, 2 et 3.
+//
+//  SEUILS
+//  7 et 27 jours ne sont pas choisis : ce sont les 85ᵉ et 95ᵉ centiles du délai
+//  entre l'ouverture d'une affaire et sa commande, recalculés à chaque appel
+//  sur les affaires de l'année. Ils dérivent avec le comportement du réseau.
+//
+//  Prérequis SQL : dashboard_tc + dashboard_tc_obj
+//  (fichier dashboard_teamcolin.sql).
 // ============================================================================
 
 OD.define('dashboard', {
   async mount(__anchor, ctx) {
     __anchor.id = 'dash-root';
     const doc = __anchor.ownerDocument || document;
-    const sb  = ctx.supabase;
     const getRoot = () => __anchor;
 
-    // Rôles (table ROLE) : 1 Admin · 2 Directeur · 3 Chef des ventes · 4 Vendeur
-    // 5 Responsable Marketing · 6 Dir. plaque · 7 Dir. marque · 8 Dir. groupe
-    const ROLE_FAM = { 1: 'admin', 2: 'directeur', 3: 'chef', 4: 'vendeur',
-                       5: 'marketing', 6: 'directeur', 7: 'directeur', 8: 'directeur' };
+    // --- PROFIL TENANT -------------------------------------------------------
+    const TC_REF = 'ieztupavcdnubmpbjvuq';
+    const IS_TC = (function () {
+      try {
+        if (window.__OD_DASH_PROFILE__ === 'teamcolin') return true;
+        const t = ctx.tenant || {};
+        if (String(t.supabase_url || '').indexOf(TC_REF) !== -1) return true;
+        const slug = String(t.slug || t.code || t.tenant_slug || t.name || '')
+          .toLowerCase().replace(/[^a-z]/g, '');
+        return slug === 'teamcolin';
+      } catch (e) { return false; }
+    })();
+    if (!IS_TC) {
+      getRoot().innerHTML = '<div style="padding:24px;font:14px/1.5 system-ui;color:#5a6b86">'
+        + 'Cette version du tableau de bord est réservée à Team Colin. '
+        + 'Le module standard est la version 25.</div>';
+      return;
+    }
 
-    // ── Socle : attendre oropraUser ──────────────────────────────────────
+    const SUPABASE_URL = ctx.tenant.supabase_url;
+    const SUPABASE_KEY = ctx.tenant.supabase_anon_key;
+    async function getUserJwt() {
+      try { const s = await ctx.supabase.auth.getSession(); return s?.data?.session?.access_token || null; }
+      catch (e) { return null; }
+    }
+
+    // --- socle utilisateur ---------------------------------------------------
     {
       const w = (wwLib.getFrontWindow && wwLib.getFrontWindow()) || window;
       const uid = () => { let d = w.oropraUser; if (Array.isArray(d)) d = d[0]; return d && d.ID_User; };
       for (let i = 0; i < 40 && uid() == null; i++) await new Promise(r => setTimeout(r, 250));
     }
     const FW = (wwLib.getFrontWindow && wwLib.getFrontWindow()) || window;
-    const U  = Array.isArray(FW.oropraUser) ? (FW.oropraUser[0] || {}) : (FW.oropraUser || {});
-    const viewerId   = U.ID_User;
-    const viewerName = U.nomComplet || '';
-    const viewerRole = U.ID_Role != null ? Number(U.ID_Role) : null;
-    if (viewerId == null) { getRoot().innerHTML = '<div style="padding:20px;color:#7a9cc4">Utilisateur non identifié.</div>'; return; }
-    const famille = () => ROLE_FAM[state.viewerRole != null ? state.viewerRole : viewerRole] || 'directeur';
+    const U = Array.isArray(FW.oropraUser) ? (FW.oropraUser[0] || {}) : (FW.oropraUser || {});
+    const prenom = String(U.nomComplet || '').split(' ')[0] || '';
 
-    // ── État partagé (window.__dash : lu par agenda.js) ───────────────────
-    const state = window.__dash || {};
-    // Periode TOUJOURS reinitialisee a l'arrivee sur la page (13/08/2026).
-    // L'etat vit sur window.__dash — partage avec agenda.js — et survit donc
-    // aux navigations SPA : avec un test `if (!state.period)`, une periode
-    // choisie suivait l'utilisateur de page en page.
-    // Regle produit : par defaut, du 1er du mois courant a aujourd'hui,
-    // aucune persistance.
-    { const n = new Date(); state.period = { from: ymd(new Date(n.getFullYear(), n.getMonth(), 1)), to: ymd(n) }; }
-    if (state.rawData === undefined) state.rawData = null;   // get_dashboard
-    if (state.act     === undefined) state.act     = null;   // get_activite_equipe
-    if (state.stock   === undefined) state.stock   = null;
-    if (state.leads   === undefined) state.leads   = null;
-    // AJOUT 20/08/2026 — entonnoir de COHORTE (get_entonnoir).
-    // Vit à côté du funnel historique, il ne le remplace pas encore :
-    // on garde les deux visibles le temps de les comparer sur de vraies
-    // données, puis on retirera l'ancien.
-    if (state.ent     === undefined) state.ent     = null;   // get_entonnoir
-    if (state.entErr  === undefined) state.entErr  = null;
-    // Montage = nouvelle arrivée sur l'accueil : on repart TOUJOURS sans filtre ni
-    // détail ouvert (corrige le retour accueil / logo qui laissait un état collé).
-    state.selection = { level: 'all', key: null, label: 'Tout le périmètre' };
-    state.detail = null;
-    state.vnvo = 'tous';
-    if (state.viewerId != null && String(state.viewerId) !== String(viewerId)) {
-      state.rawData = state.act = state.stock = state.leads = null;
+    // =========================================================================
+    //  CHARTE
+    //  Les couleurs de marque servent les fonds, les bandeaux et les pastilles.
+    //  Les MARQUES des graphiques (points, traits, barres) prennent un pas plus
+    //  soutenu des mêmes teintes : posés tels quels en traits de 2 px sur fond
+    //  blanc, le vert, l'orange et le bleu clair passent sous le seuil de
+    //  contraste et les courbes disparaissent. Les deux jeux ont été vérifiés
+    //  en vision normale et en vision déficiente, sur fond clair et sombre.
+    // =========================================================================
+    const CSS = `
+#dash-root{--bleu:#2a5ea9;--bleu-clair:#acc5e4;--vert:#53bda7;--orange:#fac055;--rouge:#d97070;
+  --m-vert:#00997f;--m-orange:#d2941f;--m-bleu:#3f7cba;--m-rouge:#c0524f;
+  --ground:#f4f7fb;--card:#fff;--line:#e3e9f3;--line-2:#cfd9e9;
+  --ink:#1c2b45;--ink-2:#5a6b86;--ink-3:#8b99b0;
+  --ok-bg:#e4f4f0;--alerte-bg:#fdf3de;--chaud-bg:#fbeceb;--calme-bg:#eef2f8;
+  --ombre:0 1px 2px rgba(28,43,69,.05),0 8px 24px rgba(28,43,69,.06);
+  --ui:"Nunito Sans",system-ui,-apple-system,sans-serif;
+  --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+  font-family:var(--ui);color:var(--ink);background:var(--ground);
+  display:block;width:100%;padding:18px 16px 40px;box-sizing:border-box}
+#dash-root *{box-sizing:border-box}
+#dash-root .dw{max-width:1180px;margin:0 auto;display:flex;flex-direction:column;gap:16px}
+#dash-root .drail{display:flex;flex-wrap:wrap;align-items:center;gap:10px 14px}
+#dash-root .drail h1{font-size:19px;font-weight:800;letter-spacing:-.015em;margin:0}
+#dash-root .drail .dt{font-family:var(--mono);font-size:11.5px;color:var(--ink-3)}
+#dash-root .dseg{display:flex;background:var(--card);border:1px solid var(--line);border-radius:9px;
+  padding:3px;box-shadow:var(--ombre);margin-left:auto}
+#dash-root .dseg button{font:inherit;font-size:12px;font-weight:600;color:var(--ink-2);background:none;
+  border:0;padding:6px 11px;border-radius:6px;cursor:pointer;white-space:nowrap}
+#dash-root .dseg button[aria-pressed="true"]{background:var(--bleu);color:#fff}
+#dash-root .dseg button:focus-visible{outline:2px solid var(--bleu);outline-offset:2px}
+#dash-root .dband{background:var(--card);border:1px solid var(--line);border-radius:14px;
+  box-shadow:var(--ombre);padding:17px 20px;display:flex;flex-wrap:wrap;gap:16px 30px;align-items:center}
+#dash-root .dband .q{font-size:10.5px;font-weight:700;letter-spacing:.09em;text-transform:uppercase;color:var(--ink-3)}
+#dash-root .dband .d{flex:1 1 320px;min-width:0}
+#dash-root .dband p{margin:6px 0 0;font-size:16px;line-height:1.45;max-width:62ch}
+#dash-root .dband b{font-weight:800}
+#dash-root .dpouls{display:flex;gap:20px;flex-wrap:wrap}
+#dash-root .dpouls div{min-width:66px}
+#dash-root .dpouls .n{font-family:var(--mono);font-size:22px;font-weight:600;line-height:1;font-variant-numeric:tabular-nums}
+#dash-root .dpouls .l{font-size:10px;color:var(--ink-3);margin-top:5px;line-height:1.25}
+#dash-root .dfam{display:flex;flex-direction:column;gap:9px}
+#dash-root .dfam > h2{font-size:12px;font-weight:800;letter-spacing:.07em;text-transform:uppercase;
+  color:var(--ink-2);margin:6px 0 0;display:flex;align-items:baseline;gap:10px;flex-wrap:wrap}
+#dash-root .dfam > h2 .cn{font-size:11px;font-weight:600;letter-spacing:0;text-transform:none;color:var(--ink-3)}
+#dash-root .detat{display:inline-block;width:7px;height:7px;border-radius:50%;margin-right:6px;vertical-align:1px}
+#dash-root .detat.plein{background:var(--m-vert)}
+#dash-root .detat.partiel{background:var(--m-orange)}
+#dash-root .detat.vide{background:var(--line-2)}
+#dash-root .dgrille{display:grid;grid-template-columns:repeat(auto-fill,minmax(176px,1fr));gap:10px}
+#dash-root .dtuile{position:relative;text-align:left;font:inherit;color:var(--ink);cursor:pointer;
+  background:var(--card);border:1px solid var(--line);border-radius:13px;padding:14px 15px 11px;
+  box-shadow:var(--ombre);display:flex;flex-direction:column;min-width:0;
+  transition:border-color .12s,transform .12s}
+#dash-root .dtuile:hover{border-color:var(--line-2);transform:translateY(-1px)}
+#dash-root .dtuile[aria-expanded="true"]{border-color:var(--bleu);
+  box-shadow:0 0 0 2px rgba(42,94,169,.22),var(--ombre)}
+#dash-root .dtuile:focus-visible{outline:2px solid var(--bleu);outline-offset:2px}
+#dash-root .dtuile.muette{opacity:.62;border-style:dashed}
+#dash-root .dtuile.muette .v{color:var(--ink-3)}
+#dash-root .dtuile .lab{font-size:11px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;
+  color:var(--ink-3);display:block;min-height:29px;padding-right:22px;line-height:1.3}
+#dash-root .dtuile .v{font-family:var(--mono);font-size:26px;font-weight:600;letter-spacing:-.02em;
+  line-height:1.15;margin-top:2px;font-variant-numeric:tabular-nums}
+#dash-root .dtuile .v em{font-style:normal;font-size:14px;color:var(--ink-3);font-weight:400;margin-left:3px}
+#dash-root .dtuile .c{font-size:11.5px;margin-top:3px;font-weight:600;line-height:1.3}
+#dash-root .dtuile svg.sp{display:block;width:100%;height:30px;margin-top:auto;padding-top:9px;overflow:visible}
+#dash-root .dtuile .pl{position:absolute;top:12px;right:12px;width:17px;height:17px;border-radius:50%;
+  background:var(--calme-bg);color:var(--ink-3);font-size:12px;font-weight:800;line-height:17px;text-align:center}
+#dash-root .dtuile[aria-expanded="true"] .pl{background:var(--bleu);color:#fff}
+#dash-root .hausse{color:var(--m-vert)}#dash-root .baisse{color:var(--m-rouge)}#dash-root .plat{color:var(--ink-3)}
+#dash-root .dtiroir{background:var(--card);border:1px solid var(--bleu);border-radius:14px;
+  box-shadow:var(--ombre);padding:20px 22px;display:grid;
+  grid-template-columns:minmax(0,1.15fr) minmax(0,1fr);gap:24px}
+#dash-root .dtiroir h3{font-size:16px;font-weight:800;margin:0 0 3px;letter-spacing:-.01em}
+#dash-root .dtiroir .ctx{font-size:12.5px;color:var(--ink-2);margin:0 0 14px}
+#dash-root .dtiroir svg.gr{display:block;width:100%;height:auto;overflow:visible}
+#dash-root .dtiroir svg text{font-family:var(--ui)}
+#dash-root .dtiroir svg text.m{font-family:var(--mono);font-variant-numeric:tabular-nums}
+#dash-root .dtrouve{background:var(--alerte-bg);border-radius:11px;padding:14px 16px;font-size:13.5px;line-height:1.5}
+#dash-root .dtrouve .t{font-size:10.5px;font-weight:700;letter-spacing:.09em;text-transform:uppercase;
+  color:var(--ink-3);margin-bottom:6px}
+#dash-root .dtrouve b{font-weight:800}
+#dash-root table.dmini{width:100%;border-collapse:collapse;font-size:12.5px;margin-top:14px;min-width:330px}
+#dash-root .dscroll{overflow-x:auto}
+#dash-root table.dmini th{font-size:9.5px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;
+  color:var(--ink-3);text-align:right;padding:0 7px 6px;white-space:nowrap}
+#dash-root table.dmini th:first-child{text-align:left}
+#dash-root table.dmini td{padding:5px 7px;border-top:1px solid var(--line);text-align:right;
+  font-variant-numeric:tabular-nums;white-space:nowrap}
+#dash-root table.dmini td:first-child{text-align:left;white-space:normal}
+#dash-root table.dmini .f{font-family:var(--mono);font-weight:600}
+#dash-root .dferme{background:none;border:0;font:inherit;font-size:12px;font-weight:600;color:var(--ink-3);
+  cursor:pointer;padding:0;margin-top:14px;text-decoration:underline;text-underline-offset:3px}
+#dash-root .dpied{font-size:11.5px;color:var(--ink-3);line-height:1.6;max-width:84ch}
+#dash-root .dvide{padding:22px;color:var(--ink-2);font-size:14px}
+@media (max-width:820px){#dash-root .dtiroir{grid-template-columns:minmax(0,1fr)}}
+@media (prefers-reduced-motion:reduce){#dash-root *{transition:none!important}}
+`;
+    if (!doc.getElementById('dash-tc-css')) {
+      const st = doc.createElement('style'); st.id = 'dash-tc-css'; st.textContent = CSS;
+      doc.head.appendChild(st);
     }
-    state.viewerId = viewerId;
-    state.viewerRole = state.viewerRole != null ? state.viewerRole : viewerRole;
-    state.err = null;
-    window.__dash = state;
-    try { FW.__dash = state; } catch (e) {}
 
-    // ══ HELPERS ══════════════════════════════════════════════════════════
-    function ymd(d) { return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'); }
-    function esc(s) { return s == null ? '' : String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;'); }
-    function num(v) { if (v == null) return 0; if (typeof v === 'number') return isFinite(v) ? v : 0; const n = parseFloat(String(v).replace(',', '.')); return isNaN(n) ? 0 : n; }
-    function fr(n) { return String(Math.round(num(n))).replace(/\B(?=(\d{3})+(?!\d))/g, ' '); }
-    function dec1(n) { return (Math.round(num(n) * 10) / 10).toFixed(1).replace('.', ','); }
-    function prenom(s) { return (s || '').trim().split(/\s+/)[0] || ''; }
-    function fmtEuro(v) { const n = num(v); return n >= 1e6 ? dec1(n / 1e6) + ' M€' : n >= 1e3 ? fr(n / 1e3) + ' k€' : fr(n) + ' €'; }
-    function fmtPeriod() { const f = s => new Date(s + 'T12:00:00').toLocaleDateString('fr-FR', { day: '2-digit', month: 'short' }); return f(state.period.from) + ' → ' + f(state.period.to); }
-    // Jours ouvrés = lundi→samedi (dimanche exclu) — même règle que Performances.
-    function joursOuvres(a, b) { let n = 0; const d = new Date(a + 'T12:00:00'), e = new Date(b + 'T12:00:00'); while (d <= e) { if (d.getDay() !== 0) n++; d.setDate(d.getDate() + 1); } return n; }
-    function moisRef() { const t = new Date(state.period.to + 'T12:00:00'); return { deb: new Date(t.getFullYear(), t.getMonth(), 1), fin: new Date(t.getFullYear(), t.getMonth() + 1, 0), jour: t.getDate() }; }
-    function prorata() { const m = moisRef(); const tot = joursOuvres(ymd(m.deb), ymd(m.fin)); const ec = joursOuvres(ymd(m.deb), state.period.to); return tot > 0 ? Math.min(1, ec / tot) : 1; }
-    function projection(re, ob) {
-      const pr = prorata(), r = num(re), o = num(ob);
-      const land = pr > 0 ? Math.round(r / pr) : r;
-      return { realise: r, objectif: o, land: land, prorata: pr,
-               verdict: o <= 0 ? 'neutre' : land >= o ? 'good' : land >= o * 0.9 ? 'warn' : 'bad' };
+    // =========================================================================
+    //  OUTILS
+    // =========================================================================
+    const esc = s => String(s == null ? '' : s)
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+    const num = v => { const n = Number(v); return isFinite(n) ? n : 0; };
+    const FINE = ' ';                       // espace fine insécable
+    function fmt(n) {
+      const v = Math.round(num(n));
+      return String(v).replace(/\B(?=(\d{3})+(?!\d))/g, FINE);
     }
-    // Objectifs saisis « normalement dès le 8 » → au-delà, l'absence est une anomalie.
-    function alerteObjectif(obj) { return num(obj) <= 0 && moisRef().jour >= 8; }
+    function fmtEur(n) {
+      const v = num(n);
+      if (Math.abs(v) >= 1e6) return (v / 1e6).toFixed(1).replace('.', ',') + FINE + 'M€';
+      if (Math.abs(v) >= 1e3) return fmt(v / 1e3) + FINE + 'k€';
+      return fmt(v) + FINE + '€';
+    }
+    function pct(a, b) { return num(b) > 0 ? Math.round(num(a) / num(b) * 100) : null; }
+    const MOIS_COURT = ['janv.', 'févr.', 'mars', 'avr.', 'mai', 'juin',
+                        'juil.', 'août', 'sept.', 'oct.', 'nov.', 'déc.'];
+    const JOURS_NOM = { '1': 'Lundi', '2': 'Mardi', '3': 'Mercredi', '4': 'Jeudi',
+                        '5': 'Vendredi', '6': 'Samedi', '7': 'Dimanche' };
 
-    // ══ MAPPING ══════════════════════════════════════════════════════════
-    // Colonnes ventilées par TYPE DE VÉHICULE (migration 20260825180000).
-    // Volontairement HORS de SUM_D : elles ne doivent pas être sommées deux
-    // fois par les agrégats, seulement servir de source à projeterVnVo.
-    const VNVO_D = ['commandes_vn','commandes_vo','objectif_commandes_vn','objectif_commandes_vo'];
-    const SUM_D = ['commandes_realisees','objectif_commandes','financements_realises','objectif_financements',
-      'contrats_service_realises','objectif_contrat_service','gravages_realises','objectif_gravage',
-      'waxoyls_realises','objectif_waxoyl','cycles_ouverts','leads_a_traiter','nb_contacts','nb_entrants',
-      'nb_sortants','nb_propales','nb_bdc','nb_wins','nb_wins_tx','nb_propales_tx','nb_bdc_tx',
-      'rdv_a_venir','rdv_aujourdhui','rdv_sans_cr'];
-    const SUM_A = ['nb_contacts','nb_entrants','nb_sortants','nb_whatsapp','nb_rpv','nb_voip','nb_sms',
-      'nb_chocs','nb_relances','nb_abandons','nb_propales_creees','nb_bdc','nb_wins'];
+    // =========================================================================
+    //  DONNÉES
+    // =========================================================================
+    const today = new Date();
+    const state = { annee: today.getFullYear(), mois: today.getMonth() + 1, ouvert: null, d: null };
 
-    function mapD(r) {
-      const o = { id_user: Number(r.id_user), nom_complet: r.nom_complet || ('Vendeur ' + r.id_user),
-        fonction: r.fonction || '', vn_vo: (r.vn_vo || '').toString().toUpperCase(),
-        id_site: r.id_site != null ? Number(r.id_site) : null, nom_site: r.nom_site || ('Site ' + r.id_site),
-        reseau: r.reseau || '(Sans réseau)', affaire: r.affaire || '(Sans affaire)',
-        id_affaire: r.id_affaire != null ? Number(r.id_affaire) : null,
-        id_role: r.id_role != null ? Number(r.id_role) : null };
-      for (const k of SUM_D) o[k] = num(r[k]);
-      // ⚠️ mapD ne recopie QUE les clés de SUM_D : toute colonne ajoutée à la
-      // RPC est silencieusement jetée ici. Les quatre colonnes ventilées par
-      // TYPE DE VÉHICULE (migration 20260825180000) doivent donc être
-      // recopiées explicitement, sinon projeterVnVo ne trouve rien et le
-      // filtre VN/VO reste sans effet — bug constaté le 26/08/2026.
-      // On distingue « colonne absente » (tenant non migré) de « valeur
-      // nulle » : undefined reste undefined, il sert de signal.
-      for (const k of VNVO_D) if (r[k] !== undefined && r[k] !== null) o[k] = num(r[k]);
-      return o;
+    async function charger() {
+      const jwt = await getUserJwt();
+      if (!jwt) throw new Error('session absente');
+      const res = await fetch(SUPABASE_URL + '/rest/v1/rpc/dashboard_tc', {
+        method: 'POST',
+        headers: { 'apikey': SUPABASE_KEY, 'Authorization': 'Bearer ' + jwt,
+                   'Content-Type': 'application/json' },
+        body: JSON.stringify({ p_annee: state.annee, p_mois: state.mois })
+      });
+      if (!res.ok) throw new Error('HTTP ' + res.status);
+      return await res.json();
     }
-    function mapA(r) {
-      const o = { id_user: Number(r.id_user), nom_complet: r.nom_complet || ('Vendeur ' + r.id_user),
-        id_site: r.id_site != null ? Number(r.id_site) : null, nom_site: r.nom_site || '',
-        reseau: r.reseau || '', affaire: r.affaire || '',
-        vn_vo: (r.vn_vo || '').toString().toUpperCase(),
-        id_role: r.id_role != null ? Number(r.id_role) : null,
-        jour: r.jour ? String(r.jour).slice(0, 10) : null };   // null = vendeur sans activité
-      for (const k of SUM_A) o[k] = num(r[k]);
-      return o;
-    }
-    function zero(keys) { const o = {}; for (const k of keys) o[k] = 0; return o; }
-    function addTo(t, r, keys) { for (const k of keys) t[k] += num(r[k]); }
-    function sum(rows, keys) { const o = zero(keys); for (const r of rows) addTo(o, r, keys); return o; }
 
-    // Filtre commun aux DEUX sources → jamais de divergence de périmètre.
-    function inScope(r) {
-      const s = state.selection;
-      if (s.level === 'site'    && String(r.id_site) !== String(s.key)) return false;
-      if (s.level === 'vendeur' && String(r.id_user) !== String(s.key)) return false;
-      if (s.level === 'reseau'  && r.reseau !== s.key) return false;
-      // ⚠️ PLUS de filtre sur r.vn_vo ici. `vn_vo` est la SPÉCIALITÉ DU
-      // VENDEUR, pas le type du véhicule vendu : douze vendeurs du site 2009
-      // vendent les deux. Filtrer les lignes là-dessus revenait à compter
-      // « les commandes des vendeurs VO », pas « les VO vendus » — 23 au lieu
-      // de 28, plus 8 commandes perdues dans une catégorie « VNVO » sans
-      // bouton. Arbitrage d'Antoine du 25/08/2026 : le VN/VO porte sur le
-      // VÉHICULE. Le filtre est désormais une PROJECTION de colonnes, faite
-      // dans projeterVnVo() ci-dessous.
-      return true;
+    // Les séries de la RPC arrivent en douze lignes { mois, cdes, fi, ... }.
+    function serie(cle) { return (state.d.serie || []).map(r => num(r[cle])); }
+    function libellesMois() {
+      return (state.d.serie || []).map(r => MOIS_COURT[parseInt(String(r.mois).slice(5), 10) - 1]);
     }
-    // Applique le filtre VN/VO en changeant de COLONNE plutôt qu'en écartant
-    // des lignes. La RPC expose depuis 20260825180000 le réalisé et
-    // l'objectif ventilés par type de véhicule.
-    //
-    // Limite connue et assumée : seules les COMMANDES sont ventilées. Les
-    // financements, contrats, gravages et waxoyls restent tous types
-    // confondus — leur ventilation demanderait autant de colonnes, et ces
-    // options ne sont pas l'enjeu du filtre VN/VO.
-    function projeterVnVo(r) {
-      if (state.vnvo !== 'vn' && state.vnvo !== 'vo') return r;
-      const suf = state.vnvo === 'vn' ? '_vn' : '_vo';
-      // Tenant non migré : la colonne est ABSENTE (undefined). On rend la
-      // ligne telle quelle plutôt que d'afficher des zéros partout — mais on
-      // le SIGNALE, une fois. Ce repli silencieux avait masqué le fait que
-      // mapD jetait les colonnes : le filtre semblait simplement « ne rien
-      // faire », sans la moindre trace en console (26/08/2026).
-      if (r['commandes' + suf] === undefined) {
-        if (!projeterVnVo.__prevenu) {
-          projeterVnVo.__prevenu = 1;
-          console.warn('[dash] filtre VN/VO inactif : colonne commandes' + suf +
-            ' absente. Tenant non migré (20260825180000) ou colonne perdue au mapping.');
+    // Écart entre le premier et le dernier mois de la série : c'est lui que la
+    // tuile affiche sous le chiffre, jamais un écart au mois précédent, trop
+    // bruité sur des volumes de cent commandes.
+    function ecartAn(cle, unite) {
+      const s = serie(cle).filter(v => v !== 0 || true);
+      if (s.length < 2) return { txt: '', sens: 'plat' };
+      const a = s[0], b = s[s.length - 1];
+      if (!a) return { txt: '', sens: 'plat' };
+      if (unite === 'pts') {
+        const e = Math.round(b - a);
+        return { txt: (e > 0 ? '+' : '') + e + ' pts sur un an', sens: e < -2 ? 'baisse' : e > 2 ? 'hausse' : 'plat' };
+      }
+      const e = Math.round((b - a) / a * 100);
+      return { txt: (e > 0 ? '+' : '') + e + ' % sur un an', sens: e < -5 ? 'baisse' : e > 5 ? 'hausse' : 'plat' };
+    }
+
+    // =========================================================================
+    //  GRAPHIQUES
+    // =========================================================================
+    function etincelle(vals, forme, couleur) {
+      if (!vals || !vals.length) return '';
+      const W = 160, H = 30, n = vals.length;
+      const mx = Math.max.apply(null, vals), mn = forme === 'barres' ? 0 : Math.min.apply(null, vals);
+      const y = v => H - 3 - (H - 6) * ((v - mn) / ((mx - mn) || 1));
+      let h = '';
+      if (forme === 'barres') {
+        const w = W / n;
+        vals.forEach((v, i) => {
+          h += '<rect x="' + (i * w + 1).toFixed(1) + '" y="' + y(v).toFixed(1) + '" width="' + (w - 2).toFixed(1)
+            + '" height="' + Math.max(H - 3 - y(v), 0).toFixed(1) + '" rx="1.5" fill="' + couleur
+            + '" fill-opacity="' + (i === n - 1 ? 1 : .32) + '"/>';
+        });
+      } else {
+        const x = i => (i / (n - 1)) * (W - 4) + 2;
+        h += '<polyline fill="none" stroke="' + couleur + '" stroke-width="2" stroke-linejoin="round"'
+          + ' stroke-linecap="round" points="'
+          + vals.map((v, i) => x(i).toFixed(1) + ',' + y(v).toFixed(1)).join(' ') + '"/>';
+        h += '<circle cx="' + x(n - 1).toFixed(1) + '" cy="' + y(vals[n - 1]).toFixed(1)
+          + '" r="3" fill="' + couleur + '" stroke="var(--card)" stroke-width="1.5"/>';
+      }
+      return '<svg class="sp" viewBox="0 0 ' + W + ' ' + H + '" preserveAspectRatio="none" aria-hidden="true">'
+        + h + '</svg>';
+    }
+
+    // Graphe du tiroir. Une seule échelle, jamais deux axes : quand une seconde
+    // série est tracée (le financement sous la LOA), elle partage l'axe — ce
+    // sont deux pourcentages, la comparaison a un sens.
+    function graphe(vals, forme, libelles, unite, second, titre) {
+      if (!vals || !vals.length) return '';
+      const W = 520, H = 190, gT = 22, gR = 12, gB = 30, gL = 34;
+      const tous = second ? vals.concat(second) : vals;
+      const mx = Math.max.apply(null, tous) || 1, mn = 0;
+      const y = v => gT + (H - gT - gB) * (1 - (v - mn) / ((mx - mn) || 1));
+      const x = i => gL + (i / (vals.length - 1)) * (W - gL - gR);
+      let h = '';
+      for (let k = 0; k <= 3; k++) {
+        const v = mn + (mx - mn) * k / 3;
+        h += '<line x1="' + gL + '" y1="' + y(v).toFixed(1) + '" x2="' + (W - gR) + '" y2="' + y(v).toFixed(1)
+          + '" stroke="var(--line)" stroke-width="1"/>'
+          + '<text class="m" x="' + (gL - 7) + '" y="' + (y(v) + 4).toFixed(1) + '" text-anchor="end"'
+          + ' font-size="10" fill="var(--ink-3)">' + Math.round(v) + '</text>';
+      }
+      if (forme === 'barres') {
+        const w = (W - gL - gR) / vals.length;
+        vals.forEach((v, i) => {
+          h += '<rect x="' + (gL + i * w + 2).toFixed(1) + '" y="' + y(v).toFixed(1) + '" width="' + (w - 4).toFixed(1)
+            + '" height="' + Math.max(y(mn) - y(v), 0).toFixed(1) + '" rx="2.5" fill="var(--m-bleu)"'
+            + ' fill-opacity="' + (i === vals.length - 1 ? 1 : .42) + '"/>';
+        });
+        h += '<text class="m" x="' + (gL + w * (vals.length - .5)).toFixed(1) + '" y="'
+          + (y(vals[vals.length - 1]) - 8).toFixed(1) + '" text-anchor="middle" font-size="11.5"'
+          + ' font-weight="700" fill="var(--ink)">' + vals[vals.length - 1] + '</text>';
+      } else {
+        if (second) {
+          h += '<polyline fill="none" stroke="var(--m-bleu)" stroke-width="2" stroke-dasharray="4 3" points="'
+            + second.map((v, i) => x(i).toFixed(1) + ',' + y(v).toFixed(1)).join(' ') + '"/>';
         }
-        return r;
-      }
-      return Object.assign({}, r, {
-        commandes_realisees: num(r['commandes' + suf]),
-        objectif_commandes:  num(r['objectif_commandes' + suf]),
-      });
-    }
-    // Auto-réparation : une sélection qui ne désigne plus rien (donnée rechargée,
-    // période changée, identifiant erroné) est annulée au lieu de vider l'écran.
-    function selectionValide() {
-      const s = state.selection, rows = state.rawData || [];
-      if (!s || s.level === 'all') return true;
-      if (!rows.length) return true;
-      if (s.level === 'site')    return rows.some(r => String(r.id_site) === String(s.key));
-      if (s.level === 'vendeur') return rows.some(r => String(r.id_user) === String(s.key));
-      if (s.level === 'reseau')  return rows.some(r => r.reseau === s.key);
-      return false;
-    }
-    function resetSelection() { state.selection = { level: 'all', key: null, label: 'Tout le périmètre' }; }
-    const dRows = () => (state.rawData || []).filter(inScope).map(projeterVnVo);
-    // L'ACTIVITÉ (contacts, appels, relances) n'est pas typée VN/VO — aucune
-    // colonne ne le permet. On conserve donc le filtre par spécialité du
-    // vendeur, faute de mieux : c'est une approximation, mais elle ne porte
-    // sur aucun compteur de vente.
-    const aRows = () => (state.act || []).filter(r => {
-      if (!inScope(r)) return false;
-      if (state.vnvo === 'vn' && !(r.vn_vo || '').includes('VN')) return false;
-      if (state.vnvo === 'vo' && !(r.vn_vo || '').includes('VO')) return false;
-      return true;
-    });
-
-    // ── VOLUME vs ATTEINTE ───────────────────────────────────────────────
-    // Depuis 20260821210000, les deux RPC remontent aussi les chefs des
-    // ventes (id_role = 3). Une commande signée par un chef EST une
-    // commande de la concession : elle compte dans le VOLUME.
-    // Mais un chef n'a quasiment jamais d'objectif — l'inclure au
-    // numérateur d'un taux d'atteinte dont il est absent au dénominateur
-    // gonflait le résultat d'une quinzaine de points.
-    //
-    //   dRows()  / aRows()  → volume, activité, totaux de la concession
-    //   dRowsV() / aRowsV() → objectif, projection, atteinte, classement
-    //                         vendeurs, vendeurs inactifs
-    //
-    // Règle : dès qu'un objectif entre dans un calcul, c'est la version V.
-    // Tolérant au décalage front/base : le CDN sert tous les tenants d'un
-    // coup, alors que le schéma se déploie tenant par tenant. Sur une base
-    // sans la migration 20260821210000, id_role est absent — on retombe
-    // alors sur le comportement d'avant plutôt que de vider l'écran.
-    const estVendeur = r => r.id_role == null || Number(r.id_role) === 4;
-    const dRowsV = () => dRows().filter(estVendeur);
-    const aRowsV = () => aRows().filter(estVendeur);
-    // Commandes signées par l'encadrement sur le périmètre courant.
-    // Sert à afficher ce que le classement vendeurs ne montre pas, plutôt
-    // que de le fondre en silence dans un total.
-    function volumeEncadrement() {
-      return dRows().filter(r => Number(r.id_role) === 3)
-        .reduce((n, r) => n + num(r.commandes_realisees), 0);
-    }
-
-    function groupBy(rows, keyFn, labelFn, keys) {
-      const m = {};
-      for (const r of rows) {
-        const k = keyFn(r); if (k == null || k === 'null' || k === '') continue;
-        if (!m[k]) m[k] = Object.assign({ key: k, label: labelFn(r) }, zero(keys));
-        addTo(m[k], r, keys);
-      }
-      return Object.values(m);
-    }
-    function parVendeur(rows, keys) {
-      const m = {};
-      for (const r of rows) {
-        const k = String(r.id_user);
-        if (!m[k]) m[k] = Object.assign({ id_user: r.id_user, nom_complet: r.nom_complet, id_site: r.id_site, nom_site: r.nom_site }, zero(keys));
-        addTo(m[k], r, keys);
-      }
-      return Object.values(m);
-    }
-    // Vendeurs SANS aucune activité sur la période (jour null et nulle part actifs)
-    function vendeursInactifs() {
-      const rows = aRowsV();   // un chef sans activité n'est pas une alerte
-      const actifs = {}; for (const r of rows) if (r.jour) actifs[String(r.id_user)] = 1;
-      const out = {}; for (const r of rows) if (!r.jour && !actifs[String(r.id_user)]) out[String(r.id_user)] = r;
-      return Object.values(out);
-    }
-    // Série cumulée des commandes, par jour ouvré, depuis get_activite_equipe
-    function serieJours() {
-      const rows = aRows().filter(r => r.jour);
-      if (!rows.length) return null;
-      const par = {}; for (const r of rows) par[r.jour] = (par[r.jour] || 0) + num(r.nb_wins);
-      const out = []; const d = new Date(state.period.from + 'T12:00:00'), e = new Date(state.period.to + 'T12:00:00');
-      while (d <= e) { const k = ymd(d); if (d.getDay() !== 0) out.push({ jour: k, n: par[k] || 0 }); d.setDate(d.getDate() + 1); }
-      return out;
-    }
-
-    // ══ CHARGEMENT — 2 RPC en parallèle, rendu dès le premier ════════════
-    async function load(force) {
-      const key = viewerId + '|' + state.period.from + '|' + state.period.to;
-      if (!force && state.key === key && state.rawData) return;
-      // Rafraîchissement SILENCIEUX quand on a déjà des données à l'écran :
-      // on ne repasse pas en état « chargement », sinon un simple retour sur
-      // l'accueil ferait clignoter la page alors qu'elle a déjà tout à
-      // afficher. Les chiffres se mettent à jour quand la RPC répond.
-      const dejaAffiche = !!state.rawData;
-      state.key = key; state.loading = !dejaAffiche; state.err = null; render();
-
-      const pD = sb.rpc('get_dashboard',        { p_viewer_id_user: Number(viewerId), p_date_from: state.period.from, p_date_to: state.period.to });
-      const pA = sb.rpc('get_activite_equipe',  { p_viewer_id_user: Number(viewerId), p_date_from: state.period.from, p_date_to: state.period.to });
-
-      try {
-        const rD = await pD;
-        if (rD.error) throw rD.error;
-        state.rawData = (rD.data || []).map(mapD);
-        if (rD.data && rD.data[0] && rD.data[0].viewer_role != null) state.viewerRole = Number(rD.data[0].viewer_role);
-        window.__dash = state; try { FW.__dash = state; } catch (e) {}
-        state.loading = false; render();          // ← agenda débloqué ici (poll 600 ms)
-      } catch (e) {
-        console.error('[dash] get_dashboard', e);
-        state.err = (e && e.message) || String(e); state.rawData = []; state.loading = false; render(); return;
-      }
-
-      try { const rA = await pA; if (rA.error) throw rA.error; state.act = (rA.data || []).map(mapA); render(); }
-      catch (e) { console.warn('[dash] get_activite_equipe', e); state.act = []; render(); }
-
-      const f = famille();
-      if (f === 'vendeur' || f === 'chef' || f === 'marketing') loadLeads();
-      if (f === 'vendeur') loadClassement();
-      if (f === 'chef' || f === 'directeur' || f === 'admin')   loadStock();
-      loadEntonnoir();
-    }
-
-    // ── AJOUT : entonnoir de cohorte ──────────────────────────────────
-    // La cohorte NE SUIT PAS le sélecteur de période de la page, et c'est
-    // volontaire : les contacts de cette semaine n'ont pas eu le temps de
-    // se conclure, les compter écraserait le taux. On prend une fenêtre de
-    // 3 mois qui s'arrête il y a 30 jours, et on l'affiche en clair.
-    function bornesCohorte() {
-      const fin = new Date(); fin.setDate(fin.getDate() - 30);
-      const deb = new Date(fin); deb.setDate(deb.getDate() - 90);
-      return { from: ymd(deb), to: ymd(fin) };
-    }
-    async function loadEntonnoir() {
-      const b = bornesCohorte();
-      const k = viewerId + '|' + b.from + '|' + b.to + '|' + famille();
-      if (state.entKey === k && (state.ent || state.entErr)) return;
-      state.entKey = k;
-      try {
-        const r = await sb.rpc('get_entonnoir', {
-          p_viewer_id_user: Number(viewerId),
-          p_date_from: b.from,
-          p_date_to: b.to,
-          p_id_user: famille() === 'vendeur' ? Number(viewerId) : null
+        h += '<polyline fill="none" stroke="var(--m-orange)" stroke-width="2.5" stroke-linejoin="round" points="'
+          + vals.map((v, i) => x(i).toFixed(1) + ',' + y(v).toFixed(1)).join(' ') + '"/>';
+        vals.forEach((v, i) => {
+          h += '<circle cx="' + x(i).toFixed(1) + '" cy="' + y(v).toFixed(1) + '" r="3.2"'
+            + ' fill="var(--m-orange)" stroke="var(--card)" stroke-width="1.5"/>';
         });
-        if (r.error) throw r.error;
-        state.ent = (r.data || []).slice().sort((x, y) => num(x.rang) - num(y.rang));
-        state.entErr = null;
-      } catch (e) {
-        console.warn('[dash] get_entonnoir', e);
-        state.ent = null;
-        state.entErr = (e && e.message) || String(e);
+        const bout = (i, v, anc, dx) => '<text class="m" x="' + (x(i) + dx).toFixed(1) + '" y="'
+          + (y(v) - 11).toFixed(1) + '" text-anchor="' + anc + '" font-size="11.5" font-weight="700"'
+          + ' fill="var(--ink)">' + v + (unite || '') + '</text>';
+        h += bout(0, vals[0], 'start', 13) + bout(vals.length - 1, vals[vals.length - 1], 'end', -4);
       }
-      render();
-    }
-    async function loadLeads() {
-      if (state.leads) return;
-      try { const r = await sb.rpc('get_dashboard_leads', { p_viewer_id_user: Number(viewerId) });
-        if (r.error) throw r.error;
-        const idx = {}; for (const x of (r.data || [])) idx[Number(x.id_user) + '_' + Number(x.id_site)] = num(x.leads_a_traiter);
-        for (const row of (state.rawData || [])) row.leads_a_traiter = idx[row.id_user + '_' + row.id_site] || 0;
-        state.leads = true; render();
-      } catch (e) { console.warn('[dash] get_dashboard_leads', e); state.leads = true; }
-    }
-    // Classement d'équipe — vue VENDEUR uniquement.
-    //
-    // Pourquoi une RPC dédiée et non dRowsV() : la RLS de PROPALE_BDC limite
-    // un vendeur à SES PROPRES dossiers (propale_visible_user_ids : « vendeur :
-    // lui-même uniquement »). get_dashboard étant en SECURITY INVOKER, il
-    // rendait bien les lignes des collègues mais toutes à zéro — le bloc
-    // n'était pas vide, il MENTAIT : un vendeur 12e sur 13 se voyait 1er.
-    //
-    // get_classement_equipe est en SECURITY DEFINER et ne rend QUE des volumes
-    // agrégés : nom et nombre de commandes, aucun dossier. Arbitrage du
-    // 25/08/2026 — « ouvrir les compteurs sans ouvrir les dossiers ».
-    async function loadClassement() {
-      // Le site entre dans la CLÉ : sans lui, changer de site en topnav
-      // ressortait le classement en cache et rien ne bougeait.
-      const site = state.siteBus != null ? Number(state.siteBus) : null;
-      const key = viewerId + '|' + state.period.from + '|' + state.period.to + '|' + (site == null ? 'tous' : site);
-      if (state.clsKey === key && state.classement) return;
-      try {
-        const r = await sb.rpc('get_classement_equipe', {
-          p_viewer_id_user: Number(viewerId),
-          p_date_from: state.period.from,
-          p_date_to: state.period.to,
-          p_id_site: site
-        });
-        if (r.error) throw r.error;
-        state.classement = (r.data || []).map(x => ({
-          rang: Number(x.rang), id_user: Number(x.id_user),
-          nom: x.nom_complet || ('Vendeur ' + x.id_user),
-          commandes: num(x.commandes), est_moi: !!x.est_moi
-        }));
-        state.clsKey = key; render();
-      } catch (e) {
-        // Tenant pas encore migré : on n'affiche pas un classement faux.
-        console.warn('[dash] get_classement_equipe', e);
-        state.classement = []; state.clsKey = key; render();
-      }
-    }
-    async function loadStock() {
-      if (state.stock) return;
-      try { const r = await sb.rpc('get_stock_synthese', { p_viewer_id_user: Number(viewerId) });
-        if (r.error) throw r.error;
-        state.stock = (r.data || []).map(x => ({ categorie: x.categorie, id_site: x.id_site != null ? Number(x.id_site) : null,
-          nb_vehicules: num(x.nb_vehicules), age_moyen_jours: num(x.age_moyen_jours),
-          nb_vieillissants: num(x.nb_vieillissants), valeur_stock: num(x.valeur_stock) }));
-        render();
-      } catch (e) { console.warn('[dash] get_stock_synthese', e); state.stock = []; }
-    }
-
-    // ══ GRAPHIQUES (SVG, sans dépendance) ════════════════════════════════
-    const COL = { blue: '#2a5ea9', blueDk: '#1F4A85', green: '#53bda7', greenDk: '#0f6e56',
-                  amber: '#fac055', amberDk: '#854f0b', red: '#e24b4a', redDk: '#a32d2d',
-                  grey: '#54678a', greyLt: '#9bb3d1', line: '#eef2f8' };
-    function couleurs(p) {
-      return { real: p.verdict === 'bad' ? COL.red : p.verdict === 'warn' ? COL.amberDk : p.verdict === 'good' ? COL.greenDk : COL.blue,
-               proj: p.verdict === 'bad' ? COL.red : p.verdict === 'warn' ? '#d99a1f' : p.verdict === 'good' ? COL.green : '#acc5e4',
-               obj: COL.greyLt };
-    }
-    function svgTraj(p, serie) {
-      const W = 560, H = 156, pl = 8, pr = 52, pt = 16, pb = 18;
-      const m = moisRef();
-      const nTot = Math.max(2, joursOuvres(ymd(m.deb), ymd(m.fin)));
-      const nCur = Math.min(nTot, Math.max(1, joursOuvres(ymd(m.deb), state.period.to)));
-      let cum = null;
-      if (serie && serie.length) { let c = 0; cum = serie.map(s => (c += s.n)).slice(0, nCur); }
-      // Garde-fou : la courbe DOIT finir sur le réalisé affiché (même source, donc
-      // ça passe ; si un jour ça diverge, on trace une droite au lieu de mentir).
-      let approx = false;
-      if (cum && cum.length) { const last = cum[cum.length - 1];
-        if (!(p.realise > 0) || Math.abs(last - p.realise) > Math.max(1, p.realise * 0.02)) { cum = null; approx = true; } }
-      const c = couleurs(p);
-      const maxY = Math.max(p.objectif, p.land, p.realise, cum ? Math.max.apply(null, cum) : 0, 1) * 1.12;
-      const x = i => pl + i * (W - pl - pr) / (nTot - 1);
-      const y = v => H - pb - v * (H - pt - pb) / maxY;
-      const real = cum ? 'M' + x(0) + ',' + y(cum[0]) + cum.map((v, i) => ' L' + x(i) + ',' + y(v)).join('')
-                       : 'M' + x(0) + ',' + y(0) + ' L' + x(nCur - 1) + ',' + y(p.realise);
-      const proj = 'M' + x(nCur - 1) + ',' + y(p.realise) + ' L' + x(nTot - 1) + ',' + y(p.land);
-      const obj  = 'M' + x(0) + ',' + y(0) + ' L' + x(nTot - 1) + ',' + y(p.objectif);
-      const yL = y(p.land), yO = y(p.objectif), yOl = Math.abs(yL - yO) < 13 ? yO + 13 : yO;
-      const txt = (a, b, t, col) => '<text x="' + a + '" y="' + b + '" font-size="11.5" font-weight="800" fill="' + col + '" font-family="Nunito Sans,system-ui,sans-serif">' + t + '</text>';
-      return { svg: '<svg viewBox="0 0 ' + W + ' ' + H + '" style="display:block;width:100%;height:auto" xmlns="http://www.w3.org/2000/svg">' +
-          '<line x1="' + pl + '" y1="' + y(0) + '" x2="' + x(nTot - 1) + '" y2="' + y(0) + '" stroke="' + COL.line + '"/>' +
-          '<line x1="' + x(nCur - 1) + '" y1="' + pt + '" x2="' + x(nCur - 1) + '" y2="' + y(0) + '" stroke="#e8eef7" stroke-dasharray="3 3"/>' +
-          (p.objectif > 0 ? '<path d="' + obj + '" fill="none" stroke="' + c.obj + '" stroke-width="2" stroke-dasharray="5 4" stroke-linecap="round"/>' : '') +
-          '<path d="' + real + '" fill="none" stroke="' + c.real + '" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>' +
-          '<path d="' + proj + '" fill="none" stroke="' + c.proj + '" stroke-width="2.5" stroke-dasharray="2 5" stroke-linecap="round"/>' +
-          '<circle cx="' + x(nCur - 1) + '" cy="' + y(p.realise) + '" r="4.5" fill="' + c.real + '"/>' +
-          (p.objectif > 0 ? '<circle cx="' + x(nTot - 1) + '" cy="' + yO + '" r="3.5" fill="' + c.obj + '"/>' : '') +
-          '<circle cx="' + x(nTot - 1) + '" cy="' + yL + '" r="5.5" fill="#fff" stroke="' + c.proj + '" stroke-width="3"/>' +
-          txt(x(nTot - 1) + 10, yL + 4, fr(p.land), c.proj) +
-          (p.objectif > 0 ? txt(x(nTot - 1) + 10, yOl + 4, fr(p.objectif), c.obj) : '') + '</svg>', approx: approx };
-    }
-    function legende(p, approx) {
-      const c = couleurs(p);
-      const sw = (s, d) => '<svg width="18" height="8" viewBox="0 0 18 8" style="flex:none"><line x1="1.5" y1="4" x2="16.5" y2="4" stroke="' + s + '" stroke-width="3" stroke-linecap="round"' + (d ? ' stroke-dasharray="' + d + '"' : '') + '/></svg>';
-      return '<div class="d-lgd"><span>' + sw(c.real) + 'réalisé</span>' +
-        (p.objectif > 0 ? '<span>' + sw(c.obj, '5 4') + 'trajectoire objectif</span>' : '') +
-        '<span>' + sw(c.proj, '2 4') + 'atterrissage prévu</span>' +
-        (approx ? '<span style="color:' + COL.greyLt + '">· courbe simplifiée</span>' : '') + '</div>';
-    }
-    function svgSpark(vals, col) {
-      if (!vals || vals.length < 2) return '';
-      const W = 240, H = 44, p = 4, max = Math.max.apply(null, vals.concat([1]));
-      const x = i => p + i * (W - 2 * p) / (vals.length - 1), y = v => H - p - v * (H - 2 * p) / max;
-      let bars = ''; vals.forEach((v, i) => { const h = v * (H - 2 * p) / max; bars += '<rect x="' + (x(i) - 3.5) + '" y="' + (H - p - h) + '" width="7" height="' + h + '" rx="2" fill="#eef4fc"/>'; });
-      const d = 'M' + x(0) + ',' + y(vals[0]) + vals.map((v, i) => ' L' + x(i) + ',' + y(v)).join('');
-      return '<svg viewBox="0 0 ' + W + ' ' + H + '" style="width:100%;height:44px" preserveAspectRatio="none">' + bars +
-        '<path d="' + d + '" fill="none" stroke="' + (col || COL.blue) + '" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/></svg>';
-    }
-
-    // ══ CARTES ═══════════════════════════════════════════════════════════
-    function bandeau(eyebrow, phrase, meta) {
-      const j = new Date().toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long' });
-      return '<div class="d-hero"><div class="d-hero-eb"><i></i>' + esc(eyebrow) + ' · ' + j + '</div>' +
-        '<div class="d-hero-l">' + phrase + '</div>' +
-        (meta && meta.length ? '<div class="d-hero-m">' + meta.map(m => '<span>' + esc(m[0]) + ' : <b>' + esc(m[1]) + '</b></span>').join('') + '</div>' : '') + '</div>';
-    }
-    function carte(titre, sub, corps, cls) {
-      return '<div class="d-c' + (cls ? ' ' + cls : '') + '"><div class="d-c-h"><span class="d-c-t">' + esc(titre) + '</span>' +
-        (sub ? '<span class="d-c-s">' + esc(sub) + '</span>' : '') + '</div>' + corps + '</div>';
-    }
-    function carteProjection(sub) {
-      // Volume RÉEL du périmètre, encadrement compris (25/08/2026). L'objectif
-      // est pris sur le même ensemble : l'encadrement n'en porte pas, il
-      // n'ajoute donc rien au dénominateur.
-      const t = sum(dRows(), SUM_D);
-      const p = projection(t.commandes_realisees, t.objectif_commandes);
-      if (alerteObjectif(t.objectif_commandes)) {
-        return carte('Projection fin de mois', sub,
-          '<div class="d-warn"><span class="d-warn-t">Objectifs non saisis</span>' +
-          '<span>On est le ' + moisRef().jour + ' du mois et aucun objectif de commandes n\'est renseigné sur ce périmètre. ' +
-          'La projection ne peut pas être calculée — à saisir dans <b>Objectifs</b>.</span>' +
-          '<div class="d-warn-n">' + fr(t.commandes_realisees) + ' commandes réalisées à ce jour</div></div>');
-      }
-      const c = couleurs(p), tr = svgTraj(p, serieJours());
-      const vd = p.verdict === 'bad' ? [COL.redDk, '#fff', '⚠ retard'] : p.verdict === 'warn' ? [COL.amber, COL.amberDk, 'à surveiller']
-               : p.verdict === 'good' ? [COL.green, '#fff', '✓ dans les temps'] : ['#eef2f8', COL.grey, '—'];
-      // Le grand chiffre est un ATTERRISSAGE (realise / prorata), pas un
-      // compteur. Sans le realise a cote, un chef lit 24 et croit avoir
-      // vendu 24 — releve par Antoine le 25/08/2026. On affiche donc les
-      // deux, en distinguant clairement la prevision du fait acquis.
-      // HIÉRARCHIE INVERSÉE le 26/08/2026, à la demande d'Antoine : « on doit
-      // voir très très nettement le résultat à la date du jour ». Le grand
-      // chiffre est désormais le RÉALISÉ sur objectif (28 / 24), fait acquis
-      // et vérifiable ; l'atterrissage, qui n'est qu'une extrapolation,
-      // passe au second plan sous forme de ligne.
-      const pctA = p.objectif > 0 ? Math.round(p.realise / p.objectif * 100) : null;
-      return carte('Projection fin de mois', sub,
-        '<div class="d-pj">' +
-          '<div class="d-pj-n" style="color:' + c.real + '">' + fr(p.realise) +
-            (p.objectif > 0 ? '<span class="d-pj-sur">/ ' + fr(p.objectif) + '</span>' : '') + '</div>' +
-          '<div class="d-pj-o">commandes <b>à ce jour</b><br>' +
-            Math.round(p.prorata * 100) + ' % du mois écoulé</div>' +
-          (pctA != null ? '<div class="d-pj-v" style="background:' + vd[0] + ';color:' + vd[1] + '">' + pctA + ' %</div>' : '') +
-        '</div>' +
-        '<div class="d-pj-land">Atterrissage prévu <b>' + fr(p.land) + '</b>' +
-          (p.objectif > 0 ? ' pour un objectif de <b>' + fr(p.objectif) + '</b> · ' + vd[2] : '') + '</div>' +
-        tr.svg + legende(p, tr.approx));
-    }
-    function cartePouls() {
-      if (!state.act) return carte('Le pouls', null, '<div class="d-empty">Chargement de l\'activité…</div>');
-      const s = serieJours();
-      if (!s || s.length < 2) return carte('Le pouls', null, '<div class="d-empty">Aucune activité enregistrée sur la période.</div>');
-      const vals = s.map(x => x.n), n = vals.length;
-      const f = vals.slice(-7).reduce((a, b) => a + b, 0), pr = vals.slice(-14, -7).reduce((a, b) => a + b, 0);
-      const jf = Math.min(7, n), jp = Math.max(0, Math.min(7, n - 7));
-      const rate = jf > 0 ? f / jf : 0;
-      const delta = (jp > 0 && pr > 0) ? Math.round((f / jf) / (pr / jp) * 100 - 100) : null;
-      const tr = delta == null ? ['#eef4fc', COL.blue, '▬', 'début de période'] :
-        delta > 5 ? ['#eefaf6', COL.greenDk, '▲', '+' + delta + ' %'] :
-        delta < -5 ? ['#fff2f1', COL.redDk, '▼', delta + ' %'] : ['#eef4fc', COL.blue, '▬', 'stable'];
-      const a = sum(aRows(), SUM_A);
-      return carte('Le pouls', jf + ' derniers jours ouvrés',
-        '<div class="d-pl"><span class="d-pl-n">' + dec1(rate) + '<i> cmd/jour</i></span>' +
-        '<span class="d-pl-t" style="background:' + tr[0] + ';color:' + tr[1] + '">' + tr[2] + ' ' + tr[3] + '</span></div>' +
-        '<div class="d-pl-s">' + fr(a.nb_contacts) + ' contacts sur la période · ' + fr(a.nb_sortants) + ' sortants</div>' +
-        svgSpark(vals.slice(-14), COL.blue));
-    }
-    function carteEntonnoir() {
-      const a = sum(aRows(), SUM_A);
-      const et = [['Contacts', a.nb_contacts, '#acc5e4'], ['Propales', a.nb_propales_creees, COL.blue],
-                  ['BDC', a.nb_bdc, COL.green], ['Commandes', a.nb_wins, COL.amber]];
-      const max = Math.max.apply(null, et.map(e => e[1]).concat([1]));
-      let h = '<div class="d-fn">';
-      et.forEach((e, i) => {
-        const w = Math.max(16, Math.round(e[1] / max * 100));
-        h += '<div class="d-fn-b" style="width:' + w + '%;background:' + e[2] + '"><b>' + fr(e[1]) + '</b><span>' + e[0] + '</span></div>';
-        if (i < et.length - 1) { const nx = et[i + 1][1], tx = e[1] > 0 ? Math.round(nx / e[1] * 100) : 0; h += '<div class="d-fn-c">↓ ' + tx + ' %</div>'; }
+      (libelles || []).forEach((m, i) => {
+        if (i % 2 && i !== libelles.length - 1) return;
+        const cx = forme === 'barres'
+          ? gL + ((W - gL - gR) / vals.length) * (i + .5) : x(i);
+        h += '<text x="' + cx.toFixed(1) + '" y="' + (H - gB + 18) + '" text-anchor="middle" font-size="10"'
+          + ' fill="var(--ink-3)">' + esc(m) + '</text>';
       });
-      return carte('Entonnoir de la période', 'activité réelle', h + '</div>');
-    }
-    function carteQualite() {
-      const a = sum(aRows(), SUM_A);
-      const tot = a.nb_chocs + a.nb_relances + a.nb_abandons;
-      if (!tot) return '';
-      const it = [['Chocs', a.nb_chocs, COL.greenDk, '#eefaf6'], ['Relances', a.nb_relances, COL.blue, '#eef4fc'], ['Abandons', a.nb_abandons, COL.redDk, '#fff2f1']];
-      return carte('Qualité des échanges', 'issues des RPV',
-        '<div class="d-q">' + it.map(x => '<div class="d-q-i" style="background:' + x[3] + '"><b style="color:' + x[2] + '">' + fr(x[1]) + '</b>' +
-          '<span>' + x[0] + '</span><i>' + Math.round(x[1] / tot * 100) + ' %</i></div>').join('') + '</div>');
-    }
-    function carteInactifs(titre) {
-      const inact = vendeursInactifs();
-      if (!state.act) return carte(titre, null, '<div class="d-empty">Chargement…</div>');
-      // Personne d'inactif : la carte n'a rien a dire. Elle DISPARAIT au lieu
-      // d'occuper une demi-largeur d'ecran a cote d'une carte bien plus haute
-      // — demande d'Antoine du 25/08/2026 : « si vide, le reste remonte ».
-      // L'information « tout le monde est actif » reste portee par le bandeau
-      // du haut, qui l'annonce deja en toutes lettres.
-      if (!inact.length) return '';
-      return carte(titre, inact.length + ' sans aucune activité',
-        '<div class="d-lst">' + inact.slice(0, 6).map(v => '<div class="d-lst-r alert" data-detail="vendeur:' + esc(v.id_user) + '"><span class="d-lst-n">' + esc(v.nom_complet) + '</span>' +
-          '<span class="d-lst-v">0 contact<small>' + esc(v.nom_site || '') + '</small></span></div>').join('') +
-        (inact.length > 6 ? '<div class="d-lst-more">+ ' + (inact.length - 6) + ' autres</div>' : '') + '</div>', 'd-alert');
-    }
-    // Calcul PARTAGÉ par le bandeau et la carte : impossible qu'ils se contredisent.
-    function sousRythme(keyFn, labelFn) {
-      const pr = prorata();
-      const g = groupBy(dRowsV(), keyFn, labelFn, SUM_D)
-        .filter(x => x.objectif_commandes > 0)
-        .map(x => ({ label: x.label, key: x.key, re: x.commandes_realisees, ob: x.objectif_commandes,
-                     ecart: Math.round((x.commandes_realisees / x.objectif_commandes - pr) * 100) }))
-        .sort((a, b) => a.ecart - b.ecart);
-      return { tous: g, bad: g.filter(x => x.ecart < -10) };
-    }
-    function carteRetard(titre, type, keyFn, labelFn) {
-      const pr = prorata();
-      const sr = sousRythme(keyFn, labelFn), g = sr.tous, bad = sr.bad;
-      if (!g.length) return carte(titre, null, '<div class="d-empty">Aucun objectif renseigné sur ce périmètre.</div>');
-      if (!bad.length) return carte(titre, null, '<div class="d-ok">✓ Tout le monde est au rythme (prorata ' + Math.round(pr * 100) + ' %)</div>');
-      return carte(titre, bad.length + ' sous le rythme · prorata ' + Math.round(pr * 100) + ' %',
-        '<div class="d-lst">' + bad.slice(0, 6).map(x => '<div class="d-lst-r' + (x.ecart < -25 ? ' alert' : ' warn') + '" ' + (type === 'vendeur' ? 'data-detail="vendeur:' + esc(x.key) + '"' : 'data-pick="' + esc(type) + ':' + esc(x.key) + '"') + '>' +
-          '<span class="d-lst-n">' + esc(x.label) + '</span><span class="d-lst-v">' + x.ecart + ' pts<small>' + fr(x.re) + ' / ' + fr(x.ob) + '</small></span></div>').join('') + '</div>');
-    }
-    function carteClassement(titre) {
-      const v = parVendeur(dRowsV(), SUM_D).sort((a, b) => b.commandes_realisees - a.commandes_realisees);
-      if (v.length < 2) return '';
-      const max = Math.max.apply(null, v.map(x => x.commandes_realisees).concat([1]));
-      // L'encadrement n'entre pas dans un classement de vendeurs, mais ses
-      // commandes ne doivent pas disparaître : on les affiche à part, pour
-      // que le total du classement se raccorde au volume de la concession.
-      const enc = volumeEncadrement();
-      const pied = enc > 0
-        ? '<div class="d-rk-more">+ ' + fr(enc) + ' commande' + (enc > 1 ? 's' : '') + ' signée' + (enc > 1 ? 's' : '') + ' par l\'encadrement</div>'
-        : '';
-      return carte(titre, 'commandes de la période',
-        '<div class="d-rk">' + v.slice(0, 7).map((x, i) => {
-          const me = String(x.id_user) === String(viewerId);
-          const col = i === 0 ? COL.green : me ? COL.blue : '#acc5e4';
-          return '<div class="d-rk-r' + (me ? ' me' : '') + '" data-detail="vendeur:' + esc(x.id_user) + '"><span class="d-rk-p">' + (i + 1) + '</span>' +
-            '<span class="d-rk-n">' + esc(x.nom_complet) + (me ? ' (vous)' : '') + '</span>' +
-            '<div class="d-rk-b"><i style="width:' + Math.max(5, Math.round(x.commandes_realisees / max * 100)) + '%;background:' + col + '"></i></div>' +
-            '<span class="d-rk-v">' + fr(x.commandes_realisees) + '</span></div>';
-        }).join('') + pied + '</div>');
-    }
-    // rows OBLIGATOIRE : la carte ne choisit jamais son périmètre toute seule.
-    function carteJournee(rows) {
-      const t = sum(rows, SUM_D);
-      const it = [['RDV aujourd\'hui', t.rdv_aujourdhui, COL.blue, 'rdv'], ['RDV à venir', t.rdv_a_venir, COL.greenDk, 'rdv'],
-                  ['CR manquants', t.rdv_sans_cr, t.rdv_sans_cr > 0 ? COL.amberDk : COL.grey, 'rdv'],
-                  ['Leads à traiter', t.leads_a_traiter, t.leads_a_traiter > 0 ? COL.redDk : COL.grey, 'leads'],
-                  ['Cycles ouverts', t.cycles_ouverts, COL.grey, 'cycles']];
-      return carte('Ma journée', 'cliquez pour le détail', 
-        '<div class="d-kpi">' + it.map(x => '<div class="d-kpi-i" data-detail="moi:' + x[3] + '"><b style="color:' + x[2] + '">' + fr(x[1]) + '</b><span>' + esc(x[0]) + '</span></div>').join('') + '</div>');
-    }
-    function carteStock() {
-      if (!state.stock || !state.stock.length) return '';
-      const ids = {}; for (const r of dRows()) ids[String(r.id_site)] = 1;
-      const rows = state.stock.filter(r => state.selection.level !== 'site' ? ids[String(r.id_site)] : String(r.id_site) === String(state.selection.key));
-      if (!rows.length) return '';
-      const ag = {};
-      for (const r of rows) { const c = r.categorie; if (!ag[c]) ag[c] = { nb: 0, vi: 0, val: 0, as: 0, an: 0 };
-        const a = ag[c]; a.nb += r.nb_vehicules; a.vi += r.nb_vieillissants; a.val += r.valeur_stock;
-        if (r.age_moyen_jours > 0) { a.as += r.age_moyen_jours * r.nb_vehicules; a.an += r.nb_vehicules; } }
-      const bloc = (c, col) => { const a = ag[c]; if (!a) return '';
-        return '<div class="d-st-c"><div class="d-st-h"><span style="color:' + col + '">' + c + '</span><b>' + fr(a.nb) + '</b></div>' +
-          '<div class="d-st-l"><span>Âge moyen</span><b>' + (a.an > 0 ? fr(a.as / a.an) + ' j' : '—') + '</b></div>' +
-          '<div class="d-st-l"><span>Vieillissants</span><b style="color:' + (a.vi ? COL.redDk : COL.greenDk) + '">' + fr(a.vi) + '</b></div>' +
-          (a.val ? '<div class="d-st-l"><span>Valeur</span><b>' + fmtEuro(a.val) + '</b></div>' : '') + '</div>'; };
-      return carte('Stock', 'VN · VO', '<div class="d-st">' + bloc('VN', COL.blue) + bloc('VO', COL.amberDk) + '</div>');
-    }
-    function carteLeads() {
-      const t = sum(dRows(), SUM_D);
-      const v = parVendeur(dRows(), SUM_D).filter(x => x.leads_a_traiter > 0).sort((a, b) => b.leads_a_traiter - a.leads_a_traiter);
-      return carte('Leads à traiter', t.leads_a_traiter + ' cycles concernés',
-        v.length ? '<div class="d-lst">' + v.slice(0, 6).map(x => '<div class="d-lst-r' + (x.leads_a_traiter > 5 ? ' alert' : ' warn') + '" data-goleads="' + esc(x.id_user) + '\u2502' + esc(x.id_site == null ? '' : x.id_site) + '\u2502' + esc(x.nom_complet) + '">' +
-          '<span class="d-lst-n">' + esc(x.nom_complet) + '</span><span class="d-lst-v">' + fr(x.leads_a_traiter) + '<small>' + esc(x.nom_site || '') + '</small></span></div>').join('') + '</div>'
-          : '<div class="d-ok">✓ Aucun lead en attente</div>');
-    }
-
-    // ══ VUES PAR RÔLE ════════════════════════════════════════════════════
-    // La question du matin décide de la carte qui occupe le haut de l'écran.
-    function vueVendeur() {   // « Où j'en suis, et qui je vois aujourd'hui ? »
-      const mine = dRows().filter(r => String(r.id_user) === String(viewerId));
-      const t = sum(mine, SUM_D);   // ← unique source de vérité de cette vue
-      const p = projection(t.commandes_realisees, t.objectif_commandes);
-      // Position lue dans le classement d'équipe (RPC dédiée), et NON dans
-      // dRowsV() : sous RLS, un vendeur ne voit que SES propres commandes,
-      // donc tous ses collègues ressortaient à 0 et il se croyait 1er.
-      // Constaté le 25/08/2026 : une vendeuse 12e sur 13 s'affichait 1re.
-      const cls = (state.classement || []);
-      const moiCls = cls.find(x => x.est_moi);
-      const pos = moiCls ? moiCls.rang : 0;
-      const manque = Math.max(0, p.objectif - p.land);
-      const phrase = 'Tu es à <b>' + fr(t.commandes_realisees) + ' commandes</b>' +
-        (p.objectif > 0 ? ', tu atterris à <b>' + fr(p.land) + '</b> pour un objectif de <b>' + fr(p.objectif) + '</b>' +
-          (manque > 0 ? ' — <dn>il t\'en manque ' + fr(manque) + '</dn>.' : ' — <up>objectif tenu</up>.') : '.') +
-        (t.rdv_aujourdhui > 0 ? ' <b>' + fr(t.rdv_aujourdhui) + ' RDV</b> aujourd\'hui.' : '');
-      return bandeau('Ma journée', phrase, [['Ma position', pos > 0 ? pos + (pos === 1 ? 'er' : 'e') + ' / ' + cls.length : '—'],
-        ['Pipeline', fr(t.cycles_ouverts) + ' cycles'], ['Prorata mois', Math.round(p.prorata * 100) + ' %']]) +
-        filtres() +
-        // Mise en page demandée le 25/08/2026 : « Ma journée » sur une seule
-        // ligne pleine largeur en haut, puis deux paires. La grille .d-g est
-        // en deux colonnes et se remplit ligne par ligne, donc l'ORDRE ici
-        // détermine la position : projection|entonnoir, puis transfo|classement.
-        '<div class="d-g">' +
-          '<div class="d-full">' + carteJournee(mine) + '</div>' +
-          carteProjectionPerso(mine) + carteEntonnoirPerso(mine) +
-          carteCohorte('') + carteClassementPerso() +
-        '</div>';
-    }
-    // Classement du vendeur : alimenté par get_classement_equipe (SECURITY
-    // DEFINER), jamais par dRowsV(). Tant que la RPC n'a pas répondu, ou si le
-    // tenant n'est pas migré, on n'affiche RIEN — une carte absente vaut mieux
-    // qu'un classement faux, qui est ce qu'on vient de corriger.
-    function carteClassementPerso() {
-      const cls = (state.classement || []);
-      if (cls.length < 2) return '';
-      const max = Math.max.apply(null, cls.map(x => x.commandes).concat([1]));
-      const ligne = x => '<div class="d-rk-r' + (x.est_moi ? ' me' : '') + '">' +
-        '<span class="d-rk-n">' + x.rang + '. ' + esc(x.nom) + (x.est_moi ? ' (vous)' : '') + '</span>' +
-        '<span class="d-rk-b"><i style="width:' + Math.round((x.commandes / max) * 100) + '%;background:' + (x.est_moi ? COL.blue : '#9bb3d1') + '"></i></span>' +
-        '<span class="d-rk-v">' + fr(x.commandes) + '</span></div>';
-      const moi = cls.find(x => x.est_moi);
-      // Repêchage : hors du top 10, on ajoute le viewer sous un séparateur avec
-      // son rang réel. Se voir 12e sur 13 est plus utile que ne pas se voir.
-      const pied = (moi && moi.rang > 10)
-        ? '<div class="d-rk-more">…</div>' + ligne(moi)
-        : '';
-      // Le sous-titre nomme le SITE : un vendeur multi-site voit son rang
-      // changer d'un site à l'autre (1er sur 13 ici, 10e sur 10 là), il doit
-      // savoir de quel plateau on parle. Ses commandes sont comptées sur le
-      // site du DOSSIER — arbitrage du 25/08/2026 — donc son total par site
-      // ne vaut pas son total global.
-      const nomSite = (state.rawData || []).find(r => String(r.id_site) === String(state.siteBus));
-      // La liste est tronquée aux 10 premiers (+ repêchage du viewer s'il est
-      // au-delà). Ajouté le 25/08/2026 : l'effectif RÉEL est annoncé, sinon
-      // rien ne distingue « les 10 premiers sur 13 » de « toute l'équipe » —
-      // trois vendeurs manquaient à l'écran sans que personne ne le sache.
-      const tronquee = cls.length > 10;
-      const soustitre = (nomSite && nomSite.nom_site ? nomSite.nom_site + ' — ' : '') +
-        (tronquee ? '10 premiers sur ' + cls.length : cls.length + ' vendeurs');
-      return carte('Ma position dans l\'équipe', soustitre,
-        '<div class="d-rk">' + cls.slice(0, 10).map(ligne).join('') + pied + '</div>');
-    }
-    function carteProjectionPerso(mine) {
-      const t = sum(mine, SUM_D), p = projection(t.commandes_realisees, t.objectif_commandes);
-      if (alerteObjectif(t.objectif_commandes)) return carteProjection('perso');
-      const c = couleurs(p);
-      const mesJours = (state.act || []).filter(r => String(r.id_user) === String(viewerId) && r.jour && inScope(r));
-      const par = {}; for (const r of mesJours) par[r.jour] = (par[r.jour] || 0) + num(r.nb_wins);
-      const serie = []; const d = new Date(state.period.from + 'T12:00:00'), e = new Date(state.period.to + 'T12:00:00');
-      while (d <= e) { if (d.getDay() !== 0) serie.push({ jour: ymd(d), n: par[ymd(d)] || 0 }); d.setDate(d.getDate() + 1); }
-      const tr = svgTraj(p, serie.length ? serie : null);
-      const vd = p.verdict === 'bad' ? [COL.redDk, '#fff', '⚠ retard'] : p.verdict === 'warn' ? [COL.amber, COL.amberDk, 'à surveiller']
-               : p.verdict === 'good' ? [COL.green, '#fff', '✓ dans les temps'] : ['#eef2f8', COL.grey, '—'];
-      return carte('Ma projection fin de mois', 'mon rythme',
-        '<div class="d-pj"><div class="d-pj-n" style="color:' + c.real + '">' + fr(p.land) + '</div>' +
-        '<div class="d-pj-o">commandes prévues' + (p.objectif > 0 ? '<br>objectif <b>' + fr(p.objectif) + '</b>' : '') + '</div>' +
-        '<div class="d-pj-v" style="background:' + vd[0] + ';color:' + vd[1] + '">' + vd[2] + '</div></div>' + tr.svg + legende(p, tr.approx));
-    }
-    function carteEntonnoirPerso(mine) {
-      const mesA = (state.act || []).filter(r => String(r.id_user) === String(viewerId) && inScope(r));
-      const a = sum(mesA, SUM_A);
-      const et = [['Contacts', a.nb_contacts, '#acc5e4'], ['Propales', a.nb_propales_creees, COL.blue], ['BDC', a.nb_bdc, COL.green], ['Commandes', a.nb_wins, COL.amber]];
-      const max = Math.max.apply(null, et.map(e => e[1]).concat([1]));
-      let h = '<div class="d-fn">';
-      et.forEach((e, i) => { h += '<div class="d-fn-b" style="width:' + Math.max(16, Math.round(e[1] / max * 100)) + '%;background:' + e[2] + '"><b>' + fr(e[1]) + '</b><span>' + e[0] + '</span></div>';
-        if (i < et.length - 1) { const tx = e[1] > 0 ? Math.round(et[i + 1][1] / e[1] * 100) : 0; h += '<div class="d-fn-c">↓ ' + tx + ' %</div>'; } });
-      return carte('Mon entonnoir', 'ma période', h + '</div>');
-    }
-    // ── AJOUT : l'entonnoir de cohorte, du premier contact à la commande ──
-    // Le funnel historique (carteEntonnoir / carteEntonnoirPerso) divise des
-    // effectifs d'étapes pris à l'instant T. Les affaires mortes ne sont plus
-    // dans aucune étape : elles sortent du dénominateur et le taux paraît
-    // toujours meilleur qu'il n'est. Mesure du 20/08 sur le vendeur 155 :
-    // nb_propales = 1, nb_bdc_tx = 3, commandes = 5 — la hiérarchie
-    // propales >= BDC >= wins est inversée de bout en bout.
-    // Ici on suit une COHORTE : les cycles touchés pendant la fenêtre, et ce
-    // qu'ils sont devenus depuis, quelle que soit la date.
-    // cls : largeur de la carte. Par défaut 'd-full' (pleine largeur), ce qui
-    // est le comportement attendu par les vues chef, directeur et marketing.
-    // La vue VENDEUR l'appelle avec '' pour la placer à gauche du classement
-    // — demande du 25/08/2026. Sans ce paramètre, le d-full écrit en dur
-    // faisait passer la carte sur toute la ligne et rejetait le classement
-    // en dessous.
-    function carteCohorte(cls) {
-      cls = (cls === undefined) ? 'd-full' : cls;
-      const b = bornesCohorte();
-      // Le sous-titre dit la RÈGLE, pas les bornes : « 22 avr. → 21 juil. »
-      // n'explique pas pourquoi la fenêtre s'arrête un mois avant
-      // aujourd'hui, et laisse croire à un réglage arbitraire.
-      const sub = 'contacts d\'il y a 1 à 4 mois';
-
-      if (state.entErr) {
-        return carte('Transformation réelle', sub,
-          '<div class="d-empty">Entonnoir indisponible.</div>', cls);
+      if (second) {
+        h += '<text x="' + (W - gR) + '" y="' + (gT - 8) + '" text-anchor="end" font-size="10.5"'
+          + ' font-weight="700" fill="var(--m-bleu)">— — taux de financement</text>';
       }
-      if (!state.ent) {
-        return carte('Transformation réelle', sub,
-          '<div class="d-sk"></div><div class="d-sk"></div><div class="d-sk"></div>', cls);
-      }
-      const e = state.ent;
-      if (!e.length || !num(e[0].total)) {
-        return carte('Transformation réelle', sub,
-          '<div class="d-empty">Aucun contact sortant sur cette période.</div>', cls);
-      }
+      return '<svg class="gr" viewBox="0 0 ' + W + ' ' + H + '" role="img" aria-label="'
+        + esc(titre || '') + ', douze mois glissants">' + h + '</svg>';
+    }
 
-      const base = num(e[0].total);
-      let h = '<div class="d-co">';
+    function tableau(entetes, lignes) {
+      return '<div class="dscroll"><table class="dmini"><thead><tr>'
+        + entetes.map((e, i) => '<th' + (i === 0 ? '' : '') + '>' + e + '</th>').join('')
+        + '</tr></thead><tbody>'
+        + lignes.map(l => '<tr>' + l.map((c, i) =>
+            '<td' + (c && c.cls ? ' class="' + c.cls + '"' : '') + '>' + (c && c.h != null ? c.h : esc(c)) + '</td>'
+          ).join('') + '</tr>').join('')
+        + '</tbody></table></div>';
+    }
 
-      e.forEach((et, i) => {
-        const tot = num(et.total), fin = num(et.rang) === 4;
-        const larg = Math.max(7, Math.round(100 * tot / base));
-        const parts = fin ? [['ga', tot]]
-                          : [['av', num(et.avance)], ['ec', num(et.en_cours)], ['pe', num(et.perdu)]];
-        h += '<div class="d-co-h"><span class="d-co-n">' + esc(et.etape) + '</span>' +
-             '<span class="d-co-t">' + fr(tot) + '</span></div>' +
-             '<div class="d-co-p" style="width:' + larg + '%">' +
-             parts.map(function (x) {
-               const w = tot > 0 ? Math.round(100 * x[1] / tot) : 0;
-               return '<span class="d-co-f co-' + x[0] + '" style="width:' + w + '%">' +
-                      (w > 14 ? '<b>' + fr(x[1]) + '</b>' : '') + '</span>';
-             }).join('') + '</div>';
+    // =========================================================================
+    //  LES TUILES
+    //  Chaque entrée décrit ce qu'elle affiche et ce qu'elle ouvre. Le constat
+    //  ("trouvaille") est CALCULÉ sur les données du moment : il change avec
+    //  elles, il n'est pas écrit en dur.
+    // =========================================================================
+    const FAMILLES = [
+      { k: 'prod', t: 'Production commerciale', etat: 'plein', n: 'commandes gagnées BACS' },
+      { k: 'pipe', t: 'Pipe et relances', etat: 'plein', n: 'affaires et devis BACS' },
+      { k: 'livr', t: 'Livraisons', etat: 'plein', n: 'statut BACS des commandes' },
+      { k: 'act', t: 'Activité commerciale', etat: 'partiel', n: 'rapports tenus, rendez-vous jamais soldés' },
+      { k: 'leads', t: 'Leads', etat: 'partiel', n: 'reçus et attribués tracés, issue rarement renseignée' },
+      { k: 'base', t: 'Qualité de la base client', etat: 'partiel', n: 'réservé à l’encadrement' }
+    ];
 
-        if (e[i + 1]) {
-          const tx = tot > 0 ? Math.round(100 * num(et.avance) / tot) : 0;
-          const dj = et.delai_median_jours;
-          const lib = num(et.rang) === 1 ? 'des contacts donnent une proposition'
-                    : num(et.rang) === 2 ? 'des propositions deviennent un bon de commande'
-                    : 'des bons de commande sont signés';
-          h += '<div class="d-co-c' + (tx < 25 ? ' bas' : '') + '">' +
-               '<span class="d-co-tx">' + tx + ' %</span>' +
-               '<span class="d-co-l">' + lib +
-               (dj != null ? ' · <b>' + dec1(dj) + ' j</b> en médiane' : '') + '</span></div>';
+    function tuiles() {
+      const d = state.d, p = d.prod || {}, o = d.obj || {}, pi = d.pipe || {}, lv = d.livr || {},
+            ac = d.act || {}, ld = d.leads || {}, ba = d.base, det = d.detail || {}, s = d.seuils || {};
+      const lm = libellesMois();
+      const T = [];
+
+      // ---------------------------------------------------------------- PROD
+      const objCde = num(o.cdes);
+      T.push({
+        fam: 'prod', id: 'cdes', lab: 'Commandes', v: fmt(p.cdes),
+        c: objCde > 0 ? (pct(p.cdes, objCde) + ' % de l’objectif ' + objCde) : 'sans objectif saisi',
+        sens: objCde > 0 && num(p.cdes) >= objCde ? 'hausse' : objCde > 0 ? 'baisse' : 'plat',
+        vals: serie('cdes'), forme: 'barres', lm: lm,
+        titre: 'Commandes du mois',
+        ctx: 'Commandes gagnées, grands comptes exclus, rattachées à leur mois de création dans BACS.',
+        trouve: () => {
+          const j = (det.jours || []).slice().sort((a, b) => num(b.n) - num(a.n));
+          if (!j.length) return 'Pas encore assez de commandes sur l’année pour dégager un rythme hebdomadaire.';
+          const fort = j[0], faible = j[j.length - 1];
+          const rap = num(faible.n) > 0 ? (num(fort.n) / num(faible.n)).toFixed(1).replace('.', ',') : '—';
+          const tot = j.reduce((a, x) => a + num(x.n), 0);
+          return '<b>Un ' + (JOURS_NOM[fort.dow] || '?').toLowerCase() + ' vaut ' + rap + ' '
+            + (JOURS_NOM[faible.dow] || '?').toLowerCase() + '.</b> Sur les ' + fmt(tot)
+            + ' commandes de l’année, ' + fmt(fort.n) + ' ont été signées un '
+            + (JOURS_NOM[fort.dow] || '?').toLowerCase() + ', soit ' + pct(fort.n, tot)
+            + ' % de la semaine à elles seules. Le renfort de ce jour-là cesse d’être une '
+            + 'question de ressenti.';
+        },
+        table: () => {
+          const j = (det.jours || []);
+          if (!j.length) return '';
+          const mx = Math.max.apply(null, j.map(x => num(x.n)));
+          return tableau(['Jour', 'Commandes', 'Poids'], j.map(x => [
+            JOURS_NOM[x.dow] || x.dow,
+            { h: '<span class="f">' + fmt(x.n) + '</span>' },
+            { h: '<span style="display:inline-block;height:9px;border-radius:5px;width:'
+                 + Math.round(num(x.n) / mx * 100) + '%;background:'
+                 + (num(x.n) === mx ? 'var(--m-orange)' : 'var(--m-bleu)') + '"></span>',
+              cls: 'g' }
+          ]));
         }
       });
 
-      const glob = base > 0 ? Math.round(100 * num(e[3].total) / base) : 0;
-      const decl = num(e[0].perdu_declare), sans = num(e[0].perdu_sans_suite);
-      let phrase = 'du premier contact à la commande.';
-      if (sans > 0) phrase += ' <b>' + fr(sans) + '</b> contacts se sont éteints sans que personne ne les clôture' +
-                              (decl > 0 ? ', contre ' + fr(decl) + ' soldés.' : '.');
-      h += '<div class="d-co-b"><span class="d-co-bn">' + glob + ' %</span>' +
-           '<span class="d-co-bt">' + phrase + '</span></div>';
-
-      h += '<div class="d-co-w">Fenêtre du ' + jolieDate(b.from) + ' au ' + jolieDate(b.to) +
-           ' : on laisse un mois aux affaires les plus récentes pour se conclure, ' +
-           'sinon le taux serait écrasé par des contacts encore en cours.' +
-           (famille() !== 'vendeur'
-             ? ' Un client peut être travaillé par plusieurs vendeurs du même site : les entonnoirs ' +
-               'individuels ne s\'additionnent pas pour donner celui du périmètre.'
-             : '') + '</div>';
-      return carte('Transformation réelle', sub, h + '</div>', cls);
-    }
-    function jolieDate(s) {
-      try { return new Date(s + 'T12:00:00').toLocaleDateString('fr-FR', { day: 'numeric', month: 'short' }); }
-      catch (e) { return s; }
-    }
-
-    function vueChef() {      // « Qui a besoin de moi aujourd'hui ? »
-      // t = VOLUME de la concession (encadrement compris).
-      // tV = base de l'ATTEINTE : vendeurs porteurs d'objectifs seulement.
-      const t = sum(dRows(), SUM_D);
-      const tV = sum(dRowsV(), SUM_D);
-      // Réalisé sur TOUT le périmètre (encadrement inclus), objectif sur le
-      // même ensemble — un chef n'a pas d'objectif, sa contribution y vaut 0,
-      // donc le dénominateur ne bouge pas. Demande d'Antoine du 25/08/2026 :
-      // « l'équipe atterrit à 28 pour un objectif de 24 », et non 21 pour 24.
-      // Une commande signée par un chef EST une commande de la concession.
-      const p = projection(t.commandes_realisees, t.objectif_commandes);
-      const inact = vendeursInactifs();
-      const nb = parVendeur(dRowsV(), SUM_D).length;
-      const phrase = (inact.length ? '<dn>' + inact.length + ' vendeur' + (inact.length > 1 ? 's' : '') + '</dn> sans aucune activité sur la période. ' : 'Toute l\'équipe est active. ') +
-        (p.objectif > 0
-          ? '<b>' + fr(p.realise) + ' commandes sur un objectif de ' + fr(p.objectif) + '</b> à ce jour. Atterrissage prévu <dn>' + fr(p.land) + '</dn>.'
-          : '<b>' + fr(t.commandes_realisees) + ' commandes</b> réalisées.') +
-        (t.rdv_sans_cr > 0 ? ' <b>' + fr(t.rdv_sans_cr) + '</b> comptes-rendus manquants.' : '');
-      return bandeau('Mon équipe', phrase, [['Périmètre', state.selection.level === 'site' ? state.selection.label : 'Tous mes sites'],
-        ['Équipe', nb + ' vendeurs'], ['Prorata mois', Math.round(p.prorata * 100) + ' %']]) +
-        filtres() + '<div class="d-g">' + carteInactifs('Qui a besoin de moi') + carteProjection('équipe') +
-        carteRetard('Vendeurs sous le rythme', 'vendeur', r => String(r.id_user), r => r.nom_complet) + cartePouls() +
-        carteEntonnoir() + carteQualite() + carteLeads() + carteStock() + carteCohorte() + '</div>';
-    }
-    function vueDirecteur(titre) {  // « Le mois est-il tenu, et où ça coince ? »
-      // t = VOLUME du groupe (encadrement compris) ; tV = base de l'ATTEINTE.
-      const t = sum(dRows(), SUM_D);
-      const tV = sum(dRowsV(), SUM_D);
-      const p = projection(tV.commandes_realisees, tV.objectif_commandes);
-      const sites = groupBy(dRows(), r => String(r.id_site), r => r.nom_site, SUM_D);
-      const pr = prorata();
-      const bad = sousRythme(r => String(r.id_site), r => r.nom_site).bad;   // même calcul que la carte
-      const phrase = (p.objectif > 0 ? 'Le groupe atterrit à <b>' + fr(p.land) + ' commandes</b> pour un objectif de <b>' + fr(p.objectif) + '</b>' +
-          (p.verdict === 'bad' ? ' — <dn>' + fr(p.objectif - p.land) + ' de retard</dn>.' : p.verdict === 'good' ? ' — <up>dans les temps</up>.' : '.')
-          : '<b>' + fr(t.commandes_realisees) + ' commandes</b> réalisées.') +
-        (bad.length ? ' <dn>' + bad.length + ' site' + (bad.length > 1 ? 's' : '') + '</dn> sous le rythme.' : '');
-      return bandeau(titre || 'Le groupe', phrase, [['Périmètre', sites.length + ' sites'],
-        ['Équipe', parVendeur(dRowsV(), SUM_D).length + ' vendeurs'], ['Prorata mois', Math.round(pr * 100) + ' %']]) +
-        filtres() + '<div class="d-g">' + carteProjection('groupe') +
-        carteRetard('Sites sous le rythme', 'site', r => String(r.id_site), r => r.nom_site) +
-        cartePouls() + carteEntonnoir() + carteInactifs('Vendeurs sans activité') + carteQualite() + carteStock() + carteCohorte() + '</div>';
-    }
-    function vueMarketing() { // périmètre = les MARQUES du user (v_user_perimeter, rôle 5)
-      const t = sum(dRows(), SUM_D), a = sum(aRows(), SUM_A);
-      const reseaux = groupBy(dRows(), r => r.reseau, r => r.reseau, SUM_D).sort((x, y) => y.commandes_realisees - x.commandes_realisees);
-      const txCmd = a.nb_contacts > 0 ? Math.round(a.nb_wins / a.nb_contacts * 1000) / 10 : 0;
-      const phrase = '<b>' + fr(a.nb_contacts) + ' contacts</b> sur le périmètre → <b>' + fr(a.nb_wins) + ' commandes</b> (' + dec1(txCmd) + ' %).' +
-        (t.leads_a_traiter > 0 ? ' <dn>' + fr(t.leads_a_traiter) + ' cycles</dn> ont des leads non traités.' : ' Tous les leads sont traités.');
-      return bandeau('Mes marques', phrase, [['Marques', reseaux.length + ''], ['Sites', groupBy(dRows(), r => String(r.id_site), r => r.nom_site, SUM_D).length + ''],
-        ['Entrants', fr(a.nb_entrants)]]) +
-        filtres() + '<div class="d-g">' + carteLeads() + carteEntonnoir() + carteQualite() + cartePouls() + carteCohorte() +
-        carteRetard('Sites sous le rythme', 'site', r => String(r.id_site), r => r.nom_site) +
-        carte('Par marque', 'commandes de la période',
-          '<div class="d-lst">' + reseaux.slice(0, 8).map(x => '<div class="d-lst-r" data-pick="reseau:' + esc(x.key) + '"><span class="d-lst-n">' + esc(x.label) + '</span>' +
-            '<span class="d-lst-v">' + fr(x.commandes_realisees) + '<small>' + (x.objectif_commandes > 0 ? 'obj. ' + fr(x.objectif_commandes) : 'sans objectif') + '</small></span></div>').join('') + '</div>') +
-        '</div>';
-    }
-    function vueAdmin() {     // vue groupe + couverture des données
-      const sites = groupBy(dRows(), r => String(r.id_site), r => r.nom_site, SUM_D);
-      const sansCmd = sites.filter(s => s.commandes_realisees === 0);
-      const sansObj = sites.filter(s => s.objectif_commandes === 0);
-      const inact = vendeursInactifs();
-      const couv = carte('Couverture des données', 'contrôle plateforme',
-        '<div class="d-kpi">' +
-        '<div class="d-kpi-i"><b>' + sites.length + '</b><span>sites actifs</span></div>' +
-        '<div class="d-kpi-i"><b style="color:' + (sansCmd.length ? COL.amberDk : COL.greenDk) + '">' + sansCmd.length + '</b><span>sans commande</span></div>' +
-        '<div class="d-kpi-i"><b style="color:' + (sansObj.length && moisRef().jour >= 8 ? COL.redDk : COL.grey) + '">' + sansObj.length + '</b><span>sans objectif</span></div>' +
-        '<div class="d-kpi-i"><b style="color:' + (inact.length ? COL.amberDk : COL.greenDk) + '">' + inact.length + '</b><span>vendeurs inactifs</span></div>' +
-        '<div class="d-kpi-i"><b>' + parVendeur(dRowsV(), SUM_D).length + '</b><span>vendeurs suivis</span></div></div>' +
-        (sansObj.length && moisRef().jour >= 8 ? '<div class="d-warn-s">Objectifs manquants après le 8 du mois : ' + sansObj.slice(0, 5).map(s => esc(s.label)).join(' · ') + (sansObj.length > 5 ? ' …' : '') + '</div>' : ''));
-      return vueDirecteur('Plateforme').replace('<div class="d-g">', '<div class="d-g">' + couv);
-    }
-
-    // ══ PANNEAU DE DÉTAIL (contenu réel, 100% depuis les données déjà chargées) ══
-    function scrollAgenda() {
-      try {
-        const d = (wwLib.getFrontWindow && wwLib.getFrontWindow().document) || doc;
-        const el = d.getElementById('agenda-root') || d.querySelector('[data-od-module="agenda"]');
-        if (el && el.scrollIntoView) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
-      } catch (e) {}
-    }
-    function miniKpi(arr) {
-      return '<div class="d-kpi">' + arr.map(x => '<div class="d-kpi-i"><b style="color:' + (x[2] || COL.blueDk) + '">' + fr(x[1]) + '</b><span>' + esc(x[0]) + '</span></div>').join('') + '</div>';
-    }
-    function miniFunnel(a) {
-      const et = [['Contacts', a.nb_contacts, '#acc5e4'], ['Propales', a.nb_propales_creees, COL.blue], ['BDC', a.nb_bdc, COL.green], ['Commandes', a.nb_wins, COL.amber]];
-      const max = Math.max.apply(null, et.map(e => e[1]).concat([1]));
-      let h = '<div class="d-fn">';
-      et.forEach((e, i) => { h += '<div class="d-fn-b" style="width:' + Math.max(16, Math.round(e[1] / max * 100)) + '%;background:' + e[2] + '"><b>' + fr(e[1]) + '</b><span>' + e[0] + '</span></div>';
-        if (i < et.length - 1) { const c = e[1] > 0 ? Math.round(et[i + 1][1] / e[1] * 100) : 0; h += '<div class="d-fn-c">↓ ' + c + ' %</div>'; } });
-      return h + '</div>';
-    }
-    function detailCard() {
-      if (!state.detail) return '';
-      const i = state.detail.indexOf(':'); if (i < 0) return '';
-      const kind = state.detail.slice(0, i), key = state.detail.slice(i + 1);
-      let idu, theme = null;
-      if (kind === 'vendeur') idu = key;
-      else if (kind === 'moi') { idu = String(viewerId); theme = key; }
-      else return '';
-      const drows = (state.rawData || []).filter(r => String(r.id_user) === String(idu) && inScope(r));
-      if (!drows.length) return '';
-      const nom = drows[0].nom_complet || ('Vendeur ' + idu);
-      const site = drows.map(r => r.nom_site).filter((v, j, arr) => v && arr.indexOf(v) === j).join(' · ');
-      const dd = sum(drows, SUM_D);
-      const arows = (state.act || []).filter(r => String(r.id_user) === String(idu) && inScope(r));
-      const aa = sum(arows, SUM_A);
-      const p = projection(dd.commandes_realisees, dd.objectif_commandes);
-      const tx = dd.nb_propales_tx > 0 ? Math.round(dd.nb_wins_tx / dd.nb_propales_tx * 100) : 0;
-      const vc = p.verdict === 'bad' ? COL.redDk : p.verdict === 'warn' ? COL.amberDk : p.verdict === 'good' ? COL.greenDk : COL.blueDk;
-      const canaux = [['WhatsApp', aa.nb_whatsapp], ['Appels', aa.nb_voip], ['SMS', aa.nb_sms], ['Emails', 0], ['RPV', aa.nb_rpv]].filter(c => c[1] > 0).map(c => [c[0], c[1], COL.blueDk]);
-      const titre = kind === 'moi' ? 'Mon détail' : nom;
-      return '<div class="d-c d-full d-detail">' +
-        '<div class="d-detail-h"><div><span class="d-detail-t">' + esc(titre) + '</span>' +
-          (site ? '<span class="d-detail-s">' + esc(site) + '</span>' : '') + '</div>' +
-          '<button type="button" data-detail-close="1" class="d-detail-x" title="Fermer">×</button></div>' +
-        '<div class="d-detail-g">' +
-          '<div class="d-detail-col"><div class="d-detail-lbl">Résultats</div>' +
-            miniKpi([['Commandes', dd.commandes_realisees, vc], ['Objectif', dd.objectif_commandes, COL.grey],
-                     ['Projection', p.land, vc], ['Transfo ' + tx + ' %', dd.nb_wins_tx, COL.blueDk],
-                     ['Financements', dd.financements_realises, COL.blueDk]]) + '</div>' +
-          '<div class="d-detail-col"><div class="d-detail-lbl">' + (kind === 'moi' ? 'Ma journée' : 'Sa journée') + '</div>' +
-            miniKpi([['RDV auj.', dd.rdv_aujourdhui, COL.blue], ['RDV à venir', dd.rdv_a_venir, COL.greenDk],
-                     ['CR manquants', dd.rdv_sans_cr, dd.rdv_sans_cr > 0 ? COL.amberDk : COL.grey],
-                     ['Leads', dd.leads_a_traiter, dd.leads_a_traiter > 0 ? COL.redDk : COL.grey],
-                     ['Cycles', dd.cycles_ouverts, COL.grey]]) +
-            (theme === 'rdv' ? '<button type="button" data-agenda="1" class="d-detail-ag">Voir dans l\'agenda ↓</button>' : '') + '</div>' +
-          '<div class="d-detail-col"><div class="d-detail-lbl">Activité — ' + fr(aa.nb_contacts) + ' contacts</div>' +
-            (canaux.length ? miniKpi(canaux) : '<div class="d-empty">Aucun échange sur la période</div>') +
-            '<div class="d-detail-lbl" style="margin-top:12px">Qualité des échanges</div>' +
-            miniKpi([['Chocs', aa.nb_chocs, COL.greenDk], ['Relances', aa.nb_relances, COL.blue], ['Abandons', aa.nb_abandons, COL.redDk]]) + '</div>' +
-          '<div class="d-detail-col"><div class="d-detail-lbl">Entonnoir</div>' + miniFunnel(aa) + '</div>' +
-        '</div></div>';
-    }
-
-    // ══ FILTRES / SHELL ══════════════════════════════════════════════════
-    function filtres() {
-      const sites = {}; for (const r of (state.rawData || [])) if (r.id_site != null) sites[String(r.id_site)] = r.nom_site;
-      const arr = Object.keys(sites).map(k => ({ id: k, nom: sites[k] })).sort((a, b) => String(a.nom).localeCompare(String(b.nom), 'fr'));
-      let h = '<div class="d-flt">';
-      if (arr.length > 1) { h += '<select class="d-sel" id="d-site"><option value="">Tout le périmètre</option>' +
-        arr.map(s => '<option value="' + esc(s.id) + '"' + (state.selection.level === 'site' && String(state.selection.key) === s.id ? ' selected' : '') + '>' + esc(s.nom) + '</option>').join('') + '</select>'; }
-      h += '<div class="d-tg">' + [['tous', 'Tous'], ['vn', 'VN'], ['vo', 'VO']].map(o =>
-        '<button type="button" class="' + (state.vnvo === o[0] ? 'on' : '') + '" data-vnvo="' + o[0] + '">' + o[1] + '</button>').join('') + '</div>';
-      if (state.selection.level !== 'all')
-        h += '<span class="d-chip">' + esc(state.selection.label) + '<button type="button" data-reset="1" title="Retirer le filtre">×</button></span>';
-      return h + '</div>';
-    }
-    function squelette() { const b = '<div class="d-sk"></div>'; return '<div class="d-c">' + b + b + b + '</div><div class="d-g"><div class="d-c">' + b + b + '</div><div class="d-c">' + b + b + '</div></div>'; }
-    function render() {
-      const root = getRoot(); if (!root) return;
-      // Filet : une sélection devenue invalide est annulée AVANT tout calcul.
-      if (state.rawData && state.rawData.length && !selectionValide()) resetSelection();
-      let body;
-      if (state.err) body = '<div class="d-c"><div class="d-empty" style="color:' + COL.redDk + '">Erreur : ' + esc(state.err) + '</div></div>';
-      else if (!state.rawData) body = squelette();
-      else if (!state.rawData.length) body = '<div class="d-c"><div class="d-empty">Aucune donnée sur ce périmètre pour la période choisie.</div></div>';
-      else if (!dRows().length) body = filtres() + '<div class="d-c"><div class="d-empty">Aucune donnée pour ce filtre.<br><b data-reset="1" style="color:#2a5ea9;cursor:pointer">Revenir à tout le périmètre</b></div></div>';
-      else {
-        try {
-          const f = famille();
-          body = f === 'vendeur' ? vueVendeur() : f === 'chef' ? vueChef() : f === 'marketing' ? vueMarketing()
-               : f === 'admin' ? vueAdmin() : vueDirecteur();
-        } catch (e) { console.error('[dash] render', e); body = '<div class="d-c"><div class="d-empty" style="color:' + COL.redDk + '">Erreur d\'affichage : ' + esc(e && e.message) + '</div></div>'; }
-      }
-      const dc = detailCard();
-      if (state.detail && !dc) state.detail = null;            // cible disparue -> on referme
-      if (dc) body = body.replace('<div class="d-g">', dc + '<div class="d-g">');
-      root.innerHTML = '<div class="dash">' + CSS +
-        '<div class="d-pb"><span>Période</span><button type="button" id="d-range">📅 ' + esc(fmtPeriod()) + ' ▾</button></div>' +
-        body + '</div>';
-      bind();
-      try { FW.dispatchEvent(new Event('resize')); } catch (e) {}
-    }
-    function bind() {
-      const root = getRoot(); if (!root) return;
-      const rg = root.querySelector('#d-range'); if (rg) rg.addEventListener('click', () => picker(rg));
-      const ss = root.querySelector('#d-site');
-      if (ss) ss.addEventListener('change', () => {
-        const v = ss.value || null;
-        state.selection = v ? { level: 'site', key: v, label: (ss.options[ss.selectedIndex] || {}).text || v } : { level: 'all', key: null, label: 'Tout le périmètre' };
-        if (v) { const b = bus(); if (b) try { b.setSiteId(Number(v)); } catch (e) {} }
-        render();
+      const txFi = pct(p.fi, p.hors_loueurs);
+      T.push({
+        fam: 'prod', id: 'fi', lab: 'Financement', v: txFi == null ? '—' : txFi, unite: '%',
+        c: ecartAn('fi', 'pts').txt || 'hors loueurs', sens: ecartAn('fi', 'pts').sens,
+        vals: serie('fi'), forme: 'ligne', lm: lm, gUnite: '%',
+        titre: 'Taux de financement',
+        ctx: 'Part des commandes financées, loueurs longue durée exclus du calcul.',
+        trouve: () => {
+          const fi = (det.fi || []);
+          const bas = fi.filter(v => num(v.n_t3) >= 15 && num(v.fi_t3) <= 5);
+          const chute = fi.filter(v => v.fi_t2 != null && v.fi_t3 != null && num(v.fi_t3) - num(v.fi_t2) <= -25);
+          let h = '';
+          if (bas.length) {
+            const v = bas[0];
+            h += '<b>' + esc(v.nom) + ' n’a financé que ' + Math.round(num(v.fi_t3) * num(v.n_t3) / 100)
+              + ' de ses ' + fmt(v.n_t3) + ' commandes du trimestre.</b> Deux issues seulement : soit le '
+              + 'financement ne se vend pas, soit il ne se saisit pas dans BACS. Dans les deux cas c’est '
+              + 'un appel à passer. ';
+          }
+          if (chute.length) {
+            h += (h ? 'Et ' : '<b>') + chute.length + ' vendeur' + (chute.length > 1 ? 's ont' : ' a')
+              + ' perdu plus de vingt-cinq points entre le trimestre précédent et celui-ci'
+              + (h ? '.' : '.</b>');
+          }
+          return h || 'Aucun décrochage marqué ce trimestre : les écarts entre vendeurs restent sous vingt-cinq points.';
+        },
+        table: () => {
+          const fi = (det.fi || []).filter(v => v.fi_t2 != null || v.fi_t3 != null);
+          if (!fi.length) return '';
+          return tableau(['Vendeur', 'Trim. préc.', 'Ce trim.', 'Écart'], fi.map(v => {
+            const e = (v.fi_t2 == null || v.fi_t3 == null) ? null : Math.round(num(v.fi_t3) - num(v.fi_t2));
+            return [
+              v.nom,
+              v.fi_t2 == null ? '—' : v.fi_t2 + ' %',
+              v.fi_t3 == null ? '—' : v.fi_t3 + ' %',
+              { h: e == null ? '—' : (e > 0 ? '+' : '') + e + ' pts',
+                cls: 'f ' + (e <= -10 ? 'baisse' : e >= 10 ? 'hausse' : 'plat') }
+            ];
+          }));
+        }
       });
-      root.querySelectorAll('[data-vnvo]').forEach(b => b.addEventListener('click', () => { state.vnvo = b.getAttribute('data-vnvo'); render(); }));
-      root.querySelectorAll('[data-pick]').forEach(el => el.addEventListener('click', () => {
-        const raw = el.getAttribute('data-pick') || '', i = raw.indexOf(':');
-        if (i < 0) return;
-        const lvl = raw.slice(0, i), id = raw.slice(i + 1);
-        if (!id || (lvl !== 'site' && lvl !== 'vendeur' && lvl !== 'reseau')) return;
-        const nm = el.querySelector('.d-lst-n');
-        state.selection = { level: lvl, key: id, label: (nm && nm.textContent) || id };
-        // Le site-bus ne reçoit QUE des identifiants de site (jamais un id_user).
-        if (lvl === 'site') { const b = bus(); if (b) try { b.setSiteId(Number(id)); } catch (e) {} }
-        render();
-      }));
-      root.querySelectorAll('[data-reset]').forEach(el => el.addEventListener('click', () => { resetSelection(); render(); }));
-      root.querySelectorAll('[data-detail]').forEach(el => el.addEventListener('click', () => {
-        const v = el.getAttribute('data-detail');
-        state.detail = (state.detail === v) ? null : v;   // reclic = referme
-        render();
-      }));
-      root.querySelectorAll('[data-detail-close]').forEach(el => el.addEventListener('click', () => { state.detail = null; render(); }));
-      root.querySelectorAll('[data-agenda]').forEach(el => el.addEventListener('click', () => scrollAgenda()));
-      root.querySelectorAll('[data-goleads]').forEach(el => el.addEventListener('click', () => {
-        const raw = el.getAttribute('data-goleads') || '', parts = raw.split('\u2502');
-        if (parts[0]) goLeadsPrefiltre(parts[0], parts[1], parts[2]);
-      }));
-    }
 
-    // ── Sélecteur de période ─────────────────────────────────────────────
-    function closePicker() { const e = doc.getElementById('d-dp'); if (e) e.remove(); if (window.__dashOut) { doc.removeEventListener('mousedown', window.__dashOut, true); window.__dashOut = null; } }
-    function picker(anchor) {
-      closePicker(); const pk = { m: null, a: null, b: null, h: null };
-      const m0 = new Date(state.period.from + 'T12:00:00'); pk.m = new Date(m0.getFullYear(), m0.getMonth(), 1);
-      const pop = doc.createElement('div'); pop.id = 'd-dp';
-      const r = anchor.getBoundingClientRect();
-      pop.style.cssText = 'position:fixed;z-index:9999;top:' + (r.bottom + 6) + 'px;left:' + Math.max(8, r.left) + 'px';
-      dpCss(); doc.body.appendChild(pop);
-      function cal() {
-        const y = pk.m.getFullYear(), mo = pk.m.getMonth(), first = new Date(y, mo, 1);
-        const si = (first.getDay() + 6) % 7, nd = new Date(y, mo + 1, 0).getDate(), today = ymd(new Date());
-        const a = pk.a, b = pk.b || pk.h, lo = a && b ? (a < b ? a : b) : null, hi = a && b ? (a < b ? b : a) : null;
-        let h = '<div class="dp"><div class="dp-h"><button type="button" data-n="-1">‹</button><span>' + esc(first.toLocaleDateString('fr-FR', { month: 'long', year: 'numeric' })) + '</span><button type="button" data-n="1">›</button></div><div class="dp-g">';
-        for (const d of ['L', 'M', 'M', 'J', 'V', 'S', 'D']) h += '<span class="dp-w">' + d + '</span>';
-        for (let i = 0; i < si; i++) h += '<span></span>';
-        for (let d = 1; d <= nd; d++) { const ds = y + '-' + String(mo + 1).padStart(2, '0') + '-' + String(d).padStart(2, '0');
-          let c = 'dp-d'; if (ds === today) c += ' t'; if (pk.a === ds || pk.b === ds) c += ' s'; else if (lo && hi && ds > lo && ds < hi) c += ' r';
-          h += '<span class="' + c + '" data-d="' + ds + '">' + d + '</span>'; }
-        return h + '</div><div class="dp-f">' + (pk.a ? 'Cliquez la date de fin' : 'Cliquez la date de début') + '</div></div>';
-      }
-      function paint() {
-        pop.innerHTML = cal();
-        pop.querySelectorAll('[data-n]').forEach(b => b.addEventListener('click', e => { e.stopPropagation(); pk.m = new Date(pk.m.getFullYear(), pk.m.getMonth() + Number(b.getAttribute('data-n')), 1); paint(); }));
-        pop.querySelectorAll('.dp-d').forEach(c => {
-          c.addEventListener('click', () => { const ds = c.getAttribute('data-d');
-            if (!pk.a || pk.b) { pk.a = ds; pk.b = null; pk.h = null; paint(); return; }
-            pk.b = ds; let x = pk.a, z = pk.b; if (z < x) { const t = x; x = z; z = t; }
-            closePicker(); state.period.from = x; state.period.to = z;
-            state.rawData = state.act = null; state.leads = state.stock = null;
-            state.classement = null; state.clsKey = null;   // le classement depend de la periode
-            load(true); });
-          c.addEventListener('mouseenter', () => { if (pk.a && !pk.b && pk.h !== c.getAttribute('data-d')) { pk.h = c.getAttribute('data-d'); paint(); } });
+      const txLoa = pct(p.loa, p.cdes);
+      T.push({
+        fam: 'prod', id: 'loa', lab: 'LOA / Easy', v: txLoa == null ? '—' : txLoa, unite: '%',
+        c: ecartAn('loa', 'pts').txt || 'des commandes', sens: ecartAn('loa', 'pts').sens,
+        vals: serie('loa'), forme: 'ligne', lm: lm, gUnite: '%', second: serie('fi'),
+        titre: 'LOA et Toyota Easy',
+        ctx: 'Part des commandes en location avec option d’achat, financement superposé.',
+        trouve: () => {
+          const a = serie('loa'), b = serie('fi');
+          const ec = a.map((v, i) => Math.abs(num(b[i]) - v)).filter(v => isFinite(v));
+          const mx = ec.length ? Math.max.apply(null, ec) : null;
+          if (mx == null) return 'Série incomplète.';
+          return '<b>Le financement de la maison, c’est la LOA.</b> Sur douze mois, l’écart entre '
+            + 'le taux de financement et le taux de LOA ne dépasse jamais ' + Math.round(mx) + ' points. '
+            + 'Il n’existe pas de levier « financement » séparé à actionner — relancer le financement, '
+            + 'ici, veut dire relancer la LOA.';
+        },
+        table: () => ''
+      });
+
+      const accCde = num(p.cdes) > 0 ? Math.round(num(p.acc) / num(p.cdes)) : 0;
+      T.push({
+        fam: 'prod', id: 'acc', lab: 'Accessoires', v: fmt(accCde), unite: '€',
+        c: ecartAn('acc').txt || 'par commande', sens: ecartAn('acc').sens,
+        vals: serie('acc'), forme: 'ligne', lm: lm, gUnite: '',
+        titre: 'Accessoires par commande',
+        ctx: 'Montant HT des accessoires du bon de commande, divisé par le nombre de commandes.',
+        trouve: () => {
+          const s = serie('acc'); if (s.length < 2 || !s[0]) return 'Série incomplète.';
+          const e = Math.round((s[s.length - 1] - s[0]) / s[0] * 100);
+          const ch = (det.fi || []).filter(v => v.acc_t2 && v.acc_t3)
+            .map(v => ({ n: v.nom, e: Math.round((num(v.acc_t3) - num(v.acc_t2)) / num(v.acc_t2) * 100) }))
+            .sort((a, b) => a.e - b.e);
+          return '<b>' + fmt(s[0]) + ' € il y a un an, ' + fmt(s[s.length - 1]) + ' € aujourd’hui'
+            + (e < 0 ? ', soit ' + Math.abs(e) + ' % de moins' : '') + '.</b> Le total mensuel bouge peu '
+            + 'parce que le volume compense : c’est le panier qui se déplace, et le total le masque.'
+            + (ch.length && ch[0].e < 0
+                ? ' Le plus fort recul est celui de ' + esc(ch[0].n) + ', de ' + Math.abs(ch[0].e)
+                  + '\u202f% entre les deux trimestres.' : '');
+        },
+        table: () => {
+          const a = (det.fi || []).filter(v => v.acc_t2 != null || v.acc_t3 != null);
+          if (!a.length) return '';
+          return tableau(['Vendeur', 'Trim. préc.', 'Ce trim.', 'Écart'], a.map(v => {
+            const e = (!v.acc_t2 || v.acc_t3 == null) ? null
+              : Math.round((num(v.acc_t3) - num(v.acc_t2)) / num(v.acc_t2) * 100);
+            return [v.nom, v.acc_t2 == null ? '—' : fmt(v.acc_t2) + ' €',
+                    v.acc_t3 == null ? '—' : fmt(v.acc_t3) + ' €',
+                    { h: e == null ? '—' : (e > 0 ? '+' : '') + e + ' %',
+                      cls: 'f ' + (e <= -10 ? 'baisse' : e >= 10 ? 'hausse' : 'plat') }];
+          }));
+        }
+      });
+
+      const txRoole = pct(p.roole, p.cdes);
+      T.push({
+        fam: 'prod', id: 'roole', lab: 'Roole', v: txRoole == null ? '—' : txRoole, unite: '%',
+        c: ecartAn('roole', 'pts').txt || 'des commandes', sens: ecartAn('roole', 'pts').sens,
+        vals: serie('roole'), forme: 'ligne', lm: lm, gUnite: '%',
+        titre: 'Produit fidélité Roole',
+        ctx: 'Part des commandes portant un pack Roole, un gravage ou une carte fidélité.',
+        trouve: () => {
+          const s = serie('roole'); if (s.length < 2) return 'Série incomplète.';
+          const mn = Math.min.apply(null, s), i = s.indexOf(mn);
+          return '<b>' + s[0] + ' % il y a un an, ' + s[s.length - 1] + ' % aujourd’hui.</b> '
+            + 'La bascule du gravage vers le pack Roole, courant 2025, s’est faite avec une perte qui '
+            + 'n’a pas été rattrapée. Le creux est en ' + (lm[i] || '?') + ', à ' + mn + ' %.';
+        },
+        table: () => ''
+      });
+
+      const txRep = pct(p.reprise, p.cdes);
+      T.push({
+        fam: 'prod', id: 'reprise', lab: 'Reprises', v: txRep == null ? '—' : txRep, unite: '%',
+        c: ecartAn('reprise', 'pts').txt || 'des commandes', sens: ecartAn('reprise', 'pts').sens,
+        vals: serie('reprise'), forme: 'ligne', lm: lm, gUnite: '%', second: serie('fi'),
+        titre: 'Commandes avec reprise',
+        ctx: 'Part des commandes portant le numéro de série d’un véhicule repris.',
+        trouve: () => '<b>La reprise suit le financement.</b> Les deux séries montent et descendent '
+          + 'ensemble : les mois à forte reprise sont les mois à fort financement. Ce sont les mêmes '
+          + 'ventes — celles où le vendeur a pris le temps de monter un dossier complet.',
+        table: () => ''
+      });
+
+      const objPhev = num(o.phev);
+      T.push({
+        fam: 'prod', id: 'phev', lab: 'PHEV / EV', v: fmt(p.phev),
+        c: objPhev > 0 ? 'objectif ' + objPhev : 'sans objectif saisi',
+        sens: objPhev > 0 && num(p.phev) >= objPhev ? 'hausse' : 'plat',
+        vals: serie('phev'), forme: 'barres', lm: lm,
+        titre: 'Hybrides rechargeables et électriques',
+        ctx: 'Commandes de véhicules rechargeables ou 100 % électriques.',
+        trouve: () => {
+          const s = serie('phev'); const mx = Math.max.apply(null, s);
+          const der = s[s.length - 1];
+          return der >= mx
+            ? '<b>Meilleur mois des douze derniers.</b> ' + der + ' commandes, contre '
+              + Math.min.apply(null, s) + ' au plus bas. C’est le seul produit additionnel qui '
+              + 'progresse pendant que les autres reculent'
+              + (objPhev > 0 && der > objPhev * 1.5 ? ', et l’objectif de ' + objPhev
+                 + ' n’a plus grand sens.' : '.')
+            : 'Le mois se situe à ' + der + ' commandes, pour un maximum de ' + mx + ' sur les douze mois.';
+        },
+        table: () => ''
+      });
+
+      const objVu = num(o.vu);
+      T.push({
+        fam: 'prod', id: 'vu', lab: 'Véhicules utilitaires', v: fmt(p.vu),
+        c: objVu > 0 ? 'objectif ' + objVu : 'sans objectif saisi',
+        sens: objVu > 0 && num(p.vu) >= objVu ? 'hausse' : 'plat',
+        vals: serie('vu'), forme: 'barres', lm: lm,
+        titre: 'Véhicules utilitaires',
+        ctx: 'Commandes de VU : Hilux, Proace et fourgons.',
+        trouve: () => {
+          const s = serie('vu'); const moitie = Math.floor(s.length / 2);
+          const av = s.slice(0, moitie).reduce((a, b) => a + b, 0) / (moitie || 1);
+          const ap = s.slice(moitie).reduce((a, b) => a + b, 0) / ((s.length - moitie) || 1);
+          return ap > av * 1.3
+            ? '<b>Le VU a changé de palier.</b> ' + av.toFixed(1).replace('.', ',') + ' par mois sur le '
+              + 'premier semestre glissant, ' + ap.toFixed(1).replace('.', ',') + ' sur le second'
+              + (objVu > 0 ? ', sans que l’objectif, resté à ' + objVu + ', en tienne compte.' : '.')
+            : 'Le rythme reste stable autour de ' + ap.toFixed(1).replace('.', ',') + ' commandes par mois.';
+        },
+        table: () => ''
+      });
+
+      // ---------------------------------------------------------------- PIPE
+      T.push({
+        fam: 'pipe', id: 'affaires', lab: 'Affaires ouvertes', v: fmt(pi.affaires), statique: true,
+        obj: 'sans commande, moins de 90 jours',
+        c: fmt(pi.froides) + ' au-delà de ' + num(s.p95) + ' jours', sens: 'baisse',
+        titre: 'Affaires ouvertes sans commande',
+        ctx: 'Affaires BACS ouvertes depuis moins de 90 jours et encore sans commande. Photo à l’instant, pas un cumul.',
+        trouve: () => '<b>Une vente se joue en ' + num(s.p85) + ' jours.</b> Sur les affaires de '
+          + 'l’année qui ont abouti, 85 % se sont conclues en ' + num(s.p85) + ' jours et 95 % '
+          + 'en ' + num(s.p95) + '. Ces deux seuils ne sont pas choisis, ils se recalculent chaque nuit sur '
+          + 'le comportement réel du réseau. Appliqués au stock d’aujourd’hui : ' + fmt(pi.fraiches)
+          + ' affaires sont dans la fenêtre, <b>' + fmt(pi.a_relancer) + ' encore rattrapables</b>, et '
+          + fmt(pi.froides) + ' ne reviendront pas.',
+        table: () => tableau(['Âge', 'Affaires', 'Fenêtre'], [
+          [{ h: '<span style="display:inline-block;width:9px;height:9px;border-radius:50%;background:var(--m-vert);margin-right:7px"></span>Dans la fenêtre' },
+           { h: '<span class="f">' + fmt(pi.fraiches) + '</span>' }, num(s.p85) + ' jours ou moins'],
+          [{ h: '<span style="display:inline-block;width:9px;height:9px;border-radius:50%;background:var(--m-orange);margin-right:7px"></span>À relancer' },
+           { h: '<span class="f">' + fmt(pi.a_relancer) + '</span>' }, (num(s.p85) + 1) + ' à ' + num(s.p95) + ' jours'],
+          [{ h: '<span style="display:inline-block;width:9px;height:9px;border-radius:50%;background:var(--m-bleu);margin-right:7px"></span>Froides' },
+           { h: '<span class="f">' + fmt(pi.froides) + '</span>' }, 'au-delà de ' + num(s.p95) + ' jours']
+        ])
+      });
+
+      T.push({
+        fam: 'pipe', id: 'relance', lab: 'À relancer', v: fmt(pi.a_relancer), statique: true,
+        obj: 'affaires de ' + (num(s.p85) + 1) + ' à ' + num(s.p95) + ' jours',
+        c: fmt(pi.fraiches) + ' encore dans la fenêtre', sens: 'plat',
+        titre: 'Le portefeuille de chacun',
+        ctx: 'Les affaires ouvertes de chaque vendeur, rangées par âge. Trié sur la colonne à relancer.',
+        trouve: () => {
+          const v = (det.vendeurs || []);
+          if (!v.length) return 'Aucune affaire ouverte sur le périmètre.';
+          const t = v[0];
+          const sansDevis = v.filter(x => num(x.froides) > num(x.total) * .6);
+          return '<b>' + esc(t.nom) + ' porte ' + fmt(t.a_relancer) + ' affaires dans la fenêtre de '
+            + 'relance</b>, la plus ancienne remonte à ' + fmt(t.plus_vieille) + ' jours.'
+            + (sansDevis.length ? ' ' + sansDevis.length + ' vendeur' + (sansDevis.length > 1 ? 's laissent' : ' laisse')
+                + ' plus de six affaires sur dix passer en froid sans les relancer.' : '');
+        },
+        table: () => {
+          const v = (det.vendeurs || []);
+          if (!v.length) return '';
+          const mx = Math.max.apply(null, v.map(x => num(x.total))) || 1;
+          return tableau(['Vendeur', 'Affaires', 'Répartition par âge', 'À relancer', 'La plus ancienne'],
+            v.map(x => {
+              const t = num(x.total) || 1;
+              return [
+                x.nom + (x.site ? ' <span style="font-size:10.5px;color:var(--ink-3);font-weight:600">'
+                  + esc(x.site) + '</span>' : ''),
+                { h: '<span class="f">' + fmt(x.total) + '</span>' },
+                { h: '<span style="display:inline-flex;height:9px;border-radius:5px;overflow:hidden;gap:2px;'
+                     + 'vertical-align:middle;width:' + Math.max(num(x.total) / mx * 100, 4).toFixed(1) + '%">'
+                     + '<i style="display:block;height:100%;width:' + (num(x.fraiches) / t * 100) + '%;background:var(--m-vert)"></i>'
+                     + '<i style="display:block;height:100%;width:' + (num(x.a_relancer) / t * 100) + '%;background:var(--m-orange)"></i>'
+                     + '<i style="display:block;height:100%;width:' + (num(x.froides) / t * 100) + '%;background:var(--m-bleu)"></i>'
+                     + '</span>' },
+                { h: '<span class="f" style="color:var(--m-orange)">' + fmt(x.a_relancer) + '</span>' },
+                { h: '<span class="f" style="color:var(--ink-3)">' + fmt(x.plus_vieille) + ' j</span>' }
+              ];
+            }));
+        }
+      });
+
+      T.push({
+        fam: 'pipe', id: 'pipeval', lab: 'Pipe valorisé', v: fmtEur(pi.montant).replace(FINE + 'M€', ''),
+        unite: 'M€', statique: true, obj: fmt(pi.dossiers) + ' dossiers ouverts',
+        c: num(pi.dossiers) > 0 ? fmtEur(num(pi.montant) / num(pi.dossiers)) + ' par dossier' : '—', sens: 'plat',
+        titre: 'Pipe commercial',
+        ctx: 'Commandes à l’état propale ou bon de commande, non encore gagnées.',
+        trouve: () => {
+          const vieux = num(pi.dossiers) - num(pi.recents);
+          return '<b>' + fmt(vieux) + ' des ' + fmt(pi.dossiers) + ' dossiers n’ont pas bougé depuis '
+            + 'plus de trente jours.</b> Le pipe affiché n’est pas un pipe : c’est un stock qui '
+            + 'n’a jamais été purgé. Le pipe réel, celui des trente derniers jours, pèse '
+            + fmt(pi.recents) + ' dossiers.';
+        },
+        table: () => ''
+      });
+
+      // ------------------------------------------------------------- LIVRAISON
+      T.push({
+        fam: 'livr', id: 'livr', lab: 'À livrer', v: fmt(lv.en_attente), statique: true,
+        obj: fmtEur(lv.montant) + ' engagés',
+        c: fmt(lv.retard) + ' en retard réel', sens: num(lv.retard) > 0 ? 'baisse' : 'plat',
+        titre: 'Commandes vendues non livrées',
+        ctx: 'Commandes gagnées dont le statut BACS n’est pas clos, placées par rapport à la date promise.',
+        trouve: () => '<b>Sur ' + fmt(num(lv.retard) + num(lv.a_cloturer)) + ' dates de livraison dépassées, '
+          + fmt(lv.retard) + ' seulement sont de vrais retards.</b> Les ' + fmt(lv.a_cloturer)
+          + ' autres ont plus de trois mois de dépassement : la voiture est livrée depuis longtemps, '
+          + 'c’est le dossier qui n’a jamais été fermé dans BACS. Mélanger les deux rend '
+          + 'l’indicateur inutilisable, d’où la séparation.',
+        table: () => tableau(['Bloc', 'Dossiers', 'Ce que c’est'], [
+          ['À rappeler aujourd’hui', { h: '<span class="f">' + fmt(lv.retard) + '</span>' }, 'date dépassée, moins de 90 jours'],
+          ['Cette semaine', { h: '<span class="f">' + fmt(lv.semaine) + '</span>' }, 'à confirmer au client'],
+          ['Ce mois-ci', { h: '<span class="f">' + fmt(lv.mois30) + '</span>' }, 'prévues sous 30 jours'],
+          ['Plus tard', { h: '<span class="f">' + fmt(lv.plus_tard) + '</span>' }, 'au-delà de 30 jours'],
+          ['À clôturer', { h: '<span class="f">' + fmt(lv.a_cloturer) + '</span>' }, 'plus de 90 jours de retard']
+        ])
+      });
+
+      T.push({
+        fam: 'livr', id: 'cloturer', lab: 'Dossiers à clôturer', v: fmt(lv.a_cloturer), statique: true,
+        obj: 'plus de 90 jours de retard', c: 'travail d’administration', sens: 'plat',
+        titre: 'Dossiers jamais fermés',
+        ctx: 'Commandes dont la date de livraison promise est dépassée de plus de trois mois.',
+        trouve: () => '<b>' + fmt(lv.a_cloturer) + ' dossiers portent un retard de plus de trois mois.</b> '
+          + 'À cette ancienneté, la voiture est livrée : c’est le statut BACS qui n’est jamais '
+          + 'passé à clos. Ils pèsent dans les ' + fmt(lv.en_attente) + ' « à livrer » et faussent tout '
+          + 'indicateur de délai tant qu’on ne les sépare pas des ' + fmt(lv.retard) + ' vrais retards.',
+        table: () => ''
+      });
+
+      // -------------------------------------------------------------- ACTIVITÉ
+      T.push({
+        fam: 'act', id: 'rapports', lab: 'Rapports vendeurs', v: fmt(ac.rapports), statique: true,
+        obj: 'sur 30 jours',
+        c: (num(ac.rapports) / 30).toFixed(1).replace('.', ',') + ' par jour',
+        sens: num(ac.rapports) > 0 ? 'hausse' : 'plat',
+        titre: 'Activité commerciale tracée',
+        ctx: 'Comptes rendus d’échange saisis par les vendeurs.',
+        trouve: () => '<b>C’est la source d’activité la mieux tenue.</b> '
+          + (num(ac.rapports) / 30).toFixed(0) + ' comptes rendus par jour, sans trou. À l’inverse '
+          + 'des rendez-vous et des canaux de contact, les vendeurs la remplissent. C’est donc sur '
+          + 'elle qu’un indicateur de pression commerciale peut s’appuyer dès maintenant.',
+        table: () => ''
+      });
+
+      T.push({
+        fam: 'act', id: 'rdv', lab: 'Rendez-vous à venir', v: fmt(ac.rdv_a_venir), statique: true,
+        obj: fmt(ac.rdv_tenus) + ' tenus sur 30 jours',
+        c: num(ac.rdv_soldes) === 0 ? 'aucun soldé' : fmt(ac.rdv_soldes) + ' soldés',
+        sens: num(ac.rdv_soldes) === 0 ? 'baisse' : 'plat',
+        titre: 'Rendez-vous clients',
+        ctx: 'Rendez-vous planifiés dans One Data.',
+        trouve: () => num(ac.rdv_soldes) === 0
+          ? '<b>' + fmt(ac.rdv_tenus) + ' rendez-vous se sont tenus en trente jours et pas un seul '
+            + 'n’a été soldé.</b> Le résultat de rendez-vous n’est jamais saisi : impossible '
+            + 'aujourd’hui de calculer une transformation rendez-vous vers vente, ni de savoir qui '
+            + 'n’est pas venu. Un champ obligatoire à la clôture réglerait ça.'
+          : fmt(ac.rdv_soldes) + ' rendez-vous sur ' + fmt(ac.rdv_tenus) + ' ont été soldés, soit '
+            + pct(ac.rdv_soldes, ac.rdv_tenus) + ' %.',
+        table: () => ''
+      });
+
+      // ----------------------------------------------------------------- LEADS
+      T.push({
+        fam: 'leads', id: 'leads', lab: 'Leads reçus', v: fmt(ld.recus_30j), statique: true,
+        obj: 'sur 30 jours',
+        c: pct(ld.perdus, ld.total) + ' % finissent perdus', sens: 'baisse',
+        titre: 'Leads entrants',
+        ctx: 'Leads externes reçus sur le périmètre, toutes sources confondues.',
+        trouve: () => '<b>Sur les ' + fmt(ld.total) + ' leads de l’historique, ' + fmt(ld.perdus)
+          + ' sont classés perdus et ' + fmt(ld.resolus) + ' résolus.</b> Un lead sur '
+          + (num(ld.resolus) > 0 ? Math.round(num(ld.total) / num(ld.resolus)) : '—')
+          + ' aboutit à une issue tracée. Le reste se perd sans motif renseigné, ce qui rend toute '
+          + 'analyse de rentabilité par source impossible : on ne sait pas quels apporteurs valent leur coût.',
+        table: () => tableau(['État', 'Leads', 'Part'], [
+          ['Perdus', { h: '<span class="f">' + fmt(ld.perdus) + '</span>' }, pct(ld.perdus, ld.total) + ' %'],
+          ['Contactés', { h: '<span class="f">' + fmt(ld.contactes) + '</span>' }, pct(ld.contactes, ld.total) + ' %'],
+          ['Attribués, jamais contactés', { h: '<span class="f">' + fmt(ld.jamais_contactes) + '</span>' },
+            pct(ld.jamais_contactes, ld.total) + ' %'],
+          ['Résolus', { h: '<span class="f">' + fmt(ld.resolus) + '</span>' }, pct(ld.resolus, ld.total) + ' %']
+        ])
+      });
+
+      T.push({
+        fam: 'leads', id: 'delai', lab: 'Premier contact',
+        v: ld.delai_median_h == null ? '—' : String(ld.delai_median_h).replace('.', ','), unite: 'h',
+        statique: true, obj: 'délai médian',
+        c: num(ld.delai_median_h) > 1 ? 'la norme est sous 1 h' : 'dans la norme',
+        sens: num(ld.delai_median_h) > 1 ? 'baisse' : 'hausse',
+        titre: 'Délai de premier contact',
+        ctx: 'Temps écoulé entre la réception du lead et le premier contact tracé.',
+        trouve: () => '<b>Un lead sur deux attend plus de '
+          + String(ld.delai_median_h).replace('.', ',') + ' heures.</b> La probabilité de joindre un '
+          + 'prospect s’effondre après la première heure ; à ce délai, le concurrent a rappelé. Et '
+          + '<b>' + fmt(ld.jamais_contactes) + ' leads attribués n’ont jamais été contactés du '
+          + 'tout</b> — ceux-là ne sont pas en retard, ils sont abandonnés.',
+        table: () => ''
+      });
+
+      // ------------------------------------------------------------------ BASE
+      if (ba) {
+        const fu = ba.fusion || {}, bl = ba.bloctel || {};
+        T.push({
+          fam: 'base', id: 'injoignables', lab: 'Fiches injoignables', v: fmt(ba.injoignables), statique: true,
+          obj: 'sur ' + fmt(ba.fiches) + ' fiches',
+          c: pct(ba.injoignables, ba.fiches) + ' % de la base', sens: 'baisse',
+          titre: 'Qualité des coordonnées',
+          ctx: 'Fiches client sans téléphone ni adresse e-mail.',
+          trouve: () => '<b>' + fmt(ba.sans_email) + ' fiches n’ont pas d’e-mail et '
+            + fmt(ba.sans_tel) + ' pas de téléphone</b> ; ' + fmt(ba.injoignables) + ' n’ont ni '
+            + 'l’un ni l’autre. Une fiche injoignable ne coûte rien à stocker et cher à compter : '
+            + 'elle gonfle la base, fausse les taux de couverture et interdit toute campagne. Le champ '
+            + 'manquant se récupère au comptoir, pas par un traitement.',
+          table: () => tableau(['Manque', 'Fiches', 'Part'], [
+            ['Sans adresse e-mail', { h: '<span class="f">' + fmt(ba.sans_email) + '</span>' }, pct(ba.sans_email, ba.fiches) + ' %'],
+            ['Sans téléphone', { h: '<span class="f">' + fmt(ba.sans_tel) + '</span>' }, pct(ba.sans_tel, ba.fiches) + ' %'],
+            ['Ni l’un ni l’autre', { h: '<span class="f">' + fmt(ba.injoignables) + '</span>' }, pct(ba.injoignables, ba.fiches) + ' %'],
+            ['Sans code postal', { h: '<span class="f">' + fmt(ba.sans_cp) + '</span>' }, pct(ba.sans_cp, ba.fiches) + ' %'],
+            ['En opposition commerciale', { h: '<span class="f">' + fmt(ba.stop_com) + '</span>' }, pct(ba.stop_com, ba.fiches) + ' %']
+          ])
+        });
+
+        T.push({
+          fam: 'base', id: 'fusion', lab: 'Rapprochements en attente', v: fmt(fu.en_attente), statique: true,
+          obj: 'file d’arbitrage RCU',
+          c: fmt(fu.rejetes) + ' déjà rejetés', sens: 'baisse',
+          titre: 'Déduplication client',
+          ctx: 'Rapprochements proposés par le résolveur d’identité, en attente d’arbitrage humain.',
+          trouve: () => {
+            const tranches = num(fu.rejetes) + num(fu.fusionnes);
+            const tauxRejet = tranches > 0 ? Math.round(num(fu.rejetes) / tranches * 100) : null;
+            return '<b>Le résolveur a proposé ' + fmt(fu.total) + ' rapprochements : ' + fmt(fu.fusionnes)
+              + ' ont été fusionnés et ' + fmt(fu.rejetes) + ' rejetés.</b> Sur les dossiers qu’un '
+              + 'humain a tranchés, ' + tauxRejet + ' % sont refusés — soit les seuils de score sont '
+              + 'trop laxistes, soit les arbitrages sont expédiés. Dans les deux cas, le réglage est à '
+              + 'revoir avant d’empiler ' + fmt(fu.en_attente) + ' dossiers de plus.';
+          },
+          table: () => tableau(['État', 'Dossiers', 'Part'], [
+            ['En attente d’arbitrage', { h: '<span class="f">' + fmt(fu.en_attente) + '</span>' }, pct(fu.en_attente, fu.total) + ' %'],
+            ['Rejetés', { h: '<span class="f">' + fmt(fu.rejetes) + '</span>' }, pct(fu.rejetes, fu.total) + ' %'],
+            ['Fusionnés', { h: '<span class="f">' + fmt(fu.fusionnes) + '</span>' }, pct(fu.fusionnes, fu.total) + ' %']
+          ])
+        });
+
+        const txBloc = pct(bl.opposes, bl.verifies);
+        T.push({
+          fam: 'base', id: 'bloctel', lab: 'Bloctel',
+          v: txBloc == null ? '—' : String(txBloc), unite: '%', statique: true,
+          obj: 'des numéros vérifiés',
+          c: pct(bl.verifies, ba.fiches) + ' % de la base vérifiée', sens: 'baisse',
+          titre: 'Opposition au démarchage',
+          ctx: 'Clients dont au moins un numéro est inscrit sur la liste Bloctel.',
+          trouve: () => '<b>' + fmt(bl.opposes) + ' clients sur les ' + fmt(bl.verifies)
+            + ' vérifiés sont inscrits sur Bloctel.</b> La prospection téléphonique sortante sur fichier '
+            + 'est, en l’état, juridiquement fermée — et seules ' + pct(bl.verifies, ba.fiches)
+            + ' % des fiches ont été confrontées à la liste. Le report naturel serait l’e-mail '
+            + 'et le SMS ; aucun des deux n’est branché aujourd’hui.',
+          table: () => ''
         });
       }
-      paint();
-      window.__dashOut = e => { if (!pop.contains(e.target) && e.target !== anchor && !anchor.contains(e.target)) closePicker(); };
-      setTimeout(() => doc.addEventListener('mousedown', window.__dashOut, true), 0);
-    }
-    function dpCss() {
-      if (doc.getElementById('d-dp-css')) return;
-      const s = doc.createElement('style'); s.id = 'd-dp-css';
-      s.textContent = '#d-dp .dp{background:#fff;border:1.5px solid #e8eef7;border-radius:12px;box-shadow:0 8px 30px rgba(42,94,169,.18);padding:13px;width:262px;font-family:"Nunito Sans",system-ui,sans-serif}#d-dp .dp-h{display:flex;align-items:center;justify-content:space-between;margin-bottom:8px}#d-dp .dp-h span{font-size:12px;font-weight:700;color:#2a5ea9;text-transform:capitalize}#d-dp .dp-h button{width:26px;height:26px;border:1.5px solid #e8eef7;background:#fff;border-radius:8px;cursor:pointer;color:#2a5ea9}#d-dp .dp-g{display:grid;grid-template-columns:repeat(7,33px);gap:2px}#d-dp .dp-w{font-size:9px;color:#acc5e4;text-align:center;font-weight:800;padding-bottom:3px}#d-dp .dp-d{height:29px;line-height:29px;text-align:center;font-size:11px;border-radius:7px;cursor:pointer}#d-dp .dp-d:hover{background:#eef4fc}#d-dp .dp-d.t{box-shadow:inset 0 0 0 1.5px #acc5e4}#d-dp .dp-d.s{background:#2a5ea9;color:#fff;font-weight:800}#d-dp .dp-d.r{background:#eef4fc}#d-dp .dp-f{margin-top:8px;text-align:center;font-size:10px;color:#9bb3d1;font-style:italic}';
-      doc.head.appendChild(s);
+
+      return T;
     }
 
-    // ══ NAVIGATION lead-mgmt pré-filtré ══════════════════════════════════
-    const LM_VAR_VENDEUR_CIBLE = '7759f3ba-c260-4297-9e28-3713c305684c';
-    const LM_MARKETING = { path: '/marketing', uid: '99519997-f935-471a-9147-b0118191b991' };
-    function inEditor() { try { return window.self !== window.top; } catch (e) { return true; } }
-    function goLeadsPrefiltre(idUser, idSite, nom) {
-      const w = (wwLib.getFrontWindow && wwLib.getFrontWindow()) || window;
-      try {
-        const lm = w.__leadMgmt || {};
-        lm.selectedVendeur = { id_user: Number(idUser), id_site: idSite === '' || idSite == null ? null : Number(idSite), vendeur_nom: nom || ('Vendeur ' + idUser) };
-        lm.section = 'suivi_leads';
-        lm.view = 'a_traiter';
-        w.__leadMgmt = lm; try { window.__leadMgmt = lm; } catch (e) {}
-      } catch (e) {}
-      try { wwLib.wwVariable.updateValue(LM_VAR_VENDEUR_CIBLE, Number(idUser)); } catch (e) {}
-      if (inEditor()) { try { wwLib.wwApp.goTo(LM_MARKETING.uid); return; } catch (e) {} try { wwLib.goTo(LM_MARKETING.uid); return; } catch (e) {} return; }
-      try { wwLib.goTo('/fr' + LM_MARKETING.path); return; } catch (e) {}
-      try { w.location.href = '/fr' + LM_MARKETING.path; } catch (e) {}
-    }
-
-    // ══ SITE BUS ═════════════════════════════════════════════════════════
-    function bus() { try { const w = wwLib.getFrontWindow(); if (w && w.oropraSite) return w.oropraSite; } catch (e) {} return window.oropraSite || null; }
-    function bindBus(t) {
-      t = t || 0; const b = bus();
-      if (!b) { if (t < 120) setTimeout(() => bindBus(t + 1), 250); return; }
-      if (!window.__dashBus) { window.__dashBus = 1; try { b.onChange(({ siteId }) => applyBus(siteId)); } catch (e) {} }
-      try { const id = b.getSiteId(); if (id != null) applyBus(id); } catch (e) {}
-    }
-    function applyBus(siteId) {
-      if (siteId == null) return;
-      const id = String(siteId);
-      // Ajouté le 25/08/2026 : le site du bus est désormais MÉMORISÉ, car le
-      // classement d'équipe doit le suivre. Un vendeur multi-site voyait
-      // jusqu'ici le même classement quel que soit le site choisi en topnav —
-      // les 22 vendeurs de ses deux sites fusionnés en une seule liste, alors
-      // qu'il est 1er sur 13 d'un côté et 10e sur 10 de l'autre.
-      const change = state.siteBus !== id;
-      state.siteBus = id;
-      if (change && famille() === 'vendeur') {
-        state.classement = null; state.clsKey = null;
-        loadClassement();
+    // =========================================================================
+    //  RENDU
+    // =========================================================================
+    function phraseDuJour() {
+      const d = state.d, p = d.prod || {}, o = d.obj || {}, ld = d.leads || {};
+      const bouts = [];
+      const objCde = num(o.cdes);
+      if (objCde > 0) {
+        bouts.push('<b>' + fmt(p.cdes) + ' commandes</b> pour un objectif de ' + objCde);
+      } else {
+        bouts.push('<b>' + fmt(p.cdes) + ' commandes</b> ce mois-ci');
       }
-      if (!state.rawData) return;
-      const row = (state.rawData || []).find(r => String(r.id_site) === id);
-      if (row) { state.selection = { level: 'site', key: id, label: row.nom_site }; render(); }
+      // Les érosions : on ne cite que celles qui reculent vraiment sur un an.
+      const recul = [];
+      [['acc', 'accessoires', ''], ['roole', 'Roole', 'pts'], ['fi', 'financement', 'pts']]
+        .forEach(([k, nom, u]) => {
+          const e = ecartAn(k, u);
+          if (e.sens === 'baisse') recul.push(nom + ' <b>' + e.txt.replace(' sur un an', '') + '</b>');
+        });
+      let ph = 'Le volume ' + (objCde > 0 && num(p.cdes) >= objCde ? 'tient' : 'est en deçà') + ' — ' + bouts[0];
+      if (recul.length) ph += ' — mais ce qui s’ajoute à la voiture recule : ' + recul.join(', ');
+      ph += '.';
+      if (num(ld.delai_median_h) > 1) {
+        ph += ' Et un lead sur deux attend <b>plus de '
+          + String(ld.delai_median_h).replace('.', ',') + ' heures</b> avant le premier appel.';
+      }
+      return ph;
     }
 
-    // ══ CSS ══════════════════════════════════════════════════════════════
-    const CSS = '<style>' +
-    '#dash-root{font-family:"Nunito Sans",system-ui,sans-serif;color:#2c2c2a}' +
-    '#dash-root *{box-sizing:border-box}' +
-    '#dash-root .d-pb{display:flex;align-items:center;gap:10px;margin-bottom:14px}' +
-    '#dash-root .d-pb>span{font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:.05em;color:#9bb3d1}' +
-    '#dash-root .d-pb button{border:1.5px solid #e8eef7;background:#fff;color:#2a5ea9;font-weight:800;font-size:12.5px;padding:7px 13px;border-radius:10px;cursor:pointer;font-family:inherit}' +
-    '#dash-root .d-pb button:hover{border-color:#2a5ea9}' +
-    '#dash-root .d-hero{background:linear-gradient(120deg,#1F4A85,#2a5ea9 55%,#356bb8);border-radius:18px;padding:22px 24px;color:#fff;position:relative;overflow:hidden;box-shadow:0 14px 34px -14px rgba(31,74,133,.55)}' +
-    '#dash-root .d-hero::after{content:"";position:absolute;right:-40px;top:-60px;width:230px;height:230px;background:radial-gradient(circle,rgba(255,255,255,.14),transparent 65%)}' +
-    '#dash-root .d-hero-eb{font-size:11px;font-weight:800;letter-spacing:.08em;color:#bcd4f2;display:flex;align-items:center;gap:8px;margin-bottom:9px;text-transform:capitalize}' +
-    '#dash-root .d-hero-eb i{width:7px;height:7px;border-radius:50%;background:#53bda7;box-shadow:0 0 0 4px rgba(83,189,167,.3)}' +
-    '#dash-root .d-hero-l{font-size:19px;font-weight:800;line-height:1.4;max-width:820px}' +
-    '#dash-root .d-hero-l b{color:#ffd98a}#dash-root .d-hero-l up{color:#7fe3cd}#dash-root .d-hero-l dn{color:#ff9f8f}' +
-    '#dash-root .d-hero-m{margin-top:14px;display:flex;gap:20px;flex-wrap:wrap;font-size:12.5px;color:#cfe0f5;font-weight:600}#dash-root .d-hero-m b{color:#fff}' +
-    '#dash-root .d-flt{display:flex;gap:10px;margin:14px 0 0;flex-wrap:wrap}' +
-    '#dash-root .d-sel{border:1.5px solid #e8eef7;border-radius:9px;padding:7px 11px;font-size:12px;font-family:inherit;font-weight:600;color:#2c2c2a;background:#fff}' +
-    '#dash-root .d-tg{display:inline-flex;background:#f7f9fc;border-radius:9px;padding:3px}' +
-    '#dash-root .d-tg button{border:0;background:transparent;font-family:inherit;font-weight:800;font-size:12px;color:#54678a;padding:6px 13px;border-radius:7px;cursor:pointer}' +
-    '#dash-root .d-chip{display:inline-flex;align-items:center;gap:7px;background:#eef4fc;border:1px solid #d6e4f6;color:#1F4A85;font-size:12px;font-weight:800;padding:6px 8px 6px 12px;border-radius:9px}' +
-    '#dash-root .d-chip button{border:0;background:#fff;color:#54678a;width:18px;height:18px;line-height:16px;border-radius:50%;cursor:pointer;font-size:13px;font-family:inherit;font-weight:800;padding:0}' +
-    '#dash-root .d-chip button:hover{background:#e24b4a;color:#fff}' +
-    '#dash-root .d-tg button.on{background:#fff;color:#2a5ea9;box-shadow:0 1px 4px rgba(42,94,169,.15)}' +
-    /* MULTI-COLONNES et non grid (26/08/2026). En CSS grid, chaque RANGÉE
-       prend la hauteur de sa carte la plus haute : une carte « Leads à
-       traiter » de 6 lignes en face d'une carte courte laissait un trou
-       béant, et l'écran devenait chaotique. Le flux multi-colonnes empile
-       les cartes sans laisser d'espace : chacune démarre où la précédente
-       s'arrête. `column-span:all` conserve les cartes pleine largeur. */
-    '#dash-root .d-g{column-count:2;column-gap:16px;margin-top:16px}' +
-    '#dash-root .d-g > *{break-inside:avoid;-webkit-column-break-inside:avoid;page-break-inside:avoid;margin-bottom:16px;display:block;width:100%}' +
-    '#dash-root .d-full{column-span:all;-webkit-column-span:all}' +
-    /* « / 24 » accolé au grand chiffre : l'objectif doit se lire d'un seul
-       coup d'œil avec le réalisé, pas se chercher ailleurs sur la carte. */
-    '#dash-root .d-pj-sur{font-size:26px;font-weight:800;opacity:.45;margin-left:4px;letter-spacing:-.02em}' +
-    /* Atterrissage : information SECONDE depuis le 26/08/2026. Une
-       extrapolation ne doit pas dominer un fait acquis. */
-    '#dash-root .d-pj-land{margin:2px 0 12px;font-size:12px;color:#54678a;padding:7px 10px;background:#f5f8fd;border-radius:8px}' +
-    '#dash-root .d-c{background:#fff;border:1px solid #e8eef7;border-radius:16px;padding:18px 19px}' +
-    '#dash-root .d-c.d-alert{border-color:#f6cfcc;background:#fffaf9}' +
-    '#dash-root .d-c-h{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:14px}' +
-    '#dash-root .d-c-t{font-size:12px;font-weight:900;letter-spacing:.05em;text-transform:uppercase;color:#1F4A85}' +
-    '#dash-root .d-c-s{font-size:11px;color:#9bb3d1;font-weight:700;text-align:right}' +
-    '#dash-root .d-pj{display:flex;align-items:flex-end;gap:16px;margin-bottom:6px}' +
-    '#dash-root .d-pj-n{font-size:50px;font-weight:900;line-height:.9;letter-spacing:-.03em}' +
-    '#dash-root .d-pj-o{font-size:14px;font-weight:800;color:#54678a;margin-bottom:6px}#dash-root .d-pj-o b{color:#2c2c2a}' +
-    '#dash-root .d-pj-v{margin-left:auto;font-size:12px;font-weight:800;padding:6px 12px;border-radius:10px;margin-bottom:5px;white-space:nowrap}' +
-    '#dash-root .d-lgd{display:flex;gap:16px;margin-top:8px;font-size:11px;font-weight:700;color:#54678a;flex-wrap:wrap}' +
-    '#dash-root .d-lgd span{display:flex;align-items:center;gap:6px}' +
-    '#dash-root .d-warn{background:#fff8ec;border:1px solid #f4e2bf;border-radius:12px;padding:15px}' +
-    '#dash-root .d-warn .d-warn-t{display:block;font-size:14px;font-weight:900;color:#854f0b;margin-bottom:5px}' +
-    '#dash-root .d-warn span{font-size:12.5px;color:#54678a;font-weight:600;line-height:1.5}' +
-    '#dash-root .d-warn-n{margin-top:10px;font-size:15px;font-weight:900;color:#1F4A85}' +
-    '#dash-root .d-warn-s{margin-top:10px;font-size:11.5px;color:#854f0b;font-weight:700;background:#fff8ec;border-radius:9px;padding:8px 10px}' +
-    '#dash-root .d-pl{display:flex;align-items:baseline;gap:10px}' +
-    '#dash-root .d-pl-n{font-size:29px;font-weight:900;letter-spacing:-.02em}#dash-root .d-pl-n i{font-size:14px;color:#54678a;font-weight:800;font-style:normal}' +
-    '#dash-root .d-pl-t{font-size:12.5px;font-weight:800;padding:3px 9px;border-radius:8px}' +
-    '#dash-root .d-pl-s{font-size:12px;color:#54678a;font-weight:600;margin:4px 0 8px}' +
-    '#dash-root .d-fn{display:flex;flex-direction:column;gap:2px}' +
-    '#dash-root .d-fn-b{height:38px;border-radius:8px;display:flex;align-items:center;gap:8px;padding:0 12px;min-width:86px}' +
-    '#dash-root .d-fn-b b{font-size:16px;font-weight:900;color:#fff}#dash-root .d-fn-b span{font-size:11px;font-weight:800;color:rgba(255,255,255,.92)}' +
-    '#dash-root .d-fn-c{font-size:10px;font-weight:800;color:#9bb3d1;padding:2px 0 2px 12px}' +
-    '#dash-root .d-q{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}' +
-    '#dash-root .d-q-i{border-radius:12px;padding:12px;text-align:center}' +
-    '#dash-root .d-q-i b{display:block;font-size:22px;font-weight:900;line-height:1}' +
-    '#dash-root .d-q-i span{font-size:11px;font-weight:700;color:#54678a}#dash-root .d-q-i i{display:block;font-size:10.5px;color:#9bb3d1;font-weight:800;font-style:normal;margin-top:2px}' +
-    '#dash-root .d-lst{display:flex;flex-direction:column;gap:8px}' +
-    '#dash-root .d-lst-r{display:flex;align-items:center;gap:11px;padding:10px 12px;border-radius:11px;background:#f7f9fc;border:1px solid #e8eef7;border-left:3px solid #acc5e4}' +
-    '#dash-root .d-lst-r[data-pick]{cursor:pointer}#dash-root .d-lst-r[data-pick]:hover{background:#fff;box-shadow:0 4px 12px -6px rgba(42,94,169,.35)}' +
-    '#dash-root .d-lst-r[data-pick]::after{content:"›";color:#9bb3d1;font-weight:900;font-size:16px;margin-left:2px}' +
-    '#dash-root .d-lst-r[data-detail]{cursor:pointer}#dash-root .d-lst-r[data-detail]:hover{background:#fff;box-shadow:0 4px 12px -6px rgba(42,94,169,.35)}' +
-    '#dash-root .d-lst-r[data-goleads]{cursor:pointer}#dash-root .d-lst-r[data-goleads]:hover{background:#fff;box-shadow:0 4px 12px -6px rgba(42,94,169,.35)}' +
-    '#dash-root .d-lst-r[data-goleads]::after{content:"\u2197";color:#9bb3d1;font-weight:900;font-size:15px;margin-left:2px}' +
-    '#dash-root .d-lst-r[data-detail]::after{content:"\u203a";color:#9bb3d1;font-weight:900;font-size:16px;margin-left:2px}' +
-    '#dash-root .d-rk-r[data-detail]{cursor:pointer;border-radius:8px;margin:0 -6px;padding:3px 6px}#dash-root .d-rk-r[data-detail]:hover{background:#f2f7fd}' +
-    '#dash-root .d-kpi-i[data-detail]{cursor:pointer;transition:.12s}#dash-root .d-kpi-i[data-detail]:hover{border-color:#acc5e4;background:#fff;box-shadow:0 4px 12px -7px rgba(42,94,169,.4)}' +
-    '#dash-root .d-detail{border-color:#cfe0f5;background:linear-gradient(180deg,#fbfdff,#fff)}' +
-    '#dash-root .d-detail-h{display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:14px}' +
-    '#dash-root .d-detail-t{font-size:17px;font-weight:900;color:#1F4A85;display:block}' +
-    '#dash-root .d-detail-s{font-size:12px;font-weight:700;color:#9bb3d1}' +
-    '#dash-root .d-detail-x{border:1px solid #e8eef7;background:#fff;color:#54678a;width:30px;height:30px;border-radius:9px;cursor:pointer;font-size:20px;line-height:1;font-family:inherit}#dash-root .d-detail-x:hover{background:#e24b4a;color:#fff;border-color:#e24b4a}' +
-    '#dash-root .d-detail-g{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:16px}' +
-    '#dash-root .d-detail-lbl{font-size:11px;font-weight:900;letter-spacing:.05em;text-transform:uppercase;color:#54678a;margin-bottom:8px}' +
-    '#dash-root .d-detail-ag{margin-top:10px;width:100%;border:1.5px solid #acc5e4;background:#eef4fc;color:#1F4A85;font-weight:800;font-size:12.5px;padding:9px;border-radius:10px;cursor:pointer;font-family:inherit}#dash-root .d-detail-ag:hover{background:#2a5ea9;color:#fff;border-color:#2a5ea9}' +
-    '#dash-root .d-lst-r.warn{border-left-color:#fac055;background:#fffaf0}' +
-    '#dash-root .d-lst-r.alert{border-left-color:#e24b4a;background:#fff5f4}' +
-    '#dash-root .d-lst-n{flex:1;font-size:13px;font-weight:800;color:#1F4A85;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}' +
-    '#dash-root .d-lst-v{font-size:12.5px;font-weight:800;color:#a32d2d;text-align:right;white-space:nowrap}' +
-    '#dash-root .d-lst-v small{display:block;font-size:10px;color:#9bb3d1;font-weight:700}' +
-    '#dash-root .d-lst-more{text-align:center;font-size:11.5px;font-weight:800;color:#9bb3d1;padding:4px}' +
-    '#dash-root .d-rk{display:flex;flex-direction:column;gap:7px}' +
-    '#dash-root .d-rk-r{display:flex;align-items:center;gap:10px}#dash-root .d-rk-r.me{background:#eef4fc;border-radius:8px;margin:0 -6px;padding:4px 6px}' +
-    '#dash-root .d-rk-p{width:20px;text-align:center;font-weight:900;font-size:13px;color:#54678a}' +
-    '#dash-root .d-rk-n{flex:1;font-size:12.5px;font-weight:700;color:#2a5ea9;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}' +
-    '#dash-root .d-rk-b{width:84px;height:12px;background:#eef2f8;border-radius:4px;overflow:hidden}#dash-root .d-rk-b i{display:block;height:100%;border-radius:4px}' +
-    '#dash-root .d-rk-v{width:34px;text-align:right;font-size:12px;font-weight:800;color:#54678a}' +
-    '#dash-root .d-rk-more{font-size:11px;color:#9ca3af;font-weight:600;text-align:center;padding:2px 0}' +
-    '#dash-root .d-kpi{display:grid;grid-template-columns:repeat(auto-fit,minmax(88px,1fr));gap:10px}' +
-    '#dash-root .d-kpi-i{background:#f7f9fc;border:1px solid #e8eef7;border-radius:12px;padding:12px 8px;text-align:center}' +
-    '#dash-root .d-kpi-i b{display:block;font-size:22px;font-weight:900;line-height:1;color:#1F4A85}' +
-    '#dash-root .d-kpi-i span{font-size:10.5px;font-weight:700;color:#54678a;line-height:1.25;display:block;margin-top:4px}' +
-    '#dash-root .d-st{display:grid;grid-template-columns:1fr 1fr;gap:12px}' +
-    '#dash-root .d-st-c{background:#f7f9fc;border:1px solid #e8eef7;border-radius:12px;padding:13px}' +
-    '#dash-root .d-st-h{display:flex;justify-content:space-between;font-weight:900;font-size:12px;margin-bottom:9px}#dash-root .d-st-h b{font-size:20px;color:#1F4A85}' +
-    '#dash-root .d-st-l{display:flex;justify-content:space-between;font-size:11px;color:#54678a;font-weight:600;margin-top:5px}#dash-root .d-st-l b{color:#2c2c2a}' +
-    '#dash-root .d-empty{padding:16px;text-align:center;color:#9bb3d1;font-size:12.5px;font-weight:600}' +
-    '#dash-root .d-ok{padding:14px;text-align:center;color:#0f6e56;font-size:12.5px;font-weight:700;background:#eefaf6;border-radius:11px}' +
-    '#dash-root .d-sk{height:14px;border-radius:7px;background:linear-gradient(90deg,#eef2f8 25%,#e2eaf5 50%,#eef2f8 75%);background-size:200% 100%;animation:dsk 1.4s infinite;margin-bottom:10px}' +
-    '@keyframes dsk{0%{background-position:200% 0}100%{background-position:-200% 0}}' +
-    /* AJOUT : entonnoir de cohorte. Trois traitements franchement distincts,
-       pas trois bleus : plein = passé, hachuré = non résolu, plat = perdu. */
-    '#dash-root .d-co-h{display:flex;align-items:baseline;gap:10px;margin:14px 0 6px}' +
-    '#dash-root .d-co-h:first-child{margin-top:4px}' +
-    '#dash-root .d-co-n{font-size:12.5px;font-weight:800;color:#1F4A85}' +
-    '#dash-root .d-co-t{margin-left:auto;font-size:18px;font-weight:800;color:#1F4A85;letter-spacing:-.03em}' +
-    '#dash-root .d-co-p{height:26px;border-radius:5px;overflow:hidden;display:flex;background:#f5f8fc}' +
-    '#dash-root .d-co-f{height:100%;display:flex;align-items:center;justify-content:center}' +
-    '#dash-root .d-co-f b{font-size:11.5px;font-weight:800;color:#fff}' +
-    '#dash-root .co-av{background:#2a5ea9}' +
-    '#dash-root .co-ec{background:repeating-linear-gradient(-45deg,#eaf0f9 0 6px,#fff 6px 12px);box-shadow:inset 0 0 0 1px #acc5e4}' +
-    '#dash-root .co-pe{background:#dfe6f1}' +
-    '#dash-root .co-ga{background:#53bda7}' +
-    '#dash-root .co-ec b,#dash-root .co-pe b{color:#54678a}' +
-    '#dash-root .d-co-c{display:flex;align-items:center;gap:11px;padding:9px 0 9px 17px;margin-left:2px;border-left:2px dashed #e8eef7;position:relative}' +
-    '#dash-root .d-co-c::before{content:"";position:absolute;left:-5px;top:50%;width:8px;height:8px;border-radius:50%;background:#9bb3d1;transform:translateY(-50%)}' +
-    '#dash-root .d-co-tx{font-size:17px;font-weight:800;color:#2a5ea9;letter-spacing:-.02em;min-width:50px}' +
-    '#dash-root .d-co-l{font-size:12.5px;color:#54678a;font-weight:600}' +
-    '#dash-root .d-co-l b{color:#1F4A85}' +
-    '#dash-root .d-co-c.bas .d-co-tx{color:#e24b4a}' +
-    '#dash-root .d-co-c.bas .d-co-l b{color:#8a2a29}' +
-    '#dash-root .d-co-b{background:#eaf0f9;border-radius:9px;padding:13px 16px;margin-top:16px;display:flex;align-items:center;gap:14px;flex-wrap:wrap}' +
-    '#dash-root .d-co-bn{font-size:28px;font-weight:800;color:#1F4A85;letter-spacing:-.035em;line-height:1}' +
-    '#dash-root .d-co-bt{font-size:12.5px;color:#54678a;font-weight:600;line-height:1.5;flex:1;min-width:200px}' +
-    '#dash-root .d-co-bt b{color:#1F4A85}' +
-    '#dash-root .d-co-w{margin-top:12px;background:#f5f8fc;border-left:3px solid #9bb3d1;padding:10px 13px;border-radius:0 8px 8px 0;font-size:12px;color:#54678a;line-height:1.5}' +
-    '@media(max-width:860px){#dash-root .d-g{column-count:1}#dash-root .d-hero-l{font-size:16px}#dash-root .d-pj-n{font-size:40px}#dash-root .d-st{grid-template-columns:1fr}#dash-root .d-q{grid-template-columns:1fr}}' +
-    '</style>';
+    function pouls() {
+      const d = state.d, m = d.meteo || {}, lv = d.livr || {}, pi = d.pipe || {};
+      return [
+        { n: fmt(m.cdes_jour), l: 'commande' + (num(m.cdes_jour) > 1 ? 's' : '') + '<br>aujourd’hui' },
+        { n: fmt(m.devis_jour), l: 'devis<br>ouverts' },
+        { n: fmt(lv.semaine), l: 'livraison' + (num(lv.semaine) > 1 ? 's' : '') + '<br>cette semaine' },
+        { n: fmt(pi.a_relancer), l: 'affaires<br>à relancer' }
+      ].map(x => '<div><div class="n">' + x.n + '</div><div class="l">' + x.l + '</div></div>').join('');
+    }
 
-    // ══ DÉMARRAGE ════════════════════════════════════════════════════════
-    bindBus();
-    render();          // rendu immédiat au (re)montage — ne pas attendre le réseau
-    // load(TRUE) et non false : l'état vit sur window.__dash et survit aux
-    // navigations SPA, or la clé de cache ne dépend que du viewer et de la
-    // période — toutes deux inchangées d'une visite à l'autre. Avec
-    // load(false), revenir sur l'accueil après avoir signé une commande dans
-    // le kanban réaffichait le cache et le chiffre ne bougeait pas jusqu'à un
-    // F5. Constaté le 25/08/2026 sur le bloc « Vendeurs sous le rythme ».
-    // Le rendu ci-dessus a déjà affiché les données connues : la revalidation
-    // est silencieuse (cf. load()), l'utilisateur ne voit aucun clignotement.
-    load(true);
-    [300, 900, 2000].forEach(d => setTimeout(() => { const r = getRoot(); if (r && !r.querySelector('.dash')) render(); }, d));
+    let TUILES = [];
+
+    function carte(t) {
+      const sp = t.statique ? '<span class="c plat" style="margin-top:9px">' + esc(t.obj || '') + '</span>'
+        : etincelle(t.vals, t.forme, t.sens === 'baisse' ? 'var(--m-rouge)' : 'var(--m-bleu)');
+      return '<button class="dtuile' + (t.muette ? ' muette' : '') + '" type="button" data-id="' + esc(t.id)
+        + '" aria-expanded="false"><span class="pl" aria-hidden="true">+</span>'
+        + '<span class="lab">' + esc(t.lab) + '</span>'
+        + '<span class="v">' + esc(t.v) + (t.unite ? '<em>' + esc(t.unite) + '</em>' : '') + '</span>'
+        + '<span class="c ' + esc(t.sens || 'plat') + '">' + esc(t.c || '') + '</span>'
+        + sp + '</button>';
+    }
+
+    function rendre() {
+      const r = getRoot();
+      const fams = FAMILLES.map(f => {
+        const ts = TUILES.filter(t => t.fam === f.k);
+        if (!ts.length) return '';
+        return '<section class="dfam" data-fam="' + f.k + '">'
+          + '<h2><span class="detat ' + f.etat + '"></span>' + esc(f.t)
+          + ' <span class="cn">' + esc(f.n) + '</span></h2>'
+          + '<div class="dgrille">' + ts.map(carte).join('') + '</div></section>';
+      }).join('');
+
+      r.innerHTML = '<div class="dw">'
+        + '<div class="drail"><h1>Le tableau du jour</h1>'
+        + '<span class="dt">' + esc(dateLongue()) + '</span></div>'
+        + '<section class="dband"><div class="d"><div class="q">La météo du jour</div>'
+        + '<p>' + phraseDuJour() + '</p></div>'
+        + '<div class="dpouls">' + pouls() + '</div></section>'
+        + '<div id="dash-fams" style="display:flex;flex-direction:column;gap:18px">' + fams + '</div>'
+        + '<div id="dash-tiroir"></div><div id="dash-ancre"></div>'
+        + '<p class="dpied">Commandes gagnées uniquement, grands comptes exclus, sur votre périmètre. '
+        + 'Douze mois glissants. Les seuils de relance (' + num((state.d.seuils || {}).p85) + ' et '
+        + num((state.d.seuils || {}).p95) + ' jours) sont recalculés chaque nuit sur les affaires de '
+        + 'l’année qui ont abouti. La pastille devant chaque famille dit l’état de sa source : '
+        + '<span class="detat plein"></span>alimentée, <span class="detat partiel"></span>partielle, '
+        + '<span class="detat vide"></span>sans donnée.</p>'
+        + '</div>';
+
+      r.querySelectorAll('.dtuile').forEach(b =>
+        b.addEventListener('click', () => basculer(b.getAttribute('data-id'))));
+    }
+
+    function dateLongue() {
+      const j = ['dimanche', 'lundi', 'mardi', 'mercredi', 'jeudi', 'vendredi', 'samedi'];
+      const m = ['janvier', 'février', 'mars', 'avril', 'mai', 'juin', 'juillet', 'août',
+                 'septembre', 'octobre', 'novembre', 'décembre'];
+      const d = new Date();
+      return j[d.getDay()] + ' ' + d.getDate() + ' ' + m[d.getMonth()]
+        + ' · ' + m[state.mois - 1] + ' en cours';
+    }
+
+    function basculer(id) {
+      if (state.ouvert === id) { fermer(); return; }
+      const t = TUILES.find(x => x.id === id);
+      if (!t) return;
+      state.ouvert = id;
+      const r = getRoot();
+      r.querySelectorAll('.dtuile').forEach(b =>
+        b.setAttribute('aria-expanded', String(b.getAttribute('data-id') === id)));
+      const zone = r.querySelector('#dash-tiroir');
+      const hote = r.querySelector('.dtuile[data-id="' + id + '"]').closest('.dfam');
+      hote.appendChild(zone);
+      let trouve = '', table = '';
+      try { trouve = t.trouve ? t.trouve() : ''; } catch (e) { console.error('[dash] trouvaille', id, e); }
+      try { table = t.table ? t.table() : ''; } catch (e) { console.error('[dash] table', id, e); }
+      zone.innerHTML = '<section class="dtiroir"><div style="min-width:0">'
+        + '<h3>' + esc(t.titre) + '</h3><p class="ctx">' + esc(t.ctx) + '</p>'
+        + (t.statique ? '' : graphe(t.vals, t.forme, t.lm, t.gUnite, t.second, t.titre))
+        + table + '</div><div style="min-width:0">'
+        + '<div class="dtrouve"><div class="t">Ce que le chiffre ne dit pas</div>' + trouve + '</div>'
+        + '<button class="dferme" type="button">Refermer</button></div></section>';
+      zone.querySelector('.dferme').addEventListener('click', fermer);
+      try { zone.scrollIntoView({ behavior: 'smooth', block: 'nearest' }); } catch (e) { }
+    }
+
+    function fermer() {
+      state.ouvert = null;
+      const r = getRoot();
+      r.querySelectorAll('.dtuile').forEach(b => b.setAttribute('aria-expanded', 'false'));
+      const a = r.querySelector('#dash-ancre'), z = r.querySelector('#dash-tiroir');
+      if (a && z) a.parentNode.insertBefore(z, a);
+    }
+
+    // =========================================================================
+    //  DÉMARRAGE
+    // =========================================================================
+    getRoot().innerHTML = '<div class="dvide">Chargement du tableau de bord…</div>';
+    try {
+      state.d = await charger();
+    } catch (e) {
+      console.error('[dash] dashboard_tc', e);
+      getRoot().innerHTML = '<div class="dvide">Le tableau de bord n’a pas pu être chargé. '
+        + 'Rechargez la page ; si le problème persiste, la fonction dashboard_tc est peut-être absente '
+        + 'de ce tenant.</div>';
+      return;
+    }
+    if (!state.d) { getRoot().innerHTML = '<div class="dvide">Aucune donnée sur votre périmètre.</div>'; return; }
+    TUILES = tuiles();
+    rendre();
+    // Une tuile est ouverte d'entrée : la page montre à quoi sert le clic sans
+    // qu'on ait à le deviner. Le financement si son taux a reculé, sinon les
+    // commandes.
+    const ouvrable = ecartAn('fi', 'pts').sens === 'baisse' ? 'fi' : 'cdes';
+    if (TUILES.some(t => t.id === ouvrable)) basculer(ouvrable);
   }
 });
