@@ -15,6 +15,16 @@
 //     fiche client, consultation en surcouche, renvoi vers BACS).
 //   · KPI Gravage renommé « Roole » : le gravage a été remplacé par le Pack
 //     Roole courant 2025.
+//  v4.13 (28/09/2026) TEAM COLIN :
+//   · les commandes sont rattachées au mois de leur CRÉATION dans BACS et non
+//     de leur passage en gagnée (bdc_attributs_tc_cache.jour_creation).
+//   · colonnes de pilotage : Cde, Cde part., Cde pro, FI, LOA/Easy, Roole,
+//     PHEV/EV, VU, Kinto, Arval, puis le reste à faire. Le mix ne garde que
+//     VD/VK, Pack Premium, Reprises et les accessoires.
+//   · FI : les loueurs sortent du calcul, l'objectif vaut la moitié des
+//     commandes réalisées hors loueurs et n'est plus saisi.
+//   · sans objectif, une cellule n'est plus jamais verte — un Kinto isolé
+//     faisait passer Kinto ET Arval pour atteints.
 //   · la consultation s'ouvre DEVANT le panneau (z-index 10050 contre 9999) :
 //     à 2000, valeur reprise du kanban, elle passait derrière la pile de cartes.
 //  Les autres tenants gardent strictement le comportement précédent.
@@ -210,22 +220,28 @@ OD.define('performances', {
   // Objectifs Cde et FI : table OBJECTIF ; Pro, PHEV/EV, VU, Kinto, Arval : objectif_kpi.
   const KPIS_TC = [
     { r: 'commandes_realisees', o: 'objectif_commandes', label: 'Cde', mode: 'obj', vue: 'pilotage' },
-    { r: 'pro_realises', o: 'objectif_pro', label: 'Pro', mode: 'obj', vue: 'pilotage' },
-    { r: 'phev_ev_realises', o: 'objectif_phev_ev', label: 'PHEV / EV', mode: 'obj', vue: 'pilotage' },
-    // Le financement se lit en volume ET en part des commandes ; LOA/Easy suit
-    // FI parce que c'est la même famille, sans objectif en face.
-    { r: 'financements_realises', o: 'objectif_financements', label: 'FI', mode: 'obj', pen: true, vue: 'pilotage' },
+    { r: 'part_realises', label: 'Cde part.', mode: 'taux', pen: true, vue: 'pilotage' },
+    { r: 'pro_realises', o: 'objectif_pro', label: 'Cde pro', mode: 'obj', pen: true, vue: 'pilotage' },
+    // FI : les loueurs (Kinto, Arval) ne relèvent pas du financement vendu par
+    // la concession. Ils sortent du numérateur comme du dénominateur, et
+    // l'objectif vaut la moitié des commandes réalisées hors loueurs — il est
+    // calculé par la vue, plus saisi.
+    { r: 'financements_hors_loueur', o: 'objectif_financements', label: 'FI', mode: 'obj',
+      pen: true, penDen: 'commandes_hors_loueur', vue: 'pilotage' },
     { r: 'loa_realises', label: 'LOA / Easy', mode: 'taux', pen: true, vue: 'pilotage' },
+    { r: 'gravages_realises', label: 'Roole', mode: 'taux', pen: true, vue: 'pilotage' },
+    { r: 'phev_ev_realises', o: 'objectif_phev_ev', label: 'PHEV / EV', mode: 'obj', vue: 'pilotage' },
     { r: 'vu_realises', o: 'objectif_vu', label: 'VU', mode: 'obj', vue: 'pilotage' },
     { r: 'kinto_realises', o: 'objectif_kinto', label: 'Kinto', mode: 'obj', vue: 'pilotage' },
     { r: 'arval_realises', o: 'objectif_arval', label: 'Arval', mode: 'obj', vue: 'pilotage' },
     { r: 'vdvk_realises', label: 'dont VD/VK', mode: 'taux', vue: 'mix' },
     { r: 'pack_premium_realises', label: 'Pack Premium', mode: 'taux', vue: 'mix' },
-    // Le gravage a été remplacé par le Pack Roole courant 2025 : le KPI compte
-    // désormais Roole, gravage et carte fidélité ensemble (cf. calc_bdc_attributs_tc).
-    { r: 'gravages_realises', label: 'Roole', mode: 'taux', vue: 'mix' },
     { r: 'reprises_realises', label: 'Reprises', mode: 'taux', vue: 'mix' },
-    { r: 'accessoires_ht', label: 'Accessoires HT', mode: 'euro', vue: 'mix' }
+    { r: 'accessoires_ht', label: 'Accessoires HT', mode: 'euro', vue: 'mix' },
+    // Agrégés mais jamais affichés : ils servent de dénominateur au taux de
+    // financement et au calcul de l'objectif.
+    { r: 'commandes_hors_loueur', label: '', mode: 'interne', vue: 'aucune' },
+    { r: 'financements_realises', label: '', mode: 'interne', vue: 'aucune' }
   ];
   const KPIS = IS_TC ? KPIS_TC : KPIS_STD;
   const KPIS_OBJ = KPIS.filter(k => k.mode === 'obj');
@@ -296,8 +312,12 @@ OD.define('performances', {
   const COL_VIDE = { bg: '#f0f2f5', text: '#8a96a8', bar: '#dde2ea' };
   function fmtEur(v) { return Math.round(num(v)).toLocaleString('fr-FR') + ' €'; }
   function tauxCde(agg, k) {
-    const cde = volTotal(agg, KPI_CDE);
-    return cde > 0 ? Math.round(volTotal(agg, k) / cde * 100) : null;
+    // Certains KPI se rapportent à un sous-ensemble des commandes : le taux de
+    // financement se lit hors loueurs, au numérateur comme au dénominateur.
+    const den = (k && k.penDen)
+      ? num(agg[k.penDen]) + num(agg[k.penDen + '_enc'])
+      : volTotal(agg, KPI_CDE);
+    return den > 0 ? Math.round(volTotal(agg, k) / den * 100) : null;
   }
   // Vue unifiée d'un KPI non-objectif : texte principal, badge, couleurs, barre.
   function kpiLibre(agg, k) {
@@ -319,7 +339,8 @@ OD.define('performances', {
   function penLine(agg, k) {
     if (!k.pen) return '';
     const p = tauxCde(agg, k);
-    return p == null ? '' : p + '% des cdes';
+    if (p == null) return '';
+    return p + '% ' + (k.penDen ? 'hors loueurs' : 'des cdes');
   }
 
   // --- PRORATA TEMPS (jours ouvrés lun-sam) ------------------------------------
@@ -355,6 +376,10 @@ OD.define('performances', {
   function kpiColorPro(realise, objectif) {
     const r = num(realise), o = num(objectif);
     if (o <= 0) {
+      // Sans objectif, aucun jugement : le vert faisait passer pour exemplaire
+      // un vendeur à qui personne n'avait rien demandé. Un Kinto isolé teintait
+      // la case, et Arval avec — les deux paraissaient atteints.
+      if (IS_TC) return { bg: '#f0f2f5', text: '#8a96a8', bar: '#dde2ea' };
       if (r > 0) return { bg: '#e1f5ee', text: '#085041', bar: '#53bda7' };
       return { bg: '#f0f2f5', text: '#8a96a8', bar: '#dde2ea' };
     }
@@ -779,8 +804,13 @@ OD.define('performances', {
   // commandes à aller chercher, pas un pourcentage à interpréter. Le vendeur
   // est jugé sur son objectif de commandes ou, à défaut, sur le premier qui en
   // porte un : Adrien Thivillon Oliva est suivi sur le Pro.
+  // Le « reste à faire » se lit sur l'objectif de commandes ou, à défaut, sur
+  // le premier objectif SAISI. L'objectif de financement étant déduit du
+  // réalisé, il ne peut pas servir de pivot : il serait toujours à moitié
+  // atteint par construction.
+  const PIVOTS = KPIS_OBJ.filter(k => k.r !== 'financements_hors_loueur');
   function kpiPivot(agg) {
-    for (const k of KPIS_OBJ) if (num(agg[k.o]) > 0) return k;
+    for (const k of PIVOTS) if (num(agg[k.o]) > 0) return k;
     return null;
   }
   function celluleReste(agg) {
@@ -788,7 +818,7 @@ OD.define('performances', {
     if (!k) return '<td class="td-reste"><div class="pf-c sans"><span class="v">—</span>'
       + '<span class="pen">pas d\u2019objectif</span></div></td>';
     const r = num(agg[k.o]) - volTotal(agg, k);
-    const sfx = (k === KPIS_OBJ[0]) ? '' : ' \u00b7 ' + k.label;
+    const sfx = (k === PIVOTS[0]) ? '' : ' \u00b7 ' + k.label;
     if (r <= 0) return '<td class="td-reste"><div class="pf-c"><span class="v ok">atteint</span>'
       + '<span class="pen">+' + (-r) + ' au-del\u00e0' + esc(sfx) + '</span></div></td>';
     return '<td class="td-reste"><div class="pf-c"><span class="v du">' + r + '</span>'
