@@ -8,8 +8,14 @@ OD.define('delco-page', {
   async mount(__anchor, ctx) {
   __anchor.id = 'dp-root';
 // ====================================================================
-//  Delco CRM360 — Page Tableau du jour (Custom JS WeWeb) v5
+//  Delco CRM360 — Page Tableau du jour (Custom JS WeWeb) v6
 //  --------------------------------------------------------------------
+//  V6 (28/09/2026) : radar multi-thèmes (leads, RDV, BDC, propales,
+//   objectifs, stock VO, atelier, livraisons) produit par agent_scan_metier.
+//   Rayon = ANCIENNETÉ RÉELLE DU PROBLÈME (payload.anciennete_h) ou
+//   imminence (payload.echeance_h), et non plus l'âge de la carte.
+//   Détail générique payload.items [{label, meta, id_client}].
+//   Pastille « Info » (et non plus « Coaching ») ; site dans l'infobulle.
 //  V5 : réactivité au bus de site pour le profil manager (rôles 3/5).
 //   Focaliser un site dans la topnav filtre brief + radar sur ce site
 //   (pastille de focus). La direction n'y réagit pas. Tri des signaux
@@ -551,8 +557,8 @@ await (async function () {
         || ((Number(p.nb_zombies) || 0) + (Number(p.nb_stagnants) || 0)
             + (Number(p.nb_propales) || 0) + (Number(p.nb_rdv) || 0)) * 1000;
     }
-    return Number(p.montant_total) || Number(p.nb_propales) || Number(p.nb_leads)
-        || Number(p.nb_vendeurs) || Number(p.rdv_sans_cr) || 0;
+    return Number(p.montant_total) || Number(p.valeur_totale) || Number(p.nb_propales) || Number(p.nb_leads)
+        || Number(p.nb_vendeurs) || Number(p.rdv_sans_cr) || Number(p.nb_rdv) || Number(p.nb) || 0;
   }
   function sortByImportance(list) {
     const order = { urgent: 0, warn: 1, good: 2, info: 3 };
@@ -591,7 +597,8 @@ await (async function () {
           || (Array.isArray(p.propales)        && p.propales.length > 0)
           || (Number(p.nb_rdv) > 0);
     }
-    return (Array.isArray(p.leads) && p.leads.length > 0)
+    return (Array.isArray(p.items) && p.items.length > 0)
+        || (Array.isArray(p.leads) && p.leads.length > 0)
         || (Array.isArray(p.propales) && p.propales.length > 0)
         || (Array.isArray(p.vendeurs) && p.vendeurs.length > 0);
   }
@@ -602,6 +609,10 @@ await (async function () {
     if (signal.rule_code === "vendeur_synthese") {
       return (Number(p.nb_zombies) || 0) + (Number(p.nb_stagnants) || 0)
            + (Number(p.nb_propales) || 0) + (Number(p.nb_rdv) > 0 ? 1 : 0);
+    }
+    if (Array.isArray(p.items) && p.items.length > 0) {
+      // Nombre réel de dossiers derrière la carte (les items sont plafonnés à 10-15).
+      return Number(p.nb_leads || p.nb_propales || p.nb_rdv || p.nb_wins || p.nb) || p.items.length;
     }
     return (p.leads?.length) || (p.propales?.length) || (p.vendeurs?.length) || 0;
   }
@@ -645,6 +656,23 @@ await (async function () {
       return html;
     }
 
+    if (Array.isArray(p.items) && p.items.length > 0) {
+      const total = detailCount(signal);
+      const rows = p.items.map(it => {
+        const idClient = it.id_client;
+        const clickable = idClient ? `data-client-id="${idClient}"` : "";
+        const clsClickable = idClient ? "dp-expand-item-clickable" : "";
+        return `
+          <div class="dp-expand-item ${clsClickable}" ${clickable}>
+            <span class="dp-expand-item-name">${escapeHtml(it.label || "")}</span>
+            <span class="dp-expand-item-meta">${escapeHtml(it.meta || "")}</span>
+          </div>`;
+      }).join("");
+      const reste = total > p.items.length
+        ? `<div class="dp-expand-item"><span class="dp-expand-item-meta">… et ${total - p.items.length} autre(s) — demande le détail à Delco</span></div>`
+        : "";
+      return rows + reste;
+    }
     if (Array.isArray(p.leads) && p.leads.length > 0) {
       return p.leads.map(l => {
         const idClient = l.id_client;
@@ -768,6 +796,11 @@ await (async function () {
 
   // Âge du signal en heures, à partir de created_at (fallback updated_at).
   function signalAgeHours(signal) {
+    // V6 : les règles métier donnent l'ancienneté réelle du problème
+    // (anciennete_h) ou le délai avant l'échéance (echeance_h, RDV du jour).
+    const pl = signal.payload || {};
+    if (pl.echeance_h != null && !isNaN(Number(pl.echeance_h))) return Math.max(0, Number(pl.echeance_h));
+    if (pl.anciennete_h != null && !isNaN(Number(pl.anciennete_h))) return Math.max(0, Number(pl.anciennete_h));
     // Pour une synthèse vendeur, le rayon reflète l'ancienneté RÉELLE du pire
     // dossier (zombie / stagnant / propale), pas l'âge du signal (qui est
     // recréé à chaque scan → sinon tous les points seraient sur le même anneau).
@@ -887,7 +920,7 @@ await (async function () {
     return top.map(s => {
       const { cx, cy } = pointPosition(s, angleFor.get(s.id));
       const tooltip = s.title || s.subject_name || "Signal";
-      const meta = fmtPrioLabel(s.priority);
+      const meta = fmtPrioLabel(s.priority) + (s.subject_name ? " · " + escapeHtml(s.subject_name) : "");
 
       // Positionnement du tooltip basé sur la position du point
       // Le tooltip s'éloigne du CENTRE du radar, pas du point lui-même.
@@ -966,7 +999,7 @@ await (async function () {
           ${urgentCount ? `<button class="dp-chip ${radarFilter==="urgent"?"active":""}" data-filter="urgent"><span class="dp-chip-dot urgent"></span>Urgent (${urgentCount})</button>` : ""}
           ${warnCount   ? `<button class="dp-chip ${radarFilter==="warn"?"active":""}" data-filter="warn"><span class="dp-chip-dot warn"></span>À traiter (${warnCount})</button>` : ""}
           ${goodCount   ? `<button class="dp-chip ${radarFilter==="good"?"active":""}" data-filter="good"><span class="dp-chip-dot good"></span>Bonne nouvelle (${goodCount})</button>` : ""}
-          ${infoCount   ? `<button class="dp-chip ${radarFilter==="info"?"active":""}" data-filter="info"><span class="dp-chip-dot info"></span>Coaching (${infoCount})</button>` : ""}
+          ${infoCount   ? `<button class="dp-chip ${radarFilter==="info"?"active":""}" data-filter="info"><span class="dp-chip-dot info"></span>Info (${infoCount})</button>` : ""}
         </div>
       </div>`;
   }
