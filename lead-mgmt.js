@@ -168,10 +168,16 @@ function profilDuRole(r) {
 const PROFIL   = profilDuRole(userRole);
 const SECTIONS_ROLE = PROFILS[PROFIL].sections;
 
-// 90 jours : au-delà, une demande n'est plus un lead à rappeler en priorité
+// 30 jours : au-delà, une demande n'est plus un lead à rappeler en priorité
 // mais une affaire à requalifier. Déclarée ICI, en tête : fetchMaFile peut
 // s'exécuter avant que le module n'atteigne le bloc des gestes (TDZ).
-const LM_ARRIERE_MIN = 90 * 1440;
+// ⚠️ 30 jours, et non 90. Mesure du 28/09 sur les dossiers prenables :
+//    371 en attente, dont 356 de plus de 30 jours, le plus ancien à 2 094
+//    jours — presque six ans. Un écran rempli d'archives ne montre pas du
+//    retard : le vendeur cesse de le regarder. Le seuil est aussi en base
+//    (`lead_collecte_config.arriere_jours`), où le mur le lit ; garder les
+//    deux valeurs égales.
+const LM_ARRIERE_MIN = 30 * 1440;
 // Un manager qui n'a pas « mon_equipe » n'est pas un chef : le drapeau
 // sert à décider des boutons (réaffecter), pas des sections.
 const PEUT_REAFFECTER = PROFIL === 'chef' || PROFIL === 'directeur';
@@ -622,9 +628,18 @@ const LM_V3_CSS = `
   font-size:11.5px; color:var(--text-mut,#6b7684); background:#fafbfd; }
 
 /* ── Panneau d'une cellule ───────────────────────────────────────────── */
-#lead-mgmt-root .v3-voile { position:fixed; inset:0; background:rgba(16,24,40,.42);
-  z-index:50; }
-#lead-mgmt-root .v3-pan { position:fixed; top:0; right:0; bottom:0; width:420px;
+/* ⚠️ RELEVÉ LE 28/09 : la liste à prendre était coupée par la topnav — ses
+   deux barres recouvraient le premier dossier et ses boutons. Le panneau est
+   en position fixed, donc placé par rapport à la fenêtre, et la topnav monte
+   jusqu'à z-index 1200 : lui passer devant l'aurait masquée et empêché de
+   naviguer. On ouvre donc le panneau SOUS elle. La variable --v3-haut est
+   MESURÉE à chaque rendu (v3PoserHautPanneau) et jamais codée en dur : la
+   barre n'a pas la même hauteur sur mobile, où le logo passe de 44 à 34 px.
+   ⚠️ AUCUN accent grave dans ce bloc : il est dans un gabarit LM_V3_CSS,
+   qu'un accent grave refermerait — c'est ce qui avait cassé la v39. */
+#lead-mgmt-root .v3-voile { position:fixed; left:0; right:0; bottom:0;
+  top:var(--v3-haut,0px); background:rgba(16,24,40,.42); z-index:50; }
+#lead-mgmt-root .v3-pan { position:fixed; top:var(--v3-haut,0px); right:0; bottom:0; width:420px;
   max-width:94vw; z-index:51; background:#fff; border-left:1px solid var(--border,#e3e6ea);
   display:flex; flex-direction:column; box-shadow:-18px 0 50px -24px rgba(16,24,40,.5); }
 #lead-mgmt-root .v3-pan-h { padding:15px 16px; border-bottom:1px solid var(--border,#e3e6ea);
@@ -3353,7 +3368,7 @@ async function fetchMaFile() {
     // ⚠️ RELEVÉ LE 18/09 : la file était coupée à 300 lignes triées de la
     //    PLUS ANCIENNE à la plus récente. Avec des dossiers de 900 jours en
     //    tête, les demandes du jour — les seules encore gagnables — tombaient
-    //    hors de la limite. L'arriéré (> 90 jours) est donc écarté par
+    //    hors de la limite. L'arriéré (> 30 jours) est donc écarté par
     //    défaut et compté à part ; le vendeur peut l'afficher d'un clic.
     if (!state.voirArriere) q = q.lte('attente_min', LM_ARRIERE_MIN);
     if (cible) q = q.eq('id_user_attribue', cible);
@@ -3368,7 +3383,7 @@ async function fetchMaFile() {
     const { data, error } = await q;
     if (error) throw error;
 
-    // Combien de dossiers dorment au-delà de 90 jours : on ne les montre
+    // Combien de dossiers dorment au-delà de 30 jours : on ne les montre
     // pas, mais on ne les cache pas non plus.
     try {
       let qa = sb.from('v_lead_sla').select('id_lead', { count: 'exact', head: true })
@@ -4638,8 +4653,8 @@ function lmArriereHtml() {
     + 'border:1px solid var(--border);font-size:12.5px;color:var(--text-soft)">'
     + (state.voirArriere
         ? '<span>L\'arriéré est affiché : <b>' + n + '</b> dossier' + (n > 1 ? 's' : '')
-          + ' de plus de 90 jours.</span>'
-        : '<span><b>' + n + '</b> dossier' + (n > 1 ? 's' : '') + ' de plus de 90 jours '
+          + ' de plus de 30 jours.</span>'
+        : '<span><b>' + n + '</b> dossier' + (n > 1 ? 's' : '') + ' de plus de 30 jours '
           + (n > 1 ? 'sont masqués' : 'est masqué') + ' pour laisser voir les demandes récentes.</span>')
     + '<button type="button" data-arriere="1" style="margin-left:auto;background:none;'
     + 'border:1px solid var(--border);border-radius:5px;padding:4px 11px;font-size:12px;'
@@ -5615,6 +5630,7 @@ function v3Init() {
     ouvert: {},              // chemins dépliés de l'arbre
     cellule: null,           // { chemin, tranche } ouverte dans le panneau
     alerteSur: null,         // index de ligne dont on choisit le destinataire
+    message: null,           // retour d'un geste qui n'a pas abouti
     curseur: 0,              // position dans la file « Le prochain »
     mur: null, murKey: null, murLoading: false,
     parcours: null, parcoursKey: null,
@@ -5692,6 +5708,22 @@ async function v3EnsureSources() {
   } finally {
     V.srcLoading = false; renderAll();
   }
+}
+
+/* La hauteur occupée par la topnav, mesurée et non devinée. Rend 0 quand la
+   barre a défilé hors de l'écran : le panneau reprend alors toute la hauteur. */
+function v3PoserHautPanneau() {
+  const root = document.getElementById('lead-mgmt-root');
+  if (!root) return;
+  let h = 0;
+  try {
+    // `#nav-root` est l'ancre du module topnav. Si elle manque (page sans
+    // nav, ou nom changé), on retombe sur 0 : le panneau s'ouvre en pleine
+    // hauteur comme avant, jamais cassé.
+    const n = document.getElementById('nav-root');
+    if (n) h = Math.max(0, Math.round(n.getBoundingClientRect().bottom));
+  } catch (e) { h = 0; }
+  root.style.setProperty('--v3-haut', h + 'px');
 }
 
 /* La bande de filtre pour les vues qui n'ont pas de barre de réglages
@@ -6121,7 +6153,19 @@ async function v3Reserver(idLead) {
       if (r.action === 'reserve') { l.verrou_par = Number(userId); l.verrou_jusqu = r.jusqu; }
       // « occupe » : quelqu'un a été plus rapide. On le dit et on passe au
       // suivant plutôt que de laisser l'utilisateur appeler dans le vide.
-      else { l.verrou_par = r.par; state.v3.curseur++; }
+      else if (r.action === 'occupe') { l.verrou_par = r.par; state.v3.curseur++; }
+    }
+    // « clos » : le dossier est classé sans suite. Le laisser dans la liste
+    // en silence enverrait l'utilisateur recliquer sans fin — on le retire
+    // de la cellule ouverte et on le dit.
+    if (r.action === 'clos') {
+      if (state.v3.cell)
+        state.v3.cell = state.v3.cell.filter(x => Number(x.id_lead) !== Number(idLead));
+      state.v3.message = 'Ce dossier est clos : il a été classé sans suite et '
+                       + 'ne peut plus être pris.';
+    } else {
+      state.v3.message = (r.action === 'occupe')
+        ? 'Un collègue vient de prendre ce dossier.' : null;
     }
     return r.action;
   } catch (e) {
@@ -6389,6 +6433,12 @@ function v3Panneau() {
                 + '<button type="button" class="ann" data-v3alerte="-1">Annuler</button></div>'
               : '');
       }).join('')
+    // Le retour d'un geste qui n'a pas abouti. Sans lui, un clic sur
+    // « Prendre » qui échoue ne produit RIEN à l'écran, et l'utilisateur
+    // recommence sans savoir pourquoi.
+    + (V.message
+        ? '<p class="v3-pan-note" style="background:#fdf6e6;border-color:#b8851a;'
+          + 'color:#7a5a12">' + escapeHtml(V.message) + '</p>' : '')
     + (peutAlerter && libres.length > 1
         ? '<p class="v3-pan-note">Prendre un dossier plus récent que le plus ancien reste '
           + 'possible, mais l\'écart apparaîtra dans la vue du chef des ventes. L\'ordre '
@@ -6599,6 +6649,9 @@ function bindEvents() {
       renderAll(); chargerSection();
     });
   });
+  // La topnav peut changer de hauteur (passage mobile, bandeau d'arbitrage
+  // qui apparaît) : on remesure à chaque rendu plutôt qu'une seule fois.
+  v3PoserHautPanneau();
   root.querySelectorAll('[data-v3src]').forEach(el => {
     el.addEventListener('click', () => {
       const code = el.getAttribute('data-v3src');
@@ -6645,18 +6698,27 @@ function bindEvents() {
   root.querySelectorAll('[data-v3fermer]').forEach(el => {
     el.addEventListener('click', () => {
       state.v3.cellule = null; state.v3.cell = null; state.v3.alerteSur = null;
+      state.v3.message = null;
       renderAll();
     });
   });
   root.querySelectorAll('[data-v3prendre]').forEach(el => {
     el.addEventListener('click', async () => {
       const id = Number(el.getAttribute('data-v3prendre'));
+      el.disabled = true;
       const r = await v3Reserver(id);
+      el.disabled = false;
       // Depuis le panneau, prendre OUVRE le dossier : un dossier « pris » qui
       // resterait dans une liste serait un dossier oublié.
       if (r === 'reserve' && state.v3.cellule) {
         state.v3.cellule = null; state.v3.cell = null;
         state.v3.vue = 'prochain'; state.v3.curseur = 0;
+        // \u26a0\ufe0f RELEV\u00c9 LE 28/09 : sans ces deux lignes, « rien ne se passait ».
+        //    `fetchMaFile` rend la main tout de suite quand la CL\u00c9 n'a pas
+        //    chang\u00e9 — or prendre un lead ne change ni le p\u00e9rim\u00e8tre ni le
+        //    filtre. La file restait donc servie depuis son cache, SANS le
+        //    dossier qu'on venait de s'attribuer.
+        state.mafileKey = null; state.mafileData = null;
         renderAll(); chargerSection();
       }
     });
