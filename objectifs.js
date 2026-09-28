@@ -21,6 +21,11 @@
 //  objectifs_tc_preparer). Un vendeur VN reçoit une ligne VN, un vendeur VO
 //  une ligne VO, un vendeur polyvalent les deux — USER."VN_VO" décide. Les
 //  lignes restées à zéro ne s'affichent plus dans Performances.
+//  v11 (28/09/2026) : « Commandes » désigne désormais les commandes
+//  PARTICULIERS, et « Pro » les comptes entreprise — Performances additionne
+//  les deux pour sa colonne Cde. L'objectif de financement quitte la saisie :
+//  il vaut la moitié des commandes réalisées hors loueurs (Kinto, Arval) et se
+//  calcule dans v_performances_tc.
 //  Rendu dans __anchor ; SUPABASE_URL/KEY -> ctx.tenant ; getUserJwt() ->
 //  session du client runtime ; doc -> __anchor.ownerDocument. User = oropraUser.
 //  Périmètre 100% v_mon_perimetre (VAR_SITES retirée). 0 vestige.
@@ -94,14 +99,18 @@ const PERF_VIEW = IS_TC ? 'v_performances_tc' : 'v_performances_v2'
 const OBJ_VIEW = IS_TC ? 'v_objectifs_tc' : 'v_objectifs'
 // Colonnes portées par la table OBJECTIF (PATCH direct) et, pour Team Colin,
 // colonnes portées par objectif_kpi (upsert séparé).
-const OBJ_TABLE_FIELDS = IS_TC ? ['commandes', 'financements'] : ['commandes', 'gravage', 'financements', 'contrat_service', 'waxoyl', 'contacts_jour']
+// Team Colin : « commandes » porte l'objectif des PARTICULIERS, « pro » celui
+// des comptes entreprise, et Performances additionne les deux. Le financement
+// a quitté la saisie : son objectif vaut la moitié des commandes réalisées
+// hors loueurs et se calcule dans v_performances_tc.
+const OBJ_TABLE_FIELDS = IS_TC ? ['commandes'] : ['commandes', 'gravage', 'financements', 'contrat_service', 'waxoyl', 'contacts_jour']
 const KPI_TABLE_FIELDS = IS_TC ? ['pro', 'phev_ev', 'vu', 'kinto', 'arval'] : []
 const REAL_FIELDS = IS_TC
-  ? { commandes: 'commandes_realisees', financements: 'financements_realises', pro: 'pro_realises', phev_ev: 'phev_ev_realises', vu: 'vu_realises', kinto: 'kinto_realises', arval: 'arval_realises' }
+  ? { commandes: 'part_realises', pro: 'pro_realises', phev_ev: 'phev_ev_realises', vu: 'vu_realises', kinto: 'kinto_realises', arval: 'arval_realises' }
   : { commandes: 'commandes_realisees', financements: 'financements_realises', contrat_service: 'contrats_service_realises', waxoyl: 'waxoyls_realises', gravage: 'gravages_realises' }
 const FIELDS = OBJ_TABLE_FIELDS.concat(KPI_TABLE_FIELDS)
 const SECONDARY = IS_TC
-  ? [{ k: 'financements', label: 'FI' }, { k: 'pro', label: 'Pro' }, { k: 'phev_ev', label: 'PHEV / EV' }, { k: 'vu', label: 'VU' }, { k: 'kinto', label: 'Kinto' }, { k: 'arval', label: 'Arval' }]
+  ? [{ k: 'pro', label: 'Pro' }, { k: 'phev_ev', label: 'PHEV / EV' }, { k: 'vu', label: 'VU' }, { k: 'kinto', label: 'Kinto' }, { k: 'arval', label: 'Arval' }]
   : [{ k: 'financements', label: 'Financement' }, { k: 'contrat_service', label: 'CS' }, { k: 'waxoyl', label: 'Waxoyl' }, { k: 'gravage', label: 'Gravage' }]
 
 const userConnected = ((wwLib.getFrontWindow && wwLib.getFrontWindow()) || window).oropraUser
@@ -130,10 +139,10 @@ window.__objState = state
 let data = [], realCur = {}, realM1 = {}, realOk = true, siteMeta = {}, userMeta = {}, originalSnap = {}, loading = false
 const MOIS_NOMS = ['Janvier', 'Février', 'Mars', 'Avril', 'Mai', 'Juin', 'Juillet', 'Août', 'Septembre', 'Octobre', 'Novembre', 'Décembre']
 const GKEYS = IS_TC
-  ? [{ k: 'commandes', label: 'Cde' }, { k: 'financements', label: 'FI' }, { k: 'pro', label: 'Pro' }, { k: 'phev_ev', label: 'PHEV / EV' }, { k: 'vu', label: 'VU' }, { k: 'kinto', label: 'Kinto' }, { k: 'arval', label: 'Arval' }]
+  ? [{ k: 'commandes', label: 'Cde part.' }, { k: 'pro', label: 'Cde pro' }, { k: 'phev_ev', label: 'PHEV / EV' }, { k: 'vu', label: 'VU' }, { k: 'kinto', label: 'Kinto' }, { k: 'arval', label: 'Arval' }]
   : [{ k: 'commandes', label: 'Commandes' }, { k: 'gravage', label: 'Gravages' }, { k: 'financements', label: 'Financements' }, { k: 'contrat_service', label: 'CS' }, { k: 'waxoyl', label: 'Waxoyl' }, { k: 'contacts_jour', label: 'Contacts/j' }]
 const KPIS_SUIVI = IS_TC
-  ? [{ k: 'commandes', label: 'Commandes' }, { k: 'financements', label: 'Financement' }, { k: 'pro', label: 'Pro' }, { k: 'phev_ev', label: 'PHEV / EV' }, { k: 'vu', label: 'VU' }, { k: 'kinto', label: 'Kinto' }, { k: 'arval', label: 'Arval' }]
+  ? [{ k: 'commandes', label: 'Commandes particuliers' }, { k: 'pro', label: 'Commandes pro' }, { k: 'phev_ev', label: 'PHEV / EV' }, { k: 'vu', label: 'VU' }, { k: 'kinto', label: 'Kinto' }, { k: 'arval', label: 'Arval' }]
   : [{ k: 'commandes', label: 'Commandes' }, { k: 'financements', label: 'Financements' }, { k: 'contrat_service', label: 'Contrat de service' }, { k: 'waxoyl', label: 'Waxoyl' }, { k: 'gravage', label: 'Gravage' }]
 
 // --- nombres / dates ---
