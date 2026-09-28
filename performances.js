@@ -219,8 +219,11 @@ OD.define('performances', {
   // Team Colin — ordre et libellés du reporting « COMMANDE 2026 » (onglet Total).
   // Objectifs Cde et FI : table OBJECTIF ; Pro, PHEV/EV, VU, Kinto, Arval : objectif_kpi.
   const KPIS_TC = [
+    // L'objectif de commandes saisi dans Objectifs porte les PARTICULIERS ;
+    // celui des PRO vit dans objectif_kpi. La colonne totale additionne les
+    // deux — c'est la vue qui fait la somme, pas le module.
     { r: 'commandes_realisees', o: 'objectif_commandes', label: 'Cde', mode: 'obj', vue: 'pilotage' },
-    { r: 'part_realises', label: 'Cde part.', mode: 'taux', pen: true, vue: 'pilotage' },
+    { r: 'part_realises', o: 'objectif_part', label: 'Cde part.', mode: 'obj', pen: true, vue: 'pilotage' },
     { r: 'pro_realises', o: 'objectif_pro', label: 'Cde pro', mode: 'obj', pen: true, vue: 'pilotage' },
     // FI : les loueurs (Kinto, Arval) ne relèvent pas du financement vendu par
     // la concession. Ils sortent du numérateur comme du dénominateur, et
