@@ -15,6 +15,8 @@
 //     fiche client, consultation en surcouche, renvoi vers BACS).
 //   · KPI Gravage renommé « Roole » : le gravage a été remplacé par le Pack
 //     Roole courant 2025.
+//   · la consultation s'ouvre DEVANT le panneau (z-index 10050 contre 9999) :
+//     à 2000, valeur reprise du kanban, elle passait derrière la pile de cartes.
 //  Les autres tenants gardent strictement le comportement précédent.
 //  v4.5 (22/09/2026) PROFIL TEAM COLIN : sur le tenant onedata-teamcolin
 //  (ref ieztupavcdnubmpbjvuq), le module lit v_performances_tc et affiche les
@@ -1699,7 +1701,9 @@ OD.define('performances', {
     const prev = doc.getElementById('vn-edit-overlay'); if (prev) prev.remove();
     const ov = doc.createElement('div');
     ov.id = 'vn-edit-overlay';
-    ov.style.cssText = 'position:fixed;inset:0;z-index:2000;display:flex;align-items:flex-start;justify-content:center;padding:20px;background:rgba(31,74,133,.45);overflow-y:auto';
+    // Le panneau des cartes est à 9999 : la consultation doit passer devant,
+    // sinon elle s'ouvre derrière la pile et paraît ne rien faire.
+    ov.style.cssText = 'position:fixed;inset:0;z-index:10050;display:flex;align-items:flex-start;justify-content:center;padding:20px;background:rgba(31,74,133,.45);overflow-y:auto';
     const modal = doc.createElement('div');
     modal.style.cssText = 'background:#fff;border-radius:18px;width:100%;max-width:1220px;box-shadow:0 30px 80px rgba(31,74,133,.35);margin:auto;position:relative;padding:20px';
     const close = doc.createElement('button');
