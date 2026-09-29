@@ -1,0 +1,191 @@
+// ============================================================================
+//  One Data — TELEPHONIE 3CX cote vendeur (module ambiant, sans ancre WeWeb)
+//  Panneau d'appel : le vendeur reste dans One Data, le combine porte la voix.
+//    - sonnerie  : fiche client + preconisation Delco AVANT le decroche
+//    - en cours  : chronometre et contexte client
+//    - sortant   : bouton « Appeler » de la fiche client
+//  Le vendeur decroche et raccroche TOUJOURS sur son combine ou son mobile :
+//  le panneau ne pilote pas le poste, il accompagne l'appel.
+// ============================================================================
+OD.define('phone3cx', {
+  mount(__anchor, ctx) {
+    if (!window.wwLib) return;
+
+    const SELECTED_CLIENT_VAR = '55490583-c88b-4748-916e-4d203db07742';
+    const PAGE_FICHE = '/fiche-client';
+    const sb  = ctx.supabase;
+    const win = (wwLib.getFrontWindow && wwLib.getFrontWindow()) || window;
+    const doc = (wwLib.getFrontDocument && wwLib.getFrontDocument()) || document;
+
+    if (win.__od3cx) return;                 // un seul panneau par session
+    const S = win.__od3cx = { appel: null, depuis: 0, tic: null, poste: null };
+
+    /* ------------------------------------------------------------ styles */
+    function css() {
+      if (doc.getElementById('od3cx-css')) return;
+      const st = doc.createElement('style');
+      st.id = 'od3cx-css';
+      st.textContent = [
+        '.od3cx{position:fixed;right:20px;bottom:20px;z-index:2147482000;width:300px;',
+        'background:#fff;border:1px solid #dbe5f2;border-left:5px solid #53bda7;border-radius:16px;',
+        'box-shadow:0 14px 38px rgba(23,43,77,.20);font-family:"Nunito Sans",system-ui,sans-serif;color:#1f2a37;',
+        'transform:translateY(16px);opacity:0;transition:.25s;overflow:hidden}',
+        '.od3cx.on{transform:none;opacity:1}',
+        '.od3cx.encours{border-left-color:#2a5ea9}',
+        '.od3cx-hd{display:flex;align-items:center;gap:9px;padding:13px 14px 4px}',
+        '.od3cx-pt{width:9px;height:9px;border-radius:50%;background:#53bda7;animation:od3cx-p 1.1s infinite}',
+        '.od3cx.encours .od3cx-pt{background:#2a5ea9;animation:none}',
+        '@keyframes od3cx-p{50%{opacity:.25;transform:scale(.75)}}',
+        '.od3cx-et{font-size:10px;font-weight:800;letter-spacing:.7px;text-transform:uppercase;color:#53bda7}',
+        '.od3cx.encours .od3cx-et{color:#2a5ea9}',
+        '.od3cx-x{margin-left:auto;border:0;background:transparent;font-size:19px;line-height:1;color:#93a3b8;cursor:pointer}',
+        '.od3cx-nom{padding:0 14px;font-size:17px;font-weight:800;color:#1f4a85}',
+        '.od3cx-num{padding:2px 14px 10px;font-size:12px;color:#6b7a90}',
+        '.od3cx-chrono{font-variant-numeric:tabular-nums;font-weight:800;color:#2a5ea9}',
+        '.od3cx-info{margin:0 14px 10px;font-size:12.5px;line-height:1.45;color:#1f2a37}',
+        '.od3cx-delco{margin:0 14px 12px;background:#eaf7f4;border-radius:9px;padding:9px 10px;font-size:12.5px;line-height:1.45}',
+        '.od3cx-delco b{color:#53bda7}',
+        '.od3cx-act{display:flex;gap:7px;padding:0 14px 14px;flex-wrap:wrap}',
+        '.od3cx-b{flex:1;min-width:84px;border:1px solid #dbe5f2;background:#fff;color:#1f2a37;font:inherit;',
+        'font-weight:700;font-size:12.5px;padding:8px 6px;border-radius:9px;cursor:pointer;transition:.15s}',
+        '.od3cx-b:hover{border-color:#acc5e4}.od3cx-b[disabled]{opacity:.5;cursor:default}',
+        '.od3cx-b.vert{background:#53bda7;border-color:#53bda7;color:#fff}',
+        '.od3cx-b.rouge{background:#e24b4a;border-color:#e24b4a;color:#fff}',
+        '.od3cx-pied{padding:0 14px 12px;font-size:11px;color:#93a3b8}',
+      ].join('');
+      (doc.head || doc.documentElement).appendChild(st);
+    }
+
+    const esc = (s) => String(s == null ? '' : s)
+      .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+    const mmss = (ms) => {
+      const t = Math.max(0, Math.floor(ms / 1000));
+      return String(Math.floor(t / 60)).padStart(2,'0') + ':' + String(t % 60).padStart(2,'0');
+    };
+
+    /* ------------------------------------------------------------- rendu */
+    function fermer() {
+      const el = doc.getElementById('od3cx');
+      if (el) { el.classList.remove('on'); setTimeout(() => el.remove(), 250); }
+      if (S.tic) { clearInterval(S.tic); S.tic = null; }
+      S.appel = null;
+    }
+
+    function rendre() {
+      const a = S.appel;
+      if (!a) return fermer();
+      css();
+      let el = doc.getElementById('od3cx');
+      if (!el) {
+        el = doc.createElement('div');
+        el.id = 'od3cx'; el.className = 'od3cx';
+        (doc.body || doc.documentElement).appendChild(el);
+        requestAnimationFrame(() => el.classList.add('on'));
+      }
+      const encours = a.etat === 'en_cours';
+      el.classList.toggle('encours', encours);
+
+      const b = a.brief || {};
+      const reco = (b.ai && (b.ai.suggestion || b.ai.brief)) || '';
+      const sous = encours
+        ? '<span class="od3cx-chrono" id="od3cx-t">' + mmss(Date.now() - S.depuis) + '</span>'
+        : esc(a.numero || '');
+
+      el.innerHTML =
+        '<div class="od3cx-hd"><span class="od3cx-pt"></span>' +
+        '<span class="od3cx-et">' + (encours ? 'En communication' : (a.sortant ? 'Appel en cours' : 'Appel entrant')) + '</span>' +
+        '<button class="od3cx-x" title="Masquer">&times;</button></div>' +
+        '<div class="od3cx-nom">' + esc(a.nom || a.numero || 'Inconnu') + '</div>' +
+        '<div class="od3cx-num">' + sous + '</div>' +
+        (b.vehicule ? '<div class="od3cx-info">' + esc(b.vehicule) + '</div>' : '') +
+        (b.lastContact && b.lastContact.resume
+          ? '<div class="od3cx-info">Dernier échange : ' + esc(b.lastContact.resume) + '</div>' : '') +
+        (b.lastPropale && b.lastPropale.label
+          ? '<div class="od3cx-info">Propale : ' + esc(b.lastPropale.label) + '</div>' : '') +
+        (reco ? '<div class="od3cx-delco"><b>Delco</b> — ' + esc(reco) + '</div>' : '') +
+        (a.idClient ? '' : '<div class="od3cx-info" style="color:#6b7a90">Numéro inconnu dans One Data</div>') +
+        '<div class="od3cx-act">' +
+          '<button class="od3cx-b" data-a="fiche">Voir la fiche</button>' +
+        '</div>' +
+        (encours ? '' : '<div class="od3cx-pied">' +
+          (a.sortant ? 'Décrochez votre combiné : le client est appelé'
+                     : 'Décrochez sur votre combiné ou votre mobile') + '</div>');
+
+      el.querySelector('.od3cx-x').addEventListener('click', fermer);
+      el.querySelectorAll('[data-a]').forEach(btn =>
+        btn.addEventListener('click', () => ouvrirFiche(a.idClient)));
+
+      if (encours && !S.tic) {
+        S.tic = setInterval(() => {
+          const t = doc.getElementById('od3cx-t');
+          if (t) t.textContent = mmss(Date.now() - S.depuis);
+        }, 1000);
+      }
+    }
+
+    /* --------------------------------------------------------- actions */
+    // Seule commande envoyee au PBX : « appeler » (click to call sortant).
+    // Le decroche et le raccroche restent la main du vendeur, sur son poste.
+    async function commande(action, extra) {
+      const { data: s } = await sb.auth.getSession();
+      const jeton = s && s.session && s.session.access_token;
+      if (!jeton) return;
+      const r = await fetch(ctx.supabaseUrl + '/functions/v1/threecx-action', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + jeton, apikey: ctx.supabaseAnonKey },
+        body: JSON.stringify(Object.assign({ action }, extra || {})),
+      });
+      const j = await r.json().catch(() => ({}));
+      if (!j.ok) console.warn('[3cx] commande refusée', action, j);
+      return j;
+    }
+
+    function ouvrirFiche(idClient) {
+      if (!idClient) return;
+      try { wwLib.wwVariable.updateValue(SELECTED_CLIENT_VAR, { IDVu: Number(idClient) }); } catch (e) {}
+      try {
+        if ((win.location.pathname || '').indexOf(PAGE_FICHE) !== -1) return;
+        if (wwLib.wwApp && wwLib.wwApp.goTo) return wwLib.wwApp.goTo(PAGE_FICHE);
+        wwLib.goTo(PAGE_FICHE);
+      } catch (e) {}
+    }
+
+    // Appel sortant depuis la fiche client : expose une API au reste du front
+    win.OD3CX = {
+      appeler(numero, client) {
+        S.appel = { etat: 'sonnerie', sortant: true, numero: numero,
+                    nom: (client && client.nom) || numero, idClient: client && client.idvu };
+        rendre();
+        return commande('appeler', { numero: numero });
+      },
+      actif() { return !!S.appel; },
+    };
+
+    /* ------------------------------------------------------ abonnement */
+    async function boot() {
+      let uid = null;
+      try { const { data } = await sb.auth.getUser(); uid = data && data.user && data.user.id; } catch (e) {}
+      if (!uid) return;
+
+      const canal = sb.channel('od:user:' + uid, { config: { private: true } });
+      canal.on('broadcast', { event: 'appel' }, (msg) => {
+        const p = (msg && msg.payload) || {};
+        if (p.source !== '3cx') return;
+        if (p.ts && Date.now() - p.ts > 60000) return;
+
+        if (p.etat === 'termine') { fermer(); return; }
+        const nouveau = !S.appel || S.appel.participant !== p.participant;
+        if (p.etat === 'en_cours' && (nouveau || S.appel.etat !== 'en_cours')) S.depuis = Date.now();
+        S.appel = Object.assign({}, S.appel, p);
+        rendre();
+
+        // La fiche s'ouvre des la sonnerie, avant meme le decroche.
+        if (p.etat === 'sonnerie' && p.idClient) ouvrirFiche(p.idClient);
+      });
+      canal.subscribe((st) => { if (st === 'SUBSCRIBED') console.log('[3cx] téléphonie active'); });
+      win.__od3cxCanal = canal;
+    }
+
+    boot();
+  }
+});
