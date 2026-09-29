@@ -24,6 +24,20 @@
 //  partielle, ou sans donnée. Une famille sans source n'est pas masquée — une
 //  tuile vide dit ce qui manque, une tuile absente ne dit rien.
 //
+//  PAR RÔLE
+//  Le jeu de tuiles dépend de la fonction : un vendeur voit sa production, son
+//  pipe et ses leads ; un chef des ventes y ajoute son équipe et ses
+//  livraisons ; un directeur voit tout, y compris la qualité de la base ; le
+//  marketing voit les leads et la base. Moins de tuiles, mais toutes utiles à
+//  celui qui les regarde.
+//
+//  PÉRIMÈTRE ET TOP NAV
+//  Un chef multi-site ouvre sur la vue agrégée de tout son périmètre, avec la
+//  ventilation par site en dessous. Le sélecteur de la page et le sélecteur de
+//  site de la barre du haut sont le même état : changer l'un change l'autre, et
+//  les chiffres se recalculent. C'est le bus de site (oropra-site-bus) qui les
+//  relie.
+//
 //  SOURCE UNIQUE
 //  Un seul aller-retour réseau : la RPC dashboard_tc(annee, mois) renvoie tout
 //  en un jsonb, bornée par propale_visible_user_ids() — un vendeur ne voit que
@@ -113,6 +127,9 @@ OD.define('dashboard', {
   border:0;padding:6px 11px;border-radius:6px;cursor:pointer;white-space:nowrap}
 #dash-root .dseg button[aria-pressed="true"]{background:var(--bleu);color:#fff}
 #dash-root .dseg button:focus-visible{outline:2px solid var(--bleu);outline-offset:2px}
+#dash-root .dseg .sep{width:1px;background:var(--line);margin:3px 4px}
+#dash-root .drole{font-size:11px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;
+  color:var(--ink-3);background:var(--calme-bg);border-radius:20px;padding:5px 11px}
 #dash-root .dband{background:var(--card);border:1px solid var(--line);border-radius:14px;
   box-shadow:var(--ombre);padding:17px 20px;display:flex;flex-wrap:wrap;gap:16px 30px;align-items:center}
 #dash-root .dband .q{font-size:10.5px;font-weight:700;letter-spacing:.09em;text-transform:uppercase;color:var(--ink-3)}
@@ -213,7 +230,34 @@ OD.define('dashboard', {
     //  DONNÉES
     // =========================================================================
     const today = new Date();
-    const state = { annee: today.getFullYear(), mois: today.getMonth() + 1, ouvert: null, d: null };
+    const state = { annee: today.getFullYear(), mois: today.getMonth() + 1,
+                    ouvert: null, d: null, site: null, chargement: false };
+
+    // Bus de site : la barre du haut et la page partagent le même état. Un
+    // changement de site là-haut recharge les chiffres ici, et le sélecteur de
+    // la page repousse son choix vers le bus. « Tout mon périmètre » ne touche
+    // pas au bus : c'est une vue agrégée, pas un site.
+    function siteBus() {
+      try { const w = wwLib.getFrontWindow(); if (w && w.oropraSite) return w.oropraSite; } catch (e) { }
+      return window.oropraSite || null;
+    }
+    function brancherBus(essais) {
+      essais = essais || 0;
+      const b = siteBus();
+      if (!b) { if (essais < 120) setTimeout(() => brancherBus(essais + 1), 250); return; }
+      try {
+        const id = b.getSiteId();
+        if (id != null && String(id) !== String(state.site)) { state.site = Number(id); recharger(); }
+      } catch (e) { }
+      if (window.__dashTcBusBound) return;
+      window.__dashTcBusBound = true;
+      b.onChange(({ siteId }) => {
+        const v = siteId == null ? null : Number(siteId);
+        if (String(v) === String(state.site)) return;
+        state.site = v;
+        recharger();
+      });
+    }
 
     async function charger() {
       const jwt = await getUserJwt();
@@ -222,7 +266,7 @@ OD.define('dashboard', {
         method: 'POST',
         headers: { 'apikey': SUPABASE_KEY, 'Authorization': 'Bearer ' + jwt,
                    'Content-Type': 'application/json' },
-        body: JSON.stringify({ p_annee: state.annee, p_mois: state.mois })
+        body: JSON.stringify({ p_annee: state.annee, p_mois: state.mois, p_id_site: state.site })
       });
       if (!res.ok) throw new Error('HTTP ' + res.status);
       return await res.json();
@@ -352,6 +396,29 @@ OD.define('dashboard', {
     //  ("trouvaille") est CALCULÉ sur les données du moment : il change avec
     //  elles, il n'est pas écrit en dur.
     // =========================================================================
+    // Rôles (table ROLE) : 1 Admin · 2 Directeur · 3 Chef des ventes · 4 Vendeur
+    // 5 Responsable marketing · 6 Dir. plaque · 7 Dir. marque · 8 Dir. groupe
+    const ROLE_FAM = { 1: 'direction', 2: 'direction', 3: 'chef', 4: 'vendeur',
+                       5: 'marketing', 6: 'direction', 7: 'direction', 8: 'direction' };
+    // Ce que chaque fonction a besoin de voir. Un vendeur n'a rien à faire de la
+    // valeur du pipe du groupe ni de la file de fusion ; un responsable
+    // marketing n'a rien à faire du taux de LOA. Mieux vaut six tuiles utiles
+    // que vingt dont douze ne le concernent pas.
+    const JEUX = {
+      vendeur:   ['cdes', 'fi', 'acc', 'affaires', 'relance', 'livr', 'leads', 'delai'],
+      chef:      ['cdes', 'fi', 'loa', 'acc', 'roole', 'phev', 'vu',
+                  'affaires', 'relance', 'pipeval', 'livr', 'cloturer',
+                  'rapports', 'rdv', 'leads', 'delai'],
+      direction: null,   // tout
+      marketing: ['cdes', 'leads', 'delai', 'injoignables', 'fusion', 'bloctel']
+    };
+    const ETIQ_ROLE = { vendeur: 'Vendeur', chef: 'Chef des ventes',
+                        direction: 'Direction', marketing: 'Marketing' };
+    function familleRole() { return ROLE_FAM[Number((state.d || {}).role)] || 'direction'; }
+    function jeuDuRole() { return JEUX[familleRole()] || null; }
+    // Un vendeur lit « mes » et non « les » : les libellés s'adaptent.
+    function moi(txt) { return familleRole() === 'vendeur' ? txt.replace(/^Les /, 'Mes ') : txt; }
+
     const FAMILLES = [
       { k: 'prod', t: 'Production commerciale', etat: 'plein', n: 'commandes gagnées BACS' },
       { k: 'pipe', t: 'Pipe et relances', etat: 'plein', n: 'affaires et devis BACS' },
@@ -371,7 +438,7 @@ OD.define('dashboard', {
       const objCde = num(o.cdes);
       T.push({
         fam: 'prod', id: 'cdes', lab: 'Commandes', v: fmt(p.cdes),
-        c: objCde > 0 ? (pct(p.cdes, objCde) + ' % de l’objectif ' + objCde) : 'sans objectif saisi',
+        c: objCde > 0 ? (pct(p.cdes, objCde) + ' % de l’objectif (' + objCde + ')') : 'sans objectif saisi',
         sens: objCde > 0 && num(p.cdes) >= objCde ? 'hausse' : objCde > 0 ? 'baisse' : 'plat',
         vals: serie('cdes'), forme: 'barres', lm: lm,
         titre: 'Commandes du mois',
@@ -780,17 +847,18 @@ OD.define('dashboard', {
         T.push({
           fam: 'base', id: 'fusion', lab: 'Rapprochements en attente', v: fmt(fu.en_attente), statique: true,
           obj: 'file d’arbitrage RCU',
-          c: fmt(fu.rejetes) + ' déjà rejetés', sens: 'baisse',
+          c: 'ni fusionnés ni rejetés', sens: 'baisse',
           titre: 'Déduplication client',
-          ctx: 'Rapprochements proposés par le résolveur d’identité, en attente d’arbitrage humain.',
+          ctx: 'Rapprochements que le résolveur d’identité n’a tranchés ni dans un sens ni dans l’autre.',
           trouve: () => {
-            const tranches = num(fu.rejetes) + num(fu.fusionnes);
-            const tauxRejet = tranches > 0 ? Math.round(num(fu.rejetes) / tranches * 100) : null;
-            return '<b>Le résolveur a proposé ' + fmt(fu.total) + ' rapprochements : ' + fmt(fu.fusionnes)
-              + ' ont été fusionnés et ' + fmt(fu.rejetes) + ' rejetés.</b> Sur les dossiers qu’un '
-              + 'humain a tranchés, ' + tauxRejet + ' % sont refusés — soit les seuils de score sont '
-              + 'trop laxistes, soit les arbitrages sont expédiés. Dans les deux cas, le réglage est à '
-              + 'revoir avant d’empiler ' + fmt(fu.en_attente) + ' dossiers de plus.';
+            // Le rejet et la fusion sont le fait du traitement, pas d'un humain :
+            // la file ne contient que la bande grise, celle où le résolveur ne
+            // sait pas trancher seul. Personne ne la vide.
+            return '<b>Ce n\u2019est pas une file d\u2019arbitrage, c\u2019est un angle mort.</b> '
+              + 'Le rejet et la fusion sont automatiques\u202f; ces ' + fmt(fu.en_attente)
+              + ' dossiers sont ceux dont le score tombe entre les deux seuils, là où le traitement '
+              + 'ne sait pas trancher seul. Ils n\u2019attendent pas un arbitrage, ils attendent '
+              + 'qu\u2019on décide d\u2019en faire quelque chose — et le tas grossit à chaque import.';
           },
           table: () => tableau(['État', 'Dossiers', 'Part'], [
             ['En attente d’arbitrage', { h: '<span class="f">' + fmt(fu.en_attente) + '</span>' }, pct(fu.en_attente, fu.total) + ' %'],
@@ -816,7 +884,46 @@ OD.define('dashboard', {
         });
       }
 
-      return T;
+      // Ventilation par site : elle n'a de sens qu'en vue agrégée, et qu'à
+      // partir de deux sites dans le périmètre.
+      const sites = (det.sites || []);
+      if (state.site == null && sites.length > 1) {
+        T.push({
+          fam: 'prod', id: 'sites', lab: 'Par site', v: String(sites.length), statique: true,
+          obj: 'sites dans votre périmètre',
+          c: 'vue agrégée', sens: 'plat',
+          titre: 'La ventilation par site',
+          ctx: 'Le même mois, découpé site par site. Un clic sur un site dans la barre du haut restreint toute la page.',
+          trouve: () => {
+            const tri = sites.slice().sort((a, b) => num(b.cdes) - num(a.cdes));
+            const h = tri[0], b = tri[tri.length - 1];
+            const ecartFi = (h.fi != null && b.fi != null) ? Math.abs(num(h.fi) - num(b.fi)) : null;
+            return '<b>' + esc(h.site) + ' porte ' + fmt(h.cdes) + ' des ' + fmt(p.cdes)
+              + ' commandes du périmètre.</b>'
+              + (ecartFi != null && ecartFi >= 8
+                 ? ' Et les sites ne vendent pas le financement de la même façon : ' + ecartFi
+                   + ' points séparent ' + esc(h.site) + ' de ' + esc(b.site)
+                   + ' — un écart de pratique, pas de clientèle.'
+                 : ' Les taux de financement des sites restent dans un mouchoir de poche.');
+          },
+          table: () => {
+            const mx = Math.max.apply(null, sites.map(x => num(x.cdes))) || 1;
+            return tableau(['Site', 'Commandes', 'Poids', 'Financement', 'Accessoires'],
+              sites.slice().sort((a, b) => num(b.cdes) - num(a.cdes)).map(x => [
+                x.site,
+                { h: '<span class="f">' + fmt(x.cdes) + '</span>' },
+                { h: '<span style="display:inline-block;height:9px;border-radius:5px;width:'
+                     + Math.max(num(x.cdes) / mx * 100, 4).toFixed(0) + '%;background:var(--m-bleu)"></span>' },
+                x.fi == null ? '—' : x.fi + ' %',
+                x.acc == null ? '—' : fmt(x.acc) + ' €'
+              ]));
+          }
+        });
+      }
+
+      // Chaque fonction ne garde que ses tuiles.
+      const jeu = jeuDuRole();
+      return jeu ? T.filter(t => jeu.indexOf(t.id) !== -1 || t.id === 'sites') : T;
     }
 
     // =========================================================================
@@ -838,7 +945,10 @@ OD.define('dashboard', {
           const e = ecartAn(k, u);
           if (e.sens === 'baisse') recul.push(nom + ' <b>' + e.txt.replace(' sur un an', '') + '</b>');
         });
-      let ph = 'Le volume ' + (objCde > 0 && num(p.cdes) >= objCde ? 'tient' : 'est en deçà') + ' — ' + bouts[0];
+      const ou = state.site == null
+        ? (((state.d.perimetre || []).length > 1) ? 'Sur tout votre périmètre, le volume ' : 'Le volume ')
+        : 'Sur ' + esc(nomSite(state.site)) + ', le volume ';
+      let ph = ou + (objCde > 0 && num(p.cdes) >= objCde ? 'tient' : 'est en deçà') + ' — ' + bouts[0];
       if (recul.length) ph += ' — mais ce qui s’ajoute à la voiture recule : ' + recul.join(', ');
       ph += '.';
       if (num(ld.delai_median_h) > 1) {
@@ -846,6 +956,11 @@ OD.define('dashboard', {
           + String(ld.delai_median_h).replace('.', ',') + ' heures</b> avant le premier appel.';
       }
       return ph;
+    }
+
+    function nomSite(id) {
+      const s2 = (state.d.perimetre || []).find(x => String(x.id_site) === String(id));
+      return s2 ? (s2.nom || ('site ' + id)) : ('site ' + id);
     }
 
     function pouls() {
@@ -884,7 +999,9 @@ OD.define('dashboard', {
 
       r.innerHTML = '<div class="dw">'
         + '<div class="drail"><h1>Le tableau du jour</h1>'
-        + '<span class="dt">' + esc(dateLongue()) + '</span></div>'
+        + '<span class="dt">' + esc(dateLongue()) + '</span>'
+        + selecteurPerimetre()
+        + '<span class="drole">' + esc(ETIQ_ROLE[familleRole()] || '') + '</span></div>'
         + '<section class="dband"><div class="d"><div class="q">La météo du jour</div>'
         + '<p>' + phraseDuJour() + '</p></div>'
         + '<div class="dpouls">' + pouls() + '</div></section>'
@@ -900,6 +1017,64 @@ OD.define('dashboard', {
 
       r.querySelectorAll('.dtuile').forEach(b =>
         b.addEventListener('click', () => basculer(b.getAttribute('data-id'))));
+
+      r.querySelectorAll('.dseg button[data-site]').forEach(b =>
+        b.addEventListener('click', () => {
+          const v = b.getAttribute('data-site');
+          const site = v === '' ? null : Number(v);
+          if (String(site) === String(state.site)) return;
+          state.site = site;
+          // On repousse le choix vers la barre du haut pour que les deux
+          // sélecteurs ne se contredisent jamais. « Tout mon périmètre » n'est
+          // pas un site : le bus reste sur sa valeur, seule la page s'élargit.
+          if (site != null) { try { const bus = siteBus(); if (bus) bus.setSiteId(site); } catch (e) { } }
+          recharger();
+        }));
+    }
+
+    // Rechargement : on garde la tuile ouverte si elle existe encore dans le
+    // nouveau jeu, sinon la page s'ouvre sur son indicateur par défaut.
+    let jeton = 0;
+    async function recharger() {
+      if (state.chargement) return;
+      state.chargement = true;
+      const mien = ++jeton;
+      const memoire = state.ouvert;
+      try {
+        const d = await charger();
+        if (mien !== jeton) return;            // un autre changement est passé devant
+        state.d = d;
+        TUILES = tuiles();
+        state.ouvert = null;
+        rendre();
+        const cible = TUILES.some(t => t.id === memoire) ? memoire : tuileParDefaut();
+        if (cible) basculer(cible);
+      } catch (e) {
+        console.error('[dash] rechargement', e);
+      } finally {
+        state.chargement = false;
+      }
+    }
+
+    function tuileParDefaut() {
+      const prefere = ecartAn('fi', 'pts').sens === 'baisse' ? 'fi' : 'cdes';
+      return TUILES.some(t => t.id === prefere) ? prefere : (TUILES[0] && TUILES[0].id);
+    }
+
+    // Le sélecteur n'apparaît qu'à partir de deux sites : pour un vendeur ou un
+    // chef mono-site, il n'y aurait qu'un bouton et rien à choisir.
+    function selecteurPerimetre() {
+      const per = (state.d.perimetre || []);
+      if (per.length < 2) return '';
+      let h = '<div class="dseg" role="group" aria-label="Périmètre">'
+        + '<button data-site="" aria-pressed="' + (state.site == null) + '">Tout mon périmètre</button>'
+        + '<span class="sep"></span>';
+      per.forEach(s2 => {
+        h += '<button data-site="' + esc(s2.id_site) + '" aria-pressed="'
+          + (String(state.site) === String(s2.id_site)) + '">' + esc(s2.nom || ('Site ' + s2.id_site))
+          + '</button>';
+      });
+      return h + '</div>';
     }
 
     function dateLongue() {
@@ -962,7 +1137,10 @@ OD.define('dashboard', {
     // Une tuile est ouverte d'entrée : la page montre à quoi sert le clic sans
     // qu'on ait à le deviner. Le financement si son taux a reculé, sinon les
     // commandes.
-    const ouvrable = ecartAn('fi', 'pts').sens === 'baisse' ? 'fi' : 'cdes';
-    if (TUILES.some(t => t.id === ouvrable)) basculer(ouvrable);
+    const ouvrable = tuileParDefaut();
+    if (ouvrable) basculer(ouvrable);
+    // Le bus peut arriver après le module : on se branche une fois la page
+    // posée, et il recalera le site lui-même s'il en porte déjà un.
+    brancherBus();
   }
 });
