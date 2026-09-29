@@ -110,10 +110,33 @@ OD.define('fiche-shell', {
     for (let i = 0; i < cands.length; i++) { try { if (cands[i] && cands[i].__VOIP_UI__) return cands[i].__VOIP_UI__; } catch (e) {} }
     return null;
   }
+  // Recherche du pilote 3CX expose par le module phone3cx (tenants equipes d'un PBX)
+  function pick3cx() {
+    const cands = [];
+    try { cands.push(wwLib.getFrontWindow && wwLib.getFrontWindow()); } catch (e) {}
+    try { cands.push(typeof globalThis !== 'undefined' ? globalThis : null); } catch (e) {}
+    cands.push(window);
+    try { cands.push(window.parent); } catch (e) {}
+    try { cands.push(window.top); } catch (e) {}
+    for (let i = 0; i < cands.length; i++) {
+      try { if (cands[i] && cands[i].OD3CX && typeof cands[i].OD3CX.appeler === 'function') return cands[i].OD3CX; } catch (e) {}
+    }
+    return null;
+  }
+
   function callClient() {
     const c = state.client; if (!c) return;
     const to = normPhone(c.TEl_MOB);
     if (!to) return;
+
+    // 1) Tenant equipe 3CX : le PBX fait sonner le poste du vendeur, puis le client.
+    const cx = pick3cx();
+    if (cx) {
+      cx.appeler(to, { nom: clientName(c), idvu: c.IDVu });
+      return;
+    }
+
+    // 2) Tenant Twilio : appel porte par le navigateur.
     const device = (typeof globalThis !== 'undefined' && globalThis.__ONE_DATA__ && globalThis.__ONE_DATA__.device)
       || window._twilioDevice || (window.parent && window.parent._twilioDevice) || (window.top && window.top._twilioDevice);
     const UI = pickVoipUI();
