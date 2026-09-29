@@ -94,22 +94,40 @@ OD.define('auth', {
     navigateAccueil();
   }
 
+  // Destination memorisee par le socle avant la redirection vers la connexion.
+  // A usage unique, valable 10 minutes, et uniquement un chemin interne.
+  function takeNext() {
+    try {
+      const raw = win.sessionStorage.getItem('od_next');
+      if (!raw) return null;
+      win.sessionStorage.removeItem('od_next');
+      const o = JSON.parse(raw);
+      if (!o || typeof o.url !== 'string') return null;
+      if (Date.now() - (o.t || 0) > 600000) return null;
+      if (!/^\/[^/]/.test(o.url)) return null;              // chemin interne uniquement
+      if (/authentification|mot-de-passe-oublie/i.test(o.url)) return null;
+      return o.url;
+    } catch (e) { return null; }
+  }
+
   function navigateAccueil() {
+    const next = takeNext();
     // ÉDITEUR vs PROD : en éditeur, location.href recharge l'iframe de preview et
     // emboîte un nouvel éditeur (double bootstrap). On y navigue donc en SPA.
     // En prod, location.href avec préfixe de langue est le plus fiable (/fr/…).
     var inEditor = false;
     try { inEditor = (window.self !== window.top) || /-editor\.weweb\.io|weweb\.io/i.test(location.hostname); } catch (e) {}
     if (inEditor) {
-      try { if (wwLib.wwApp && wwLib.wwApp.goTo) { wwLib.wwApp.goTo(ACCUEIL_PATH); return; } } catch (e) {}
-      try { wwLib.goTo(ACCUEIL_PATH); return; } catch (e) {}
+      const spaPath = next ? next.replace(/^\/[a-z]{2}(?=\/)/i, '') : ACCUEIL_PATH;
+      try { if (wwLib.wwApp && wwLib.wwApp.goTo) { wwLib.wwApp.goTo(spaPath); return; } } catch (e) {}
+      try { wwLib.goTo(spaPath); return; } catch (e) {}
       return;
     }
     // PROD : navigation par URL avec le préfixe de langue déduit de l'URL courante.
     try {
       var m = (win.location.pathname || '').match(/^\/([a-z]{2})(\/|$)/i);
       var langPrefix = m ? '/' + m[1] : '/fr';
-      win.location.href = langPrefix + ACCUEIL_PATH;
+      win.location.href = next || (langPrefix + ACCUEIL_PATH);
       return;
     } catch (e) {}
     try { if (wwLib.wwApp && wwLib.wwApp.goTo) { wwLib.wwApp.goTo(ACCUEIL_PATH); return; } } catch (e) {}
