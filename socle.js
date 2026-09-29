@@ -24,6 +24,19 @@
     const FD = (wwLib.getFrontDocument && wwLib.getFrontDocument()) || document;
     const OROPRA_USER_VAR = '8b103baa-30a5-42e5-8f17-42120781a596'; // variable globale WeWeb (Object)
 
+    // ---------------------------------------------- lien externe vers page protegee
+    // Un lien entrant (integration 3CX, e-mail, SMS) peut viser une page protegee
+    // avec un parametre (ex /fiche-client?idvu=123). Si la session manque, WeWeb
+    // renvoie vers la connexion et le parametre est perdu. On le met de cote ici ;
+    // auth.js y revient apres login (voir takeNext).
+    try {
+        const _p = FW.location.pathname || '';
+        const _s = FW.location.search || '';
+        if (_s && !/authentification|mot-de-passe-oublie/i.test(_p) && /[?&](idvu|client|id)=/i.test(_s)) {
+            FW.sessionStorage.setItem('od_next', JSON.stringify({ url: _p + _s, t: Date.now() }));
+        }
+    } catch (e) {}
+
     // ---------------------------------------------------------- loader plein écran
     function showLoader() {
         try {
@@ -667,12 +680,14 @@ const HOST_MAP = {
         'site-bus', 'delco-badge', 'notif-badge',
         // Modules ambiants (ancre posée par le socle, voir poserAmbiants).
         'pulse', 'retours',
+        // Réception des appels 3CX : un seul abonnement temps réel par session.
+        'phone3cx',
     ]);
 
     // Modules AMBIANTS : aucune ancre dans WeWeb. Le socle en pose une, invisible,
     // pour chaque module ambiant présent dans le manifeste du tenant. L'ordre
     // compte : pulse (télémétrie, API OD.pulse) avant retours (widget d'avis).
-    OD.AMBIANTS = OD.AMBIANTS || ['pulse', 'retours'];
+    OD.AMBIANTS = OD.AMBIANTS || ['pulse', 'retours', 'phone3cx'];
     const poserAmbiants = () => {
         if (!document.body) return;
         OD.AMBIANTS.forEach(key => {
