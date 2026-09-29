@@ -3,7 +3,9 @@
 //  Panneau d'appel : le vendeur reste dans One Data, le combine porte la voix.
 //    - sonnerie  : fiche client + preconisation Delco AVANT le decroche
 //    - en cours  : chronometre et contexte client
-//    - sortant   : bouton « Appeler » de la fiche client
+//    - sortant   : bouton « Appeler » de la fiche client. Composition directe
+//                  par le client 3CX du vendeur ; repli sur makecall (le poste
+//                  sonne d'abord) si aucun gabarit d'URL n'est configure.
 //  Le vendeur decroche et raccroche TOUJOURS sur son combine ou son mobile :
 //  le panneau ne pilote pas le poste, il accompagne l'appel.
 // ============================================================================
@@ -52,6 +54,10 @@ OD.define('phone3cx', {
         '.od3cx-b.vert{background:#53bda7;border-color:#53bda7;color:#fff}',
         '.od3cx-b.rouge{background:#e24b4a;border-color:#e24b4a;color:#fff}',
         '.od3cx-pied{padding:0 14px 12px;font-size:11px;color:#93a3b8}',
+        '.od3cx.mince{width:auto;max-width:380px;border-radius:12px}',
+        '.od3cx-mince{display:flex;align-items:center;gap:9px;padding:11px 12px 11px 14px}',
+        '.od3cx-mt{font-size:13px;font-weight:600;color:#1f2a37;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}',
+        '.od3cx-mince .od3cx-x{margin-left:4px}',
       ].join('');
       (doc.head || doc.documentElement).appendChild(st);
     }
@@ -84,6 +90,31 @@ OD.define('phone3cx', {
       }
       const encours = a.etat === 'en_cours';
       el.classList.toggle('encours', encours);
+
+      // Appel sortant : le vendeur est deja sur la fiche, il n'a besoin que de
+      // savoir que son propre poste sonne d'abord. Bandeau d'une ligne.
+      el.classList.toggle('mince', !!a.sortant);
+      if (a.sortant) {
+        el.innerHTML =
+          '<div class="od3cx-mince">' +
+          '<span class="od3cx-pt"></span>' +
+          '<span class="od3cx-mt">' +
+            (encours
+              ? (a.direct ? 'Appel de ' : 'En ligne avec ') + esc(a.nom || a.numero || '') +
+                ' · <span class="od3cx-chrono" id="od3cx-t">' + mmss(Date.now() - S.depuis) + '</span>'
+              : 'Votre poste sonne — décrochez pour appeler ' + esc(a.nom || a.numero || '')) +
+          '</span>' +
+          '<button class="od3cx-x" title="Masquer">&times;</button>' +
+          '</div>';
+        el.querySelector('.od3cx-x').addEventListener('click', fermer);
+        if (encours && !S.tic) {
+          S.tic = setInterval(() => {
+            const t = doc.getElementById('od3cx-t');
+            if (t) t.textContent = mmss(Date.now() - S.depuis);
+          }, 1000);
+        }
+        return;
+      }
 
       const b = a.brief || {};
       const reco = (b.ai && (b.ai.suggestion || b.ai.brief)) || '';
@@ -127,16 +158,10 @@ OD.define('phone3cx', {
     // Seule commande envoyee au PBX : « appeler » (click to call sortant).
     // Le decroche et le raccroche restent la main du vendeur, sur son poste.
     async function commande(action, extra) {
-      const { data: s } = await sb.auth.getSession();
-      const jeton = s && s.session && s.session.access_token;
-      if (!jeton) return;
-      const r = await fetch(ctx.supabaseUrl + '/functions/v1/threecx-action', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + jeton, apikey: ctx.supabaseAnonKey },
-        body: JSON.stringify(Object.assign({ action }, extra || {})),
-      });
+      if (typeof ctx.fn !== 'function') { console.warn('[3cx] OD.fn indisponible'); return { ok: false }; }
+      const r = await ctx.fn('threecx-action', Object.assign({ action }, extra || {}));
       const j = await r.json().catch(() => ({}));
-      if (!j.ok) console.warn('[3cx] commande refusée', action, j);
+      if (!j.ok) console.warn('[3cx] commande refusée', action, r.status, j);
       return j;
     }
 
@@ -150,12 +175,32 @@ OD.define('phone3cx', {
       } catch (e) {}
     }
 
+    // Composition directe par le client 3CX du vendeur : le softphone emet
+    // lui-meme, donc l'appel part tout de suite, sans rappel prealable du poste.
+    // C'est le mode normal des que les vendeurs sont equipes. Sans gabarit
+    // d'URL en base, on retombe sur makecall (le poste sonne d'abord).
+    function composerParClient(numero) {
+      const gabarit = S.poste && S.poste.url_appel;
+      if (!gabarit) return false;
+      const url = gabarit.replace('{num}', encodeURIComponent(numero));
+      try {
+        const f = win.open(url, 'od3cx-client');
+        if (!f) return false;           // fenetre bloquee : on laisse le repli jouer
+        try { f.focus(); } catch (e) {}
+        return true;
+      } catch (e) { return false; }
+    }
+
     // Appel sortant depuis la fiche client : expose une API au reste du front
     win.OD3CX = {
       appeler(numero, client) {
-        S.appel = { etat: 'sonnerie', sortant: true, numero: numero,
-                    nom: (client && client.nom) || numero, idClient: client && client.idvu };
+        const direct = composerParClient(numero);
+        S.appel = { etat: direct ? 'en_cours' : 'sonnerie', sortant: true, numero: numero,
+                    nom: (client && client.nom) || numero, idClient: client && client.idvu,
+                    direct: direct };
+        if (direct) S.depuis = Date.now();
         rendre();
+        if (direct) return Promise.resolve({ ok: true, via: 'client3cx' });
         return commande('appeler', { numero: numero });
       },
       actif() { return !!S.appel; },
@@ -166,6 +211,13 @@ OD.define('phone3cx', {
       let uid = null;
       try { const { data } = await sb.auth.getUser(); uid = data && data.user && data.user.id; } catch (e) {}
       if (!uid) return;
+
+      // Poste du vendeur et mode de composition. Cette RPC ne renvoie aucun
+      // secret : la cle du pont reste cote serveur.
+      try {
+        const { data } = await sb.rpc('threecx_mon_poste_front');
+        S.poste = Array.isArray(data) ? data[0] : data;
+      } catch (e) { S.poste = null; }
 
       const canal = sb.channel('od:user:' + uid, { config: { private: true } });
       canal.on('broadcast', { event: 'appel' }, (msg) => {
