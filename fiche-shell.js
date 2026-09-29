@@ -224,6 +224,8 @@ OD.define('fiche-shell', {
 .fs-btn{display:inline-flex;align-items:center;gap:8px;border:1.5px solid var(--bd);background:#fff;border-radius:10px;padding:9px 16px;font:inherit;font-size:14px;font-weight:700;cursor:pointer;transition:.15s;color:var(--dk)}
 .fs-btn svg{width:17px;height:17px}
 .fs-btn:hover{background:var(--hov)}
+.fs-btn:focus{outline:none}
+.fs-btn:focus-visible{outline:2px solid var(--md);outline-offset:2px}
 .fs-btn.call{color:var(--md);border-color:#c9d9ee}.fs-btn.call:hover{background:#eef4fc}
 .fs-btn.wa{color:#1f9d63;border-color:#bfe6cf}.fs-btn.wa:hover{background:#eafaf1}
 .fs-btn.mail{color:var(--dk);border-color:#d7dfe9}.fs-btn.mail:hover{background:#f2f5f9}
