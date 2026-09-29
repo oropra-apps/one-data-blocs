@@ -20,7 +20,7 @@ OD.define('phone3cx', {
     const doc = (wwLib.getFrontDocument && wwLib.getFrontDocument()) || document;
 
     if (win.__od3cx) return;                 // un seul panneau par session
-    const S = win.__od3cx = { appel: null, depuis: 0, tic: null, poste: null };
+    const S = win.__od3cx = { appel: null, depuis: 0, tic: null, chien: null, poste: null };
 
     /* ------------------------------------------------------------ styles */
     function css() {
@@ -74,7 +74,16 @@ OD.define('phone3cx', {
       const el = doc.getElementById('od3cx');
       if (el) { el.classList.remove('on'); setTimeout(() => el.remove(), 250); }
       if (S.tic) { clearInterval(S.tic); S.tic = null; }
+      if (S.chien) { clearTimeout(S.chien); S.chien = null; }
       S.appel = null;
+    }
+
+    // Garde-fou : si l'evenement de fin n'arrive pas (perte du flux 3CX,
+    // appel jamais decroche), le panneau se retire de lui-meme plutot que de
+    // rester a l'ecran. 90 s en sonnerie, 2 h en communication.
+    function armerChien(encours) {
+      if (S.chien) clearTimeout(S.chien);
+      S.chien = setTimeout(fermer, encours ? 7200000 : 90000);
     }
 
     function rendre() {
@@ -90,6 +99,7 @@ OD.define('phone3cx', {
       }
       const encours = a.etat === 'en_cours';
       el.classList.toggle('encours', encours);
+      armerChien(encours);
 
       // Appel sortant : le vendeur est deja sur la fiche, il n'a besoin que de
       // savoir que son propre poste sonne d'abord. Bandeau d'une ligne.
