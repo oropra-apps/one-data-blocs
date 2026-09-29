@@ -6215,12 +6215,38 @@ function v3BarreCanaux(lead, actifs) {
     + '</div>';
 }
 
+// ---- Telephonie : pilote 3CX (module phone3cx) s'il est present ------------
+//  Tenant equipe d'un PBX 3CX : le PBX fait sonner le poste du vendeur, puis
+//  le client. Sinon on retombe sur Twilio, puis sur un lien tel:.
+function lmPick3cx() {
+  const cands = [];
+  try { cands.push(window.wwLib && wwLib.getFrontWindow && wwLib.getFrontWindow()); } catch (e) {}
+  try { cands.push(typeof globalThis !== 'undefined' ? globalThis : null); } catch (e) {}
+  cands.push(window);
+  try { cands.push(window.parent); } catch (e) {}
+  try { cands.push(window.top); } catch (e) {}
+  for (let i = 0; i < cands.length; i++) {
+    try { if (cands[i] && cands[i].OD3CX && typeof cands[i].OD3CX.appeler === 'function') return cands[i].OD3CX; } catch (e) {}
+  }
+  return null;
+}
+function lmNormTel(n) {
+  const t = String(n || '').replace(/[^0-9+]/g, '');
+  if (!t) return '';
+  if (t[0] === '+') return t;
+  if (t[0] === '0') return '+33' + t.slice(1);
+  return t;
+}
+
 function v3OuvrirCanal(act, lead) {
   // Le client attendu par les modules : ils lisent IDVu, TEl_MOB, EMAIL.
   const c = { IDVu: lead.id_client, TEl_MOB: lead.telephone, EMAIL: lead.email,
               nom: lead.nom, prenom: lead.prenom };
   try {
     if (act === 'appel') {
+      const cx = lmPick3cx();
+      const num = lmNormTel(lead.telephone);
+      if (cx && num) { cx.appeler(num, { nom: ((lead.prenom || '') + ' ' + (lead.nom || '')).trim(), idvu: lead.id_client }); return; }
       const w = (window.parent && window.parent.__VOIP_UI__) || window.__VOIP_UI__;
       if (w && w.call) w.call(lead.telephone, c);
       else if (window.__ONE_DATA__ && window.__ONE_DATA__.device && lead.telephone)
@@ -6926,6 +6952,11 @@ function bindEvents() {
         //    fichier : on reprend ce qui marche.
         const tel = lead.telephone || lead.mobile || '';
         if (!tel) { lmToast('Ce lead ne porte aucun numéro.', 'erreur'); return; }
+        const cx3 = lmPick3cx();
+        if (cx3) {
+          cx3.appeler(lmNormTel(tel), { nom: ((lead.prenom || '') + ' ' + (lead.nom || '')).trim(), idvu: lead.id_client });
+          return;
+        }
         try {
           const w = (window.wwLib && wwLib.getFrontWindow && wwLib.getFrontWindow()) || window;
           w.open('tel:' + String(tel).replace(/[^0-9+]/g, ''), '_self');
