@@ -1,5 +1,5 @@
 // ============================================================================
-//  DASHBOARD — module One Data (OD.define)   v26 — PROFIL TEAM COLIN
+//  DASHBOARD — module One Data (OD.define)   v28 — PROFIL TEAM COLIN
 //
 //  Cette version est réservée au tenant Team Colin (ref ieztupavcdnubmpbjvuq),
 //  où elle est épinglée. Le défaut du registre reste la v25 « Tour de
@@ -24,12 +24,25 @@
 //  partielle, ou sans donnée. Une famille sans source n'est pas masquée — une
 //  tuile vide dit ce qui manque, une tuile absente ne dit rien.
 //
-//  PAR RÔLE
-//  Le jeu de tuiles dépend de la fonction : un vendeur voit sa production, son
-//  pipe et ses leads ; un chef des ventes y ajoute son équipe et ses
-//  livraisons ; un directeur voit tout, y compris la qualité de la base ; le
-//  marketing voit les leads et la base. Moins de tuiles, mais toutes utiles à
-//  celui qui les regarde.
+//  PAR RÔLE — ce qui change en v28
+//  Le jeu de tuiles dépendait déjà de la fonction. Ce n'était pas assez : le
+//  DÉPLI restait celui du chef des ventes. Un vendeur cliquait sur « À
+//  relancer » et lisait « Le portefeuille de chacun » — un tableau d'une seule
+//  ligne, la sienne, sous la phrase « Mina Tang porte 26 affaires ». Elle le
+//  sait : c'est elle.
+//
+//  Chaque tuile porte donc maintenant un bloc `vues` qui redéfinit, par
+//  famille de rôle, son titre, son contexte, sa trouvaille, son tableau et la
+//  liste nominative qu'elle ouvre. Ce qui n'est pas redéfini retombe sur la
+//  valeur commune, et rien n'est dupliqué.
+//
+//  La règle qui a guidé le découpage : le chef compare ses vendeurs, la
+//  direction compare ses sites, LE VENDEUR NE COMPARE RIEN. Il ne veut pas
+//  savoir combien il a d'affaires à relancer — il le voit sur la tuile — mais
+//  LESQUELLES, dans quel ordre, et à quel numéro. Les huit tuiles de son jeu
+//  ouvrent donc sur une liste de noms et de téléphones cliquables, servie à la
+//  demande par dashboard_tc_liste. Le bandeau, le pouls, le titre de la page et
+//  le pied de page sont réécrits dans le même esprit.
 //
 //  PÉRIMÈTRE ET TOP NAV
 //  Un chef multi-site ouvre sur la vue agrégée de tout son périmètre, avec la
@@ -38,12 +51,17 @@
 //  les chiffres se recalculent. C'est le bus de site (oropra-site-bus) qui les
 //  relie.
 //
-//  SOURCE UNIQUE
-//  Un seul aller-retour réseau : la RPC dashboard_tc(annee, mois) renvoie tout
-//  en un jsonb, bornée par propale_visible_user_ids() — un vendeur ne voit que
-//  lui, un chef son site, la direction les trois. Les grands comptes sont
+//  SOURCE
+//  Un seul aller-retour au chargement : la RPC dashboard_tc(annee, mois) renvoie
+//  tout en un jsonb, bornée par propale_visible_user_ids() — un vendeur ne voit
+//  que lui, un chef son site, la direction les trois. Les grands comptes sont
 //  exclus partout, comme dans Performances. La famille « qualité de la base »
 //  est un sujet de groupe : elle n'est servie qu'aux rôles 1, 2 et 3.
+//
+//  Les listes nominatives sont servies à part, par dashboard_tc_liste(bloc, …),
+//  et seulement au clic : les charger d'avance alourdirait la page pour des
+//  dépliés que personne n'ouvrira. Elles sont mises en cache par bloc, et le
+//  cache est vidé dès que le site ou le mois change.
 //
 //  SEUILS
 //  7 et 27 jours ne sont pas choisis : ce sont les 85ᵉ et 95ᵉ centiles du délai
@@ -191,6 +209,14 @@ OD.define('dashboard', {
   font-variant-numeric:tabular-nums;white-space:nowrap}
 #dash-root table.dmini td:first-child{text-align:left;white-space:normal}
 #dash-root table.dmini .f{font-family:var(--mono);font-weight:600}
+#dash-root table.dmini .pale{color:var(--ink-3)}
+/* Une liste nominative se lit de gauche à droite : le nom d'abord, ancré, le
+   reste peut défiler. Le téléphone est un lien : sur mobile il compose. */
+#dash-root .dliste{margin-top:6px}
+#dash-root .dliste table.dmini td:first-child{font-weight:600}
+#dash-root .dtel{font-family:var(--mono);font-weight:600;color:var(--m-bleu);
+  text-decoration:none;border-bottom:1px solid transparent}
+#dash-root .dtel:hover{border-bottom-color:currentColor}
 #dash-root .dferme{background:none;border:0;font:inherit;font-size:12px;font-weight:600;color:var(--ink-3);
   cursor:pointer;padding:0;margin-top:14px;text-decoration:underline;text-underline-offset:3px}
 #dash-root .dpied{font-size:11.5px;color:var(--ink-3);line-height:1.6;max-width:84ch}
@@ -270,6 +296,57 @@ OD.define('dashboard', {
       });
       if (!res.ok) throw new Error('HTTP ' + res.status);
       return await res.json();
+    }
+
+    // -------------------------------------------------------------------------
+    //  Les listes nominatives, chargées au clic et pas avant.
+    //
+    //  Un agrégat dit combien ; un vendeur veut savoir QUI. dashboard_tc_liste
+    //  sert ces listes à la demande — les charger au démarrage alourdirait la
+    //  page pour des dépliés que personne n'ouvrira.
+    //
+    //  Le cache est vidé à chaque changement de site ou de mois : une liste
+    //  d'un autre périmètre serait pire que pas de liste du tout.
+    // -------------------------------------------------------------------------
+    let CACHE_LISTES = {};
+    async function chargerListe(bloc) {
+      const cle = bloc + '|' + state.annee + '|' + state.mois + '|' + state.site;
+      if (CACHE_LISTES[cle]) return CACHE_LISTES[cle];
+      const jwt = await getUserJwt();
+      if (!jwt) throw new Error('session absente');
+      const res = await fetch(SUPABASE_URL + '/rest/v1/rpc/dashboard_tc_liste', {
+        method: 'POST',
+        headers: { 'apikey': SUPABASE_KEY, 'Authorization': 'Bearer ' + jwt,
+                   'Content-Type': 'application/json' },
+        body: JSON.stringify({ p_bloc: bloc, p_annee: state.annee, p_mois: state.mois,
+                               p_id_site: state.site, p_limite: 60 })
+      });
+      if (!res.ok) throw new Error('HTTP ' + res.status);
+      const j = await res.json();
+      CACHE_LISTES[cle] = j;
+      return j;
+    }
+
+    // Un téléphone se compose, il ne se lit pas : on en fait un lien.
+    function tel(n) {
+      if (!n) return '<span class="pale">—</span>';
+      const brut = String(n).replace(/[^0-9+]/g, '');
+      return '<a href="tel:' + esc(brut) + '" class="dtel">' + esc(String(n)) + '</a>';
+    }
+
+    // Rendu d'une liste nominative. Les colonnes sont décrites une fois, la
+    // colonne « vendeur » ne s'ajoute que lorsque le périmètre en compte
+    // plusieurs — pour un vendeur elle ne répéterait que son propre nom.
+    function listeNominative(j, cols) {
+      const l = (j && j.lignes) || [];
+      if (!l.length) return '<p class="ctx">Rien dans cette liste aujourd’hui.</p>';
+      const c = cols.filter(x => x.k !== 'vendeur' || j.multi_vendeurs);
+      const h = tableau(c.map(x => x.t), l.map(r => c.map(x => x.h(r))));
+      const reste = num(j.total) - l.length;
+      return h + (reste > 0
+        ? '<p class="ctx">Les ' + fmt(l.length) + ' premiers sur ' + fmt(j.total)
+          + '. Les ' + fmt(reste) + ' autres sont dans le kanban.</p>'
+        : '');
     }
 
     // Les séries de la RPC arrivent en douze lignes { mois, cdes, fi, ... }.
@@ -419,6 +496,63 @@ OD.define('dashboard', {
     // Un vendeur lit « mes » et non « les » : les libellés s'adaptent.
     function moi(txt) { return familleRole() === 'vendeur' ? txt.replace(/^Les /, 'Mes ') : txt; }
 
+    // =========================================================================
+    //  LES VUES PAR RÔLE
+    //
+    //  Filtrer les tuiles par rôle ne suffisait pas : le DÉPLI restait celui du
+    //  chef des ventes. Un vendeur cliquait sur « À relancer » et lisait « Le
+    //  portefeuille de chacun » — un tableau d'une seule ligne, la sienne, avec
+    //  la phrase « Mina Tang porte 26 affaires ». Elle le sait : c'est elle.
+    //
+    //  Une tuile porte donc maintenant, en plus de ses valeurs par défaut, un
+    //  bloc `vues` qui redéfinit titre, contexte, trouvaille, tableau ou liste
+    //  pour une famille de rôle donnée. Ce qui n'est pas redéfini retombe sur
+    //  la valeur commune.
+    //
+    //  La règle qui guide le choix : le chef compare ses vendeurs, la direction
+    //  compare ses sites, LE VENDEUR NE COMPARE RIEN — il a besoin de noms, de
+    //  numéros et d'un ordre de priorité pour sa journée.
+    // =========================================================================
+    function vue(t, champ) {
+      const v = (t.vues || {})[familleRole()];
+      if (v && Object.prototype.hasOwnProperty.call(v, champ)) return v[champ];
+      return t[champ];
+    }
+
+    // ---- Jeux de colonnes réutilisables pour les listes nominatives ----------
+    const COL_CLIENT   = { k: 'client', t: 'Client',
+                           h: r => ({ h: '<b>' + esc(r.client || '—') + '</b>' }) };
+    const COL_TEL      = { k: 'tel', t: 'Téléphone', h: r => ({ h: tel(r.tel) }) };
+    const COL_VENDEUR  = { k: 'vendeur', t: 'Vendeur',
+                           h: r => ({ h: '<span class="pale">' + esc(r.vendeur || '—') + '</span>' }) };
+    const COL_VEHICULE = { k: 'vehicule', t: 'Véhicule',
+                           h: r => ({ h: r.vehicule ? esc(r.vehicule) : '<span class="pale">—</span>' }) };
+    const COL_AGE      = { k: 'age', t: 'Ouverte depuis',
+                           h: r => ({ h: '<span class="f">' + fmt(r.age) + ' j</span>' }) };
+
+    function colsAffaires() { return [COL_CLIENT, COL_TEL, COL_AGE, COL_VENDEUR]; }
+    function colsLivraisons() {
+      return [COL_CLIENT, COL_VEHICULE, COL_TEL,
+              { k: 'd', t: 'Promise le', h: r => ({ h: '<span class="f">' + jourCourt(r.date_promise) + '</span>' }) },
+              COL_VENDEUR];
+    }
+    function colsCommandes() {
+      return [COL_CLIENT, COL_VEHICULE, COL_TEL,
+              { k: 'j', t: 'Commandée le', h: r => ({ h: jourCourt(r.jour) }) }, COL_VENDEUR];
+    }
+    function colsLeads() {
+      return [COL_CLIENT, COL_TEL,
+              { k: 's', t: 'Source', h: r => ({ h: r.source ? esc(r.source) : '<span class="pale">—</span>' }) },
+              { k: 'j', t: 'Reçu il y a', h: r => ({ h: '<span class="f">' + fmt(r.jours) + ' j</span>' }) },
+              COL_VENDEUR];
+    }
+    function jourCourt(d) {
+      if (!d) return '—';
+      const x = new Date(d);
+      if (isNaN(x)) return esc(String(d));
+      return x.getDate() + ' ' + MOIS_COURT[x.getMonth()];
+    }
+
     const FAMILLES = [
       { k: 'prod', t: 'Production commerciale', etat: 'plein', n: 'commandes gagnées BACS' },
       { k: 'pipe', t: 'Pipe et relances', etat: 'plein', n: 'affaires et devis BACS' },
@@ -441,6 +575,32 @@ OD.define('dashboard', {
         c: objCde > 0 ? (pct(p.cdes, objCde) + ' % de l’objectif (' + objCde + ')') : 'sans objectif saisi',
         sens: objCde > 0 && num(p.cdes) >= objCde ? 'hausse' : objCde > 0 ? 'baisse' : 'plat',
         vals: serie('cdes'), forme: 'barres', lm: lm,
+        vues: {
+          vendeur: {
+            titre: 'Votre mois, jour après jour',
+            ctx: 'Vos commandes gagnées du mois. Le graphe porte vos douze derniers mois.',
+            liste: 'cdes_mois', cols: colsCommandes,
+            trouve: () => {
+              const reste = objCde > 0 ? objCde - num(p.cdes) : null;
+              const j = (det.jours || []).slice().sort((a, b) => num(b.n) - num(a.n));
+              const fort = j.length ? (JOURS_NOM[j[0].dow] || '').toLowerCase() : null;
+              let h = '';
+              if (reste != null && reste > 0) {
+                h += '<b>Il vous reste ' + fmt(reste) + ' commande' + (reste > 1 ? 's' : '')
+                  + ' pour tenir votre objectif.</b> ';
+              } else if (reste != null) {
+                h += '<b>Objectif atteint, et dépassé de ' + fmt(Math.abs(reste)) + '.</b> ';
+              }
+              if (fort) {
+                h += (h ? '' : '<b>') + 'Sur le réseau, le ' + fort + ' est le jour qui signe le plus'
+                  + (h ? '' : '.</b>') + ' — un rendez-vous posé ce jour-là ne vaut pas un rendez-vous '
+                  + 'posé un autre jour.';
+              }
+              return h || 'Pas encore assez de commandes ce mois-ci pour dégager une tendance.';
+            },
+            table: () => ''
+          }
+        },
         titre: 'Commandes du mois',
         ctx: 'Commandes gagnées, grands comptes exclus, rattachées à leur mois de création dans BACS.',
         trouve: () => {
@@ -476,6 +636,28 @@ OD.define('dashboard', {
         fam: 'prod', id: 'fi', lab: 'Financement', v: txFi == null ? '—' : txFi, unite: '%',
         c: ecartAn('fi', 'pts').txt || 'hors loueurs', sens: ecartAn('fi', 'pts').sens,
         vals: serie('fi'), forme: 'ligne', lm: lm, gUnite: '%',
+        // Le classement des vendeurs n'a aucun sens pour un vendeur : il y
+        // figure seul. Ce qui l'intéresse, ce sont SES commandes sans
+        // financement — celles où il reste quelque chose à rattraper.
+        vues: {
+          vendeur: {
+            titre: 'Vos commandes sans financement',
+            ctx: 'Vos commandes du mois qui sont parties sans financement, loueurs longue durée '
+               + 'exclus — eux n’en ont jamais.',
+            liste: 'sans_fi', cols: colsCommandes,
+            table: () => '',
+            trouve: () => {
+              const sans = num(p.hors_loueurs) - num(p.fi);
+              const e = ecartAn('fi', 'pts');
+              return '<b>' + fmt(sans) + ' de vos ' + fmt(p.hors_loueurs) + ' commandes finançables '
+                + 'du mois n’ont pas de financement.</b> Deux explications possibles, et elles '
+                + 'n’appellent pas le même geste : soit le financement n’a pas été proposé, soit il '
+                + 'l’a été mais n’a jamais été saisi dans BACS. Dans le second cas la commission '
+                + 'existe et ne vous est pas comptée.'
+                + (e.sens === 'baisse' ? ' Sur douze mois votre taux a reculé de ' + e.txt.replace(' sur un an', '') + '.' : '');
+            }
+          }
+        },
         titre: 'Taux de financement',
         ctx: 'Part des commandes financées, loueurs longue durée exclus du calcul.',
         trouve: () => {
@@ -538,6 +720,22 @@ OD.define('dashboard', {
         fam: 'prod', id: 'acc', lab: 'Accessoires', v: fmt(accCde), unite: '€',
         c: ecartAn('acc').txt || 'par commande', sens: ecartAn('acc').sens,
         vals: serie('acc'), forme: 'ligne', lm: lm, gUnite: '',
+        vues: {
+          vendeur: {
+            titre: 'Vos commandes sans aucun accessoire',
+            ctx: 'Vos commandes du mois dont le bon ne porte pas une ligne d’accessoire.',
+            liste: 'sans_acc', cols: colsCommandes,
+            trouve: () => {
+              const s = serie('acc');
+              const ref = s.length > 1 && s[0] ? Math.round(s[0]) : null;
+              return '<b>Chaque commande sans accessoire est une marge qui ne revient pas.</b> '
+                + 'Vous êtes à ' + fmt(accCde) + ' € par commande ce mois-ci'
+                + (ref ? ', contre ' + fmt(ref) + ' € il y a un an' : '') + '. L’accessoire se vend '
+                + 'à la signature ou ne se vend pas : passé la livraison, le client ne revient pas '
+                + 'pour ça. Les commandes de la liste sont celles où rien n’a été posé.';
+            }
+          }
+        },
         titre: 'Accessoires par commande',
         ctx: 'Montant HT des accessoires du bon de commande, divisé par le nombre de commandes.',
         trouve: () => {
@@ -645,6 +843,30 @@ OD.define('dashboard', {
         fam: 'pipe', id: 'affaires', lab: 'Affaires ouvertes', v: fmt(pi.affaires), statique: true,
         obj: 'sans commande, moins de 90 jours',
         c: fmt(pi.froides) + ' au-delà de ' + num(s.p95) + ' jours', sens: 'baisse',
+        vues: {
+          vendeur: {
+            titre: 'Celles que vous allez perdre',
+            ctx: 'Vos affaires ouvertes au-delà de ' + num(s.p95) + ' jours. Statistiquement, '
+               + 'elles ne se concluent plus : soit elles se rouvrent autrement, soit elles se ferment.',
+            liste: 'froides', cols: colsAffaires,
+            table: () => tableau(['Âge', 'Vos affaires', 'Ce que ça veut dire'], [
+              [{ h: '<span style="display:inline-block;width:9px;height:9px;border-radius:50%;background:var(--m-vert);margin-right:7px"></span>Dans la fenêtre' },
+               { h: '<span class="f">' + fmt(pi.fraiches) + '</span>' }, 'tout est normal'],
+              [{ h: '<span style="display:inline-block;width:9px;height:9px;border-radius:50%;background:var(--m-orange);margin-right:7px"></span>À relancer' },
+               { h: '<span class="f">' + fmt(pi.a_relancer) + '</span>' }, 'un appel les récupère'],
+              [{ h: '<span style="display:inline-block;width:9px;height:9px;border-radius:50%;background:var(--m-bleu);margin-right:7px"></span>Froides' },
+               { h: '<span class="f">' + fmt(pi.froides) + '</span>' }, 'à rouvrir ou à fermer']
+            ]),
+            trouve: () => {
+              const part = pct(pi.froides, pi.affaires);
+              return '<b>' + fmt(pi.froides) + ' de vos ' + fmt(pi.affaires) + ' affaires ouvertes '
+                + 'sont froides</b>, soit ' + (part == null ? '—' : part) + ' %. Elles pèsent dans '
+                + 'votre portefeuille sans rien y apporter : tant qu’elles y restent, impossible de '
+                + 'savoir combien vous avez vraiment de dossiers vivants. Les fermer ne fait rien '
+                + 'perdre — le client reste dans la base, et vous retrouvez un portefeuille lisible.';
+            }
+          }
+        },
         titre: 'Affaires ouvertes sans commande',
         ctx: 'Affaires BACS ouvertes depuis moins de 90 jours et encore sans commande. Photo à l’instant, pas un cumul.',
         trouve: () => '<b>Une vente se joue en ' + num(s.p85) + ' jours.</b> Sur les affaires de '
@@ -667,6 +889,23 @@ OD.define('dashboard', {
         fam: 'pipe', id: 'relance', lab: 'À relancer', v: fmt(pi.a_relancer), statique: true,
         obj: 'affaires de ' + (num(s.p85) + 1) + ' à ' + num(s.p95) + ' jours',
         c: fmt(pi.fraiches) + ' encore dans la fenêtre', sens: 'plat',
+        // Le vendeur reçoit la liste de ses appels du jour ; son chef, le
+        // comparatif de son équipe. Même chiffre, deux métiers.
+        vues: {
+          vendeur: {
+            titre: 'Vos appels du jour',
+            ctx: 'Vos affaires ouvertes entre ' + (num(s.p85) + 1) + ' et ' + num(s.p95)
+               + ' jours — la fenêtre où une relance change encore l’issue. La plus ancienne en premier.',
+            liste: 'relance', cols: colsAffaires,
+            table: () => '',
+            trouve: () => '<b>Passé ' + num(s.p95) + ' jours, une affaire ne se conclut plus.</b> '
+              + 'Ce seuil n’est pas une convention : il se recalcule chaque nuit sur les affaires '
+              + 'de l’année qui ont abouti — 95 % se sont jouées avant. Vous avez <b>'
+              + fmt(pi.a_relancer) + ' affaires</b> encore dans cette fenêtre et ' + fmt(pi.froides)
+              + ' qui l’ont dépassée. Les premières valent un appel aujourd’hui ; les secondes, '
+              + 'une décision — relancer autrement, ou fermer.'
+          }
+        },
         titre: 'Le portefeuille de chacun',
         ctx: 'Les affaires ouvertes de chaque vendeur, rangées par âge. Trié sur la colonne à relancer.',
         trouve: () => {
@@ -687,8 +926,12 @@ OD.define('dashboard', {
             v.map(x => {
               const t = num(x.total) || 1;
               return [
-                x.nom + (x.site ? ' <span style="font-size:10.5px;color:var(--ink-3);font-weight:600">'
-                  + esc(x.site) + '</span>' : ''),
+                // Une chaîne nue serait échappée par tableau() : le balisage du
+                // site s'affichait en clair dans la cellule. Elle passe donc en
+                // { h: … }, avec le nom échappé à la main.
+                { h: esc(x.nom) + (x.site
+                    ? ' <span style="font-size:10.5px;color:var(--ink-3);font-weight:600">'
+                      + esc(x.site) + '</span>' : '') },
                 { h: '<span class="f">' + fmt(x.total) + '</span>' },
                 { h: '<span style="display:inline-flex;height:9px;border-radius:5px;overflow:hidden;gap:2px;'
                      + 'vertical-align:middle;width:' + Math.max(num(x.total) / mx * 100, 4).toFixed(1) + '%">'
@@ -724,6 +967,32 @@ OD.define('dashboard', {
         fam: 'livr', id: 'livr', lab: 'À livrer', v: fmt(lv.en_attente), statique: true,
         obj: fmtEur(lv.montant) + ' engagés',
         c: fmt(lv.retard) + ' en retard réel', sens: num(lv.retard) > 0 ? 'baisse' : 'plat',
+        vues: {
+          vendeur: {
+            titre: num(lv.retard) > 0 ? 'Les clients à rappeler avant qu’ils n’appellent'
+                                      : 'Vos livraisons de la semaine',
+            ctx: num(lv.retard) > 0
+              ? 'Vos commandes dont la date promise est passée de moins de trois mois. Le client '
+                + 'attend et n’a pas été prévenu.'
+              : 'Vos commandes à livrer dans les sept jours, à confirmer au client.',
+            liste: num(lv.retard) > 0 ? 'livr_retard' : 'livr_semaine', cols: colsLivraisons,
+            table: () => tableau(['Quand', 'Vos dossiers', ''], [
+              ['En retard', { h: '<span class="f" style="color:var(--m-rouge)">' + fmt(lv.retard) + '</span>' }, 'à rappeler'],
+              ['Cette semaine', { h: '<span class="f">' + fmt(lv.semaine) + '</span>' }, 'à confirmer'],
+              ['Ce mois-ci', { h: '<span class="f">' + fmt(lv.mois30) + '</span>' }, 'sous 30 jours'],
+              ['Plus tard', { h: '<span class="f">' + fmt(lv.plus_tard) + '</span>' }, 'au-delà'],
+              ['À clôturer', { h: '<span class="f pale">' + fmt(lv.a_cloturer) + '</span>' }, 'dossiers oubliés']
+            ]),
+            trouve: () => num(lv.retard) > 0
+              ? '<b>' + fmt(lv.retard) + ' de vos clients ont dépassé leur date de livraison.</b> '
+                + 'Un client prévenu d’un retard attend ; un client qui découvre le retard en '
+                + 'appelant doute de tout le reste. C’est le seul appel de la journée qui coûte '
+                + 'moins cher fait que pas fait.'
+              : '<b>Aucun retard sur vos livraisons.</b> Les ' + fmt(lv.semaine) + ' dossiers de la '
+                + 'semaine n’attendent qu’une confirmation — c’est aussi le moment où un accessoire '
+                + 'ou une extension de garantie se placent encore.'
+          }
+        },
         titre: 'Commandes vendues non livrées',
         ctx: 'Commandes gagnées dont le statut BACS n’est pas clos, placées par rapport à la date promise.',
         trouve: () => '<b>Sur ' + fmt(num(lv.retard) + num(lv.a_cloturer)) + ' dates de livraison dépassées, '
@@ -789,6 +1058,19 @@ OD.define('dashboard', {
         fam: 'leads', id: 'leads', lab: 'Leads reçus', v: fmt(ld.recus_30j), statique: true,
         obj: 'sur 30 jours',
         c: pct(ld.perdus, ld.total) + ' % finissent perdus', sens: 'baisse',
+        vues: {
+          vendeur: {
+            titre: 'Les leads qui vous attendent',
+            ctx: 'Les leads qui vous ont été attribués et dont aucun premier contact n’est tracé. '
+               + 'Le plus ancien en premier.',
+            liste: 'leads_jamais', cols: colsLeads,
+            table: () => '',
+            trouve: () => '<b>' + fmt(ld.jamais_contactes) + ' leads vous ont été attribués sans '
+              + 'qu’un seul appel soit tracé.</b> Un lead non rappelé n’est pas un lead perdu par '
+              + 'hasard : c’est un client qui a appelé ailleurs. Et tant que le contact n’est pas '
+              + 'saisi, le lead reste compté comme en attente — même si vous avez appelé.'
+          }
+        },
         titre: 'Leads entrants',
         ctx: 'Leads externes reçus sur le périmètre, toutes sources confondues.',
         trouve: () => '<b>Sur les ' + fmt(ld.total) + ' leads de l’historique, ' + fmt(ld.perdus)
@@ -811,6 +1093,21 @@ OD.define('dashboard', {
         statique: true, obj: 'délai médian',
         c: num(ld.delai_median_h) > 1 ? 'la norme est sous 1 h' : 'dans la norme',
         sens: num(ld.delai_median_h) > 1 ? 'baisse' : 'hausse',
+        vues: {
+          vendeur: {
+            titre: 'Les plus anciens d’abord',
+            ctx: 'Vos leads en attente, classés par ancienneté. Ceux du haut sont ceux dont la '
+               + 'probabilité de réponse est la plus basse — et donc ceux à traiter en premier '
+               + 'ou à classer.',
+            liste: 'leads_jamais', cols: colsLeads,
+            table: () => '',
+            trouve: () => '<b>La première heure décide.</b> Passé ce délai, la probabilité de '
+              + 'joindre un prospect s’effondre, et le concurrent a rappelé. Le délai médian sur '
+              + 'votre périmètre est de ' + String(ld.delai_median_h).replace('.', ',') + ' heures : '
+              + 'ce n’est pas une question d’organisation, c’est la différence entre un lead qui se '
+              + 'transforme et un lead qui alimente la statistique des perdus.'
+          }
+        },
         titre: 'Délai de premier contact',
         ctx: 'Temps écoulé entre la réception du lead et le premier contact tracé.',
         trouve: () => '<b>Un lead sur deux attend plus de '
@@ -930,6 +1227,7 @@ OD.define('dashboard', {
     //  RENDU
     // =========================================================================
     function phraseDuJour() {
+      if (familleRole() === 'vendeur') return phraseVendeur();
       const d = state.d, p = d.prod || {}, o = d.obj || {}, ld = d.leads || {};
       const bouts = [];
       const objCde = num(o.cdes);
@@ -958,18 +1256,62 @@ OD.define('dashboard', {
       return ph;
     }
 
+    // Le bandeau d'un vendeur ne commente pas la santé du réseau : il ouvre sa
+    // journée. Le premier bout dit où il en est de son mois, les suivants
+    // nomment ce qui l'attend, dans l'ordre où ça coûte de ne pas le faire.
+    function phraseVendeur() {
+      const d = state.d, p = d.prod || {}, o = d.obj || {}, pi = d.pipe || {},
+            lv = d.livr || {}, ld = d.leads || {};
+      const objCde = num(o.cdes);
+      let ph;
+      if (objCde > 0) {
+        const reste = objCde - num(p.cdes);
+        ph = reste > 0
+          ? 'Vous êtes à <b>' + fmt(p.cdes) + ' commandes</b> sur ' + objCde + ' : il en manque <b>'
+            + fmt(reste) + '</b>.'
+          : 'Vous êtes à <b>' + fmt(p.cdes) + ' commandes</b> pour ' + objCde
+            + ' demandées — objectif tenu.';
+      } else {
+        ph = 'Vous êtes à <b>' + fmt(p.cdes) + ' commandes</b> ce mois-ci.';
+      }
+      const faire = [];
+      if (num(lv.retard) > 0) {
+        faire.push('<b>' + fmt(lv.retard) + ' client' + (num(lv.retard) > 1 ? 's ont' : ' a')
+          + ' dépassé sa date de livraison</b>');
+      }
+      if (num(pi.a_relancer) > 0) {
+        faire.push('<b>' + fmt(pi.a_relancer) + ' affaire' + (num(pi.a_relancer) > 1 ? 's' : '')
+          + '</b> dans la fenêtre de relance');
+      }
+      if (num(ld.jamais_contactes) > 0) {
+        faire.push('<b>' + fmt(ld.jamais_contactes) + ' lead'
+          + (num(ld.jamais_contactes) > 1 ? 's' : '') + '</b> sans premier appel tracé');
+      }
+      if (!faire.length) return ph + ' Rien d’urgent dans votre portefeuille aujourd’hui.';
+      const dernier = faire.pop();
+      return ph + ' Aujourd’hui : '
+        + (faire.length ? faire.join(', ') + ' et ' + dernier : dernier) + '.';
+    }
+
     function nomSite(id) {
       const s2 = (state.d.perimetre || []).find(x => String(x.id_site) === String(id));
       return s2 ? (s2.nom || ('site ' + id)) : ('site ' + id);
     }
 
+    // Le pouls d'un vendeur compte ce qui se fait dans la journée ; celui d'un
+    // encadrant, ce qui se produit sur le périmètre. Les deux premiers repères
+    // sont communs, les deux derniers changent.
     function pouls() {
-      const d = state.d, m = d.meteo || {}, lv = d.livr || {}, pi = d.pipe || {};
+      const d = state.d, m = d.meteo || {}, lv = d.livr || {}, pi = d.pipe || {},
+            ld = d.leads || {};
+      const v = familleRole() === 'vendeur';
       return [
         { n: fmt(m.cdes_jour), l: 'commande' + (num(m.cdes_jour) > 1 ? 's' : '') + '<br>aujourd’hui' },
         { n: fmt(m.devis_jour), l: 'devis<br>ouverts' },
-        { n: fmt(lv.semaine), l: 'livraison' + (num(lv.semaine) > 1 ? 's' : '') + '<br>cette semaine' },
-        { n: fmt(pi.a_relancer), l: 'affaires<br>à relancer' }
+        v ? { n: fmt(lv.retard), l: 'livraison' + (num(lv.retard) > 1 ? 's' : '') + '<br>en retard' }
+          : { n: fmt(lv.semaine), l: 'livraison' + (num(lv.semaine) > 1 ? 's' : '') + '<br>cette semaine' },
+        v ? { n: fmt(ld.jamais_contactes), l: 'leads<br>jamais appelés' }
+          : { n: fmt(pi.a_relancer), l: 'affaires<br>à relancer' }
       ].map(x => '<div><div class="n">' + x.n + '</div><div class="l">' + x.l + '</div></div>').join('');
     }
 
@@ -998,7 +1340,8 @@ OD.define('dashboard', {
       }).join('');
 
       r.innerHTML = '<div class="dw">'
-        + '<div class="drail"><h1>Le tableau du jour</h1>'
+        + '<div class="drail"><h1>' + (familleRole() === 'vendeur' ? 'Votre journée'
+                                                                  : 'Le tableau du jour') + '</h1>'
         + '<span class="dt">' + esc(dateLongue()) + '</span>'
         + selecteurPerimetre()
         + '<span class="drole">' + esc(ETIQ_ROLE[familleRole()] || '') + '</span></div>'
@@ -1007,7 +1350,8 @@ OD.define('dashboard', {
         + '<div class="dpouls">' + pouls() + '</div></section>'
         + '<div id="dash-fams" style="display:flex;flex-direction:column;gap:18px">' + fams + '</div>'
         + '<div id="dash-tiroir"></div><div id="dash-ancre"></div>'
-        + '<p class="dpied">Commandes gagnées uniquement, grands comptes exclus, sur votre périmètre. '
+        + '<p class="dpied">Commandes gagnées uniquement, grands comptes exclus, '
+        + (familleRole() === 'vendeur' ? 'sur vos propres affaires. ' : 'sur votre périmètre. ')
         + 'Douze mois glissants. Les seuils de relance (' + num((state.d.seuils || {}).p85) + ' et '
         + num((state.d.seuils || {}).p95) + ' jours) sont recalculés chaque nuit sur les affaires de '
         + 'l’année qui ont abouti. La pastille devant chaque famille dit l’état de sa source : '
@@ -1043,6 +1387,7 @@ OD.define('dashboard', {
       try {
         const d = await charger();
         if (mien !== jeton) return;            // un autre changement est passé devant
+        CACHE_LISTES = {};                      // périmètre changé : les listes aussi
         state.d = d;
         TUILES = tuiles();
         state.ouvert = null;
@@ -1097,17 +1442,40 @@ OD.define('dashboard', {
       const zone = r.querySelector('#dash-tiroir');
       const hote = r.querySelector('.dtuile[data-id="' + id + '"]').closest('.dfam');
       hote.appendChild(zone);
+
+      // Tout ce qui s'affiche ici passe par vue() : la même tuile ne raconte pas
+      // la même chose à un vendeur et à son chef.
+      const titre = vue(t, 'titre'), ctx = vue(t, 'ctx');
+      const fTrouve = vue(t, 'trouve'), fTable = vue(t, 'table');
+      const bloc = vue(t, 'liste'), fCols = vue(t, 'cols');
       let trouve = '', table = '';
-      try { trouve = t.trouve ? t.trouve() : ''; } catch (e) { console.error('[dash] trouvaille', id, e); }
-      try { table = t.table ? t.table() : ''; } catch (e) { console.error('[dash] table', id, e); }
+      try { trouve = fTrouve ? fTrouve() : ''; } catch (e) { console.error('[dash] trouvaille', id, e); }
+      try { table = fTable ? fTable() : ''; } catch (e) { console.error('[dash] table', id, e); }
+
       zone.innerHTML = '<section class="dtiroir"><div style="min-width:0">'
-        + '<h3>' + esc(t.titre) + '</h3><p class="ctx">' + esc(t.ctx) + '</p>'
-        + (t.statique ? '' : graphe(t.vals, t.forme, t.lm, t.gUnite, t.second, t.titre))
-        + table + '</div><div style="min-width:0">'
+        + '<h3>' + esc(titre) + '</h3><p class="ctx">' + esc(ctx) + '</p>'
+        + (t.statique ? '' : graphe(t.vals, t.forme, t.lm, t.gUnite, t.second, titre))
+        + table
+        + (bloc ? '<div class="dliste" data-bloc="' + esc(bloc) + '">'
+                  + '<p class="ctx">Chargement de la liste…</p></div>' : '')
+        + '</div><div style="min-width:0">'
         + '<div class="dtrouve"><div class="t">Ce que le chiffre ne dit pas</div>' + trouve + '</div>'
         + '<button class="dferme" type="button">Refermer</button></div></section>';
       zone.querySelector('.dferme').addEventListener('click', fermer);
       try { zone.scrollIntoView({ behavior: 'smooth', block: 'nearest' }); } catch (e) { }
+
+      // La liste arrive après coup. Le dépli reste utilisable pendant ce temps,
+      // et si la tuile a changé entre-temps on n'écrit rien.
+      if (bloc) {
+        const cible = zone.querySelector('.dliste');
+        chargerListe(bloc).then(j => {
+          if (state.ouvert !== id || !cible.isConnected) return;
+          cible.innerHTML = listeNominative(j, (fCols || colsAffaires)());
+        }).catch(e => {
+          console.error('[dash] liste', bloc, e);
+          if (cible.isConnected) cible.innerHTML = '<p class="ctx">La liste n’a pas pu être chargée.</p>';
+        });
+      }
     }
 
     function fermer() {
