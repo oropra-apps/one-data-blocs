@@ -1,5 +1,5 @@
 // ============================================================================
-//  DASHBOARD — module One Data (OD.define)   v28 — PROFIL TEAM COLIN
+//  DASHBOARD — module One Data (OD.define)   v29 — PROFIL TEAM COLIN
 //
 //  Cette version est réservée au tenant Team Colin (ref ieztupavcdnubmpbjvuq),
 //  où elle est épinglée. Le défaut du registre reste la v25 « Tour de
@@ -24,7 +24,39 @@
 //  partielle, ou sans donnée. Une famille sans source n'est pas masquée — une
 //  tuile vide dit ce qui manque, une tuile absente ne dit rien.
 //
-//  PAR RÔLE — ce qui change en v28
+//  PAR RÔLE — QUATRE PAGES, PAS UNE PAGE FILTRÉE (v29)
+//
+//  Chaque fonction a sa propre question, et donc sa propre page :
+//
+//    VENDEUR    « qui j'appelle aujourd'hui ? »
+//               Titre « Votre journée ». Huit tuiles, et chaque dépli est une
+//               LISTE NOMINATIVE — nom, véhicule, téléphone cliquable — servie
+//               par dashboard_tc_liste. Aucun comparatif : il y figurerait seul.
+//
+//    CHEF       « qui décroche, et sur quoi ? »
+//               Titre « Votre équipe aujourd'hui ». Chaque dépli est le
+//               CLASSEMENT DE SON ÉQUIPE sur cet indicateur, trié du plus en
+//               retard au moins, avec l'écart à l'objectif individuel, servi par
+//               dashboard_tc_equipe. Le constat nomme la personne à voir.
+//
+//    DIRECTION  « quelle entité décroche, et de combien ? »
+//               Titre « Le tableau du groupe ». Chaque dépli est
+//               L'ARBORESCENCE MARQUE › AFFAIRE › SITE, repliable, servie par
+//               dashboard_tc_arbre ; cliquer une ligne filtre toute la page sur
+//               ce périmètre. Le sélecteur à plat de vingt-sept boutons est
+//               remplacé par le même arbre. Le constat compare les affaires
+//               entre elles. Ni PHEV ni utilitaires : ce sont des objectifs
+//               individuels, leur somme au niveau groupe n'a pas de destinataire.
+//
+//    MARKETING  « d'où viennent les leads et pourquoi se perdent-ils ? »
+//               Titre « Ce qui entre, ce qui se perd ». Les déplis leads
+//               ouvrent sur LE TABLEAU PAR SOURCE — volume, délai médian,
+//               jamais appelés, taux de perte — servi par dashboard_tc_sources.
+//               Le constat met en regard délai de rappel et taux de perte.
+//
+//  Le bandeau, le pouls, le titre et le pied de page suivent le même découpage.
+//
+//  PAR RÔLE — ce qui avait changé en v28
 //  Le jeu de tuiles dépendait déjà de la fonction. Ce n'était pas assez : le
 //  DÉPLI restait celui du chef des ventes. Un vendeur cliquait sur « À
 //  relancer » et lisait « Le portefeuille de chacun » — un tableau d'une seule
@@ -210,13 +242,64 @@ OD.define('dashboard', {
 #dash-root table.dmini td:first-child{text-align:left;white-space:normal}
 #dash-root table.dmini .f{font-family:var(--mono);font-weight:600}
 #dash-root table.dmini .pale{color:var(--ink-3)}
-/* Une liste nominative se lit de gauche à droite : le nom d'abord, ancré, le
-   reste peut défiler. Le téléphone est un lien : sur mobile il compose. */
+/* Le conteneur défile, pas la page — et la première colonne reste ancrée : sans
+   elle on perdait de vue à qui appartenait la ligne qu'on lisait. Même principe
+   que l'arbre de Performances. */
+#dash-root .dscroll{overflow-x:auto;-webkit-overflow-scrolling:touch;position:relative;
+  max-width:100%;overscroll-behavior-x:contain}
+#dash-root .dscroll table.dmini th:first-child,
+#dash-root .dscroll table.dmini td:first-child{position:sticky;left:0;z-index:2;
+  background:var(--card);border-right:1px solid var(--line)}
+#dash-root .dscroll table.dmini thead th:first-child{z-index:3}
 #dash-root .dliste{margin-top:6px}
 #dash-root .dliste table.dmini td:first-child{font-weight:600}
+/* Un libellé véhicule fait parfois soixante caractères : il se tronque plutôt
+   que de pousser tout le tableau hors de l'écran. */
+#dash-root table.dmini td.coupe{max-width:230px;overflow:hidden;text-overflow:ellipsis;
+  white-space:nowrap;text-align:left}
 #dash-root .dtel{font-family:var(--mono);font-weight:600;color:var(--m-bleu);
   text-decoration:none;border-bottom:1px solid transparent}
 #dash-root .dtel:hover{border-bottom-color:currentColor}
+/* L'arbre marque › affaire › site. Le décalage dit le niveau, la ligne entière
+   est cliquable pour filtrer le tableau de bord sur ce périmètre. */
+#dash-root .darbre tr{cursor:pointer}
+#dash-root .darbre tr:hover td{background:var(--calme-bg)}
+#dash-root .darbre .lv1 td:first-child{font-weight:800;padding-left:7px}
+#dash-root .darbre .lv2 td:first-child{font-weight:700;padding-left:22px;color:var(--ink-2)}
+#dash-root .darbre .lv3 td:first-child{font-weight:500;padding-left:38px;color:var(--ink-2)}
+#dash-root .darbre tr.lv1 td{border-top:1.5px solid var(--line-2)}
+#dash-root .darbre tr.actif td{background:var(--calme-bg)}
+#dash-root .darbre tr.actif td:first-child{box-shadow:inset 3px 0 0 var(--m-bleu)}
+#dash-root .darbre .pli{display:inline-block;width:13px;color:var(--ink-3);font-size:10px}
+#dash-root .dmuet td{color:var(--ink-3)}
+#dash-root .dnote{font-size:11.5px;color:var(--ink-3);margin-top:8px;line-height:1.5}
+/* Le sélecteur de périmètre arborescent : un bouton qui dit où l'on est, et
+   qui déplie marque › affaire › site. */
+#dash-root .dperim{margin-top:10px;max-width:520px}
+#dash-root .dperim-t{display:flex;align-items:center;gap:8px;width:100%;text-align:left;
+  background:var(--card);border:1px solid var(--line);border-radius:9px;padding:8px 12px;
+  font:inherit;font-size:13px;color:var(--ink);cursor:pointer}
+#dash-root .dperim-t:hover{border-color:var(--line-2)}
+#dash-root .dperim-t .cn{margin-left:auto;font-size:11px;color:var(--ink-3);font-weight:600}
+#dash-root .dperim-c{border:1px solid var(--line);border-top:0;border-radius:0 0 9px 9px;
+  background:var(--card);padding:6px;max-height:320px;overflow-y:auto}
+#dash-root .dperim-c button{display:block;width:100%;text-align:left;background:none;border:0;
+  font:inherit;font-size:12.5px;color:var(--ink-2);padding:5px 9px;border-radius:6px;cursor:pointer}
+#dash-root .dperim-c button:hover{background:var(--calme-bg)}
+#dash-root .dperim-c button.actif{background:var(--calme-bg);color:var(--ink);font-weight:700;
+  box-shadow:inset 2px 0 0 var(--m-bleu)}
+#dash-root .dperim-c button.n0{font-weight:700;color:var(--ink)}
+#dash-root .dperim-c button.n2{padding-left:30px}
+#dash-root .dperim-c button em{font-style:normal;font-size:10.5px;color:var(--ink-3)}
+#dash-root .dperim-m > .t{font-size:10px;font-weight:800;letter-spacing:.08em;text-transform:uppercase;
+  color:var(--ink-3);padding:9px 9px 3px}
+#dash-root .dperim-a > .t{font-size:11.5px;font-weight:700;color:var(--ink-2);padding:4px 9px 2px 18px}
+@media (max-width:640px){
+  #dash-root table.dmini td.coupe{max-width:130px}
+  #dash-root .dscroll table.dmini th:first-child,
+  #dash-root .dscroll table.dmini td:first-child{max-width:132px;overflow:hidden;
+    text-overflow:ellipsis;white-space:nowrap}
+}
 #dash-root .dferme{background:none;border:0;font:inherit;font-size:12px;font-weight:600;color:var(--ink-3);
   cursor:pointer;padding:0;margin-top:14px;text-decoration:underline;text-underline-offset:3px}
 #dash-root .dpied{font-size:11.5px;color:var(--ink-3);line-height:1.6;max-width:84ch}
@@ -257,7 +340,8 @@ OD.define('dashboard', {
     // =========================================================================
     const today = new Date();
     const state = { annee: today.getFullYear(), mois: today.getMonth() + 1,
-                    ouvert: null, d: null, site: null, chargement: false };
+                    ouvert: null, d: null, site: null, chargement: false,
+                    perimOuvert: false, arbrePlis: {} };
 
     // Bus de site : la barre du haut et la page partagent le même état. Un
     // changement de site là-haut recharge les chiffres ici, et le sélecteur de
@@ -467,6 +551,20 @@ OD.define('dashboard', {
         + '</tbody></table></div>';
     }
 
+    // Variante : mêmes cellules, mais chaque ligne porte ses propres attributs
+    // (niveau d'arbre, clé de périmètre) et la table une classe. Sert à
+    // l'arborescence marque › affaire › site de la direction.
+    function tableauLignes(entetes, lignes, classeTable) {
+      return '<div class="dscroll"><table class="dmini ' + (classeTable || '') + '"><thead><tr>'
+        + entetes.map(e => '<th>' + e + '</th>').join('')
+        + '</tr></thead><tbody>'
+        + lignes.map(l => '<tr' + (l.attrs || '') + '>' + (l.c || []).map(c =>
+            '<td' + (c && c.cls ? ' class="' + c.cls + '"' : '') + '>'
+            + (c && c.h != null ? c.h : esc(c)) + '</td>'
+          ).join('') + '</tr>').join('')
+        + '</tbody></table></div>';
+    }
+
     // =========================================================================
     //  LES TUILES
     //  Chaque entrée décrit ce qu'elle affiche et ce qu'elle ouvre. Le constat
@@ -482,15 +580,27 @@ OD.define('dashboard', {
     // marketing n'a rien à faire du taux de LOA. Mieux vaut six tuiles utiles
     // que vingt dont douze ne le concernent pas.
     const JEUX = {
+      // Le vendeur : ce sur quoi il agit lui-même dans la journée.
       vendeur:   ['cdes', 'fi', 'acc', 'affaires', 'relance', 'livr', 'leads', 'delai'],
-      chef:      ['cdes', 'fi', 'loa', 'acc', 'roole', 'phev', 'vu',
+      // Le chef : la production de son équipe, plus les objectifs individuels
+      // qu'il suit — PHEV et utilitaires en font partie, ils sont fixés par
+      // vendeur et par mois.
+      chef:      ['cdes', 'fi', 'loa', 'acc', 'roole', 'reprise', 'phev', 'vu',
                   'affaires', 'relance', 'pipeval', 'livr', 'cloturer',
                   'rapports', 'rdv', 'leads', 'delai'],
-      direction: null,   // tout
+      // La direction : les marges et les stocks, pas les objectifs individuels.
+      // PHEV et utilitaires se pilotent au site, pas au groupe — les mettre ici
+      // ne produirait qu'une somme sans destinataire.
+      direction: ['cdes', 'fi', 'loa', 'acc', 'roole', 'reprise',
+                  'affaires', 'relance', 'pipeval', 'livr', 'cloturer',
+                  'leads', 'delai', 'injoignables', 'fusion', 'bloctel'],
       marketing: ['cdes', 'leads', 'delai', 'injoignables', 'fusion', 'bloctel']
     };
     const ETIQ_ROLE = { vendeur: 'Vendeur', chef: 'Chef des ventes',
                         direction: 'Direction', marketing: 'Marketing' };
+    // Le titre dit à qui la page s'adresse, et donc ce qu'on va y trouver.
+    const TITRE_ROLE = { vendeur: 'Votre journée', chef: 'Votre équipe aujourd’hui',
+                         direction: 'Le tableau du groupe', marketing: 'Ce qui entre, ce qui se perd' };
     function familleRole() { return ROLE_FAM[Number((state.d || {}).role)] || 'direction'; }
     function jeuDuRole() { return JEUX[familleRole()] || null; }
     // Un vendeur lit « mes » et non « les » : les libellés s'adaptent.
@@ -513,9 +623,31 @@ OD.define('dashboard', {
     //  compare ses sites, LE VENDEUR NE COMPARE RIEN — il a besoin de noms, de
     //  numéros et d'un ordre de priorité pour sa journée.
     // =========================================================================
+    //  Le découpage se fait par défaut, tuile par tuile, plutôt que d'écrire
+    //  quarante blocs à la main : à la direction l'arborescence de son
+    //  indicateur, au chef le classement de son équipe sur ce même indicateur,
+    //  au marketing les sources. Une tuile peut toujours redéfinir sa vue à la
+    //  main dans `vues` — c'est ce que fait le vendeur, dont les dépliés sont
+    //  des listes d'appels et non des comparatifs.
     function vue(t, champ) {
-      const v = (t.vues || {})[familleRole()];
+      const fam = familleRole();
+      const v = (t.vues || {})[fam];
       if (v && Object.prototype.hasOwnProperty.call(v, champ)) return v[champ];
+
+      if (fam === 'direction') {
+        if (champ === 'arbre') return IND[t.id] ? t.id : null;
+        // Le détail par vendeur n'a pas de sens sur douze affaires et cent
+        // vendeurs : l'arbre le remplace.
+        if (champ === 'table' && IND[t.id]) return () => '';
+        if (champ === 'titre' && IND[t.id]) return t.titre + ' — par marque, affaire et site';
+      }
+      if (fam === 'chef') {
+        if (champ === 'equipe') return VEND[t.id] ? t.id : null;
+        if (champ === 'titre' && VEND[t.id]) return t.titre + ' — votre équipe';
+      }
+      if (fam === 'marketing') {
+        if (champ === 'sources') return (t.id === 'leads' || t.id === 'delai') ? true : null;
+      }
       return t[champ];
     }
 
@@ -526,7 +658,8 @@ OD.define('dashboard', {
     const COL_VENDEUR  = { k: 'vendeur', t: 'Vendeur',
                            h: r => ({ h: '<span class="pale">' + esc(r.vendeur || '—') + '</span>' }) };
     const COL_VEHICULE = { k: 'vehicule', t: 'Véhicule',
-                           h: r => ({ h: r.vehicule ? esc(r.vehicule) : '<span class="pale">—</span>' }) };
+                           h: r => ({ h: r.vehicule ? esc(r.vehicule) : '<span class="pale">—</span>',
+                                      cls: 'coupe' }) };
     const COL_AGE      = { k: 'age', t: 'Ouverte depuis',
                            h: r => ({ h: '<span class="f">' + fmt(r.age) + ' j</span>' }) };
 
@@ -546,6 +679,362 @@ OD.define('dashboard', {
               { k: 'j', t: 'Reçu il y a', h: r => ({ h: '<span class="f">' + fmt(r.jours) + ' j</span>' }) },
               COL_VENDEUR];
     }
+    // =========================================================================
+    //  L'ARBRE CHIFFRÉ — marque › affaire › site
+    //
+    //  C'est la lecture de la direction : elle ne compare pas des vendeurs, elle
+    //  compare des entités. L'arbre agrège les sites en affaires et les affaires
+    //  en marques, additionne les numérateurs et les dénominateurs séparément —
+    //  une moyenne de taux n'est pas un taux — et se replie.
+    //
+    //  Les branches sans activité du mois sont rangées à la fin et repliées :
+    //  sur vingt-sept sites, vingt-quatre sont à zéro pendant le pilote, et les
+    //  laisser au milieu noierait les trois qui produisent.
+    // =========================================================================
+    let CACHE_ARBRE = null;
+    async function chargerArbre() {
+      if (CACHE_ARBRE && CACHE_ARBRE.cle === state.annee + '|' + state.mois) return CACHE_ARBRE.j;
+      const jwt = await getUserJwt();
+      if (!jwt) throw new Error('session absente');
+      const res = await fetch(SUPABASE_URL + '/rest/v1/rpc/dashboard_tc_arbre', {
+        method: 'POST',
+        headers: { 'apikey': SUPABASE_KEY, 'Authorization': 'Bearer ' + jwt,
+                   'Content-Type': 'application/json' },
+        body: JSON.stringify({ p_annee: state.annee, p_mois: state.mois })
+      });
+      if (!res.ok) throw new Error('HTTP ' + res.status);
+      const j = await res.json();
+      CACHE_ARBRE = { cle: state.annee + '|' + state.mois, j: j };
+      return j;
+    }
+
+    // Somme de tous les compteurs d'un ensemble de sites.
+    const CLES_SOMME = ['cdes', 'obj_cdes', 'hors_loueurs', 'fi', 'loa', 'roole', 'reprise',
+                        'phev', 'vu', 'acc_total', 'affaires', 'a_relancer', 'froides',
+                        'livr', 'retard', 'a_cloturer', 'leads', 'leads_jamais'];
+    function somme(sites) {
+      const o = {};
+      CLES_SOMME.forEach(k => { o[k] = sites.reduce((a, s2) => a + num(s2[k]), 0); });
+      o._n = sites.length;
+      return o;
+    }
+
+    function construireArbre(sites) {
+      const marques = [];
+      (sites || []).forEach(s2 => {
+        const mk = s2.reseau || '__sans';
+        let m = marques.find(x => x.k === mk);
+        if (!m) { m = { k: mk, lab: s2.reseau || 'Sans marque', aff: [], sites: [] }; marques.push(m); }
+        m.sites.push(s2);
+        const ak = s2.affaire || '__sans';
+        let a = m.aff.find(x => x.k === ak);
+        if (!a) { a = { k: mk + '|' + ak, lab: s2.affaire || 'Sans affaire', sites: [] }; m.aff.push(a); }
+        a.sites.push(s2);
+      });
+      marques.forEach(m => {
+        m.agg = somme(m.sites);
+        m.aff.forEach(a => {
+          a.agg = somme(a.sites);
+          a.sites.sort((x, y) => num(y.cdes) - num(x.cdes) || String(x.site).localeCompare(String(y.site)));
+        });
+        // Les affaires qui produisent d'abord, les dormantes ensuite.
+        m.aff.sort((a, b) => num(b.agg.cdes) - num(a.agg.cdes) || a.lab.localeCompare(b.lab));
+      });
+      marques.sort((a, b) => num(b.agg.cdes) - num(a.agg.cdes) || a.lab.localeCompare(b.lab));
+      return marques;
+    }
+
+    // Un indicateur décrit comment se lit une cellule de l'arbre : son en-tête,
+    // sa valeur à partir d'un agrégat, et si un petit est mauvais ou bon.
+    const IND = {
+      cdes:     { t: 'Commandes', v: a => fmt(a.cdes),
+                  s: a => num(a.obj_cdes) > 0 ? (pct(a.cdes, a.obj_cdes) + ' % de ' + fmt(a.obj_cdes)) : null,
+                  bon: a => num(a.obj_cdes) > 0 && num(a.cdes) >= num(a.obj_cdes) },
+      fi:       { t: 'Financement', v: a => { const p2 = pct(a.fi, a.hors_loueurs); return p2 == null ? '—' : p2 + ' %'; },
+                  s: a => fmt(a.fi) + ' sur ' + fmt(a.hors_loueurs) },
+      loa:      { t: 'LOA / Easy', v: a => { const p2 = pct(a.loa, a.cdes); return p2 == null ? '—' : p2 + ' %'; } },
+      acc:      { t: 'Accessoires', v: a => num(a.cdes) > 0 ? fmt(Math.round(num(a.acc_total) / num(a.cdes))) + ' €' : '—' },
+      roole:    { t: 'Roole', v: a => { const p2 = pct(a.roole, a.cdes); return p2 == null ? '—' : p2 + ' %'; } },
+      reprise:  { t: 'Reprises', v: a => { const p2 = pct(a.reprise, a.cdes); return p2 == null ? '—' : p2 + ' %'; } },
+      phev:     { t: 'PHEV / EV', v: a => fmt(a.phev) },
+      vu:       { t: 'Utilitaires', v: a => fmt(a.vu) },
+      affaires: { t: 'Affaires ouvertes', v: a => fmt(a.affaires), s: a => fmt(a.froides) + ' froides' },
+      relance:  { t: 'À relancer', v: a => fmt(a.a_relancer) },
+      livr:     { t: 'À livrer', v: a => fmt(a.livr), s: a => fmt(a.retard) + ' en retard' },
+      cloturer: { t: 'À clôturer', v: a => fmt(a.a_cloturer) },
+      leads:    { t: 'Leads 30 j', v: a => fmt(a.leads), s: a => fmt(a.leads_jamais) + ' sans appel' },
+      delai:    { t: 'Leads sans appel', v: a => fmt(a.leads_jamais) }
+    };
+
+    // Rendu de l'arbre pour UN indicateur, plus la colonne commandes comme
+    // repère de volume — un taux sans son volume ne se compare pas.
+    function rendreArbre(j, indCle) {
+      const ind = IND[indCle] || IND.cdes;
+      const marques = construireArbre((j || {}).sites || []);
+      if (!marques.length) return '<p class="ctx">Aucun site dans votre périmètre.</p>';
+      const entetes = ['Périmètre', 'Commandes', ind.t, ''];
+      const lignes = [];
+      let muets = 0;
+
+      const cellules = (agg, lab, niveau, cle, idSite) => {
+        const vide = num(agg.cdes) === 0;
+        const sous = ind.s ? ind.s(agg) : null;
+        return {
+          attrs: ' class="lv' + niveau + (vide ? ' dmuet' : '')
+               + (idSite != null && String(idSite) === String(state.site) ? ' actif' : '') + '"'
+               + (idSite != null ? ' data-site="' + esc(idSite) + '"' : '')
+               + (cle ? ' data-cle="' + esc(cle) + '"' : ''),
+          c: [
+            { h: (niveau < 3 ? '<span class="pli">' + (state.arbrePlis[cle] === false ? '▸' : '▾') + '</span>' : '')
+                 + esc(lab) },
+            { h: '<span class="f">' + fmt(agg.cdes) + '</span>' },
+            { h: '<span class="f"' + (ind.bon && ind.bon(agg) ? ' style="color:var(--m-vert)"' : '') + '>'
+                 + ind.v(agg) + '</span>' },
+            { h: sous ? '<span class="pale">' + sous + '</span>' : '' }
+          ]
+        };
+      };
+
+      marques.forEach(m => {
+        lignes.push(cellules(m.agg, m.lab, 1, 'm:' + m.k, null));
+        if (state.arbrePlis['m:' + m.k] === false) return;
+        m.aff.forEach(a => {
+          if (num(a.agg.cdes) === 0) { muets += a.sites.length; return; }
+          lignes.push(cellules(a.agg, a.lab, 2, 'a:' + a.k, null));
+          if (state.arbrePlis['a:' + a.k] === false) return;
+          a.sites.forEach(s2 => {
+            lignes.push(cellules(s2, s2.site, 3, null, s2.id_site));
+          });
+        });
+      });
+
+      return tableauLignes(entetes, lignes, 'darbre')
+        + (muets > 0 ? '<p class="dnote">' + fmt(muets) + ' sites sans commande ce mois-ci ne sont pas '
+           + 'affichés. Cliquez une ligne pour filtrer le tableau de bord sur ce périmètre.</p>'
+           : '<p class="dnote">Cliquez une ligne pour filtrer le tableau de bord sur ce périmètre.</p>');
+    }
+
+    // =========================================================================
+    //  L'ÉQUIPE — la lecture du chef des ventes
+    //
+    //  Il ne compare pas des sites, il compare des gens. Chaque tuile ouvre sur
+    //  le classement de son équipe pour CET indicateur, avec l'écart à
+    //  l'objectif individuel quand il existe.
+    // =========================================================================
+    let CACHE_EQUIPE = null;
+    async function chargerEquipe() {
+      const cle = state.annee + '|' + state.mois + '|' + state.site;
+      if (CACHE_EQUIPE && CACHE_EQUIPE.cle === cle) return CACHE_EQUIPE.j;
+      const jwt = await getUserJwt();
+      if (!jwt) throw new Error('session absente');
+      const res = await fetch(SUPABASE_URL + '/rest/v1/rpc/dashboard_tc_equipe', {
+        method: 'POST',
+        headers: { 'apikey': SUPABASE_KEY, 'Authorization': 'Bearer ' + jwt,
+                   'Content-Type': 'application/json' },
+        body: JSON.stringify({ p_annee: state.annee, p_mois: state.mois, p_id_site: state.site })
+      });
+      if (!res.ok) throw new Error('HTTP ' + res.status);
+      const j = await res.json();
+      CACHE_EQUIPE = { cle: cle, j: j };
+      return j;
+    }
+
+    // Comment se lit un vendeur pour chaque indicateur : sa valeur, son repère,
+    // et le critère de tri — le plus faible en premier quand c'est un manque.
+    const VEND = {
+      cdes:     { t: 'Commandes', v: v => fmt(v.cdes),
+                  r: v => num(v.obj_cdes) > 0 ? pct(v.cdes, v.obj_cdes) + ' % de ' + fmt(v.obj_cdes) : 'sans objectif',
+                  tri: (a, b) => num(b.cdes) - num(a.cdes),
+                  mauvais: v => num(v.obj_cdes) > 0 && num(v.cdes) < num(v.obj_cdes) },
+      fi:       { t: 'Financement', v: v => { const p2 = pct(v.fi, v.hors_loueurs); return p2 == null ? '—' : p2 + ' %'; },
+                  r: v => fmt(v.fi) + ' sur ' + fmt(v.hors_loueurs),
+                  tri: (a, b) => (pct(a.fi, a.hors_loueurs) || 0) - (pct(b.fi, b.hors_loueurs) || 0),
+                  mauvais: v => num(v.hors_loueurs) >= 5 && (pct(v.fi, v.hors_loueurs) || 0) < 20 },
+      loa:      { t: 'LOA / Easy', v: v => { const p2 = pct(v.loa, v.cdes); return p2 == null ? '—' : p2 + ' %'; },
+                  tri: (a, b) => (pct(a.loa, a.cdes) || 0) - (pct(b.loa, b.cdes) || 0) },
+      acc:      { t: 'Accessoires', v: v => num(v.cdes) > 0 ? fmt(Math.round(num(v.acc_total) / num(v.cdes))) + ' €' : '—',
+                  tri: (a, b) => (num(a.cdes) ? num(a.acc_total) / num(a.cdes) : 0)
+                               - (num(b.cdes) ? num(b.acc_total) / num(b.cdes) : 0) },
+      roole:    { t: 'Roole', v: v => { const p2 = pct(v.roole, v.cdes); return p2 == null ? '—' : p2 + ' %'; },
+                  tri: (a, b) => (pct(a.roole, a.cdes) || 0) - (pct(b.roole, b.cdes) || 0) },
+      reprise:  { t: 'Reprises', v: v => { const p2 = pct(v.reprise, v.cdes); return p2 == null ? '—' : p2 + ' %'; },
+                  tri: (a, b) => (pct(a.reprise, a.cdes) || 0) - (pct(b.reprise, b.cdes) || 0) },
+      phev:     { t: 'PHEV / EV', v: v => fmt(v.phev), tri: (a, b) => num(a.phev) - num(b.phev) },
+      vu:       { t: 'Utilitaires', v: v => fmt(v.vu), tri: (a, b) => num(a.vu) - num(b.vu) },
+      affaires: { t: 'Affaires ouvertes', v: v => fmt(v.affaires),
+                  r: v => fmt(v.froides) + ' froides', tri: (a, b) => num(b.froides) - num(a.froides),
+                  mauvais: v => num(v.affaires) > 0 && num(v.froides) > num(v.affaires) * .5 },
+      relance:  { t: 'À relancer', v: v => fmt(v.a_relancer),
+                  r: v => num(v.plus_vieille) > 0 ? 'la plus vieille : ' + fmt(v.plus_vieille) + ' j' : '',
+                  tri: (a, b) => num(b.a_relancer) - num(a.a_relancer) },
+      livr:     { t: 'À livrer', v: v => fmt(v.livr), r: v => fmt(v.retard) + ' en retard',
+                  tri: (a, b) => num(b.retard) - num(a.retard),
+                  mauvais: v => num(v.retard) > 0 },
+      rapports: { t: 'Rapports 30 j', v: v => fmt(v.rapports),
+                  tri: (a, b) => num(a.rapports) - num(b.rapports),
+                  mauvais: v => num(v.cdes) > 0 && num(v.rapports) === 0 },
+      leads:    { t: 'Leads sans appel', v: v => fmt(v.leads_jamais),
+                  tri: (a, b) => num(b.leads_jamais) - num(a.leads_jamais),
+                  mauvais: v => num(v.leads_jamais) >= 20 },
+      delai:    { t: 'Leads sans appel', v: v => fmt(v.leads_jamais),
+                  tri: (a, b) => num(b.leads_jamais) - num(a.leads_jamais),
+                  mauvais: v => num(v.leads_jamais) >= 20 }
+    };
+
+    function rendreEquipe(j, indCle) {
+      const d = VEND[indCle] || VEND.cdes;
+      // Un vendeur sans commande ni affaire ni lead n'est pas en retard : il
+      // n'est pas en poste. L'afficher ferait passer l'équipe pour deux fois
+      // plus grande qu'elle n'est.
+      const tous = ((j || {}).vendeurs || []).filter(v =>
+        num(v.cdes) + num(v.affaires) + num(v.livr) + num(v.leads_jamais) + num(v.rapports) > 0);
+      if (!tous.length) return '<p class="ctx">Aucune activité sur votre équipe ce mois-ci.</p>';
+      const l = tous.slice().sort(d.tri);
+      const multi = new Set(tous.map(v => v.site)).size > 1;
+      const entetes = ['Vendeur', 'Commandes', d.t, ''].concat(multi ? ['Site'] : []);
+      return tableauLignes(entetes, l.map(v => ({
+        attrs: d.mauvais && d.mauvais(v) ? ' class="dmuet"' : '',
+        c: [
+          { h: '<b>' + esc(v.nom) + '</b>' },
+          { h: '<span class="f">' + fmt(v.cdes) + '</span>' },
+          { h: '<span class="f"' + (d.mauvais && d.mauvais(v) ? ' style="color:var(--m-rouge)"' : '')
+               + '>' + d.v(v) + '</span>' },
+          { h: d.r ? '<span class="pale">' + d.r(v) + '</span>' : '' }
+        ].concat(multi ? [{ h: '<span class="pale">' + esc(v.site || '—') + '</span>' }] : [])
+      })), 'dequipe');
+    }
+
+    // =========================================================================
+    //  LES SOURCES DE LEADS — la lecture du marketing
+    // =========================================================================
+    let CACHE_SOURCES = null;
+    async function chargerSources() {
+      const cle = state.annee + '|' + state.mois + '|' + state.site;
+      if (CACHE_SOURCES && CACHE_SOURCES.cle === cle) return CACHE_SOURCES.j;
+      const jwt = await getUserJwt();
+      if (!jwt) throw new Error('session absente');
+      const res = await fetch(SUPABASE_URL + '/rest/v1/rpc/dashboard_tc_sources', {
+        method: 'POST',
+        headers: { 'apikey': SUPABASE_KEY, 'Authorization': 'Bearer ' + jwt,
+                   'Content-Type': 'application/json' },
+        body: JSON.stringify({ p_annee: state.annee, p_mois: state.mois, p_id_site: state.site })
+      });
+      if (!res.ok) throw new Error('HTTP ' + res.status);
+      const j = await res.json();
+      CACHE_SOURCES = { cle: cle, j: j };
+      return j;
+    }
+
+    function rendreSources(j) {
+      const l = ((j || {}).sources || []);
+      if (!l.length) return '<p class="ctx">Aucun lead sur ce périmètre.</p>';
+      return tableau(['Source', 'Leads', 'Délai médian', 'Jamais appelés', 'Perdus'],
+        l.map(s2 => [
+          { h: '<b>' + esc(s2.source) + '</b>' },
+          { h: '<span class="f">' + fmt(s2.total) + '</span>' },
+          { h: s2.delai_median_h == null ? '<span class="pale">—</span>'
+             : '<span class="f"' + (num(s2.delai_median_h) > 24 ? ' style="color:var(--m-rouge)"' : '')
+               + '>' + String(s2.delai_median_h).replace('.', ',') + ' h</span>' },
+          { h: '<span class="f">' + fmt(s2.jamais) + '</span>' },
+          { h: '<span class="f"' + (num(s2.tx_perdu) >= 70 ? ' style="color:var(--m-rouge)"' : '')
+               + '>' + (s2.tx_perdu == null ? '—' : s2.tx_perdu + ' %') + '</span>' }
+        ]));
+    }
+
+    // =========================================================================
+    //  LES CONSTATS PAR RÔLE
+    //
+    //  La trouvaille est calculée, jamais écrite d'avance. Mais elle se calcule
+    //  sur des données qui arrivent après le dépli (l'arbre, l'équipe) : elle
+    //  est donc réécrite quand elles arrivent, à la place du texte commun.
+    //
+    //  Ce qu'elle cherche n'est pas le même selon le rôle : la direction veut
+    //  savoir QUELLE ENTITÉ décroche et de combien, le chef QUI décroche.
+    // =========================================================================
+    function ecartRelatif(agg, indCle) {
+      // Position d'une entité par rapport au reste, en points ou en pourcentage
+      // selon la nature de l'indicateur.
+      if (indCle === 'cdes') return num(agg.obj_cdes) > 0 ? pct(agg.cdes, agg.obj_cdes) : null;
+      if (indCle === 'fi')   return pct(agg.fi, agg.hors_loueurs);
+      if (indCle === 'loa')  return pct(agg.loa, agg.cdes);
+      if (indCle === 'roole') return pct(agg.roole, agg.cdes);
+      if (indCle === 'reprise') return pct(agg.reprise, agg.cdes);
+      if (indCle === 'acc')  return num(agg.cdes) > 0 ? Math.round(num(agg.acc_total) / num(agg.cdes)) : null;
+      return null;
+    }
+
+    function trouvailleArbre(j, indCle) {
+      const marques = construireArbre((j || {}).sites || []);
+      const aff = [];
+      marques.forEach(m => m.aff.forEach(a => { if (num(a.agg.cdes) > 0) aff.push({ lab: a.lab, agg: a.agg, m: m.lab }); }));
+      if (aff.length < 2) {
+        return '<b>Un seul périmètre produit ce mois-ci.</b> La comparaison entre affaires n’a pas '
+          + 'encore de sens : ' + fmt(aff.length) + ' affaire sur ' + fmt(marques.reduce((n, m) => n + m.aff.length, 0))
+          + ' a enregistré des commandes. C’est le propre d’un déploiement en cours — l’arborescence '
+          + 'ci-contre montre déjà tout le groupe, elle se remplira au fur et à mesure des raccordements.';
+      }
+      const val = aff.map(a => ({ a: a, v: ecartRelatif(a.agg, indCle) })).filter(x => x.v != null);
+      if (val.length < 2) {
+        const tot = somme((j.sites || []));
+        return '<b>' + fmt(tot.cdes) + ' commandes sur l’ensemble du groupe</b>, réparties sur '
+          + fmt(aff.length) + ' affaires. Le détail par entité est dans l’arborescence.';
+      }
+      val.sort((x, y) => y.v - x.v);
+      const haut = val[0], bas = val[val.length - 1];
+      const unite = indCle === 'acc' ? ' €' : ' %';
+      const ecart = Math.round(haut.v - bas.v);
+      return '<b>' + esc(haut.a.lab) + ' est à ' + haut.v + unite + ', ' + esc(bas.a.lab)
+        + ' à ' + bas.v + unite + '.</b> ' + ecart + (indCle === 'acc' ? ' € ' : ' points ')
+        + 'séparent la meilleure affaire de la dernière, sur le même produit et le même mois. '
+        + 'Un écart de cette taille ne vient pas du marché local : il vient de ce qui se fait, ou '
+        + 'ne se fait pas, au moment de la vente. L’arborescence dit à quel site il se loge.';
+    }
+
+    function trouvailleEquipe(j, indCle) {
+      const d = VEND[indCle] || VEND.cdes;
+      const l = ((j || {}).vendeurs || []).filter(v =>
+        num(v.cdes) + num(v.affaires) + num(v.livr) + num(v.leads_jamais) + num(v.rapports) > 0);
+      if (!l.length) return 'Aucune activité sur votre équipe ce mois-ci.';
+      const mauvais = d.mauvais ? l.filter(d.mauvais) : [];
+      if (mauvais.length) {
+        const m = mauvais.slice().sort(d.tri)[0];
+        const autres = mauvais.length - 1;
+        return '<b>' + esc(m.nom) + ' : ' + d.v(m) + (d.r ? ' — ' + d.r(m) : '') + '.</b> '
+          + (autres > 0
+             ? autres + ' autre' + (autres > 1 ? 's sont' : ' est') + ' dans le même cas. '
+             : '')
+          + 'Le classement ci-contre est trié du plus en retard au moins : la première ligne est '
+          + 'l’entretien à mener cette semaine, pas la moyenne de l’équipe.';
+      }
+      const tete = l.slice().sort(d.tri)[0];
+      return '<b>Personne ne décroche sur cet indicateur.</b> ' + esc(tete.nom) + ' ouvre le '
+        + 'classement à ' + d.v(tete) + '. Quand l’équipe se tient, l’écart utile n’est plus entre '
+        + 'ses membres mais avec les autres sites — le tableau de bord de la direction le montre.';
+    }
+
+    // Le marketing ne cherche pas un coupable mais une corrélation : les sources
+    // traitées vite se perdent moins. Si elle est là, on la montre.
+    function trouvailleSources(j) {
+      const l = ((j || {}).sources || []).filter(s2 => num(s2.total) >= 20 && s2.delai_median_h != null);
+      if (l.length < 2) return 'Pas encore assez de sources mesurées pour comparer les délais.';
+      const vite = l.slice().sort((a, b) => num(a.delai_median_h) - num(b.delai_median_h))[0];
+      const lent = l.slice().sort((a, b) => num(b.delai_median_h) - num(a.delai_median_h))[0];
+      if (vite.source === lent.source) return 'Une seule source exploitable pour l’instant.';
+      const gagne = num(lent.tx_perdu) - num(vite.tx_perdu);
+      return '<b>' + esc(vite.source) + ' est rappelée en '
+        + String(vite.delai_median_h).replace('.', ',') + ' h et perd ' + num(vite.tx_perdu)
+        + ' % de ses leads ; ' + esc(lent.source) + ' attend '
+        + String(lent.delai_median_h).replace('.', ',') + ' h et en perd ' + num(lent.tx_perdu)
+        + ' %.</b> '
+        + (gagne > 5
+           ? gagne + ' points de perte séparent les deux, et ce qui les sépare n’est pas la qualité '
+             + 'du lead — c’est le délai de rappel. Une source n’est jamais mauvaise en soi : elle '
+             + 'est mal servie.'
+           : 'Le délai ne suffit pas ici à expliquer l’écart de perte : le motif de fin n’est '
+             + 'presque jamais renseigné, et sans lui aucune source ne peut être jugée sur sa '
+             + 'rentabilité.');
+    }
+
     function jourCourt(d) {
       if (!d) return '—';
       const x = new Date(d);
@@ -1228,6 +1717,7 @@ OD.define('dashboard', {
     // =========================================================================
     function phraseDuJour() {
       if (familleRole() === 'vendeur') return phraseVendeur();
+      if (familleRole() === 'marketing') return phraseMarketing();
       const d = state.d, p = d.prod || {}, o = d.obj || {}, ld = d.leads || {};
       const bouts = [];
       const objCde = num(o.cdes);
@@ -1293,6 +1783,29 @@ OD.define('dashboard', {
         + (faire.length ? faire.join(', ') + ' et ' + dernier : dernier) + '.';
     }
 
+    // Le marketing ne pilote ni le volume ni la marge : il pilote l'entrée —
+    // ce qui arrive, à quelle vitesse c'est traité, et ce que la base permet
+    // encore de faire.
+    function phraseMarketing() {
+      const d = state.d, ld = d.leads || {}, ba = d.base;
+      const bouts = ['<b>' + fmt(ld.recus_30j) + ' leads</b> reçus en trente jours'];
+      if (num(ld.jamais_contactes) > 0) {
+        bouts.push('<b>' + fmt(ld.jamais_contactes) + '</b> attribués sans un seul appel tracé');
+      }
+      let ph = bouts.join(', ') + '.';
+      if (num(ld.delai_median_h) > 1) {
+        ph += ' Le délai médian de premier contact est de <b>'
+          + String(ld.delai_median_h).replace('.', ',') + ' heures</b> — la probabilité de joindre '
+          + 'un prospect s’effondre après la première.';
+      }
+      if (ba && num(ba.fiches) > 0) {
+        const p2 = pct(ba.injoignables, ba.fiches);
+        ph += ' Sur ' + fmt(ba.fiches) + ' fiches, <b>' + fmt(ba.injoignables)
+          + '</b> n’ont ni téléphone ni e-mail' + (p2 != null ? ' (' + p2 + ' %)' : '') + '.';
+      }
+      return ph;
+    }
+
     function nomSite(id) {
       const s2 = (state.d.perimetre || []).find(x => String(x.id_site) === String(id));
       return s2 ? (s2.nom || ('site ' + id)) : ('site ' + id);
@@ -1303,16 +1816,42 @@ OD.define('dashboard', {
     // sont communs, les deux derniers changent.
     function pouls() {
       const d = state.d, m = d.meteo || {}, lv = d.livr || {}, pi = d.pipe || {},
-            ld = d.leads || {};
-      const v = familleRole() === 'vendeur';
-      return [
-        { n: fmt(m.cdes_jour), l: 'commande' + (num(m.cdes_jour) > 1 ? 's' : '') + '<br>aujourd’hui' },
-        { n: fmt(m.devis_jour), l: 'devis<br>ouverts' },
-        v ? { n: fmt(lv.retard), l: 'livraison' + (num(lv.retard) > 1 ? 's' : '') + '<br>en retard' }
-          : { n: fmt(lv.semaine), l: 'livraison' + (num(lv.semaine) > 1 ? 's' : '') + '<br>cette semaine' },
-        v ? { n: fmt(ld.jamais_contactes), l: 'leads<br>jamais appelés' }
-          : { n: fmt(pi.a_relancer), l: 'affaires<br>à relancer' }
-      ].map(x => '<div><div class="n">' + x.n + '</div><div class="l">' + x.l + '</div></div>').join('');
+            ld = d.leads || {}, ba = d.base;
+      const fam = familleRole();
+      let r;
+      if (fam === 'vendeur') {
+        r = [
+          { n: fmt(m.cdes_jour), l: 'commande' + (num(m.cdes_jour) > 1 ? 's' : '') + '<br>aujourd’hui' },
+          { n: fmt(m.devis_jour), l: 'devis<br>ouverts' },
+          { n: fmt(lv.retard), l: 'livraison' + (num(lv.retard) > 1 ? 's' : '') + '<br>en retard' },
+          { n: fmt(ld.jamais_contactes), l: 'leads<br>jamais appelés' }
+        ];
+      } else if (fam === 'marketing') {
+        r = [
+          { n: fmt(ld.recus_30j), l: 'leads reçus<br>sur 30 jours' },
+          { n: fmt(ld.jamais_contactes), l: 'jamais<br>appelés' },
+          { n: ld.delai_median_h == null ? '—' : String(ld.delai_median_h).replace('.', ','),
+            l: 'heures avant<br>le premier appel' },
+          { n: ba ? fmt(ba.injoignables) : '—', l: 'fiches<br>injoignables' }
+        ];
+      } else if (fam === 'direction') {
+        // Au niveau groupe, le pouls du jour ne dit rien : un directeur regarde
+        // ce qui est engagé et ce qui traîne, pas les commandes de la matinée.
+        r = [
+          { n: fmt(pi.dossiers), l: 'dossiers<br>au pipe' },
+          { n: fmt(pi.froides), l: 'affaires<br>froides' },
+          { n: fmt(lv.retard), l: 'livraisons<br>en retard' },
+          { n: fmt(lv.a_cloturer), l: 'dossiers<br>à clôturer' }
+        ];
+      } else {
+        r = [
+          { n: fmt(m.cdes_jour), l: 'commande' + (num(m.cdes_jour) > 1 ? 's' : '') + '<br>aujourd’hui' },
+          { n: fmt(m.devis_jour), l: 'devis<br>ouverts' },
+          { n: fmt(lv.semaine), l: 'livraison' + (num(lv.semaine) > 1 ? 's' : '') + '<br>cette semaine' },
+          { n: fmt(pi.a_relancer), l: 'affaires<br>à relancer' }
+        ];
+      }
+      return r.map(x => '<div><div class="n">' + x.n + '</div><div class="l">' + x.l + '</div></div>').join('');
     }
 
     let TUILES = [];
@@ -1340,8 +1879,7 @@ OD.define('dashboard', {
       }).join('');
 
       r.innerHTML = '<div class="dw">'
-        + '<div class="drail"><h1>' + (familleRole() === 'vendeur' ? 'Votre journée'
-                                                                  : 'Le tableau du jour') + '</h1>'
+        + '<div class="drail"><h1>' + esc(TITRE_ROLE[familleRole()] || 'Le tableau du jour') + '</h1>'
         + '<span class="dt">' + esc(dateLongue()) + '</span>'
         + selecteurPerimetre()
         + '<span class="drole">' + esc(ETIQ_ROLE[familleRole()] || '') + '</span></div>'
@@ -1362,11 +1900,19 @@ OD.define('dashboard', {
       r.querySelectorAll('.dtuile').forEach(b =>
         b.addEventListener('click', () => basculer(b.getAttribute('data-id'))));
 
-      r.querySelectorAll('.dseg button[data-site]').forEach(b =>
+      const bascule = r.querySelector('.dperim-t');
+      if (bascule) bascule.addEventListener('click', () => {
+        state.perimOuvert = !state.perimOuvert;
+        rendre();
+        if (state.ouvert) basculer(state.ouvert);
+      });
+
+      r.querySelectorAll('.dseg button[data-site], .dperim-c button[data-site]').forEach(b =>
         b.addEventListener('click', () => {
           const v = b.getAttribute('data-site');
           const site = v === '' ? null : Number(v);
-          if (String(site) === String(state.site)) return;
+          state.perimOuvert = false;
+          if (String(site) === String(state.site)) { rendre(); if (state.ouvert) basculer(state.ouvert); return; }
           state.site = site;
           // On repousse le choix vers la barre du haut pour que les deux
           // sélecteurs ne se contredisent jamais. « Tout mon périmètre » n'est
@@ -1387,7 +1933,8 @@ OD.define('dashboard', {
       try {
         const d = await charger();
         if (mien !== jeton) return;            // un autre changement est passé devant
-        CACHE_LISTES = {};                      // périmètre changé : les listes aussi
+        // Périmètre ou mois changé : tout ce qui en dépend est périmé.
+        CACHE_LISTES = {}; CACHE_EQUIPE = null; CACHE_SOURCES = null;
         state.d = d;
         TUILES = tuiles();
         state.ouvert = null;
@@ -1406,20 +1953,80 @@ OD.define('dashboard', {
       return TUILES.some(t => t.id === prefere) ? prefere : (TUILES[0] && TUILES[0].id);
     }
 
-    // Le sélecteur n'apparaît qu'à partir de deux sites : pour un vendeur ou un
-    // chef mono-site, il n'y aurait qu'un bouton et rien à choisir.
+    // -------------------------------------------------------------------------
+    //  Le périmètre
+    //
+    //  Une rangée de vingt-sept boutons n'est pas un sélecteur, c'est une liste
+    //  à lire. Au-delà de six sites, le choix passe par l'arborescence réelle du
+    //  groupe — marque › affaire › site — celle que Performances utilise déjà.
+    //  En dessous, la rangée reste plus rapide qu'un arbre à deux branches.
+    // -------------------------------------------------------------------------
+    function arbrePerimetre() {
+      const per = (state.d.perimetre || []).slice();
+      const marques = [];
+      per.forEach(s2 => {
+        const mk = s2.reseau || '__sans';
+        let m = marques.find(x => x.k === mk);
+        if (!m) { m = { k: mk, lab: s2.reseau || 'Sans marque', aff: [] }; marques.push(m); }
+        const ak = s2.affaire || '__sans';
+        let a = m.aff.find(x => x.k === ak);
+        if (!a) { a = { k: ak, lab: s2.affaire || 'Sans affaire', sites: [] }; m.aff.push(a); }
+        a.sites.push(s2);
+      });
+      marques.sort((a, b) => a.k === '__sans' ? 1 : b.k === '__sans' ? -1 : a.lab.localeCompare(b.lab));
+      marques.forEach(m => {
+        m.aff.sort((a, b) => a.lab.localeCompare(b.lab));
+        m.aff.forEach(a => a.sites.sort((x, y) => String(x.nom).localeCompare(String(y.nom))));
+      });
+      return marques;
+    }
+
     function selecteurPerimetre() {
       const per = (state.d.perimetre || []);
       if (per.length < 2) return '';
-      let h = '<div class="dseg" role="group" aria-label="Périmètre">'
-        + '<button data-site="" aria-pressed="' + (state.site == null) + '">Tout mon périmètre</button>'
-        + '<span class="sep"></span>';
-      per.forEach(s2 => {
-        h += '<button data-site="' + esc(s2.id_site) + '" aria-pressed="'
-          + (String(state.site) === String(s2.id_site)) + '">' + esc(s2.nom || ('Site ' + s2.id_site))
-          + '</button>';
+      if (per.length <= 6) {
+        let h = '<div class="dseg" role="group" aria-label="Périmètre">'
+          + '<button data-site="" aria-pressed="' + (state.site == null) + '">Tout mon périmètre</button>'
+          + '<span class="sep"></span>';
+        per.forEach(s2 => {
+          h += '<button data-site="' + esc(s2.id_site) + '" aria-pressed="'
+            + (String(state.site) === String(s2.id_site)) + '">' + esc(s2.nom || ('Site ' + s2.id_site))
+            + '</button>';
+        });
+        return h + '</div>';
+      }
+
+      // Au-delà : l'arbre. Il s'ouvre replié sur la branche du site courant, ou
+      // entièrement replié en vue groupe — vingt-sept lignes dépliées d'entrée
+      // seraient le même mur que vingt-sept boutons.
+      const marques = arbrePerimetre();
+      const courant = state.site;
+      let h = '<div class="dperim"><button class="dperim-t" type="button" aria-expanded="'
+        + String(!!state.perimOuvert) + '">'
+        + '<span class="pli">' + (state.perimOuvert ? '▾' : '▸') + '</span> '
+        + '<b>' + esc(courant == null ? 'Tout mon périmètre' : nomSite(courant)) + '</b>'
+        + '<span class="cn">' + per.length + ' sites · ' + marques.length + ' marque'
+        + (marques.length > 1 ? 's' : '') + '</span></button>';
+      if (!state.perimOuvert) return h + '</div>';
+
+      h += '<div class="dperim-c"><button class="n0' + (courant == null ? ' actif' : '')
+        + '" type="button" data-site="">Tout mon périmètre</button>';
+      marques.forEach(m => {
+        h += '<div class="dperim-m"><div class="t">' + esc(m.lab) + '</div>';
+        m.aff.forEach(a => {
+          h += '<div class="dperim-a"><div class="t">' + esc(a.lab) + '</div>';
+          a.sites.forEach(s2 => {
+            const actif = String(courant) === String(s2.id_site);
+            h += '<button class="n2' + (actif ? ' actif' : '') + '" type="button" data-site="'
+              + esc(s2.id_site) + '">' + esc(s2.nom)
+              + (s2.type_site && s2.type_site !== 'vente'
+                 ? ' <em>' + esc(s2.type_site) + '</em>' : '') + '</button>';
+          });
+          h += '</div>';
+        });
+        h += '</div>';
       });
-      return h + '</div>';
+      return h + '</div></div>';
     }
 
     function dateLongue() {
@@ -1448,6 +2055,7 @@ OD.define('dashboard', {
       const titre = vue(t, 'titre'), ctx = vue(t, 'ctx');
       const fTrouve = vue(t, 'trouve'), fTable = vue(t, 'table');
       const bloc = vue(t, 'liste'), fCols = vue(t, 'cols');
+      const arbre = vue(t, 'arbre'), equipe = vue(t, 'equipe'), sources = vue(t, 'sources');
       let trouve = '', table = '';
       try { trouve = fTrouve ? fTrouve() : ''; } catch (e) { console.error('[dash] trouvaille', id, e); }
       try { table = fTable ? fTable() : ''; } catch (e) { console.error('[dash] table', id, e); }
@@ -1456,6 +2064,9 @@ OD.define('dashboard', {
         + '<h3>' + esc(titre) + '</h3><p class="ctx">' + esc(ctx) + '</p>'
         + (t.statique ? '' : graphe(t.vals, t.forme, t.lm, t.gUnite, t.second, titre))
         + table
+        + (arbre ? '<div class="darbre-z"><p class="ctx">Chargement de l’arborescence…</p></div>' : '')
+        + (equipe ? '<div class="dequipe-z"><p class="ctx">Chargement de l’équipe…</p></div>' : '')
+        + (sources ? '<div class="dsources-z"><p class="ctx">Chargement des sources…</p></div>' : '')
         + (bloc ? '<div class="dliste" data-bloc="' + esc(bloc) + '">'
                   + '<p class="ctx">Chargement de la liste…</p></div>' : '')
         + '</div><div style="min-width:0">'
@@ -1463,6 +2074,66 @@ OD.define('dashboard', {
         + '<button class="dferme" type="button">Refermer</button></div></section>';
       zone.querySelector('.dferme').addEventListener('click', fermer);
       try { zone.scrollIntoView({ behavior: 'smooth', block: 'nearest' }); } catch (e) { }
+
+      // L'arborescence de la direction. Cliquer une ligne de marque ou d'affaire
+      // la replie ; cliquer un site filtre tout le tableau de bord dessus.
+      if (arbre) {
+        const zA = zone.querySelector('.darbre-z');
+        chargerArbre().then(j => {
+          if (state.ouvert !== id || !zA.isConnected) return;
+          zA.innerHTML = rendreArbre(j, arbre);
+          // Le constat se réécrit sur les données réelles de l'arbre : il nomme
+          // l'entité qui décroche, pas un vendeur.
+          const zT = zone.querySelector('.dtrouve');
+          if (zT) zT.innerHTML = '<div class="t">Ce que le chiffre ne dit pas</div>'
+            + trouvailleArbre(j, arbre);
+          zA.querySelectorAll('tr[data-cle], tr[data-site]').forEach(tr => {
+            tr.addEventListener('click', () => {
+              const site = tr.getAttribute('data-site');
+              if (site != null) {
+                state.site = Number(site);
+                try { const b = siteBus(); if (b) b.setSiteId(Number(site)); } catch (e) { }
+                recharger();
+                return;
+              }
+              const cle = tr.getAttribute('data-cle');
+              state.arbrePlis[cle] = state.arbrePlis[cle] === false ? true : false;
+              fermer(); basculer(id);       // le dépli se redessine avec le nouveau pli
+            });
+          });
+        }).catch(e => {
+          console.error('[dash] arbre', e);
+          if (zA.isConnected) zA.innerHTML = '<p class="ctx">L’arborescence n’a pas pu être chargée.</p>';
+        });
+      }
+
+      if (equipe) {
+        const zE = zone.querySelector('.dequipe-z');
+        chargerEquipe().then(j => {
+          if (state.ouvert !== id || !zE.isConnected) return;
+          zE.innerHTML = rendreEquipe(j, equipe);
+          const zT = zone.querySelector('.dtrouve');
+          if (zT) zT.innerHTML = '<div class="t">Ce que le chiffre ne dit pas</div>'
+            + trouvailleEquipe(j, equipe);
+        }).catch(e => {
+          console.error('[dash] equipe', e);
+          if (zE.isConnected) zE.innerHTML = '<p class="ctx">L’équipe n’a pas pu être chargée.</p>';
+        });
+      }
+
+      if (sources) {
+        const zS = zone.querySelector('.dsources-z');
+        chargerSources().then(j => {
+          if (state.ouvert !== id || !zS.isConnected) return;
+          zS.innerHTML = rendreSources(j);
+          const zT = zone.querySelector('.dtrouve');
+          if (zT) zT.innerHTML = '<div class="t">Ce que le chiffre ne dit pas</div>'
+            + trouvailleSources(j);
+        }).catch(e => {
+          console.error('[dash] sources', e);
+          if (zS.isConnected) zS.innerHTML = '<p class="ctx">Les sources n’ont pas pu être chargées.</p>';
+        });
+      }
 
       // La liste arrive après coup. Le dépli reste utilisable pendant ce temps,
       // et si la tuile a changé entre-temps on n'écrit rien.
