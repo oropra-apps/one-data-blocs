@@ -1,5 +1,5 @@
 // ============================================================================
-//  DASHBOARD — module One Data (OD.define)   v29 — PROFIL TEAM COLIN
+//  DASHBOARD — module One Data (OD.define)   v30 — PROFIL TEAM COLIN
 //
 //  Cette version est réservée au tenant Team Colin (ref ieztupavcdnubmpbjvuq),
 //  où elle est épinglée. Le défaut du registre reste la v25 « Tour de
@@ -23,6 +23,18 @@
 //  Une pastille devant chaque famille dit l'état de sa source : alimentée,
 //  partielle, ou sans donnée. Une famille sans source n'est pas masquée — une
 //  tuile vide dit ce qui manque, une tuile absente ne dit rien.
+//
+//  LE PÉRIMÈTRE — TOUS LES NIVEAUX (v30)
+//  Le sélecteur ne savait choisir qu'un site : vingt-sept boutons à plat, puis
+//  un menu qui ne rendait cliquables que les feuilles. Un directeur de groupe ne
+//  pouvait ni isoler TOYOTA, ni une affaire.
+//  Il est remplacé par un TABLEAU dont chaque ligne est un choix — le groupe,
+//  une marque, une affaire, un site — sur le modèle du périmètre du suivi
+//  d'activité : le chevron plie la branche, le reste de la ligne sélectionne.
+//  Chaque ligne porte ses chiffres (commandes / objectif, à relancer, retards),
+//  tirés de l'arbre chargé avec la page.
+//  Dessous, les fonctions SQL acceptent désormais une LISTE de sites
+//  (p_sites numeric[]), toujours bornée au périmètre réel de l'utilisateur.
 //
 //  PAR RÔLE — QUATRE PAGES, PAS UNE PAGE FILTRÉE (v29)
 //
@@ -242,6 +254,7 @@ OD.define('dashboard', {
 #dash-root table.dmini td:first-child{text-align:left;white-space:normal}
 #dash-root table.dmini .f{font-family:var(--mono);font-weight:600}
 #dash-root table.dmini .pale{color:var(--ink-3)}
+#dash-root table.dmini .mauvais{color:var(--m-rouge)}
 /* Le conteneur défile, pas la page — et la première colonne reste ancrée : sans
    elle on perdait de vue à qui appartenait la ligne qu'on lisait. Même principe
    que l'arbre de Performances. */
@@ -273,27 +286,31 @@ OD.define('dashboard', {
 #dash-root .darbre .pli{display:inline-block;width:13px;color:var(--ink-3);font-size:10px}
 #dash-root .dmuet td{color:var(--ink-3)}
 #dash-root .dnote{font-size:11.5px;color:var(--ink-3);margin-top:8px;line-height:1.5}
-/* Le sélecteur de périmètre arborescent : un bouton qui dit où l'on est, et
-   qui déplie marque › affaire › site. */
-#dash-root .dperim{margin-top:10px;max-width:520px}
-#dash-root .dperim-t{display:flex;align-items:center;gap:8px;width:100%;text-align:left;
-  background:var(--card);border:1px solid var(--line);border-radius:9px;padding:8px 12px;
-  font:inherit;font-size:13px;color:var(--ink);cursor:pointer}
-#dash-root .dperim-t:hover{border-color:var(--line-2)}
-#dash-root .dperim-t .cn{margin-left:auto;font-size:11px;color:var(--ink-3);font-weight:600}
-#dash-root .dperim-c{border:1px solid var(--line);border-top:0;border-radius:0 0 9px 9px;
-  background:var(--card);padding:6px;max-height:320px;overflow-y:auto}
-#dash-root .dperim-c button{display:block;width:100%;text-align:left;background:none;border:0;
-  font:inherit;font-size:12.5px;color:var(--ink-2);padding:5px 9px;border-radius:6px;cursor:pointer}
-#dash-root .dperim-c button:hover{background:var(--calme-bg)}
-#dash-root .dperim-c button.actif{background:var(--calme-bg);color:var(--ink);font-weight:700;
-  box-shadow:inset 2px 0 0 var(--m-bleu)}
-#dash-root .dperim-c button.n0{font-weight:700;color:var(--ink)}
-#dash-root .dperim-c button.n2{padding-left:30px}
-#dash-root .dperim-c button em{font-style:normal;font-size:10.5px;color:var(--ink-3)}
-#dash-root .dperim-m > .t{font-size:10px;font-weight:800;letter-spacing:.08em;text-transform:uppercase;
-  color:var(--ink-3);padding:9px 9px 3px}
-#dash-root .dperim-a > .t{font-size:11.5px;font-weight:700;color:var(--ink-2);padding:4px 9px 2px 18px}
+/* Le périmètre : un tableau dont chaque ligne est un choix — le groupe, une
+   marque, une affaire, un site. Le chevron plie, le reste de la ligne choisit.
+   Même mécanique que le périmètre du suivi d'activité. */
+#dash-root .dportee{font-size:11px;font-weight:700;color:var(--ink-2);background:var(--calme-bg);
+  padding:3px 9px;border-radius:20px}
+#dash-root .dperim{margin-top:0;background:var(--card);border:1px solid var(--line);
+  border-radius:11px;box-shadow:var(--ombre);overflow:hidden}
+#dash-root .dperim-h{display:flex;align-items:baseline;gap:10px;padding:10px 14px 6px;
+  font-size:12px;font-weight:800;letter-spacing:.02em;color:var(--ink)}
+#dash-root .dperim-h .cn{font-size:10.5px;font-weight:600;color:var(--ink-3);letter-spacing:0}
+#dash-root .dperim .dscroll{max-height:290px;overflow-y:auto}
+#dash-root table.dperimt{min-width:0}
+#dash-root table.dperimt td{border-top:1px solid var(--line);padding:4px 14px;cursor:pointer}
+#dash-root table.dperimt td:first-child{text-align:left;white-space:nowrap}
+#dash-root table.dperimt tr:first-child td{border-top:0}
+#dash-root table.dperimt tr:hover td{background:var(--calme-bg)}
+#dash-root table.dperimt tr.actif td{background:var(--calme-bg);font-weight:800;color:var(--ink)}
+#dash-root table.dperimt tr.actif td:first-child{box-shadow:inset 3px 0 0 var(--m-bleu)}
+#dash-root table.dperimt tr.lv1 td:first-child{font-weight:700}
+#dash-root table.dperimt tr.lv2 td:first-child{padding-left:30px;font-weight:600;color:var(--ink-2)}
+#dash-root table.dperimt tr.lv3 td:first-child{padding-left:50px;font-weight:400;color:var(--ink-2)}
+#dash-root table.dperimt .pli{display:inline-block;width:15px;color:var(--ink-3);font-size:10px}
+#dash-root table.dperimt .pli[data-role="pli"]{cursor:pointer;border-radius:3px}
+#dash-root table.dperimt .pli[data-role="pli"]:hover{background:var(--line)}
+#dash-root table.dperimt em{font-style:normal;font-size:10.5px}
 @media (max-width:640px){
   #dash-root table.dmini td.coupe{max-width:130px}
   #dash-root .dscroll table.dmini th:first-child,
@@ -339,9 +356,32 @@ OD.define('dashboard', {
     //  DONNÉES
     // =========================================================================
     const today = new Date();
+    // Le périmètre n'est plus un site mais un NIVEAU : le groupe entier, une
+    // marque, une affaire ou un site. state.site ne garde que le cas « un seul
+    // site », parce que c'est la seule chose que la barre du haut sait porter.
     const state = { annee: today.getFullYear(), mois: today.getMonth() + 1,
                     ouvert: null, d: null, site: null, chargement: false,
-                    perimOuvert: false, arbrePlis: {} };
+                    sel: { level: 'all', key: null, label: 'Tout mon périmètre' },
+                    plis: {}, arbrePlis: {} };
+
+    // Les sites couverts par la sélection courante. null = tout le périmètre,
+    // et c'est ce que les fonctions SQL attendent pour ne rien filtrer.
+    function sitesSelection() {
+      const per = ((state.d || {}).perimetre || []);
+      const s = state.sel;
+      if (!s || s.level === 'all') return null;
+      if (s.level === 'reseau')
+        return per.filter(x => (x.reseau || '__sans') === s.key).map(x => Number(x.id_site));
+      if (s.level === 'affaire')
+        return per.filter(x => (x.affaire || '__sans') === s.key).map(x => Number(x.id_site));
+      if (s.level === 'site') return [Number(s.key)];
+      return null;
+    }
+
+    // Ce que la sélection vaut pour la barre du haut : un site, ou rien.
+    function siteSelection() {
+      return (state.sel && state.sel.level === 'site') ? Number(state.sel.key) : null;
+    }
 
     // Bus de site : la barre du haut et la page partagent le même état. Un
     // changement de site là-haut recharge les chiffres ici, et le sélecteur de
@@ -357,14 +397,15 @@ OD.define('dashboard', {
       if (!b) { if (essais < 120) setTimeout(() => brancherBus(essais + 1), 250); return; }
       try {
         const id = b.getSiteId();
-        if (id != null && String(id) !== String(state.site)) { state.site = Number(id); recharger(); }
+        if (id != null && String(id) !== String(siteSelection())) { poserSite(Number(id)); recharger(); }
       } catch (e) { }
       if (window.__dashTcBusBound) return;
       window.__dashTcBusBound = true;
       b.onChange(({ siteId }) => {
         const v = siteId == null ? null : Number(siteId);
-        if (String(v) === String(state.site)) return;
-        state.site = v;
+        if (String(v) === String(siteSelection())) return;
+        if (v == null) state.sel = { level: 'all', key: null, label: 'Tout mon périmètre' };
+        else poserSite(v);
         recharger();
       });
     }
@@ -376,7 +417,8 @@ OD.define('dashboard', {
         method: 'POST',
         headers: { 'apikey': SUPABASE_KEY, 'Authorization': 'Bearer ' + jwt,
                    'Content-Type': 'application/json' },
-        body: JSON.stringify({ p_annee: state.annee, p_mois: state.mois, p_id_site: state.site })
+        body: JSON.stringify({ p_annee: state.annee, p_mois: state.mois,
+                               p_id_site: siteSelection(), p_sites: sitesSelection() })
       });
       if (!res.ok) throw new Error('HTTP ' + res.status);
       return await res.json();
@@ -394,7 +436,7 @@ OD.define('dashboard', {
     // -------------------------------------------------------------------------
     let CACHE_LISTES = {};
     async function chargerListe(bloc) {
-      const cle = bloc + '|' + state.annee + '|' + state.mois + '|' + state.site;
+      const cle = bloc + '|' + cleSel();
       if (CACHE_LISTES[cle]) return CACHE_LISTES[cle];
       const jwt = await getUserJwt();
       if (!jwt) throw new Error('session absente');
@@ -403,7 +445,8 @@ OD.define('dashboard', {
         headers: { 'apikey': SUPABASE_KEY, 'Authorization': 'Bearer ' + jwt,
                    'Content-Type': 'application/json' },
         body: JSON.stringify({ p_bloc: bloc, p_annee: state.annee, p_mois: state.mois,
-                               p_id_site: state.site, p_limite: 60 })
+                               p_id_site: siteSelection(), p_limite: 60,
+                               p_sites: sitesSelection() })
       });
       if (!res.ok) throw new Error('HTTP ' + res.status);
       const j = await res.json();
@@ -781,7 +824,7 @@ OD.define('dashboard', {
         const sous = ind.s ? ind.s(agg) : null;
         return {
           attrs: ' class="lv' + niveau + (vide ? ' dmuet' : '')
-               + (idSite != null && String(idSite) === String(state.site) ? ' actif' : '') + '"'
+               + (idSite != null && String(idSite) === String(siteSelection()) ? ' actif' : '') + '"'
                + (idSite != null ? ' data-site="' + esc(idSite) + '"' : '')
                + (cle ? ' data-cle="' + esc(cle) + '"' : ''),
           c: [
@@ -823,7 +866,7 @@ OD.define('dashboard', {
     // =========================================================================
     let CACHE_EQUIPE = null;
     async function chargerEquipe() {
-      const cle = state.annee + '|' + state.mois + '|' + state.site;
+      const cle = cleSel();
       if (CACHE_EQUIPE && CACHE_EQUIPE.cle === cle) return CACHE_EQUIPE.j;
       const jwt = await getUserJwt();
       if (!jwt) throw new Error('session absente');
@@ -831,7 +874,8 @@ OD.define('dashboard', {
         method: 'POST',
         headers: { 'apikey': SUPABASE_KEY, 'Authorization': 'Bearer ' + jwt,
                    'Content-Type': 'application/json' },
-        body: JSON.stringify({ p_annee: state.annee, p_mois: state.mois, p_id_site: state.site })
+        body: JSON.stringify({ p_annee: state.annee, p_mois: state.mois,
+                               p_id_site: siteSelection(), p_sites: sitesSelection() })
       });
       if (!res.ok) throw new Error('HTTP ' + res.status);
       const j = await res.json();
@@ -909,7 +953,7 @@ OD.define('dashboard', {
     // =========================================================================
     let CACHE_SOURCES = null;
     async function chargerSources() {
-      const cle = state.annee + '|' + state.mois + '|' + state.site;
+      const cle = cleSel();
       if (CACHE_SOURCES && CACHE_SOURCES.cle === cle) return CACHE_SOURCES.j;
       const jwt = await getUserJwt();
       if (!jwt) throw new Error('session absente');
@@ -917,7 +961,8 @@ OD.define('dashboard', {
         method: 'POST',
         headers: { 'apikey': SUPABASE_KEY, 'Authorization': 'Bearer ' + jwt,
                    'Content-Type': 'application/json' },
-        body: JSON.stringify({ p_annee: state.annee, p_mois: state.mois, p_id_site: state.site })
+        body: JSON.stringify({ p_annee: state.annee, p_mois: state.mois,
+                               p_id_site: siteSelection(), p_sites: sitesSelection() })
       });
       if (!res.ok) throw new Error('HTTP ' + res.status);
       const j = await res.json();
@@ -1673,7 +1718,7 @@ OD.define('dashboard', {
       // Ventilation par site : elle n'a de sens qu'en vue agrégée, et qu'à
       // partir de deux sites dans le périmètre.
       const sites = (det.sites || []);
-      if (state.site == null && sites.length > 1) {
+      if (state.sel.level === 'all' && sites.length > 1) {
         T.push({
           fam: 'prod', id: 'sites', lab: 'Par site', v: String(sites.length), statique: true,
           obj: 'sites dans votre périmètre',
@@ -1733,9 +1778,9 @@ OD.define('dashboard', {
           const e = ecartAn(k, u);
           if (e.sens === 'baisse') recul.push(nom + ' <b>' + e.txt.replace(' sur un an', '') + '</b>');
         });
-      const ou = state.site == null
+      const ou = state.sel.level === 'all'
         ? (((state.d.perimetre || []).length > 1) ? 'Sur tout votre périmètre, le volume ' : 'Le volume ')
-        : 'Sur ' + esc(nomSite(state.site)) + ', le volume ';
+        : 'Sur ' + esc(state.sel.label) + ', le volume ';
       let ph = ou + (objCde > 0 && num(p.cdes) >= objCde ? 'tient' : 'est en deçà') + ' — ' + bouts[0];
       if (recul.length) ph += ' — mais ce qui s’ajoute à la voiture recule : ' + recul.join(', ');
       ph += '.';
@@ -1881,8 +1926,11 @@ OD.define('dashboard', {
       r.innerHTML = '<div class="dw">'
         + '<div class="drail"><h1>' + esc(TITRE_ROLE[familleRole()] || 'Le tableau du jour') + '</h1>'
         + '<span class="dt">' + esc(dateLongue()) + '</span>'
-        + selecteurPerimetre()
+        + '<span class="dportee">' + esc(state.sel.label) + '</span>'
         + '<span class="drole">' + esc(ETIQ_ROLE[familleRole()] || '') + '</span></div>'
+        // Le périmètre est un tableau : il a sa place en pleine largeur, pas
+        // dans le rail du titre.
+        + selecteurPerimetre()
         + '<section class="dband"><div class="d"><div class="q">La météo du jour</div>'
         + '<p>' + phraseDuJour() + '</p></div>'
         + '<div class="dpouls">' + pouls() + '</div></section>'
@@ -1900,24 +1948,37 @@ OD.define('dashboard', {
       r.querySelectorAll('.dtuile').forEach(b =>
         b.addEventListener('click', () => basculer(b.getAttribute('data-id'))));
 
-      const bascule = r.querySelector('.dperim-t');
-      if (bascule) bascule.addEventListener('click', () => {
-        state.perimOuvert = !state.perimOuvert;
-        rendre();
-        if (state.ouvert) basculer(state.ouvert);
+      // Le chevron plie, le reste de la ligne choisit le périmètre.
+      r.querySelectorAll('.dperimt tr').forEach(tr => {
+        tr.addEventListener('click', ev => {
+          const pli = tr.getAttribute('data-pli');
+          if (pli && ev.target && ev.target.getAttribute('data-role') === 'pli') {
+            const ouvertParDefaut = pli.indexOf('reseau:') === 0;
+            const etat = state.plis[pli];
+            state.plis[pli] = (etat === undefined) ? !ouvertParDefaut : !etat;
+            rendre(); if (state.ouvert) basculer(state.ouvert);
+            return;
+          }
+          const lv = tr.getAttribute('data-lv');
+          const k = tr.getAttribute('data-k');
+          const lab = tr.getAttribute('data-lab');
+          if (lv === state.sel.level && String(k) === String(state.sel.key == null ? '' : state.sel.key)) return;
+          state.sel = { level: lv, key: lv === 'all' ? null : (lv === 'site' ? Number(k) : k), label: lab };
+          state.site = lv === 'site' ? Number(k) : null;
+          // La barre du haut ne sait porter qu'un site : on ne lui pousse une
+          // valeur que dans ce cas, sinon les deux se contrediraient.
+          if (lv === 'site') { try { const b = siteBus(); if (b) b.setSiteId(Number(k)); } catch (e) { } }
+          recharger();
+        });
       });
 
-      r.querySelectorAll('.dseg button[data-site], .dperim-c button[data-site]').forEach(b =>
+      r.querySelectorAll('.dseg button[data-site]').forEach(b =>
         b.addEventListener('click', () => {
           const v = b.getAttribute('data-site');
           const site = v === '' ? null : Number(v);
-          state.perimOuvert = false;
-          if (String(site) === String(state.site)) { rendre(); if (state.ouvert) basculer(state.ouvert); return; }
-          state.site = site;
-          // On repousse le choix vers la barre du haut pour que les deux
-          // sélecteurs ne se contredisent jamais. « Tout mon périmètre » n'est
-          // pas un site : le bus reste sur sa valeur, seule la page s'élargit.
-          if (site != null) { try { const bus = siteBus(); if (bus) bus.setSiteId(site); } catch (e) { } }
+          if (String(site) === String(siteSelection())) return;
+          if (site == null) { state.sel = { level: 'all', key: null, label: 'Tout mon périmètre' }; state.site = null; }
+          else { poserSite(site); try { const bus = siteBus(); if (bus) bus.setSiteId(site); } catch (e) { } }
           recharger();
         }));
     }
@@ -1936,6 +1997,10 @@ OD.define('dashboard', {
         // Périmètre ou mois changé : tout ce qui en dépend est périmé.
         CACHE_LISTES = {}; CACHE_EQUIPE = null; CACHE_SOURCES = null;
         state.d = d;
+        // L'arbre chiffre le sélecteur de périmètre : il se charge avec la page,
+        // sans la retarder — le tableau s'affiche d'abord sans ses colonnes.
+        chargerArbre().then(j => { state.arbre = j; rendre(); if (state.ouvert) basculer(state.ouvert); })
+                      .catch(() => { });
         TUILES = tuiles();
         state.ouvert = null;
         rendre();
@@ -1981,52 +2046,86 @@ OD.define('dashboard', {
       return marques;
     }
 
+    // Le tableau du périmètre. Chaque ligne est sélectionnable — le groupe, une
+    // marque, une affaire, un site — et porte ses chiffres, comme le périmètre
+    // du suivi d'activité. Le chevron plie la branche, le reste de la ligne
+    // choisit le périmètre.
+    function cleSel() {
+      return state.annee + '|' + state.mois + '|' + state.sel.level + '|' + state.sel.key;
+    }
+
+    function poserSite(id) {
+      const s2 = ((state.d || {}).perimetre || []).find(x => String(x.id_site) === String(id));
+      state.sel = { level: 'site', key: Number(id),
+                    label: s2 ? (s2.nom || ('Site ' + id)) : ('Site ' + id) };
+      state.site = Number(id);
+    }
+
     function selecteurPerimetre() {
       const per = (state.d.perimetre || []);
       if (per.length < 2) return '';
-      if (per.length <= 6) {
-        let h = '<div class="dseg" role="group" aria-label="Périmètre">'
-          + '<button data-site="" aria-pressed="' + (state.site == null) + '">Tout mon périmètre</button>'
-          + '<span class="sep"></span>';
-        per.forEach(s2 => {
-          h += '<button data-site="' + esc(s2.id_site) + '" aria-pressed="'
-            + (String(state.site) === String(s2.id_site)) + '">' + esc(s2.nom || ('Site ' + s2.id_site))
-            + '</button>';
-        });
-        return h + '</div>';
-      }
-
-      // Au-delà : l'arbre. Il s'ouvre replié sur la branche du site courant, ou
-      // entièrement replié en vue groupe — vingt-sept lignes dépliées d'entrée
-      // seraient le même mur que vingt-sept boutons.
       const marques = arbrePerimetre();
-      const courant = state.site;
-      let h = '<div class="dperim"><button class="dperim-t" type="button" aria-expanded="'
-        + String(!!state.perimOuvert) + '">'
-        + '<span class="pli">' + (state.perimOuvert ? '▾' : '▸') + '</span> '
-        + '<b>' + esc(courant == null ? 'Tout mon périmètre' : nomSite(courant)) + '</b>'
-        + '<span class="cn">' + per.length + ' sites · ' + marques.length + ' marque'
-        + (marques.length > 1 ? 's' : '') + '</span></button>';
-      if (!state.perimOuvert) return h + '</div>';
+      const sel = state.sel;
+      const estSel = (lv, k) => sel.level === lv && String(sel.key == null ? '' : sel.key) === String(k);
 
-      h += '<div class="dperim-c"><button class="n0' + (courant == null ? ' actif' : '')
-        + '" type="button" data-site="">Tout mon périmètre</button>';
+      // Les chiffres du tableau viennent de l'arbre, chargé en même temps que la
+      // page. Tant qu'il n'est pas là, les colonnes restent vides plutôt que de
+      // faire attendre le sélecteur.
+      const parSite = {};
+      (((state.arbre || {}).sites) || []).forEach(x => { parSite[String(x.id_site)] = x; });
+      const agg = (lv, k) => {
+        const l = lv === 'all' ? per
+          : lv === 'reseau' ? per.filter(x => (x.reseau || '__sans') === k)
+          : lv === 'affaire' ? per.filter(x => (x.affaire || '__sans') === k)
+          : per.filter(x => String(x.id_site) === String(k));
+        return somme(l.map(x => parSite[String(x.id_site)]).filter(Boolean));
+      };
+
+      const cel = (a, cle, cls) => ({ h: state.arbre
+        ? '<span class="f' + (cls || '') + '">' + fmt(a[cle]) + '</span>' : '' });
+
+      const ligne = (lv, k, lab, niveau, pliable, ouvert, sfx) => {
+        const a = agg(lv, k);
+        const obj = num(a.obj_cdes) > 0
+          ? '<span class="pale"> / ' + fmt(a.obj_cdes) + '</span>' : '';
+        return '<tr class="lv' + niveau + (estSel(lv, k) ? ' actif' : '')
+          + (state.arbre && num(a.cdes) === 0 ? ' dmuet' : '') + '"'
+          + ' data-lv="' + esc(lv) + '" data-k="' + esc(k == null ? '' : k) + '"'
+          + ' data-lab="' + esc(lab) + '"'
+          + (pliable ? ' data-pli="' + esc(lv + ':' + k) + '"' : '') + '>'
+          + '<td>' + (pliable ? '<span class="pli" data-role="pli">' + (ouvert ? '▾' : '▸') + '</span>'
+                              : '<span class="pli"></span>')
+          + esc(lab) + (sfx || '') + '</td>'
+          + '<td>' + (state.arbre ? '<span class="f">' + fmt(a.cdes) + '</span>' + obj : '') + '</td>'
+          + '<td>' + cel(a, 'a_relancer').h + '</td>'
+          + '<td>' + (state.arbre ? '<span class="f' + (num(a.retard) > 0 ? ' mauvais' : '')
+                                    + '">' + fmt(a.retard) + '</span>' : '') + '</td>'
+          + '</tr>';
+      };
+
+      let lignes = ligne('all', '', 'Tout mon périmètre', 1, false, false, '');
       marques.forEach(m => {
-        h += '<div class="dperim-m"><div class="t">' + esc(m.lab) + '</div>';
+        const pk = 'reseau:' + m.k, ouv = state.plis[pk] !== false;
+        lignes += ligne('reseau', m.k, m.lab, 1, true, ouv, '');
+        if (!ouv) return;
         m.aff.forEach(a => {
-          h += '<div class="dperim-a"><div class="t">' + esc(a.lab) + '</div>';
-          a.sites.forEach(s2 => {
-            const actif = String(courant) === String(s2.id_site);
-            h += '<button class="n2' + (actif ? ' actif' : '') + '" type="button" data-site="'
-              + esc(s2.id_site) + '">' + esc(s2.nom)
-              + (s2.type_site && s2.type_site !== 'vente'
-                 ? ' <em>' + esc(s2.type_site) + '</em>' : '') + '</button>';
+          const ak = 'affaire:' + a.k, aouv = state.plis[ak] === true;
+          lignes += ligne('affaire', a.k, a.lab, 2, true, aouv, '');
+          if (!aouv) return;
+          a.sites.forEach(x => {
+            lignes += ligne('site', x.id_site, x.nom, 3, false, false,
+              x.type_site && x.type_site !== 'vente'
+                ? ' <em class="pale">' + esc(x.type_site) + '</em>' : '');
           });
-          h += '</div>';
         });
-        h += '</div>';
       });
-      return h + '</div></div>';
+
+      return '<div class="dperim"><div class="dperim-h">Périmètre'
+        + '<span class="cn">' + per.length + ' sites · ' + marques.length + ' marque'
+        + (marques.length > 1 ? 's' : '') + ' · cliquez une ligne pour filtrer, le chevron pour déplier</span></div>'
+        + '<div class="dscroll"><table class="dmini dperimt"><thead><tr>'
+        + '<th>Périmètre</th><th>Commandes</th><th>À relancer</th><th>Retards</th>'
+        + '</tr></thead><tbody>' + lignes + '</tbody></table></div></div>';
     }
 
     function dateLongue() {
@@ -2091,7 +2190,7 @@ OD.define('dashboard', {
             tr.addEventListener('click', () => {
               const site = tr.getAttribute('data-site');
               if (site != null) {
-                state.site = Number(site);
+                poserSite(Number(site));
                 try { const b = siteBus(); if (b) b.setSiteId(Number(site)); } catch (e) { }
                 recharger();
                 return;
@@ -2173,6 +2272,8 @@ OD.define('dashboard', {
     if (!state.d) { getRoot().innerHTML = '<div class="dvide">Aucune donnée sur votre périmètre.</div>'; return; }
     TUILES = tuiles();
     rendre();
+    chargerArbre().then(j => { state.arbre = j; rendre(); if (state.ouvert) basculer(state.ouvert); })
+                  .catch(() => { });
     // Une tuile est ouverte d'entrée : la page montre à quoi sert le clic sans
     // qu'on ait à le deviner. Le financement si son taux a reculé, sinon les
     // commandes.
