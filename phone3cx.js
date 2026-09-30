@@ -45,8 +45,10 @@ OD.define('phone3cx', {
         '.od3cx-num{padding:2px 14px 10px;font-size:12px;color:#6b7a90}',
         '.od3cx-chrono{font-variant-numeric:tabular-nums;font-weight:800;color:#2a5ea9}',
         '.od3cx-info{margin:0 14px 10px;font-size:12.5px;line-height:1.45;color:#1f2a37}',
-        '.od3cx-delco{margin:0 14px 12px;background:#eaf7f4;border-radius:9px;padding:9px 10px;font-size:12.5px;line-height:1.45}',
+        '.od3cx-delco{margin:0 14px 8px;background:#eaf7f4;border-radius:9px;padding:9px 10px;font-size:12.5px;line-height:1.45}',
         '.od3cx-delco b{color:#53bda7}',
+        '.od3cx-reco{margin-bottom:12px;background:#fff6e8}',
+        '.od3cx-reco b{color:#c98418}',
         '.od3cx-act{display:flex;gap:7px;padding:0 14px 14px;flex-wrap:wrap}',
         '.od3cx-b{flex:1;min-width:84px;border:1px solid #dbe5f2;background:#fff;color:#1f2a37;font:inherit;',
         'font-weight:700;font-size:12.5px;padding:8px 6px;border-radius:9px;cursor:pointer;transition:.15s}',
@@ -127,7 +129,11 @@ OD.define('phone3cx', {
       }
 
       const b = a.brief || {};
-      const reco = (b.ai && (b.ai.suggestion || b.ai.brief)) || '';
+      // Deux choses distinctes, et on affichait une seule : le briefing dit QUI
+      // appelle et OU en est le dossier, la suggestion dit QUOI FAIRE. Les
+      // afficher toutes les deux, c'est tout l'interet du brief avant decroche.
+      const dBrief = (b.ai && b.ai.brief) || '';
+      const dReco  = (b.ai && b.ai.suggestion) || '';
       const sous = encours
         ? '<span class="od3cx-chrono" id="od3cx-t">' + mmss(Date.now() - S.depuis) + '</span>'
         : esc(a.numero || '');
@@ -143,7 +149,8 @@ OD.define('phone3cx', {
           ? '<div class="od3cx-info">Dernier échange : ' + esc(b.lastContact.resume) + '</div>' : '') +
         (b.lastPropale && b.lastPropale.label
           ? '<div class="od3cx-info">Propale : ' + esc(b.lastPropale.label) + '</div>' : '') +
-        (reco ? '<div class="od3cx-delco"><b>Delco</b> — ' + esc(reco) + '</div>' : '') +
+        (dBrief ? '<div class="od3cx-delco"><b>Delco</b> — ' + esc(dBrief) + '</div>' : '') +
+        (dReco ? '<div class="od3cx-delco od3cx-reco"><b>À faire</b> — ' + esc(dReco) + '</div>' : '') +
         (a.idClient ? '' : '<div class="od3cx-info" style="color:#6b7a90">Numéro inconnu dans One Data</div>') +
         '<div class="od3cx-act">' +
           '<button class="od3cx-b" data-a="fiche">Voir la fiche</button>' +
