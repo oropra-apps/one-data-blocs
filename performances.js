@@ -1,5 +1,14 @@
 // ============================================================================
 //  PERFORMANCES ÉQUIPE — module One Data (OD.define)  v1
+//  v4.13 (30/09/2026) TEAM COLIN — LE VENDEUR VOIT SON ÉQUIPE
+//    La vue des performances est bornée par propale_visible_user_ids() : un
+//    vendeur n'y trouvait que sa propre ligne, sans pouvoir se situer. Pour lui
+//    seul, le module lit maintenant perf_equipe_tc(), qui rend les chiffres de
+//    TOUS les vendeurs de ses sites — et retire les identifiants de dossiers de
+//    ses collègues : il voit leurs résultats, jamais leurs affaires.
+//    Sa ou ses lignes portent un liseré, une pastille « vous », et l'arbre
+//    s'ouvre déplié jusqu'à elles.
+//
 //  v4.12 (28/09/2026) TEAM COLIN — refonte de la lecture de la grille :
 //   · deux vues au lieu de treize colonnes — « Pilotage » (ce qui porte un
 //     objectif) et « Mix produit » (ce qui décrit la vente). Le défilement
@@ -138,8 +147,36 @@ OD.define('performances', {
   }
   // FOLD : requête directe v_performances_v2 (dates + sites du périmètre) au lieu
   // de fetcher col_performances_equipe via workflow puis lire une variable.
+  // Le rôle de celui qui regarde : la lecture de la vue est bornée par
+  // propale_visible_user_ids(), donc un VENDEUR ne verrait que sa propre ligne
+  // et n'aurait aucun moyen de se situer. Pour lui seul, on passe par
+  // perf_equipe_tc(), qui rend les chiffres de tous les vendeurs de ses sites
+  // — et retire les identifiants de dossiers des collègues.
+  function monIdUser() {
+    try {
+      const me = (((wwLib.getFrontWindow && wwLib.getFrontWindow()) || window).oropraUser) || {};
+      return me.ID_User == null ? null : Number(me.ID_User);
+    } catch (e) { return null; }
+  }
+  function monRole() {
+    try {
+      const me = (((wwLib.getFrontWindow && wwLib.getFrontWindow()) || window).oropraUser) || {};
+      const r = me.ID_Role != null ? me.ID_Role : me.id_role;
+      return r == null ? null : Number(r);
+    } catch (e) { return null; }
+  }
+  const EST_VENDEUR = () => Number(monRole()) === 4;
+
   async function loadPerfData(deb, fin) {
     if (!perimSites.length) await loadPerimeter();
+    if (IS_TC && EST_VENDEUR()) {
+      const { data, error } = await sb.rpc('perf_equipe_tc', {
+        p_deb: String(deb).slice(0, 10), p_fin: String(fin).slice(0, 10) });
+      if (!error) { allRawData = data || []; return allRawData; }
+      // La fonction peut manquer sur un tenant non migré : on retombe alors sur
+      // la vue, c'est-à-dire sur l'ancien comportement, plutôt que sur du vide.
+      console.warn('[perf] perf_equipe_tc indisponible, repli sur la vue', error);
+    }
     let q = sb.from(PERF_VIEW).select('*')
       .gte('date_mois', String(deb).slice(0, 10))
       .lte('date_mois', String(fin).slice(0, 10));
@@ -157,6 +194,9 @@ OD.define('performances', {
   if (state.segment === undefined) state.segment = 'reseau';  // reseau | grand_compte | ALL
   if (state.mois === undefined) state.mois = 'ALL';   // ALL | 'YYYY-MM'
   if (state.selection === undefined) state.selection = { level: 'all', key: null, label: 'Tout le périmètre' };
+  // Un vendeur s'ouvre déplié sur son équipe : sans cela il arrive sur la vue
+  // groupe et doit ouvrir trois niveaux avant de se voir.
+  if (state.deplieMoi === undefined) state.deplieMoi = false;
   if (state.expanded === undefined) state.expanded = {};
   if (state.busSite === undefined) state.busSite = null;
   if (state.busSelPending === undefined) state.busSelPending = true;
@@ -165,6 +205,19 @@ OD.define('performances', {
   window.__perf = state;
 
   const viewerIdUser = allRawData[0]?.viewer_id_user || null;
+
+  // Déplie l'arbre jusqu'à la ligne du vendeur connecté, une seule fois.
+  function deplierJusquAMoi(rows) {
+    if (state.deplieMoi || !EST_VENDEUR()) return;
+    const id = monIdUser(); if (id == null) return;
+    const r = (rows || []).find(x => String(vendeurId(x)) === String(id));
+    if (!r) return;
+    const rk = 'r:' + (r.RESEAU || '__sr');
+    const ak = rk + '|a:' + (r.AFFAIRE || '__sa');
+    const sk = ak + '|s:' + (r.id_site);
+    state.expanded[rk] = true; state.expanded[ak] = true; state.expanded[sk] = true;
+    state.deplieMoi = true;
+  }
   // (périmètre : voir perimSites, dérivé de v_mon_perimetre)
 
   // --- Synchronisation avec le bus ---------------------------------------------
@@ -712,6 +765,14 @@ OD.define('performances', {
 #perf-root .pf-type-VO   { background:#faeeda; color:#633806; }
 #perf-root .pf-type-VNVO { background:#e1f5ee; color:#085041; }
 #perf-root .pf-tree .lv-vendeur.deep td:first-child { padding-left:84px; }
+/* « C'est moi » : un liseré et une pastille, pas une couleur de fond — la
+   sélection en utilise déjà une, et les deux doivent pouvoir coexister. */
+#perf-root .pf-tree tr.is-moi td { background:#f2f7fd; }
+#perf-root .pf-tree tr.is-moi td:first-child { box-shadow:inset 3px 0 0 var(--blue-dk);
+  color:var(--blue-dk); font-weight:700; }
+#perf-root .pf-tree tr.is-moi .moi { display:inline-block; margin-left:6px; padding:1px 6px;
+  border-radius:20px; background:var(--blue-dk); color:#fff; font-size:9.5px; font-weight:700;
+  letter-spacing:.04em; text-transform:uppercase; vertical-align:middle; }
 
 #perf-root .pf-cmp-chips { display:flex; gap:8px; flex-wrap:wrap; align-items:center; margin-bottom:12px; }
 #perf-root .pf-cmp-chip { display:inline-flex; align-items:center; gap:7px; background:#faeeda; color:#633806; border:1px solid var(--orange); border-radius:14px; padding:4px 11px; font-size:11px; font-weight:600; }
@@ -1009,6 +1070,7 @@ OD.define('performances', {
     const root = getRoot();
     if (!root) return;
     refreshRawData();
+    deplierJusquAMoi(allRawData);
     adoptBusSelectionPerf();
     __prorata = prorataTemps();
     injectStyle();
@@ -1320,7 +1382,10 @@ OD.define('performances', {
             // en premier, et les vendeurs sans objectif ferment la marche.
             const vend = IS_TC ? T.vend.slice().sort(resteDesc) : T.vend;
             for (const V of vend) {
-              body += '<tr class="lv-vendeur' + (collapseT ? '' : ' deep') + cls('vendeur', V.key) + '" data-lvl="vendeur" data-key="' + esc(V.key) + '" data-label="' + esc(V.label) + '"><td>' + esc(V.label) + (V.fonction ? ' <span class="fct">· ' + esc(V.fonction) + '</span>' : '') + '</td>' + kpiCellsTree(V.agg, V.label) + '</tr>';
+              // La ligne de celui qui regarde est mise en évidence : dans une
+              // équipe de neuf, se retrouver doit être immédiat.
+              const moi = String(V.key) === String(monIdUser());
+              body += '<tr class="lv-vendeur' + (collapseT ? '' : ' deep') + (moi ? ' is-moi' : '') + cls('vendeur', V.key) + '" data-lvl="vendeur" data-key="' + esc(V.key) + '" data-label="' + esc(V.label) + '"><td>' + esc(V.label) + (moi ? ' <span class="moi">vous</span>' : '') + (V.fonction ? ' <span class="fct">· ' + esc(V.fonction) + '</span>' : '') + '</td>' + kpiCellsTree(V.agg, V.label) + '</tr>';
             }
           }
         }
