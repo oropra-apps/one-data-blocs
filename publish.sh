@@ -237,15 +237,24 @@ echo
 echo "✅ ${MODULE} ${VERSION} publié :"
 echo "   ${CDN_URL}"
 echo
-echo "   ÉTAT DU REGISTRE POUR '${MODULE}' :"
-DEF="$(cp_curl "${CP_URL}/rest/v1/code_module?module_key=eq.${MODULE}&select=default_version:code_version!code_module_default_fk(label)" 2>/dev/null || true)"
-DEF_LABEL="$(jval label "$DEF")"
-echo "   • défaut de flotte       : ${DEF_LABEL:-aucun (null)}"
+echo "   ETAT DU REGISTRE POUR '${MODULE}' :"
+# Deux appels plats plutôt qu'un select imbriqué : la jointure PostgREST
+# renvoyait {default_version:{label:…}}, dont jval ne sait pas lire la clé
+# imbriquée — le récap annonçait donc « aucun » alors que le défaut existait.
+DEF_ID="$(jval default_version_id "$(cp_curl "${CP_URL}/rest/v1/code_module?module_key=eq.${MODULE}&select=default_version_id")")"
+if [ -n "$DEF_ID" ] && [ "$DEF_ID" != "null" ]; then
+  DEF_LABEL="$(jval label "$(cp_curl "${CP_URL}/rest/v1/code_version?id=eq.${DEF_ID}&select=label")")"
+else
+  DEF_LABEL=""
+fi
+echo "   - defaut de flotte : ${DEF_LABEL:-aucun (null)}"
+# Sortie en ASCII pur : le terminal Git Bash sous Windows n'est pas en UTF-8 et
+# transformait les puces et les flèches en charabia.
 PINS="$(cp_curl "${CP_URL}/rest/v1/tenant_module?module_key=eq.${MODULE}&select=tenant:tenant(slug),version:code_version(label)" 2>/dev/null || true)"
 if command -v jq >/dev/null 2>&1 && [ -n "$PINS" ]; then
-  printf '%s' "$PINS" | jq -r '.[] | "   • épinglé : \(.tenant.slug) → \(.version.label)"'
+  printf '%s' "$PINS" | jq -r '.[] | "   - epingle : \(.tenant.slug) = \(.version.label)"'
 else
-  echo "   • épinglages : ${PINS:-aucun}"
+  echo "   - epinglages : ${PINS:-aucun}"
 fi
 echo
 if [ "$SET_DEFAULT" = "1" ]; then
