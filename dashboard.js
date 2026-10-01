@@ -498,16 +498,6 @@ OD.define('dashboard', {
       } catch (e) { }
       return null;
     }
-    async function siteDOuverture(msMax) {
-      const t0 = Date.now();
-      for (;;) {
-        const id = siteDuBusMaintenant();
-        if (id != null) return id;
-        if (Date.now() - t0 > (msMax || 2000)) return null;
-        await new Promise(r => setTimeout(r, 70));
-      }
-    }
-
     function brancherBus(essais) {
       essais = essais || 0;
       const b = siteBus();
@@ -3053,18 +3043,31 @@ OD.define('dashboard', {
     // =========================================================================
     getRoot().innerHTML = '<div class="dvide">Chargement du tableau de bord…</div>';
 
-    // D'abord le périmètre, ensuite les chiffres. Jamais l'inverse.
-    const idDepart = await siteDOuverture(2000);
-    if (idDepart != null) { state.busSiteVu = idDepart; poserSite(idDepart); }
-
-    // Le stock et l'entonnoir ne dépendent ni de l'année ni du mois : ils
-    // partent tout de suite, en même temps que les chiffres, au lieu d'attendre
-    // leur retour. L'arbre, lui, est daté — il attend le repli de mois.
+    // ON N'ATTEND PLUS RIEN AVANT DE CHARGER.
+    //
+    // Il y avait ici une attente du périmètre porté par la barre du haut —
+    // jusqu'à deux secondes — avant même de lancer la première requête. Elle
+    // avait un sens tant que chaque appel était filtré par périmètre : partir
+    // sans le connaître obligeait à tout recharger quand il arrivait.
+    //
+    // Depuis que la page repose sur un socle ventilé par site, cette raison a
+    // disparu : le socle est le MÊME quel que soit le périmètre. On le demande
+    // donc tout de suite, et le périmètre ne sert qu'à l'agrégation, qui se
+    // fait en mémoire. Le bus peut répondre quand il veut — ci-dessous, il ne
+    // provoque qu'un recalcul local, sans un seul appel réseau.
+    const pSocle0 = chargerSocle().catch(e => { console.error('[dash] socle', e); return null; });
     const pStock0 = chargerStock().catch(() => null);
     const pEnt0   = chargerEntonnoir().catch(() => null);
     const pBase0  = chargerBase().catch(() => null);
 
+    // Le périmètre d'ouverture est cueilli au passage s'il est déjà là, sans
+    // jamais faire attendre : la page s'ouvre sur « tout mon périmètre » et se
+    // recentre d'elle-même dès que la barre du haut a répondu.
+    const idDepart = siteDuBusMaintenant();
+    if (idDepart != null) { state.busSiteVu = idDepart; poserSite(idDepart); }
+
     try {
+      await pSocle0;
       state.d = await charger();
     } catch (e) {
       console.error('[dash] dashboard_tc', e);
