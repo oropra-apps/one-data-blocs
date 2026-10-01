@@ -1,5 +1,22 @@
 // ============================================================================
-//  TOP NAV — module One Data (OD.define)  v2 (étape B) — refresh user au montage
+//  TOP NAV — module One Data (OD.define)  v3 — SÉLECTEUR DE PÉRIMÈTRE
+//
+//  CE QUI CHANGE EN v3
+//  Le sélecteur de site listait les sites à plat. Sur un groupe de vingt-sept
+//  sites répartis en deux marques et douze affaires, ce n'était plus un
+//  sélecteur mais une liste à lire — et il ne permettait de choisir qu'une
+//  feuille : ni « tout mon périmètre », ni une marque, ni une affaire.
+//
+//  Il devient une ARBORESCENCE marque › affaire › site, alimentée par
+//  oropraSite.getSites() qui portait déjà reseau et affaire. Chaque ligne est un
+//  choix ; le chevron déplie sans choisir. En dessous de sept sites, la liste
+//  plate est conservée : un arbre à deux branches ferait perdre du temps.
+//
+//  Il appelle setPerimetre({level,key}) du bus v3. Sur un bus v2, qui ne connaît
+//  que setSiteId, il retombe automatiquement sur la liste plate — la nav ne
+//  casse donc pas si les deux modules ne sont pas déployés ensemble.
+//
+//  (v2, étape B — refresh user au montage)
 //  Extrait de authDefine. Rendu dans __anchor (#nav-root) ; logo via
 //  ctx.tenant.logo_url ; ref morte Userconnected retirée.
 //  GARDÉS (constants de l'app partagée, identiques pour tous les tenants) :
@@ -17,7 +34,7 @@ OD.define('topnav', {
   const wwLib = window.wwLib;
   const doc = __anchor.ownerDocument || wwLib.getFrontDocument();
   const ROOT_ID = 'nav-root';
-  const NAV_VER = 27; // <- numéro de version (témoin de chargement)
+  const NAV_VER = 28; // <- numéro de version (témoin de chargement)
   try { window.__navVer = NAV_VER; } catch (e) {}
   function root() { return doc.getElementById(ROOT_ID); }
   // NB : on ne fait PLUS de "early return" si #nav-root est absent. Tout le démarrage
@@ -303,6 +320,20 @@ OD.define('topnav', {
 .od-site.open>button svg.od-cv{transform:rotate(180deg)}
 .od-site .od-drop{left:auto;right:0;min-width:220px;max-height:320px;overflow-y:auto}
 .od-site .od-drop a.is-active{background:#eef4fc;color:#2a5ea9;font-weight:700}
+/* Sélecteur de périmètre : marque › affaire › site. Le décalage dit le niveau,
+   le chevron plie sans choisir. Plus étroit que la liste plate parce qu'il est
+   plus haut : on garde le menu utilisable sur un portable. */
+.od-site .od-drop.od-perim{min-width:280px;max-height:420px;padding:4px}
+.od-drop.od-perim a.od-p{padding:5px 10px;gap:4px;font-size:13px;line-height:1.35;align-items:baseline}
+.od-drop.od-perim a.od-p i.od-pli{font-style:normal;width:14px;flex:0 0 14px;color:#9db2d2;font-size:10px;text-align:center}
+.od-drop.od-perim a.od-p i.od-pli[data-pli]{cursor:pointer;border-radius:3px}
+.od-drop.od-perim a.od-p i.od-pli[data-pli]:hover{background:#e4ecf8;color:#2a5ea9}
+.od-drop.od-perim a.od-p em{font-style:normal;font-size:10.5px;color:#9db2d2;margin-left:4px}
+.od-drop.od-perim a.n0{font-weight:700;color:#1F4A85}
+.od-drop.od-perim a.n1{font-weight:700;font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:#7a98c5}
+.od-drop.od-perim a.n2{font-weight:600;padding-left:22px;color:#2a5ea9}
+.od-drop.od-perim a.n3{font-weight:400;padding-left:40px;color:#42618f}
+.od-drop.od-perim a.is-active{background:#eef4fc;font-weight:700;box-shadow:inset 3px 0 0 #2a5ea9}
 /* burger */
 .od-burger{display:none;background:none;border:none;cursor:pointer;color:#1F4A85;padding:7px;border-radius:9px;flex:0 0 auto}
 .od-burger:hover{background:#f2f6fc}
@@ -544,6 +575,76 @@ OD.define('topnav', {
     const s = sites.find(function (x) { return String(x.id_site) === String(id); });
     return s ? s.site : null;
   }
+
+  // --- Périmètre arborescent (bus v3) ----------------------------------------
+  // Le bus v2 ne connaît que setSiteId : on le détecte et on retombe sur la
+  // liste plate, plutôt que d'afficher un arbre dont les branches ne feraient
+  // rien. Les deux modules peuvent donc être déployés séparément.
+  function busPorteLePerimetre(api) {
+    return !!(api && typeof api.setPerimetre === 'function' && typeof api.getPerimetre === 'function');
+  }
+  // Pliage : mémorisé sur window pour survivre aux reconstructions du menu.
+  function plis() {
+    if (!window.__navPlisPerim) window.__navPlisPerim = {};
+    return window.__navPlisPerim;
+  }
+  // marque › affaire › site, dans l'ordre alphabétique. Les sites sans marque
+  // (logistique) finissent la liste plutôt que d'ouvrir le menu.
+  function arbrePerim(sites) {
+    const marques = [];
+    (sites || []).forEach(function (x) {
+      const mk = x.reseau || '__sans';
+      let m = marques.find(function (y) { return y.k === mk; });
+      if (!m) { m = { k: mk, lab: x.reseau || 'Sans marque', aff: [] }; marques.push(m); }
+      const ak = x.affaire || '__sans';
+      let a = m.aff.find(function (y) { return y.k === ak; });
+      if (!a) { a = { k: ak, lab: x.affaire || 'Sans affaire', sites: [] }; m.aff.push(a); }
+      a.sites.push(x);
+    });
+    marques.sort(function (a, b) {
+      if (a.k === '__sans') return 1; if (b.k === '__sans') return -1;
+      return String(a.lab).localeCompare(String(b.lab), 'fr');
+    });
+    marques.forEach(function (m) {
+      m.aff.sort(function (a, b) { return String(a.lab).localeCompare(String(b.lab), 'fr'); });
+      m.aff.forEach(function (a) {
+        a.sites.sort(function (x, y) { return String(x.site).localeCompare(String(y.site), 'fr'); });
+      });
+    });
+    return marques;
+  }
+  function htmlPerim(sites, perim) {
+    const p = perim || { level: 'site', key: null };
+    const estSel = function (lv, k) {
+      return p.level === lv && String(p.key == null ? '' : p.key) === String(k);
+    };
+    const ligne = function (lv, k, lab, cls, pliable, ouvert, suffixe) {
+      return '<a class="od-p ' + cls + (estSel(lv, k) ? ' is-active' : '') + '"'
+        + ' data-lv="' + esc(lv) + '" data-k="' + esc(k == null ? '' : k) + '"'
+        + ' data-lab="' + esc(lab) + '">'
+        + (pliable
+            ? '<i class="od-pli" data-pli="' + esc(lv + ':' + k) + '">' + (ouvert ? '\u25be' : '\u25b8') + '</i>'
+            : '<i class="od-pli"></i>')
+        + '<span>' + esc(lab) + '</span>'
+        + (suffixe ? '<em>' + esc(suffixe) + '</em>' : '') + '</a>';
+    };
+    let h = ligne('all', '', 'Tout mon périmètre', 'n0', false, false, '');
+    arbrePerim(sites).forEach(function (m) {
+      const pk = 'reseau:' + m.k, ouv = plis()[pk] !== false;
+      h += ligne('reseau', m.k, m.lab, 'n1', true, ouv, '');
+      if (!ouv) return;
+      m.aff.forEach(function (a) {
+        const ak = 'affaire:' + a.k, aouv = plis()[ak] === true;
+        h += ligne('affaire', a.k, a.lab, 'n2', true, aouv, '');
+        if (!aouv) return;
+        a.sites.forEach(function (x) {
+          h += ligne('site', x.id_site, x.site, 'n3', false, false,
+                     (x.type_site && x.type_site !== 'vente') ? x.type_site : '');
+        });
+      });
+    });
+    return h;
+  }
   // Rend l'état SI les données sont là. Ne casse JAMAIS de chaîne : en cas
   // d'indispo transitoire (api/DOM absents, sites vides) -> renvoie false, le
   // heartbeat rappellera. Idempotent via une signature -> coût négligeable par
@@ -559,24 +660,72 @@ OD.define('topnav', {
     const sites = (api.getSites && api.getSites()) || [];
     if (!sites.length) return false; // pas encore chargé -> heartbeat rappellera
     const curId = api.getSiteId && api.getSiteId();
-    const sig = String(curId) + '|' + sites.map(function (s) { return s.id_site; }).join(',');
+
+    // Arbre dès que le groupe le justifie, ET seulement si le bus sait porter un
+    // périmètre. Sept sites est le seuil : en dessous, la liste plate est plus
+    // rapide qu'un arbre à déplier.
+    const arbo = busPorteLePerimetre(api) && sites.length >= 7;
+    const perim = arbo ? (api.getPerimetre() || { level: 'site', key: curId }) : null;
+
+    const sig = (arbo ? 'A' : 'P') + '|' + (perim ? perim.level + ':' + perim.key : String(curId))
+      + '|' + sites.map(function (s) { return s.id_site; }).join(',')
+      + '|' + (arbo ? JSON.stringify(plis()) : '');
     if (box.getAttribute('data-sig') === sig) return true;   // déjà à jour
-    if (box.classList.contains('open')) return true;         // ne pas reconstruire un menu ouvert
-    nameEl.textContent = siteName(api, curId) || (curId != null ? ('Site ' + curId) : 'Site');
-    drop.innerHTML = sites.slice().sort(function (a, b) {
-      return String(a.site).localeCompare(String(b.site), 'fr');
-    }).map(function (s) {
-      return '<a data-site="' + s.id_site + '"' + (String(s.id_site) === String(curId) ? ' class="is-active"' : '') + '>' + esc(s.site) + '</a>';
-    }).join('');
-    drop.querySelectorAll('[data-site]').forEach(function (a) {
-      a.addEventListener('click', function (e) {
-        e.preventDefault(); e.stopPropagation();
-        const id = Number(a.getAttribute('data-site'));
-        try { api.setSiteId(id); } catch (er) {}
-        box.classList.remove('open');
-        renderSiteState();
+    if (box.classList.contains('open') && box.getAttribute('data-sig')) {
+      // Un menu ouvert ne se reconstruit que si l'utilisateur vient d'y plier
+      // une branche — sinon il se refermerait sous ses doigts.
+      if (box.getAttribute('data-sig').split('|')[3] === sig.split('|')[3]) return true;
+    }
+
+    nameEl.textContent = arbo
+      ? (perim.label || 'Tout mon périmètre')
+      : (siteName(api, curId) || (curId != null ? ('Site ' + curId) : 'Site'));
+
+    if (arbo) {
+      drop.classList.add('od-perim');
+      drop.innerHTML = htmlPerim(sites, perim);
+      drop.querySelectorAll('a.od-p').forEach(function (a) {
+        a.addEventListener('click', function (e) {
+          e.preventDefault(); e.stopPropagation();
+          // Le chevron plie, le reste de la ligne choisit.
+          const cible = e.target;
+          if (cible && cible.classList && cible.classList.contains('od-pli')) {
+            const cle = cible.getAttribute('data-pli');
+            if (cle) {
+              const ouvertParDefaut = cle.indexOf('reseau:') === 0;
+              const etat = plis()[cle];
+              plis()[cle] = (etat === undefined) ? !ouvertParDefaut : !etat;
+              renderSiteState();
+            }
+            return;
+          }
+          const lv = a.getAttribute('data-lv');
+          const k = a.getAttribute('data-k');
+          const lab = a.getAttribute('data-lab');
+          try {
+            api.setPerimetre({ level: lv, key: lv === 'all' ? null : (lv === 'site' ? Number(k) : k), label: lab });
+          } catch (er) { console.error('[nav] setPerimetre', er); }
+          box.classList.remove('open');
+          renderSiteState();
+        });
       });
-    });
+    } else {
+      drop.classList.remove('od-perim');
+      drop.innerHTML = sites.slice().sort(function (a, b) {
+        return String(a.site).localeCompare(String(b.site), 'fr');
+      }).map(function (s) {
+        return '<a data-site="' + s.id_site + '"' + (String(s.id_site) === String(curId) ? ' class="is-active"' : '') + '>' + esc(s.site) + '</a>';
+      }).join('');
+      drop.querySelectorAll('[data-site]').forEach(function (a) {
+        a.addEventListener('click', function (e) {
+          e.preventDefault(); e.stopPropagation();
+          const id = Number(a.getAttribute('data-site'));
+          try { api.setSiteId(id); } catch (er) {}
+          box.classList.remove('open');
+          renderSiteState();
+        });
+      });
+    }
     box.setAttribute('data-sig', sig);
     return true;
   }
