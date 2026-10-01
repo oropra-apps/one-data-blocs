@@ -1,5 +1,5 @@
 // ============================================================================
-//  DASHBOARD — module One Data (OD.define)   v30 — PROFIL TEAM COLIN
+//  DASHBOARD — module One Data (OD.define)   v31 — PROFIL TEAM COLIN
 //
 //  Cette version est réservée au tenant Team Colin (ref ieztupavcdnubmpbjvuq),
 //  où elle est épinglée. Le défaut du registre reste la v25 « Tour de
@@ -24,7 +24,17 @@
 //  partielle, ou sans donnée. Une famille sans source n'est pas masquée — une
 //  tuile vide dit ce qui manque, une tuile absente ne dit rien.
 //
-//  LE PÉRIMÈTRE — TOUS LES NIVEAUX (v30)
+//  LE PÉRIMÈTRE — UN SEUL SÉLECTEUR, DANS LA BARRE DU HAUT (v31)
+//  La v30 avait mis un tableau de périmètre dans la page. Deux sélecteurs pour
+//  un même choix — celui de la barre du haut et celui de la page — finissaient
+//  toujours par se contredire : choisir une marque ici laissait la barre
+//  afficher un site.
+//  Le choix vit maintenant dans la barre du haut (topnav v3), qui déplie
+//  marque › affaire › site, et le bus (site-bus v3) porte le périmètre au lieu
+//  d'un simple identifiant de site. La page l'écoute et se contente de rappeler
+//  le périmètre courant à côté de son titre.
+//
+//  LE PÉRIMÈTRE — TOUS LES NIVEAUX (v30, la couche SQL)
 //  Le sélecteur ne savait choisir qu'un site : vingt-sept boutons à plat, puis
 //  un menu qui ne rendait cliquables que les feuilles. Un directeur de groupe ne
 //  pouvait ni isoler TOYOTA, ni une affaire.
@@ -362,7 +372,7 @@ OD.define('dashboard', {
     const state = { annee: today.getFullYear(), mois: today.getMonth() + 1,
                     ouvert: null, d: null, site: null, chargement: false,
                     sel: { level: 'all', key: null, label: 'Tout mon périmètre' },
-                    plis: {}, arbrePlis: {} };
+                    plis: {}, arbrePlis: {}, busSites: null };
 
     // Les sites couverts par la sélection courante. null = tout le périmètre,
     // et c'est ce que les fonctions SQL attendent pour ne rien filtrer.
@@ -370,6 +380,8 @@ OD.define('dashboard', {
       const per = ((state.d || {}).perimetre || []);
       const s = state.sel;
       if (!s || s.level === 'all') return null;
+      // Le bus connaît le périmètre réel : quand il l'a calculé, il fait foi.
+      if (state.busSites && state.busSites.length) return state.busSites.slice();
       if (s.level === 'reseau')
         return per.filter(x => (x.reseau || '__sans') === s.key).map(x => Number(x.id_site));
       if (s.level === 'affaire')
@@ -391,21 +403,49 @@ OD.define('dashboard', {
       try { const w = wwLib.getFrontWindow(); if (w && w.oropraSite) return w.oropraSite; } catch (e) { }
       return window.oropraSite || null;
     }
+    // Le périmètre vient du bus, qui sait désormais porter un niveau. Sur un bus
+    // v2 (siteId seul), on retombe sur l'ancien comportement sans rien casser.
+    function adopterPerimetreDuBus(d) {
+      const p = d && d.perimetre;
+      if (p) {
+        state.sel = { level: p.level, key: p.key, label: p.label || 'Tout mon périmètre' };
+        state.site = p.level === 'site' ? Number(p.key) : null;
+        state.busSites = Array.isArray(d.sites) ? d.sites.map(Number) : null;
+        return true;
+      }
+      const id = d ? d.siteId : null;
+      if (id == null) { state.sel = { level: 'all', key: null, label: 'Tout mon périmètre' }; state.site = null; }
+      else poserSite(Number(id));
+      state.busSites = null;
+      return true;
+    }
+
     function brancherBus(essais) {
       essais = essais || 0;
       const b = siteBus();
       if (!b) { if (essais < 120) setTimeout(() => brancherBus(essais + 1), 250); return; }
       try {
-        const id = b.getSiteId();
-        if (id != null && String(id) !== String(siteSelection())) { poserSite(Number(id)); recharger(); }
+        // Au montage, on adopte ce que le bus porte déjà — périmètre compris.
+        if (typeof b.getPerimetre === 'function') {
+          const p = b.getPerimetre();
+          if (p && (p.level !== state.sel.level || String(p.key) !== String(state.sel.key))) {
+            adopterPerimetreDuBus({ perimetre: p,
+              sites: typeof b.getSitesDuPerimetre === 'function' ? b.getSitesDuPerimetre() : null });
+            recharger();
+          }
+        } else {
+          const id = b.getSiteId();
+          if (id != null && String(id) !== String(siteSelection())) { poserSite(Number(id)); recharger(); }
+        }
       } catch (e) { }
       if (window.__dashTcBusBound) return;
       window.__dashTcBusBound = true;
-      b.onChange(({ siteId }) => {
-        const v = siteId == null ? null : Number(siteId);
-        if (String(v) === String(siteSelection())) return;
-        if (v == null) state.sel = { level: 'all', key: null, label: 'Tout mon périmètre' };
-        else poserSite(v);
+      b.onChange(d => {
+        const p = d && d.perimetre;
+        // Rien de neuf : on ne recharge pas pour le même périmètre.
+        if (p && p.level === state.sel.level && String(p.key) === String(state.sel.key)) return;
+        if (!p && String(d && d.siteId) === String(siteSelection())) return;
+        adopterPerimetreDuBus(d);
         recharger();
       });
     }
@@ -2061,72 +2101,10 @@ OD.define('dashboard', {
       state.site = Number(id);
     }
 
-    function selecteurPerimetre() {
-      const per = (state.d.perimetre || []);
-      if (per.length < 2) return '';
-      const marques = arbrePerimetre();
-      const sel = state.sel;
-      const estSel = (lv, k) => sel.level === lv && String(sel.key == null ? '' : sel.key) === String(k);
-
-      // Les chiffres du tableau viennent de l'arbre, chargé en même temps que la
-      // page. Tant qu'il n'est pas là, les colonnes restent vides plutôt que de
-      // faire attendre le sélecteur.
-      const parSite = {};
-      (((state.arbre || {}).sites) || []).forEach(x => { parSite[String(x.id_site)] = x; });
-      const agg = (lv, k) => {
-        const l = lv === 'all' ? per
-          : lv === 'reseau' ? per.filter(x => (x.reseau || '__sans') === k)
-          : lv === 'affaire' ? per.filter(x => (x.affaire || '__sans') === k)
-          : per.filter(x => String(x.id_site) === String(k));
-        return somme(l.map(x => parSite[String(x.id_site)]).filter(Boolean));
-      };
-
-      const cel = (a, cle, cls) => ({ h: state.arbre
-        ? '<span class="f' + (cls || '') + '">' + fmt(a[cle]) + '</span>' : '' });
-
-      const ligne = (lv, k, lab, niveau, pliable, ouvert, sfx) => {
-        const a = agg(lv, k);
-        const obj = num(a.obj_cdes) > 0
-          ? '<span class="pale"> / ' + fmt(a.obj_cdes) + '</span>' : '';
-        return '<tr class="lv' + niveau + (estSel(lv, k) ? ' actif' : '')
-          + (state.arbre && num(a.cdes) === 0 ? ' dmuet' : '') + '"'
-          + ' data-lv="' + esc(lv) + '" data-k="' + esc(k == null ? '' : k) + '"'
-          + ' data-lab="' + esc(lab) + '"'
-          + (pliable ? ' data-pli="' + esc(lv + ':' + k) + '"' : '') + '>'
-          + '<td>' + (pliable ? '<span class="pli" data-role="pli">' + (ouvert ? '▾' : '▸') + '</span>'
-                              : '<span class="pli"></span>')
-          + esc(lab) + (sfx || '') + '</td>'
-          + '<td>' + (state.arbre ? '<span class="f">' + fmt(a.cdes) + '</span>' + obj : '') + '</td>'
-          + '<td>' + cel(a, 'a_relancer').h + '</td>'
-          + '<td>' + (state.arbre ? '<span class="f' + (num(a.retard) > 0 ? ' mauvais' : '')
-                                    + '">' + fmt(a.retard) + '</span>' : '') + '</td>'
-          + '</tr>';
-      };
-
-      let lignes = ligne('all', '', 'Tout mon périmètre', 1, false, false, '');
-      marques.forEach(m => {
-        const pk = 'reseau:' + m.k, ouv = state.plis[pk] !== false;
-        lignes += ligne('reseau', m.k, m.lab, 1, true, ouv, '');
-        if (!ouv) return;
-        m.aff.forEach(a => {
-          const ak = 'affaire:' + a.k, aouv = state.plis[ak] === true;
-          lignes += ligne('affaire', a.k, a.lab, 2, true, aouv, '');
-          if (!aouv) return;
-          a.sites.forEach(x => {
-            lignes += ligne('site', x.id_site, x.nom, 3, false, false,
-              x.type_site && x.type_site !== 'vente'
-                ? ' <em class="pale">' + esc(x.type_site) + '</em>' : '');
-          });
-        });
-      });
-
-      return '<div class="dperim"><div class="dperim-h">Périmètre'
-        + '<span class="cn">' + per.length + ' sites · ' + marques.length + ' marque'
-        + (marques.length > 1 ? 's' : '') + ' · cliquez une ligne pour filtrer, le chevron pour déplier</span></div>'
-        + '<div class="dscroll"><table class="dmini dperimt"><thead><tr>'
-        + '<th>Périmètre</th><th>Commandes</th><th>À relancer</th><th>Retards</th>'
-        + '</tr></thead><tbody>' + lignes + '</tbody></table></div></div>';
-    }
+    // Le sélecteur vit maintenant dans la barre du haut (topnav v3, bus v3) :
+    // deux sélecteurs pour un même choix finissaient toujours par se contredire.
+    // La page ne fait plus que RAPPELER le périmètre courant, à côté du titre.
+    function selecteurPerimetre() { return ''; }
 
     function dateLongue() {
       const j = ['dimanche', 'lundi', 'mardi', 'mercredi', 'jeudi', 'vendredi', 'samedi'];
