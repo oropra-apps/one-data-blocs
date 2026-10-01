@@ -889,9 +889,13 @@ OD.define('dashboard', {
         let m = marques.find(x => x.k === mk);
         if (!m) { m = { k: mk, lab: s2.reseau || 'Sans marque', aff: [], sites: [] }; marques.push(m); }
         m.sites.push(s2);
-        const ak = s2.affaire || '__sans';
+        // Clé composée marque|affaire : la recherche doit porter sur la MÊME
+        // clé que celle stockée. La v33 cherchait l'affaire seule et ne
+        // trouvait jamais l'entrée créée → une ligne d'affaire par site
+        // (ARCUEIL et L'HAY LES ROSES affichés sous deux « COLIN TEAM TOY »).
+        const ak = mk + '|' + (s2.affaire || '__sans');
         let a = m.aff.find(x => x.k === ak);
-        if (!a) { a = { k: mk + '|' + ak, lab: s2.affaire || 'Sans affaire', sites: [] }; m.aff.push(a); }
+        if (!a) { a = { k: ak, lab: s2.affaire || 'Sans affaire', sites: [] }; m.aff.push(a); }
         a.sites.push(s2);
       });
       marques.forEach(m => {
