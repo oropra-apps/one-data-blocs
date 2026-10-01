@@ -152,6 +152,14 @@ OD.define('delco-badge', {
     }, delay));
   });
 
-  boot();
+  // La pastille passe après l'affichage du tableau de bord et de l'agenda :
+
+  // elle ne vaut pas une requête de plus pendant qu'ils chargent.
+
+  if (typeof window.requestIdleCallback === 'function') {
+
+    window.requestIdleCallback(function () { boot(); }, { timeout: 7000 });
+
+  } else { setTimeout(boot, 4000); }
 }
 });
