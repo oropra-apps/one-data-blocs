@@ -232,17 +232,32 @@ OD.define('dashboard', {
 #dash-root .dpouls div{min-width:66px}
 #dash-root .dpouls .n{font-family:var(--mono);font-size:22px;font-weight:600;line-height:1;font-variant-numeric:tabular-nums}
 #dash-root .dpouls .l{font-size:10px;color:var(--ink-3);margin-top:5px;line-height:1.25}
-#dash-root .dfam{display:flex;flex-direction:column;gap:9px}
-#dash-root .dfam > h2{font-size:12px;font-weight:800;letter-spacing:.07em;text-transform:uppercase;
-  color:var(--ink-2);margin:6px 0 0;display:flex;align-items:baseline;gap:10px;flex-wrap:wrap}
-#dash-root .dfam > h2 .cn{font-size:11px;font-weight:600;letter-spacing:0;text-transform:none;color:var(--ink-3)}
+/* Les familles ne s'empilent plus en bandes pleine largeur : elles partagent
+   une grille unique. Une famille d'une seule tuile occupe une colonne, pas une
+   ligne entière — c'est ce qui divisait la hauteur de page par deux. Chaque
+   section reçoit un grid-column:span N posé au rendu, N étant son nombre de
+   tuiles ; sa grille interne se recompose toute seule quand la place manque. */
+#dash-root .dfams{display:grid;grid-template-columns:repeat(auto-fill,minmax(164px,1fr));
+  gap:18px 10px;align-items:start}
+#dash-root .dfam{display:flex;flex-direction:column;gap:7px;min-width:0}
+/* Hauteur fixe : sans elle, un titre sur deux lignes décalait la grille de sa
+   voisine et l'alignement des tuiles sautait d'une famille à l'autre. */
+#dash-root .dfam > h2{font-size:11px;font-weight:800;letter-spacing:.07em;text-transform:uppercase;
+  color:var(--ink-2);margin:0;height:16px;display:flex;align-items:center;gap:8px;
+  white-space:nowrap;overflow:hidden}
+#dash-root .dfam > h2 .tt{overflow:hidden;text-overflow:ellipsis;min-width:0;flex:0 1 auto}
+#dash-root .dfam > h2 .cn{font-size:10.5px;font-weight:600;letter-spacing:0;text-transform:none;
+  color:var(--ink-3);overflow:hidden;text-overflow:ellipsis;min-width:0;flex:0 1 auto}
+/* Une ou deux tuiles : la colonne est trop étroite pour la source, qui serait
+   tronquée à trois mots. Le titre seul y suffit ; le pied de page dit le reste. */
+#dash-root .dfam.etroite > h2 .cn{display:none}
 #dash-root .detat{display:inline-block;width:7px;height:7px;border-radius:50%;margin-right:6px;vertical-align:1px}
 #dash-root .detat.plein{background:var(--m-vert)}
 #dash-root .detat.partiel{background:var(--m-orange)}
 #dash-root .detat.vide{background:var(--line-2)}
-#dash-root .dgrille{display:grid;grid-template-columns:repeat(auto-fill,minmax(176px,1fr));gap:10px}
+#dash-root .dgrille{display:grid;grid-template-columns:repeat(auto-fill,minmax(152px,1fr));gap:10px}
 #dash-root .dtuile{position:relative;text-align:left;font:inherit;color:var(--ink);cursor:pointer;
-  background:var(--card);border:1px solid var(--line);border-radius:13px;padding:14px 15px 11px;
+  background:var(--card);border:1px solid var(--line);border-radius:13px;padding:11px 13px 9px;
   box-shadow:var(--ombre);display:flex;flex-direction:column;min-width:0;
   transition:border-color .12s,transform .12s}
 #dash-root .dtuile:hover{border-color:var(--line-2);transform:translateY(-1px)}
@@ -251,20 +266,29 @@ OD.define('dashboard', {
 #dash-root .dtuile:focus-visible{outline:2px solid var(--bleu);outline-offset:2px}
 #dash-root .dtuile.muette{opacity:.62;border-style:dashed}
 #dash-root .dtuile.muette .v{color:var(--ink-3)}
-#dash-root .dtuile .lab{font-size:11px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;
-  color:var(--ink-3);display:block;min-height:29px;padding-right:22px;line-height:1.3}
-#dash-root .dtuile .v{font-family:var(--mono);font-size:26px;font-weight:600;letter-spacing:-.02em;
-  line-height:1.15;margin-top:2px;font-variant-numeric:tabular-nums}
-#dash-root .dtuile .v em{font-style:normal;font-size:14px;color:var(--ink-3);font-weight:400;margin-left:3px}
-#dash-root .dtuile .c{font-size:11.5px;margin-top:3px;font-weight:600;line-height:1.3}
-#dash-root .dtuile svg.sp{display:block;width:100%;height:30px;margin-top:auto;padding-top:9px;overflow:visible}
-#dash-root .dtuile .pl{position:absolute;top:12px;right:12px;width:17px;height:17px;border-radius:50%;
-  background:var(--calme-bg);color:var(--ink-3);font-size:12px;font-weight:800;line-height:17px;text-align:center}
+#dash-root .dtuile .lab{font-size:10.5px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;
+  color:var(--ink-3);display:block;min-height:26px;padding-right:20px;line-height:1.25}
+#dash-root .dtuile .v{font-family:var(--mono);font-size:23px;font-weight:600;letter-spacing:-.02em;
+  line-height:1.1;margin-top:1px;font-variant-numeric:tabular-nums}
+#dash-root .dtuile .v em{font-style:normal;font-size:13px;color:var(--ink-3);font-weight:400;margin-left:3px}
+#dash-root .dtuile .c{font-size:11px;margin-top:2px;font-weight:600;line-height:1.3}
+#dash-root .dtuile svg.sp{display:block;width:100%;height:22px;margin-top:auto;padding-top:7px;overflow:visible}
+#dash-root .dtuile .pl{position:absolute;top:10px;right:10px;width:16px;height:16px;border-radius:50%;
+  background:var(--calme-bg);color:var(--ink-3);font-size:11.5px;font-weight:800;line-height:16px;text-align:center}
 #dash-root .dtuile[aria-expanded="true"] .pl{background:var(--bleu);color:#fff}
 #dash-root .hausse{color:var(--m-vert)}#dash-root .baisse{color:var(--m-rouge)}#dash-root .plat{color:var(--ink-3)}
+/* Le tiroir vit dans la grille des familles, en pleine largeur, juste sous la
+   famille de la tuile ouverte. Vide, il disparaît : sinon il laissait une
+   gouttière de 18px au milieu de la page. */
+#dash-root #dash-tiroir{grid-column:1/-1}
+#dash-root #dash-tiroir:empty{display:none}
+#dash-root #dash-ancre{display:none}
 #dash-root .dtiroir{background:var(--card);border:1px solid var(--bleu);border-radius:14px;
   box-shadow:var(--ombre);padding:20px 22px;display:grid;
   grid-template-columns:minmax(0,1.15fr) minmax(0,1fr);gap:24px}
+/* Un arbre de 27 sites déroulé faisait à lui seul trois écrans de défilement :
+   il défile désormais dans son cadre, la page ne s'allonge plus. */
+#dash-root .dtiroir .dscroll{max-height:336px;overflow-y:auto}
 #dash-root .dtiroir h3{font-size:16px;font-weight:800;margin:0 0 3px;letter-spacing:-.01em}
 #dash-root .dtiroir .ctx{font-size:12.5px;color:var(--ink-2);margin:0 0 14px}
 #dash-root .dtiroir svg.gr{display:block;width:100%;height:auto;overflow:visible}
@@ -359,6 +383,13 @@ OD.define('dashboard', {
 }
 #dash-root .dferme{background:none;border:0;font:inherit;font-size:12px;font-weight:600;color:var(--ink-3);
   cursor:pointer;padding:0;margin-top:14px;text-decoration:underline;text-underline-offset:3px}
+/* La croix : refermer sans avoir à redescendre au bas du tiroir. */
+#dash-root .dtiroir{position:relative}
+#dash-root .dferme.dx{position:absolute;top:9px;right:11px;margin:0;text-decoration:none;
+  width:26px;height:26px;border-radius:50%;font-size:18px;line-height:24px;text-align:center;
+  color:var(--ink-3);background:var(--calme-bg)}
+#dash-root .dferme.dx:hover{color:var(--ink);background:var(--line)}
+#dash-root .dtiroir h3{padding-right:34px}
 #dash-root .dpied{font-size:11.5px;color:var(--ink-3);line-height:1.6;max-width:84ch}
 #dash-root .dvide{padding:22px;color:var(--ink-2);font-size:14px}
 @media (max-width:820px){#dash-root .dtiroir{grid-template-columns:minmax(0,1fr)}}
@@ -889,13 +920,9 @@ OD.define('dashboard', {
         let m = marques.find(x => x.k === mk);
         if (!m) { m = { k: mk, lab: s2.reseau || 'Sans marque', aff: [], sites: [] }; marques.push(m); }
         m.sites.push(s2);
-        // Clé composée marque|affaire : la recherche doit porter sur la MÊME
-        // clé que celle stockée. La v33 cherchait l'affaire seule et ne
-        // trouvait jamais l'entrée créée → une ligne d'affaire par site
-        // (ARCUEIL et L'HAY LES ROSES affichés sous deux « COLIN TEAM TOY »).
-        const ak = mk + '|' + (s2.affaire || '__sans');
+        const ak = s2.affaire || '__sans';
         let a = m.aff.find(x => x.k === ak);
-        if (!a) { a = { k: ak, lab: s2.affaire || 'Sans affaire', sites: [] }; m.aff.push(a); }
+        if (!a) { a = { k: mk + '|' + ak, lab: s2.affaire || 'Sans affaire', sites: [] }; m.aff.push(a); }
         a.sites.push(s2);
       });
       marques.forEach(m => {
@@ -1227,7 +1254,7 @@ OD.define('dashboard', {
       { k: 'livr', t: 'Livraisons', etat: 'plein', n: 'statut BACS des commandes' },
       { k: 'act', t: 'Activité commerciale', etat: 'partiel', n: 'rapports tenus, rendez-vous jamais soldés' },
       { k: 'leads', t: 'Leads', etat: 'partiel', n: 'reçus et attribués tracés, issue rarement renseignée' },
-      { k: 'base', t: 'Qualité de la base client', etat: 'partiel', n: 'réservé à l’encadrement' }
+      { k: 'base', t: 'Base client', etat: 'partiel', n: 'qualité des coordonnées, encadrement' }
     ];
 
     function tuiles() {
@@ -2150,9 +2177,15 @@ OD.define('dashboard', {
       const fams = FAMILLES.map(f => {
         const ts = TUILES.filter(t => t.fam === f.k);
         if (!ts.length) return '';
-        return '<section class="dfam" data-fam="' + f.k + '">'
-          + '<h2><span class="detat ' + f.etat + '"></span>' + esc(f.t)
-          + ' <span class="cn">' + esc(f.n) + '</span></h2>'
+        // La largeur de la famille suit son nombre de tuiles, plafonnée à six :
+        // au-delà, une seule famille mangeait la ligne et renvoyait toutes les
+        // autres à la suivante.
+        const n = Math.min(ts.length, 6);
+        return '<section class="dfam' + (n <= 2 ? ' etroite' : '') + '" data-fam="' + f.k
+          + '" style="grid-column:span ' + n + '">'
+          + '<h2><span class="detat ' + f.etat + '"></span>'
+          + '<span class="tt">' + esc(f.t) + '</span>'
+          + '<span class="cn">' + esc(f.n) + '</span></h2>'
           + '<div class="dgrille">' + ts.map(carte).join('') + '</div></section>';
       }).join('');
 
@@ -2174,8 +2207,8 @@ OD.define('dashboard', {
         + '<section class="dband"><div class="d"><div class="q">La météo du jour</div>'
         + '<p>' + phraseDuJour() + '</p></div>'
         + '<div class="dpouls">' + pouls() + '</div></section>'
-        + '<div id="dash-fams" style="display:flex;flex-direction:column;gap:18px">' + fams + '</div>'
-        + '<div id="dash-tiroir"></div><div id="dash-ancre"></div>'
+        + '<div id="dash-fams" class="dfams">' + fams
+        + '<div id="dash-tiroir"></div><div id="dash-ancre"></div></div>'
         + '<p class="dpied">Commandes gagnées uniquement, grands comptes exclus, '
         + (familleRole() === 'vendeur' ? 'sur vos propres affaires. ' : 'sur votre périmètre. ')
         + 'Douze mois glissants. Les seuils de relance (' + num((state.d.seuils || {}).p85) + ' et '
@@ -2389,8 +2422,10 @@ OD.define('dashboard', {
       r.querySelectorAll('.dtuile').forEach(b =>
         b.setAttribute('aria-expanded', String(b.getAttribute('data-id') === id)));
       const zone = r.querySelector('#dash-tiroir');
+      // Le tiroir se glisse APRÈS la section de la famille, pas dedans : dedans,
+      // il héritait de la largeur de la colonne (parfois une seule tuile).
       const hote = r.querySelector('.dtuile[data-id="' + id + '"]').closest('.dfam');
-      hote.appendChild(zone);
+      hote.parentNode.insertBefore(zone, hote.nextSibling);
 
       // Tout ce qui s'affiche ici passe par vue() : la même tuile ne raconte pas
       // la même chose à un vendeur et à son chef.
@@ -2402,7 +2437,9 @@ OD.define('dashboard', {
       try { trouve = fTrouve ? fTrouve() : ''; } catch (e) { console.error('[dash] trouvaille', id, e); }
       try { table = fTable ? fTable() : ''; } catch (e) { console.error('[dash] table', id, e); }
 
-      zone.innerHTML = '<section class="dtiroir"><div style="min-width:0">'
+      zone.innerHTML = '<section class="dtiroir">'
+        + '<button class="dferme dx" type="button" aria-label="Refermer">×</button>'
+        + '<div style="min-width:0">'
         + '<h3>' + esc(titre) + '</h3><p class="ctx">' + esc(ctx) + '</p>'
         + (t.statique ? '' : graphe(t.vals, t.forme, t.lm, t.gUnite, t.second, titre))
         + table
@@ -2414,7 +2451,7 @@ OD.define('dashboard', {
         + '</div><div style="min-width:0">'
         + '<div class="dtrouve"><div class="t">Ce que le chiffre ne dit pas</div>' + trouve + '</div>'
         + '<button class="dferme" type="button">Refermer</button></div></section>';
-      zone.querySelector('.dferme').addEventListener('click', fermer);
+      zone.querySelectorAll('.dferme').forEach(b => b.addEventListener('click', fermer));
       try { zone.scrollIntoView({ behavior: 'smooth', block: 'nearest' }); } catch (e) { }
 
       // L'arborescence de la direction. Cliquer une ligne de marque ou d'affaire
@@ -2496,7 +2533,12 @@ OD.define('dashboard', {
       const r = getRoot();
       r.querySelectorAll('.dtuile').forEach(b => b.setAttribute('aria-expanded', 'false'));
       const a = r.querySelector('#dash-ancre'), z = r.querySelector('#dash-tiroir');
-      if (a && z) a.parentNode.insertBefore(z, a);
+      if (!z) return;
+      // C'était le bug : le tiroir était replacé à sa position de repos, mais son
+      // contenu restait écrit. « Refermer » donnait donc l'impression de pousser
+      // le détail vers le bas au lieu de le fermer.
+      z.innerHTML = '';
+      if (a) a.parentNode.insertBefore(z, a);
     }
 
     // =========================================================================
