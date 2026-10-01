@@ -34,7 +34,7 @@ OD.define('topnav', {
   const wwLib = window.wwLib;
   const doc = __anchor.ownerDocument || wwLib.getFrontDocument();
   const ROOT_ID = 'nav-root';
-  const NAV_VER = 28; // <- numéro de version (témoin de chargement)
+  const NAV_VER = 29; // <- numéro de version (témoin de chargement)
   try { window.__navVer = NAV_VER; } catch (e) {}
   function root() { return doc.getElementById(ROOT_ID); }
   // NB : on ne fait PLUS de "early return" si #nav-root est absent. Tout le démarrage
@@ -613,6 +613,11 @@ OD.define('topnav', {
     });
     return marques;
   }
+  // Un échelon qui n'offre aucun choix n'est pas un échelon : il est sauté.
+  // Un seul réseau, ou une affaire qui ne contient qu'un site, produisait une
+  // ligne qui ne faisait que répéter la suivante. C'est ce qui rend le même
+  // sélecteur lisible pour un chef des ventes à deux sites et pour un
+  // directeur de groupe qui en a vingt-sept.
   function htmlPerim(sites, perim) {
     const p = perim || { level: 'site', key: null };
     const estSel = function (lv, k) {
@@ -628,17 +633,36 @@ OD.define('topnav', {
         + '<span>' + esc(lab) + '</span>'
         + (suffixe ? '<em>' + esc(suffixe) + '</em>' : '') + '</a>';
     };
+    const marques = arbrePerim(sites);
+    const plusieursReseaux = marques.length > 1;
+    // Le repliage ne vaut que pour un petit périmètre. Au-delà de sept sites,
+    // l'arbre reste complet : sauter une affaire à site unique ferait apparaître
+    // un site au milieu des affaires, et on ne saurait plus ce qu'on lit.
+    const compact = sites.length < 7;
     let h = ligne('all', '', 'Tout mon périmètre', 'n0', false, false, '');
-    arbrePerim(sites).forEach(function (m) {
-      const pk = 'reseau:' + m.k, ouv = plis()[pk] !== false;
-      h += ligne('reseau', m.k, m.lab, 'n1', true, ouv, '');
-      if (!ouv) return;
+    marques.forEach(function (m) {
+      const nSites = m.aff.reduce(function (a, x) { return a + x.sites.length; }, 0);
+      const rendreR = compact ? (plusieursReseaux && nSites > 1) : true;
+      let d = 1;
+      if (rendreR) {
+        const pk = 'reseau:' + m.k, ouv = plis()[pk] !== false;
+        h += ligne('reseau', m.k, m.lab, 'n1', true, ouv, '');
+        if (!ouv) return;
+        d = 2;
+      }
+      const plusieursAff = m.aff.length > 1;
       m.aff.forEach(function (a) {
-        const ak = 'affaire:' + a.k, aouv = plis()[ak] === true;
-        h += ligne('affaire', a.k, a.lab, 'n2', true, aouv, '');
-        if (!aouv) return;
+        const rendreA = compact ? (plusieursAff && a.sites.length > 1) : true;
+        let d2 = d;
+        if (rendreA) {
+          const ak = 'affaire:' + a.k, aouv = plis()[ak] === true;
+          h += ligne('affaire', a.k, a.lab, 'n' + d, true, aouv, '');
+          if (!aouv) return;
+          d2 = d + 1;
+        }
+        const cls = 'n' + Math.min(d2, 3);
         a.sites.forEach(function (x) {
-          h += ligne('site', x.id_site, x.site, 'n3', false, false,
+          h += ligne('site', x.id_site, x.site, cls, false, false,
                      (x.type_site && x.type_site !== 'vente') ? x.type_site : '');
         });
       });
@@ -661,10 +685,12 @@ OD.define('topnav', {
     if (!sites.length) return false; // pas encore chargé -> heartbeat rappellera
     const curId = api.getSiteId && api.getSiteId();
 
-    // Arbre dès que le groupe le justifie, ET seulement si le bus sait porter un
-    // périmètre. Sept sites est le seuil : en dessous, la liste plate est plus
-    // rapide qu'un arbre à déplier.
-    const arbo = busPorteLePerimetre(api) && sites.length >= 7;
+    // Dès DEUX sites, et seulement si le bus sait porter un périmètre. Le seuil
+    // était à sept : un chef des ventes qui couvre deux sites n'avait donc aucun
+    // moyen de demander les deux à la fois, alors que c'est précisément son
+    // périmètre de travail. htmlPerim replie les échelons inutiles, si bien que
+    // deux sites donnent trois lignes, pas un arbre.
+    const arbo = busPorteLePerimetre(api) && sites.length >= 2;
     const perim = arbo ? (api.getPerimetre() || { level: 'site', key: curId }) : null;
 
     const sig = (arbo ? 'A' : 'P') + '|' + (perim ? perim.level + ':' + perim.key : String(curId))
@@ -677,8 +703,12 @@ OD.define('topnav', {
       if (box.getAttribute('data-sig').split('|')[3] === sig.split('|')[3]) return true;
     }
 
+    // Sans libellé, le niveau décide : un périmètre « site » non étiqueté doit
+    // afficher le nom du site, pas « Tout mon périmètre ».
     nameEl.textContent = arbo
-      ? (perim.label || 'Tout mon périmètre')
+      ? (perim.label || (perim.level === 'site'
+           ? (siteName(api, perim.key) || siteName(api, curId) || 'Site')
+           : 'Tout mon périmètre'))
       : (siteName(api, curId) || (curId != null ? ('Site ' + curId) : 'Site'));
 
     if (arbo) {
