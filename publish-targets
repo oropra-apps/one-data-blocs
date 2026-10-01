@@ -1,0 +1,26 @@
+# ============================================================================
+#  One Data — cibles de publication par module
+#
+#  Un module listé ici est en DÉPLOIEMENT CIBLÉ : publish.sh ne le promeut
+#  jamais en version par défaut de la flotte, et l'épingle automatiquement
+#  sur le ou les tenants indiqués.
+#
+#  Format :  <module> = <slug tenant>[,<slug tenant>…]
+#  Un module absent de ce fichier garde le comportement historique
+#  (promotion en défaut de flotte).
+#
+#  Pour sortir un module du mode ciblé : retirer sa ligne, ou publier une
+#  fois avec --force-default.
+# ============================================================================
+
+# Modules refondus pour Team Colin : ils appellent des fonctions SQL
+# (dashboard_tc_*, perf_equipe_tc, …) qui n'existent que dans ce tenant.
+# Les promouvoir en défaut casserait les autres clients.
+dashboard    = teamcolin
+performances = teamcolin
+site-bus     = teamcolin
+topnav       = teamcolin
+phone3cx     = teamcolin
+
+# Module interne OROPRA : jamais de défaut de flotte.
+onboarding   = oropra

@@ -5,22 +5,31 @@
 #  Usage :
 #    ./publish.sh <module> <version> [options]
 #
+#  CIBLES AUTOMATIQUES (publish-targets)
+#    Un module listé dans le fichier 'publish-targets' est en déploiement
+#    CIBLÉ : il n'est jamais promu en version par défaut de la flotte, et il
+#    est épinglé tout seul sur le ou les tenants déclarés.
+#        dashboard = teamcolin
+#    Ainsi « ./publish.sh dashboard v34 » suffit : Team Colin reçoit v34, les
+#    autres clients ne bougent pas. Plus rien à penser au moment de publier.
+#
 #  Options :
 #    --no-default        publie SANS promouvoir la version en défaut.
-#                        Les clients non épinglés restent où ils sont.
-#                        (remplace les 2 requêtes à rejouer pour 'onboarding')
-#    --pin <slug>        épingle ce tenant sur la version publiée
+#    --force-default     promeut en défaut MÊME si le module est ciblé.
+#                        (à n'utiliser qu'en sortant un module du mode ciblé)
+#    --pin <slug>        épingle ce tenant en plus des cibles automatiques
 #    --unpin <slug>      détache ce tenant (il resuit la version par défaut)
 #    --republish         autorise la publication alors que le fichier n'a pas
 #                        changé (reprise après un échec de vérification CDN)
 #
 #  Exemples :
-#    ./publish.sh dashboard v6                          # tout le monde
-#    ./publish.sh propale_vo v9 --no-default --pin team-colin   # un seul client
-#    ./publish.sh onboarding v7 --no-default            # module interne OROPRA
+#    ./publish.sh dashboard v34               # Team Colin seul (cible auto)
+#    ./publish.sh socle v9                    # tout le monde (non ciblé)
+#    ./publish.sh propale_vo v9 --pin teamcolin --no-default
 #
 #  Garde-fous : node -c, aucun secret en dur, tag immuable, CDN vérifié AVANT
-#  d'écrire au registre, et refus de republier un fichier inchangé.
+#  d'écrire au registre, refus de republier un fichier inchangé, et récap de
+#  l'état du registre à la fin (défaut de flotte + tenants épinglés).
 # ============================================================================
 set -euo pipefail
 
@@ -29,15 +38,18 @@ VERSION="${2:?usage: ./publish.sh <module> <version> [--no-default] [--pin <slug
 shift 2
 
 SET_DEFAULT=1
+FORCE_DEFAULT=0
+EXPLICIT_NO_DEFAULT=0
 REPUBLISH=0
 PIN=""
 UNPIN=""
 while [ $# -gt 0 ]; do
   case "$1" in
-    --no-default) SET_DEFAULT=0; shift ;;
-    --republish)  REPUBLISH=1; shift ;;
-    --pin)        PIN="${2:?--pin attend un slug}"; shift 2 ;;
-    --unpin)      UNPIN="${2:?--unpin attend un slug}"; shift 2 ;;
+    --no-default)    SET_DEFAULT=0; EXPLICIT_NO_DEFAULT=1; shift ;;
+    --force-default) FORCE_DEFAULT=1; shift ;;
+    --republish)     REPUBLISH=1; shift ;;
+    --pin)           PIN="${2:?--pin attend un slug}"; shift 2 ;;
+    --unpin)         UNPIN="${2:?--unpin attend un slug}"; shift 2 ;;
     *) echo "❌ option inconnue : $1"; exit 1 ;;
   esac
 done
@@ -51,6 +63,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO="oropra-apps/one-data-blocs"
 FILE="${MODULE}.js"
 TAG="${MODULE}-${VERSION}"
+TARGETS_FILE="$SCRIPT_DIR/publish-targets"
 
 cp_curl() { curl -fsS "$@" \
   -H "apikey: ${CP_SERVICE_KEY}" \
@@ -65,6 +78,29 @@ jval() {  # $1 = clé, $2 = json
     printf '%s' "$2" | sed -n "s/.*\"$1\"[[:space:]]*:[[:space:]]*\"\{0,1\}\([^,\"}]*\)\"\{0,1\}.*/\1/p"
   fi
 }
+
+# --- cibles automatiques ----------------------------------------------------
+# Lues AVANT toute écriture : si le module est ciblé, la promotion en défaut
+# est désarmée d'office. C'est la correction du piège qui, cinq fois, a fait
+# basculer toute la flotte sur une version écrite pour un seul client.
+AUTO_TARGETS=""
+if [ -f "$TARGETS_FILE" ]; then
+  AUTO_TARGETS="$(sed -e 's/#.*//' "$TARGETS_FILE" \
+                  | grep -E "^[[:space:]]*${MODULE}[[:space:]]*=" \
+                  | head -n1 | cut -d= -f2 | tr -d '[:space:]' || true)"
+fi
+
+if [ -n "$AUTO_TARGETS" ]; then
+  if [ "$FORCE_DEFAULT" = "1" ]; then
+    SET_DEFAULT=1
+    echo "⚠️  '${MODULE}' est ciblé (${AUTO_TARGETS}) mais --force-default a été demandé :"
+    echo "    la version SERA promue en défaut de flotte."
+  else
+    SET_DEFAULT=0
+    echo "ℹ️  '${MODULE}' est en déploiement ciblé → ${AUTO_TARGETS}"
+    echo "    (défaut de flotte inchangé ; --force-default pour le promouvoir)"
+  fi
+fi
 
 [ -f "$FILE" ] || { echo "❌ fichier introuvable : $FILE (es-tu dans le dossier du repo ?)"; exit 1; }
 
@@ -153,7 +189,7 @@ fi
 
 # --- publication au registre ------------------------------------------------
 # p_make_default = false : la version est enregistrée mais PAS promue.
-# Les clients non épinglés restent où ils sont (et 'onboarding' garde son null).
+# Les clients non épinglés restent où ils sont.
 if [ "$SET_DEFAULT" = "1" ]; then MAKE_DEFAULT=true; else MAKE_DEFAULT=false; fi
 
 echo "→ enregistrement dans le registre (control plane) …"
@@ -164,14 +200,26 @@ RESP="$(cp_curl -X POST "${CP_URL}/rest/v1/rpc/publish_module_version" \
 VERSION_ID="$(jval version_id "$RESP")"
 [ -n "$VERSION_ID" ] || { echo "❌ réponse inattendue du registre : $RESP"; exit 1; }
 
-if [ -n "$PIN" ]; then
-  echo "→ épinglage de '${PIN}' sur ${VERSION} …"
-  TENANT_ID="$(jval id "$(cp_curl "${CP_URL}/rest/v1/tenant?slug=eq.${PIN}&select=id")")"
-  [ -n "$TENANT_ID" ] || { echo "❌ tenant '${PIN}' introuvable au control plane"; exit 1; }
+# --- épinglages -------------------------------------------------------------
+epingler() {  # $1 = slug
+  local slug="$1" tid
+  tid="$(jval id "$(cp_curl "${CP_URL}/rest/v1/tenant?slug=eq.${slug}&select=id")")"
+  [ -n "$tid" ] || { echo "❌ tenant '${slug}' introuvable au control plane"; exit 1; }
   cp_curl -X POST "${CP_URL}/rest/v1/tenant_module" \
     -H "Prefer: resolution=merge-duplicates,return=minimal" \
-    -d "{\"tenant_id\":${TENANT_ID},\"module_key\":\"${MODULE}\",\"version_id\":\"${VERSION_ID}\"}" >/dev/null
-  echo "  ✅ ${PIN} → ${MODULE} ${VERSION} (les autres clients ne bougent pas)"
+    -d "{\"tenant_id\":${tid},\"module_key\":\"${MODULE}\",\"version_id\":\"${VERSION_ID}\"}" >/dev/null
+  echo "  ✅ ${slug} → ${MODULE} ${VERSION}"
+}
+
+if [ -n "$AUTO_TARGETS" ] && [ "$FORCE_DEFAULT" != "1" ]; then
+  echo "→ épinglage des cibles automatiques …"
+  IFS=',' read -ra _cibles <<< "$AUTO_TARGETS"
+  for c in "${_cibles[@]}"; do [ -n "$c" ] && epingler "$c"; done
+fi
+
+if [ -n "$PIN" ]; then
+  echo "→ épinglage de '${PIN}' sur ${VERSION} …"
+  epingler "$PIN"
 fi
 
 if [ -n "$UNPIN" ]; then
@@ -182,9 +230,24 @@ if [ -n "$UNPIN" ]; then
   echo "  ✅ ${UNPIN} resuit désormais la version par défaut"
 fi
 
+# --- récapitulatif : qui reçoit quoi, maintenant ----------------------------
+# C'est la ligne qu'il faut lire avant de fermer le terminal : si le défaut de
+# flotte a bougé alors qu'il ne devait pas, ça se voit ici, tout de suite.
 echo
 echo "✅ ${MODULE} ${VERSION} publié :"
 echo "   ${CDN_URL}"
+echo
+echo "   ÉTAT DU REGISTRE POUR '${MODULE}' :"
+DEF="$(cp_curl "${CP_URL}/rest/v1/code_module?module_key=eq.${MODULE}&select=default_version:code_version!code_module_default_fk(label)" 2>/dev/null || true)"
+DEF_LABEL="$(jval label "$DEF")"
+echo "   • défaut de flotte       : ${DEF_LABEL:-aucun (null)}"
+PINS="$(cp_curl "${CP_URL}/rest/v1/tenant_module?module_key=eq.${MODULE}&select=tenant:tenant(slug),version:code_version(label)" 2>/dev/null || true)"
+if command -v jq >/dev/null 2>&1 && [ -n "$PINS" ]; then
+  printf '%s' "$PINS" | jq -r '.[] | "   • épinglé : \(.tenant.slug) → \(.version.label)"'
+else
+  echo "   • épinglages : ${PINS:-aucun}"
+fi
+echo
 if [ "$SET_DEFAULT" = "1" ]; then
   echo "   → version par DÉFAUT : tous les clients non épinglés la reçoivent"
 else
