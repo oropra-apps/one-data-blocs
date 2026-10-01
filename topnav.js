@@ -34,7 +34,24 @@ OD.define('topnav', {
   const wwLib = window.wwLib;
   const doc = __anchor.ownerDocument || wwLib.getFrontDocument();
   const ROOT_ID = 'nav-root';
-  const NAV_VER = 29; // <- numéro de version (témoin de chargement)
+  const NAV_VER = 30; // <- numéro de version (témoin de chargement)
+
+  // La barre du haut est un sélecteur de SITE, et rien d'autre.
+  //
+  // L'essai inverse a été fait : elle portait l'arborescence marque › affaire ›
+  // site, et le périmètre choisi là valait pour toute l'application. Il a échoué
+  // pour une raison de fond. La barre est partagée par toutes les pages, mais
+  // aucune page opérationnelle ne sait travailler sur « une marque » : le kanban
+  // se vidait (sa requête exige un site et un vendeur), le lead management
+  // ignorait l'événement et restait figé sur son dernier site, les listes VN/VO
+  // et l'agenda suivaient le même chemin. Un seul écran savait l'exploiter.
+  //
+  // Le périmètre multi-niveaux vit donc dans les pages qui savent agréger —
+  // dashboard, lead management, suivi d'activité — chacune avec le sien.
+  //
+  // Le code d'arborescence (arbrePerim, htmlPerim, plis) est conservé tel quel :
+  // il est juste débranché. Repasser ce drapeau à true le réactive en entier.
+  const PERIM_EN_TOPNAV = false;
   try { window.__navVer = NAV_VER; } catch (e) {}
   function root() { return doc.getElementById(ROOT_ID); }
   // NB : on ne fait PLUS de "early return" si #nav-root est absent. Tout le démarrage
@@ -685,12 +702,8 @@ OD.define('topnav', {
     if (!sites.length) return false; // pas encore chargé -> heartbeat rappellera
     const curId = api.getSiteId && api.getSiteId();
 
-    // Dès DEUX sites, et seulement si le bus sait porter un périmètre. Le seuil
-    // était à sept : un chef des ventes qui couvre deux sites n'avait donc aucun
-    // moyen de demander les deux à la fois, alors que c'est précisément son
-    // périmètre de travail. htmlPerim replie les échelons inutiles, si bien que
-    // deux sites donnent trois lignes, pas un arbre.
-    const arbo = busPorteLePerimetre(api) && sites.length >= 2;
+    // Débranché : voir PERIM_EN_TOPNAV en tête de module.
+    const arbo = PERIM_EN_TOPNAV && busPorteLePerimetre(api) && sites.length >= 2;
     const perim = arbo ? (api.getPerimetre() || { level: 'site', key: curId }) : null;
 
     const sig = (arbo ? 'A' : 'P') + '|' + (perim ? perim.level + ':' + perim.key : String(curId))
