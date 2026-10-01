@@ -173,9 +173,19 @@ OD.define('dashboard', {
 
     const SUPABASE_URL = ctx.tenant.supabase_url;
     const SUPABASE_KEY = ctx.tenant.supabase_anon_key;
+    // Le jeton est redemandé à chaque appel REST, et la page en fait cinq ou six
+    // par chargement. getSession() lit le stockage et peut déclencher un
+    // rafraîchissement : on garde le jeton trente secondes, très loin de son
+    // heure de validité, pour ne pas payer ce détour à chaque requête.
+    let JWT = { t: 0, v: null };
     async function getUserJwt() {
-      try { const s = await ctx.supabase.auth.getSession(); return s?.data?.session?.access_token || null; }
-      catch (e) { return null; }
+      const now = Date.now();
+      if (JWT.v && now - JWT.t < 30000) return JWT.v;
+      try {
+        const s = await ctx.supabase.auth.getSession();
+        JWT = { t: now, v: s?.data?.session?.access_token || null };
+        return JWT.v;
+      } catch (e) { return null; }
     }
 
     // --- socle utilisateur ---------------------------------------------------
@@ -495,7 +505,11 @@ OD.define('dashboard', {
       });
     }
 
+    // Les chiffres du périmètre courant, mis en cache par (année, mois,
+    // périmètre). Revenir sur un périmètre déjà consulté n'appelle plus la base.
+    let CACHE_TC = null;
     async function charger() {
+      if (CACHE_TC && CACHE_TC.cle === cleSel()) return CACHE_TC.j;
       const jwt = await getUserJwt();
       if (!jwt) throw new Error('session absente');
       const res = await fetch(SUPABASE_URL + '/rest/v1/rpc/dashboard_tc', {
@@ -506,7 +520,9 @@ OD.define('dashboard', {
                                p_id_site: siteSelection(), p_sites: sitesSelection() })
       });
       if (!res.ok) throw new Error('HTTP ' + res.status);
-      return await res.json();
+      const j = await res.json();
+      CACHE_TC = { cle: cleSel(), j: j };
+      return j;
     }
 
     // -------------------------------------------------------------------------
@@ -2272,18 +2288,23 @@ OD.define('dashboard', {
       const mien = ++jeton;
       const memoire = state.ouvert;
       try {
+        // Les trois appels partent ENSEMBLE. Ils étaient enchaînés : le stock
+        // n'était demandé qu'une fois les chiffres revenus, ce qui ajoutait son
+        // temps à celui du reste au lieu de le recouvrir.
+        //
+        // Les caches sont indexés par (année, mois, périmètre) : les vider ici,
+        // comme on le faisait, jetait des résultats parfaitement valables et
+        // obligeait à tout refaire au moindre aller-retour entre deux périmètres.
+        const pArbre = chargerArbre().catch(() => null);
+        const pStock = chargerStock().catch(() => null);
         const d = await charger();
         if (mien !== jeton) return;            // un autre changement est passé devant
-        // Périmètre ou mois changé : tout ce qui en dépend est périmé.
-        CACHE_LISTES = {}; CACHE_EQUIPE = null; CACHE_SOURCES = null; CACHE_STOCK = null;
         state.d = d;
-        // L'arbre chiffre le sélecteur de périmètre : il se charge avec la page,
-        // sans la retarder — le tableau s'affiche d'abord sans ses colonnes.
-        chargerArbre().then(j => { state.arbre = j; rendre(); if (state.ouvert) basculer(state.ouvert, true); })
-                      .catch(() => { });
-        chargerStock().then(j => { state.stock = j; TUILES = tuiles(); rendre();
-                                   if (state.ouvert) basculer(state.ouvert, true); })
-                      .catch(() => { });
+        pArbre.then(j => { if (mien !== jeton || !j) return;
+                           state.arbre = j; rendre(); if (state.ouvert) basculer(state.ouvert, true); });
+        pStock.then(j => { if (mien !== jeton || !j) return;
+                           state.stock = j; TUILES = tuiles(); rendre();
+                           if (state.ouvert) basculer(state.ouvert, true); });
         TUILES = tuiles();
         state.ouvert = null;
         rendre();
