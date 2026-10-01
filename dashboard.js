@@ -482,6 +482,31 @@ OD.define('dashboard', {
       try { const w = wwLib.getFrontWindow(); if (w && w.oropraSite) return w.oropraSite; } catch (e) { }
       return window.oropraSite || null;
     }
+    // Le périmètre d'ouverture vient de la barre du haut, et il doit être connu
+    // AVANT le premier appel. Sans cela, la page chargeait tout sur « tout mon
+    // périmètre », le bus arrivait ensuite avec son site, et les cinq appels
+    // repartaient une seconde fois avec d'autres paramètres : le temps
+    // d'affichage était tout simplement doublé.
+    function siteDuBusMaintenant() {
+      try {
+        const b = siteBus();
+        if (b && typeof b.getSiteId === 'function') {
+          const id = b.getSiteId();
+          if (id != null && !isNaN(Number(id))) return Number(id);
+        }
+      } catch (e) { }
+      return null;
+    }
+    async function siteDOuverture(msMax) {
+      const t0 = Date.now();
+      for (;;) {
+        const id = siteDuBusMaintenant();
+        if (id != null) return id;
+        if (Date.now() - t0 > (msMax || 2000)) return null;
+        await new Promise(r => setTimeout(r, 70));
+      }
+    }
+
     function brancherBus(essais) {
       essais = essais || 0;
       const b = siteBus();
@@ -2435,14 +2460,11 @@ OD.define('dashboard', {
         // Les caches sont indexés par (année, mois, périmètre) : les vider ici,
         // comme on le faisait, jetait des résultats parfaitement valables et
         // obligeait à tout refaire au moindre aller-retour entre deux périmètres.
-        const pArbre = chargerArbre().catch(() => null);
         const pStock = chargerStock().catch(() => null);
         const pEnt   = chargerEntonnoir().catch(() => null);
         const d = await charger();
         if (mien !== jeton) return;            // un autre changement est passé devant
         state.d = d;
-        pArbre.then(j => { if (mien !== jeton || !j) return;
-                           state.arbre = j; rendre(); if (state.ouvert) basculer(state.ouvert, true); });
         pStock.then(j => { if (mien !== jeton || !j) return;
                            state.stock = j; TUILES = tuiles(); rendre();
                            if (state.ouvert) basculer(state.ouvert, true); });
@@ -2778,6 +2800,17 @@ OD.define('dashboard', {
     //  DÉMARRAGE
     // =========================================================================
     getRoot().innerHTML = '<div class="dvide">Chargement du tableau de bord…</div>';
+
+    // D'abord le périmètre, ensuite les chiffres. Jamais l'inverse.
+    const idDepart = await siteDOuverture(2000);
+    if (idDepart != null) { state.busSiteVu = idDepart; poserSite(idDepart); }
+
+    // Le stock et l'entonnoir ne dépendent ni de l'année ni du mois : ils
+    // partent tout de suite, en même temps que les chiffres, au lieu d'attendre
+    // leur retour. L'arbre, lui, est daté — il attend le repli de mois.
+    const pStock0 = chargerStock().catch(() => null);
+    const pEnt0   = chargerEntonnoir().catch(() => null);
+
     try {
       state.d = await charger();
     } catch (e) {
@@ -2793,18 +2826,23 @@ OD.define('dashboard', {
     if (await replierSiMoisVide()) {
       try { state.d = await charger(); } catch (e) { console.error('[dash] repli mois', e); }
     }
+    // L'arbre n'est plus chargé ici. Il l'était à chaque montage et à chaque
+    // changement de périmètre — l'appel le plus lourd de la page, 1,3 s — pour
+    // remplir une variable que PERSONNE ne lisait : le tiroir fait sa propre
+    // requête et se sert de son résultat. Il est donc chargé à l'ouverture
+    // d'une tuile qui l'affiche, et mis en cache pour les suivantes.
+    //
+    // Le libellé du périmètre n'était qu'un « Site 12 » tant que la liste des
+    // sites n'était pas revenue : on le reprend maintenant qu'elle est là.
+    if (idDepart != null) poserSite(idDepart);
     TUILES = tuiles();
     rendre();
-    chargerArbre().then(j => { state.arbre = j; rendre(); if (state.ouvert) basculer(state.ouvert, true); })
-                  .catch(() => { });
-    // Le stock n'est pas dans dashboard_tc : il arrive à part, et les tuiles se
-    // reconstruisent quand il est là.
-    chargerStock().then(j => { state.stock = j; TUILES = tuiles(); rendre();
-                               if (state.ouvert) basculer(state.ouvert, true); })
-                  .catch(() => { });
-    chargerEntonnoir().then(j => { state.entonnoir = j; TUILES = tuiles(); rendre();
-                                   if (state.ouvert) basculer(state.ouvert, true); })
-                      .catch(() => { });
+    pStock0.then(j => { if (!j) return;
+                        state.stock = j; TUILES = tuiles(); rendre();
+                        if (state.ouvert) basculer(state.ouvert, true); });
+    pEnt0.then(j => { if (!j) return;
+                      state.entonnoir = j; TUILES = tuiles(); rendre();
+                      if (state.ouvert) basculer(state.ouvert, true); });
     // Une tuile est ouverte d'entrée : la page montre à quoi sert le clic sans
     // qu'on ait à le deviner. Le financement si son taux a reculé, sinon les
     // commandes.
