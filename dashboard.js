@@ -1,5 +1,5 @@
 // ============================================================================
-//  DASHBOARD — module One Data (OD.define)   v31 — PROFIL TEAM COLIN
+//  DASHBOARD — module One Data (OD.define)   v32 — PROFIL TEAM COLIN
 //
 //  Cette version est réservée au tenant Team Colin (ref ieztupavcdnubmpbjvuq),
 //  où elle est épinglée. Le défaut du registre reste la v25 « Tour de
@@ -23,6 +23,14 @@
 //  Une pastille devant chaque famille dit l'état de sa source : alimentée,
 //  partielle, ou sans donnée. Une famille sans source n'est pas masquée — une
 //  tuile vide dit ce qui manque, une tuile absente ne dit rien.
+//
+//  LE MOIS (v32)
+//  Le tableau lisait toujours le mois en cours. Le 1er octobre, cela donnait une
+//  page entière à zéro — aucune commande n'avait encore été passée — et faisait
+//  douter du reste, qui était juste. Un sélecteur de mois s'ajoute, et la page
+//  s'ouvre sur le mois précédent tant que le mois en cours n'a aucune commande,
+//  en le disant. Le repli ne joue qu'une fois : choisir un mois à la main le
+//  désarme.
 //
 //  LE PÉRIMÈTRE — UN SEUL SÉLECTEUR, DANS LA BARRE DU HAUT (v31)
 //  La v30 avait mis un tableau de périmètre dans la page. Deux sélecteurs pour
@@ -299,6 +307,16 @@ OD.define('dashboard', {
 /* Le périmètre : un tableau dont chaque ligne est un choix — le groupe, une
    marque, une affaire, un site. Le chevron plie, le reste de la ligne choisit.
    Même mécanique que le périmètre du suivi d'activité. */
+#dash-root .dmois{display:inline-flex;gap:2px;background:var(--calme-bg);border-radius:9px;padding:2px}
+#dash-root .dmois button{background:none;border:0;font:inherit;font-size:11.5px;font-weight:700;
+  color:var(--ink-3);padding:4px 10px;border-radius:7px;cursor:pointer;text-transform:capitalize}
+#dash-root .dmois button:hover{color:var(--ink)}
+#dash-root .dmois button[aria-pressed="true"]{background:var(--card);color:var(--ink);
+  box-shadow:0 1px 2px rgba(28,43,69,.08)}
+/* L'avis de repli : il explique pourquoi la production est vide. Il ne doit pas
+   ressembler à une erreur — c'est une information de calendrier. */
+#dash-root .davis{background:var(--alerte-bg);border-radius:10px;padding:10px 14px;
+  font-size:12.5px;line-height:1.5;color:var(--ink-2)}
 #dash-root .dportee{font-size:11px;font-weight:700;color:var(--ink-2);background:var(--calme-bg);
   padding:3px 9px;border-radius:20px}
 #dash-root .dperim{margin-top:0;background:var(--card);border:1px solid var(--line);
@@ -372,7 +390,8 @@ OD.define('dashboard', {
     const state = { annee: today.getFullYear(), mois: today.getMonth() + 1,
                     ouvert: null, d: null, site: null, chargement: false,
                     sel: { level: 'all', key: null, label: 'Tout mon périmètre' },
-                    plis: {}, arbrePlis: {}, busSites: null };
+                    plis: {}, arbrePlis: {}, busSites: null,
+                    replieFait: false, moisRepli: null };
 
     // Les sites couverts par la sélection courante. null = tout le périmètre,
     // et c'est ce que les fonctions SQL attendent pour ne rien filtrer.
@@ -1967,10 +1986,17 @@ OD.define('dashboard', {
         + '<div class="drail"><h1>' + esc(TITRE_ROLE[familleRole()] || 'Le tableau du jour') + '</h1>'
         + '<span class="dt">' + esc(dateLongue()) + '</span>'
         + '<span class="dportee">' + esc(state.sel.label) + '</span>'
+        + selecteurMois()
         + '<span class="drole">' + esc(ETIQ_ROLE[familleRole()] || '') + '</span></div>'
         // Le périmètre est un tableau : il a sa place en pleine largeur, pas
         // dans le rail du titre.
         + selecteurPerimetre()
+        + (state.moisRepli
+            ? '<div class="davis">' + esc(MOIS_LONG[new Date().getMonth()])
+              + ' n\u2019a pas encore de commande : voici ' + esc(MOIS_LONG[state.mois - 1])
+              + '. Le pipe, les livraisons et les leads ci-dessous sont, eux, à jour '
+              + 'd\u2019aujourd\u2019hui.</div>'
+            : '')
         + '<section class="dband"><div class="d"><div class="q">La météo du jour</div>'
         + '<p>' + phraseDuJour() + '</p></div>'
         + '<div class="dpouls">' + pouls() + '</div></section>'
@@ -2011,6 +2037,17 @@ OD.define('dashboard', {
           recharger();
         });
       });
+
+      r.querySelectorAll('.dmois button[data-m]').forEach(b =>
+        b.addEventListener('click', () => {
+          const a = Number(b.getAttribute('data-a')), m = Number(b.getAttribute('data-m'));
+          if (a === state.annee && m === state.mois) return;
+          state.annee = a; state.mois = m;
+          state.replieFait = true;      // choix explicite : le repli ne joue plus
+          state.moisRepli = null;
+          CACHE_ARBRE = null;           // l'arbre est daté, lui aussi
+          recharger();
+        }));
 
       r.querySelectorAll('.dseg button[data-site]').forEach(b =>
         b.addEventListener('click', () => {
@@ -2106,13 +2143,64 @@ OD.define('dashboard', {
     // La page ne fait plus que RAPPELER le périmètre courant, à côté du titre.
     function selecteurPerimetre() { return ''; }
 
+    // -------------------------------------------------------------------------
+    //  LE MOIS
+    //
+    //  Le tableau de bord lisait toujours le mois en cours. Le 1er octobre, cela
+    //  donne une page entière à zéro : aucune commande n'a encore été passée, et
+    //  tout ce qui est mensuel — commandes, financement, accessoires, Roole —
+    //  affiche 0 ou « — ». La page devient illisible un jour sur trente, et
+    //  pire : elle fait douter du reste, qui est juste.
+    //
+    //  Deux réponses, pas une. Un SÉLECTEUR, pour aller voir le mois qu'on veut.
+    //  Et un REPLI automatique au démarrage : tant que le mois en cours n'a
+    //  aucune commande sur le périmètre, la page s'ouvre sur le mois précédent
+    //  et le dit. Le repli ne joue qu'une fois — choisir un mois à la main le
+    //  désarme, sinon le sélecteur serait inutilisable.
+    // -------------------------------------------------------------------------
+    const MOIS_LONG = ['janvier', 'février', 'mars', 'avril', 'mai', 'juin', 'juillet',
+                       'août', 'septembre', 'octobre', 'novembre', 'décembre'];
+
+    function moisPrecedent(a, m) { return m > 1 ? { a: a, m: m - 1 } : { a: a - 1, m: 12 }; }
+
+    function estMoisEnCours() {
+      const d = new Date();
+      return state.annee === d.getFullYear() && state.mois === d.getMonth() + 1;
+    }
+
+    function selecteurMois() {
+      const d = new Date();
+      const choix = [];
+      let a = d.getFullYear(), m = d.getMonth() + 1;
+      for (let i = 0; i < 3; i++) {
+        choix.push({ a: a, m: m, lab: MOIS_LONG[m - 1] + (i === 0 ? '' : '') });
+        const p2 = moisPrecedent(a, m); a = p2.a; m = p2.m;
+      }
+      return '<div class="dmois" role="group" aria-label="Mois">'
+        + choix.map(c => '<button type="button" data-a="' + c.a + '" data-m="' + c.m + '"'
+            + ' aria-pressed="' + (c.a === state.annee && c.m === state.mois) + '">'
+            + esc(c.lab) + '</button>').join('')
+        + '</div>';
+    }
+
+    // Vrai une seule fois : si le mois en cours est vide, on recule d'un mois.
+    async function replierSiMoisVide() {
+      if (state.replieFait || !estMoisEnCours()) return false;
+      state.replieFait = true;
+      if (num((state.d.prod || {}).cdes) > 0) return false;
+      const p2 = moisPrecedent(state.annee, state.mois);
+      state.moisRepli = { depuis: MOIS_LONG[state.mois - 1] };
+      state.annee = p2.a; state.mois = p2.m;
+      return true;
+    }
+
     function dateLongue() {
       const j = ['dimanche', 'lundi', 'mardi', 'mercredi', 'jeudi', 'vendredi', 'samedi'];
       const m = ['janvier', 'février', 'mars', 'avril', 'mai', 'juin', 'juillet', 'août',
                  'septembre', 'octobre', 'novembre', 'décembre'];
       const d = new Date();
       return j[d.getDay()] + ' ' + d.getDate() + ' ' + m[d.getMonth()]
-        + ' · ' + m[state.mois - 1] + ' en cours';
+        + ' · ' + m[state.mois - 1] + (estMoisEnCours() ? ' en cours' : ' ' + state.annee);
     }
 
     function basculer(id) {
@@ -2248,6 +2336,11 @@ OD.define('dashboard', {
       return;
     }
     if (!state.d) { getRoot().innerHTML = '<div class="dvide">Aucune donnée sur votre périmètre.</div>'; return; }
+    // Le mois en cours est vide (on est le 1er, ou rien n'est encore importé) :
+    // on s'ouvre sur le mois précédent plutôt que sur une page de zéros.
+    if (await replierSiMoisVide()) {
+      try { state.d = await charger(); } catch (e) { console.error('[dash] repli mois', e); }
+    }
     TUILES = tuiles();
     rendre();
     chargerArbre().then(j => { state.arbre = j; rendre(); if (state.ouvert) basculer(state.ouvert); })
