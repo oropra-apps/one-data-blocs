@@ -756,7 +756,11 @@ OD.define('dashboard', {
       // Le chef : la production de son équipe, plus les objectifs individuels
       // qu'il suit — PHEV et utilitaires en font partie, ils sont fixés par
       // vendeur et par mois.
+      // Le stock lui sert autant qu'à la direction : c'est lui qui décide ce
+      // qu'on pousse cette semaine, et un VN de plus de 90 jours sur son parc
+      // est son problème avant d'être celui du groupe.
       chef:      ['cdes', 'fi', 'loa', 'acc', 'roole', 'reprise', 'phev', 'vu',
+                  'stock_vn', 'stock_vo',
                   'affaires', 'relance', 'pipeval', 'livr', 'cloturer',
                   'rapports', 'rdv', 'leads', 'delai'],
       // La direction : NEUF tuiles, pas seize. Un directeur de groupe ou de
@@ -824,6 +828,10 @@ OD.define('dashboard', {
       if (fam === 'chef') {
         if (champ === 'equipe') return VEND[t.id] ? t.id : null;
         if (champ === 'titre' && VEND[t.id]) return t.titre + ' — votre équipe';
+        // Le stock ne se ventile pas par vendeur mais par site : un chef qui en
+        // couvre deux doit voir lequel porte les véhicules âgés.
+        if (champ === 'arbre' && (t.id === 'stock_vn' || t.id === 'stock_vo')
+            && (state.d.perimetre || []).length > 1) return t.id;
       }
       if (fam === 'marketing') {
         if (champ === 'sources') return (t.id === 'leads' || t.id === 'delai') ? true : null;
