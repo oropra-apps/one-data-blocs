@@ -1338,7 +1338,7 @@ OD.define('dashboard', {
       { k: 'stock', t: 'Stock', etat: 'plein', n: 'véhicules disponibles, DMS' },
       { k: 'pipe', t: 'Pipe et relances', etat: 'plein', n: 'affaires et devis BACS' },
       { k: 'livr', t: 'Livraisons', etat: 'plein', n: 'statut BACS des commandes' },
-      { k: 'act', t: 'Activité commerciale', etat: 'partiel', n: 'rapports tenus, rendez-vous jamais soldés' },
+      { k: 'act', t: 'Activité commerciale', etat: 'vide', n: 'saisie One Data, en attente du déploiement' },
       { k: 'leads', t: 'Leads', etat: 'partiel', n: 'reçus et attribués tracés, issue rarement renseignée' },
       { k: 'base', t: 'Base client', etat: 'partiel', n: 'qualité des coordonnées, encadrement' }
     ];
@@ -1907,36 +1907,65 @@ OD.define('dashboard', {
       });
 
       // -------------------------------------------------------------- ACTIVITÉ
+      //
+      // Ces deux indicateurs ne mesurent pas le terrain : ils mesurent la
+      // SAISIE dans One Data. Tant que l'outil n'est pas deploye chez les
+      // vendeurs, ils valent zero — et un zero affiche en rouge ferait passer
+      // pour un relachement commercial ce qui n'est qu'un calendrier de
+      // deploiement.
+      //
+      // Le basculement est automatique, sans drapeau a maintenir : le jour ou
+      // le premier compte rendu est saisi, la tuile reprend son sens d'elle-meme.
+      const odSaisi = num(ac.rapports) > 0 || num(ac.rdv_soldes) > 0;
+
       T.push({
-        fam: 'act', id: 'rapports', lab: 'Rapports vendeurs', v: fmt(ac.rapports), statique: true,
-        obj: 'sur 30 jours',
-        c: (num(ac.rapports) / 30).toFixed(1).replace('.', ',') + ' par jour',
-        sens: num(ac.rapports) > 0 ? 'hausse' : 'plat',
-        titre: 'Activité commerciale tracée',
-        ctx: 'Comptes rendus d’échange saisis par les vendeurs.',
-        trouve: () => '<b>C’est la source d’activité la mieux tenue.</b> '
-          + (num(ac.rapports) / 30).toFixed(0) + ' comptes rendus par jour, sans trou. À l’inverse '
-          + 'des rendez-vous et des canaux de contact, les vendeurs la remplissent. C’est donc sur '
-          + 'elle qu’un indicateur de pression commerciale peut s’appuyer dès maintenant.',
+        fam: 'act', id: 'rapports', lab: 'Rapports vendeurs',
+        v: odSaisi ? fmt(ac.rapports) : '\u2014', statique: true,
+        obj: odSaisi ? 'sur 30 jours' : 'en attente du d\u00e9ploiement',
+        c: odSaisi ? (num(ac.rapports) / 30).toFixed(1).replace('.', ',') + ' par jour'
+                   : 'One Data pas encore d\u00e9ploy\u00e9',
+        sens: 'plat', muette: !odSaisi,
+        titre: 'Activit\u00e9 commerciale trac\u00e9e',
+        ctx: 'Comptes rendus d\u2019\u00e9change saisis par les vendeurs dans One Data.',
+        trouve: () => odSaisi
+          ? '<b>' + fmt(ac.rapports) + ' comptes rendus en trente jours</b>, soit '
+            + (num(ac.rapports) / 30).toFixed(1).replace('.', ',') + ' par jour. Les cl\u00f4tures '
+            + 'de cycle \u00e9crites automatiquement par BACS en sont exclues : seules comptent '
+            + 'les saisies d\u2019un vendeur apr\u00e8s un \u00e9change avec un client.'
+          : '<b>Aucun compte rendu n\u2019est saisi, et c\u2019est attendu : One Data n\u2019est '
+            + 'pas encore d\u00e9ploy\u00e9 aupr\u00e8s des vendeurs.</b> Cette tuile mesure '
+            + 'l\u2019adoption de l\u2019outil, pas l\u2019activit\u00e9 du terrain — elle se '
+            + 'remplira d\u2019elle-m\u00eame au d\u00e9ploiement. Les cl\u00f4tures de cycle '
+            + '\u00e9crites par BACS sont volontairement exclues du compte : elles disent '
+            + 'qu\u2019une commande a \u00e9t\u00e9 transmise, pas qu\u2019un vendeur a parl\u00e9 '
+            + '\u00e0 quelqu\u2019un.',
         table: () => ''
       });
 
       T.push({
-        fam: 'act', id: 'rdv', lab: 'Rendez-vous à venir', v: fmt(ac.rdv_a_venir), statique: true,
+        fam: 'act', id: 'rdv', lab: 'Rendez-vous \u00e0 venir', v: fmt(ac.rdv_a_venir), statique: true,
         obj: fmt(ac.rdv_tenus) + ' tenus sur 30 jours',
-        c: num(ac.rdv_soldes) === 0 ? 'aucun soldé' : fmt(ac.rdv_soldes) + ' soldés',
-        sens: num(ac.rdv_soldes) === 0 ? 'baisse' : 'plat',
+        c: num(ac.rdv_soldes) === 0 ? (odSaisi ? 'aucun sold\u00e9' : 'r\u00e9sultats non saisis')
+                                    : fmt(ac.rdv_soldes) + ' sold\u00e9s',
+        sens: num(ac.rdv_soldes) === 0 && odSaisi ? 'baisse' : 'plat',
         titre: 'Rendez-vous clients',
-        ctx: 'Rendez-vous planifiés dans One Data.',
-        trouve: () => num(ac.rdv_soldes) === 0
-          ? '<b>' + fmt(ac.rdv_tenus) + ' rendez-vous se sont tenus en trente jours et pas un seul '
-            + 'n’a été soldé.</b> Le résultat de rendez-vous n’est jamais saisi : impossible '
-            + 'aujourd’hui de calculer une transformation rendez-vous vers vente, ni de savoir qui '
-            + 'n’est pas venu. Un champ obligatoire à la clôture réglerait ça.'
-          : fmt(ac.rdv_soldes) + ' rendez-vous sur ' + fmt(ac.rdv_tenus) + ' ont été soldés, soit '
-            + pct(ac.rdv_soldes, ac.rdv_tenus) + ' %.',
+        ctx: 'Rendez-vous import\u00e9s, et leur r\u00e9sultat quand il est saisi dans One Data.',
+        trouve: () => num(ac.rdv_soldes) > 0
+          ? fmt(ac.rdv_soldes) + ' rendez-vous sur ' + fmt(ac.rdv_tenus) + ' ont \u00e9t\u00e9 '
+            + 'sold\u00e9s, soit ' + pct(ac.rdv_soldes, ac.rdv_tenus) + ' %.'
+          : (odSaisi
+            ? '<b>' + fmt(ac.rdv_tenus) + ' rendez-vous se sont tenus en trente jours et pas un '
+              + 'seul n\u2019a \u00e9t\u00e9 sold\u00e9.</b> Le r\u00e9sultat n\u2019est '
+              + 'jamais saisi : impossible de calculer une transformation rendez-vous vers vente, '
+              + 'ni de savoir qui n\u2019est pas venu.'
+            : '<b>Les rendez-vous sont import\u00e9s, leurs r\u00e9sultats ne le sont pas.</b> '
+              + 'Le r\u00e9sultat d\u2019un rendez-vous se saisit dans One Data, qui n\u2019est '
+              + 'pas encore d\u00e9ploy\u00e9 : la colonne « sold\u00e9s » restera vide '
+              + 'jusque-l\u00e0. Le volume affich\u00e9, lui, est r\u00e9el et vient de '
+              + 'l\u2019import.'),
         table: () => ''
       });
+
 
       // ----------------------------------------------------------------- LEADS
       T.push({
