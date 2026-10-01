@@ -452,7 +452,8 @@ OD.define('dashboard', {
     const state = { annee: today.getFullYear(), mois: today.getMonth() + 1,
                     ouvert: null, d: null, site: null, chargement: false,
                     sel: { level: 'all', key: null, label: 'Tout mon périmètre' },
-                    plis: {}, arbrePlis: {}, busSiteVu: null, entonnoir: null,
+                    plis: {}, arbrePlis: {}, busSiteVu: null,
+                    stockBrut: null, entonnoirBrut: null, entonnoir: null,
                     replieFait: false, moisRepli: null, stock: null };
 
     // Les sites couverts par la sélection courante. null = tout le périmètre,
@@ -543,34 +544,27 @@ OD.define('dashboard', {
 
     // Les chiffres du périmètre courant, mis en cache par (année, mois,
     // périmètre). Revenir sur un périmètre déjà consulté n'appelle plus la base.
-    let CACHE_TC = null;
-    // Verrou anti-doublon, repris du suivi d'activité : si un chargement pour la
-    // MÊME clé est déjà en vol, on rend sa promesse au lieu d'en lancer un
-    // second. Deux déclencheurs rapprochés — le montage et le bus, un double
-    // clic sur le périmètre — ne produisent donc plus qu'un seul appel.
+    // Les chiffres de la page. Ils ne viennent plus d'un appel par périmètre
+    // mais du socle, chargé une fois par mois consulté et agrégé en mémoire :
+    // un changement de périmètre ne touche donc plus le réseau.
+    //
+    // Verrou anti-doublon repris du suivi d'activité : si un chargement du
+    // socle est déjà en vol, on rend sa promesse plutôt que d'en lancer un
+    // second — le montage et le bus peuvent se déclencher coup sur coup.
     let EN_VOL = { cle: null, p: null };
     async function charger() {
-      const cle = cleSel();
-      if (CACHE_TC && CACHE_TC.cle === cle) return CACHE_TC.j;
-      if (EN_VOL.p && EN_VOL.cle === cle) return EN_VOL.p;
-      EN_VOL = { cle: cle, p: chargerVraiment() };
-      try { return await EN_VOL.p; }
-      finally { if (EN_VOL.cle === cle) EN_VOL = { cle: null, p: null }; }
-    }
-    async function chargerVraiment() {
-      const jwt = await getUserJwt();
-      if (!jwt) throw new Error('session absente');
-      const res = await fetch(SUPABASE_URL + '/rest/v1/rpc/dashboard_tc', {
-        method: 'POST',
-        headers: { 'apikey': SUPABASE_KEY, 'Authorization': 'Bearer ' + jwt,
-                   'Content-Type': 'application/json' },
-        body: JSON.stringify({ p_annee: state.annee, p_mois: state.mois,
-                               p_id_site: siteSelection(), p_sites: sitesSelection() })
-      });
-      if (!res.ok) throw new Error('HTTP ' + res.status);
-      const j = await res.json();
-      CACHE_TC = { cle: cleSel(), j: j };
-      return j;
+      const cleMois = state.annee + '|' + state.mois;
+      let socle;
+      if (CACHE_SOCLE && CACHE_SOCLE.cle === cleMois) {
+        socle = CACHE_SOCLE.j;
+      } else if (EN_VOL.p && EN_VOL.cle === cleMois) {
+        socle = await EN_VOL.p;
+      } else {
+        EN_VOL = { cle: cleMois, p: chargerSocle() };
+        try { socle = await EN_VOL.p; }
+        finally { if (EN_VOL.cle === cleMois) EN_VOL = { cle: null, p: null }; }
+      }
+      return agreger(socle, sitesSelection());
     }
 
     // -------------------------------------------------------------------------
@@ -635,7 +629,7 @@ OD.define('dashboard', {
     // -------------------------------------------------------------------------
     let CACHE_STOCK = null;
     async function chargerStock() {
-      const cle = JSON.stringify(sitesSelection());
+      const cle = 'tout';            // ventilé par site : un seul chargement suffit
       if (CACHE_STOCK && CACHE_STOCK.cle === cle) return CACHE_STOCK.j;
       const jwt = await getUserJwt();
       if (!jwt) throw new Error('session absente');
@@ -643,12 +637,52 @@ OD.define('dashboard', {
         method: 'POST',
         headers: { 'apikey': SUPABASE_KEY, 'Authorization': 'Bearer ' + jwt,
                    'Content-Type': 'application/json' },
-        body: JSON.stringify({ p_sites: sitesSelection() })
+        body: '{}'
       });
       if (!res.ok) throw new Error('HTTP ' + res.status);
       const j = await res.json();
       CACHE_STOCK = { cle: cle, j: j };
       return j;
+    }
+
+    // Le stock et l'entonnoir arrivent eux aussi ventilés par site : on les
+    // somme ici, comme le socle, pour que le périmètre reste sans appel.
+    function agregerStock(j, ids) {
+      const tous = ((j || {}).sites || []);
+      const gard = (ids && ids.length)
+        ? tous.filter(x => ids.indexOf(Number(x.id_site)) >= 0) : tous;
+      const vn = sommer(gard.map(x => x.vn));
+      const vo = sommer(gard.map(x => x.vo));
+      const moy = o => num(o.age_n) > 0 ? Math.round(num(o.age_somme) / num(o.age_n)) : null;
+      return {
+        vn: Object.assign({}, vn, { age_moyen: moy(vn) }),
+        vo: Object.assign({}, vo, { age_moyen: moy(vo) }),
+        sites: gard.map(x => ({
+          id_site: x.id_site, site: x.site,
+          vn: num((x.vn || {}).n), vn_valeur: num((x.vn || {}).valeur), vn_90: num((x.vn || {}).plus_90j),
+          vo: num((x.vo || {}).n), vo_valeur: num((x.vo || {}).valeur), vo_90: num((x.vo || {}).plus_90j)
+        }))
+      };
+    }
+
+    function agregerEntonnoir(j, ids) {
+      const tous = ((j || {}).sites || []);
+      const gard = (ids && ids.length)
+        ? tous.filter(x => ids.indexOf(Number(x.id_site)) >= 0) : tous;
+      const t = sommer(gard.map(x => { const y = Object.assign({}, x); delete y.id_site; return y; }));
+      return {
+        etapes: [
+          { cle: 'preparation', lab: 'En préparation',
+            n: num(t.preparation_n), montant: num(t.preparation_m) },
+          { cle: 'approbation', lab: 'Demande d\u2019approbation',
+            n: num(t.approbation_n), montant: num(t.approbation_m) },
+          { cle: 'transmis', lab: 'Transmis / Validé',
+            n: num(t.transmis_n), montant: num(t.transmis_m) }
+        ],
+        refus: { n: num(t.refus_n), montant: num(t.refus_m) },
+        total: { n: num(t.preparation_n) + num(t.approbation_n) + num(t.transmis_n),
+                 montant: num(t.preparation_m) + num(t.approbation_m) + num(t.transmis_m) }
+      };
     }
 
     // -------------------------------------------------------------------------
@@ -712,7 +746,7 @@ OD.define('dashboard', {
     // -------------------------------------------------------------------------
     let CACHE_ENTONNOIR = null;
     async function chargerEntonnoir() {
-      const cle = JSON.stringify(sitesSelection());
+      const cle = 'tout';
       if (CACHE_ENTONNOIR && CACHE_ENTONNOIR.cle === cle) return CACHE_ENTONNOIR.j;
       const jwt = await getUserJwt();
       if (!jwt) throw new Error('session absente');
@@ -720,12 +754,148 @@ OD.define('dashboard', {
         method: 'POST',
         headers: { 'apikey': SUPABASE_KEY, 'Authorization': 'Bearer ' + jwt,
                    'Content-Type': 'application/json' },
-        body: JSON.stringify({ p_sites: sitesSelection() })
+        body: '{}'
       });
       if (!res.ok) throw new Error('HTTP ' + res.status);
       const j = await res.json();
       CACHE_ENTONNOIR = { cle: cle, j: j };
       return j;
+    }
+
+    // =========================================================================
+    //  LE SOCLE, ET SON AGRÉGATION EN MÉMOIRE
+    //
+    //  C'est la méthode du suivi d'activité, qui est la seule page fluide de
+    //  l'application : on charge UNE fois les chiffres ventilés par site, sans
+    //  filtre de périmètre, puis on fait la somme ici selon le périmètre choisi.
+    //  Changer de marque, d'affaire ou de site ne déclenche donc plus aucun
+    //  appel — le travail se fait sur trente kilo-octets déjà en mémoire.
+    //
+    //  Règle de lecture : le socle ne contient ni taux ni médiane, qui ne
+    //  s'additionnent pas. Il porte les numérateurs et les dénominateurs ; les
+    //  divisions se font ici, APRÈS la somme.
+    // =========================================================================
+    let CACHE_SOCLE = null;
+    async function chargerSocle() {
+      const cle = state.annee + '|' + state.mois;
+      if (CACHE_SOCLE && CACHE_SOCLE.cle === cle) return CACHE_SOCLE.j;
+      const jwt = await getUserJwt();
+      if (!jwt) throw new Error('session absente');
+      const res = await fetch(SUPABASE_URL + '/rest/v1/rpc/dashboard_tc_socle', {
+        method: 'POST',
+        headers: { 'apikey': SUPABASE_KEY, 'Authorization': 'Bearer ' + jwt,
+                   'Content-Type': 'application/json' },
+        body: JSON.stringify({ p_annee: state.annee, p_mois: state.mois })
+      });
+      if (!res.ok) throw new Error('HTTP ' + res.status);
+      const j = await res.json();
+      CACHE_SOCLE = { cle: cle, j: j };
+      return j;
+    }
+
+    // La tranche médiane du premier contact, reconstruite à partir des compteurs
+    // par tranche. On ne peut pas additionner des médianes entre sites, mais on
+    // peut additionner des effectifs et retrouver où tombe le milieu.
+    //
+    // La moyenne, elle, était inutilisable : des leads de 2016 recontactés cette
+    // année la portaient à 333 jours, là où la médiane réelle est d'un quart de
+    // journée. On rend donc le haut de la tranche où tombe le milieu.
+    const TRANCHES = [
+      { k: 'd_15min', h: 0.25, lab: 'moins de 15 min' },
+      { k: 'd_30min', h: 0.5,  lab: 'moins de 30 min' },
+      { k: 'd_60min', h: 1,    lab: 'moins d\u2019une heure' },
+      { k: 'd_4h',    h: 4,    lab: 'moins de 4 heures' },
+      { k: 'd_24h',   h: 24,   lab: 'moins de 24 heures' },
+      { k: 'd_plus',  h: null, lab: 'plus de 24 heures' }
+    ];
+    function delaiMedian(leads) {
+      const n = num(leads.delai_n);
+      if (!n) return null;
+      let cumul = 0;
+      for (let i = 0; i < TRANCHES.length; i++) {
+        cumul += num(leads[TRANCHES[i].k]);
+        if (cumul >= n / 2) return TRANCHES[i].h;   // null = au-delà de 24 h
+      }
+      return null;
+    }
+
+    // Somme de plusieurs objets plats, clé à clé.
+    function sommer(objets) {
+      const o = {};
+      objets.forEach(x => {
+        Object.keys(x || {}).forEach(k => { o[k] = num(o[k]) + num(x[k]); });
+      });
+      return o;
+    }
+
+    // Du socle vers la forme que tout le reste du module attend déjà. Rien
+    // d'autre ne change : tuiles(), la météo, les graphes continuent de lire
+    // state.d.prod, state.d.pipe, state.d.livr…
+    function agreger(socle, ids) {
+      const tous = (socle.sites || []);
+      const gard = (ids && ids.length)
+        ? tous.filter(x => ids.indexOf(Number(x.id_site)) >= 0)
+        : tous;
+
+      const prod  = sommer(gard.map(x => x.prod));
+      const livr  = sommer(gard.map(x => x.livr));
+      const pipe  = sommer(gard.map(x => x.pipe));
+      const pval  = sommer(gard.map(x => x.pipe_val));
+      const rap   = sommer(gard.map(x => x.rap));
+      const rdv   = sommer(gard.map(x => x.rdv));
+      const leads = sommer(gard.map(x => x.leads));
+      const obj   = sommer(gard.map(x => x.obj));
+      const met   = sommer(gard.map(x => x.meteo));
+
+      // Les séries : on ne garde que les sites du périmètre, puis on recompose
+      // les douze mois, y compris ceux sans aucune commande — un trou dans la
+      // série décalerait le graphe.
+      const parMois = {};
+      (socle.serie || []).forEach(r => {
+        if (ids && ids.length && ids.indexOf(Number(r.id_site)) < 0) return;
+        const m = r.mois;
+        if (!parMois[m]) parMois[m] = { mois: m };
+        Object.keys(r).forEach(k => {
+          if (k === 'mois' || k === 'id_site') return;
+          parMois[m][k] = num(parMois[m][k]) + num(r[k]);
+        });
+      });
+      const serie = [];
+      const d0 = new Date(state.annee, state.mois - 1, 1);
+      for (let i = 11; i >= 0; i--) {
+        const dd = new Date(d0.getFullYear(), d0.getMonth() - i, 1);
+        const cle = dd.getFullYear() + '-' + String(dd.getMonth() + 1).padStart(2, '0');
+        const r = parMois[cle] || { mois: cle };
+        // Les taux se calculent après la somme, jamais en moyennant des taux.
+        serie.push({
+          mois: cle, cdes: num(r.cdes),
+          fi:      num(r.hors_loueurs) > 0 ? Math.round(100 * num(r.fi) / num(r.hors_loueurs)) : null,
+          loa:     num(r.cdes) > 0 ? Math.round(100 * num(r.loa) / num(r.cdes)) : null,
+          roole:   num(r.cdes) > 0 ? Math.round(100 * num(r.roole) / num(r.cdes)) : null,
+          reprise: num(r.cdes) > 0 ? Math.round(100 * num(r.reprise) / num(r.cdes)) : null,
+          phev:    num(r.phev), vu: num(r.vu),
+          acc:     num(r.cdes) > 0 ? Math.round(num(r.acc) / num(r.cdes)) : 0
+        });
+      }
+
+      return {
+        annee: socle.annee, mois: socle.mois, role: socle.role,
+        perimetre: socle.perimetre, seuils: socle.seuils,
+        site: (ids && ids.length === 1) ? ids[0] : null,
+        sites_actifs: ids || null,
+        prod: prod,
+        obj: { cdes: num(obj.cdes), fi: num(obj.fi) },
+        serie: serie,
+        pipe: Object.assign({}, pipe, {
+          dossiers: num(pval.dossiers), montant: num(pval.montant), recents: num(pval.recents)
+        }),
+        livr: livr,
+        act: { rapports: num(rap.rapports), rdv_a_venir: num(rdv.rdv_a_venir),
+               rdv_tenus: num(rdv.rdv_tenus), rdv_soldes: num(rdv.rdv_soldes) },
+        leads: Object.assign({}, leads, { delai_median_h: delaiMedian(leads) }),
+        meteo: { cdes_jour: num(met.cdes_jour), devis_jour: num(met.devis_jour) },
+        base: null, detail: null
+      };
     }
 
     // Les séries de la RPC arrivent en douze lignes { mois, cdes, fi, ... }.
@@ -1432,6 +1602,12 @@ OD.define('dashboard', {
     ];
 
     function tuiles() {
+      // Le stock et l'entonnoir sont gardés bruts, ventilés par site, et
+      // ré-agrégés ici au périmètre courant : changer de périmètre ne les
+      // recharge pas, il les recompte.
+      const idsP = sitesSelection();
+      state.stock = state.stockBrut ? agregerStock(state.stockBrut, idsP) : null;
+      state.entonnoir = state.entonnoirBrut ? agregerEntonnoir(state.entonnoirBrut, idsP) : null;
       const d = state.d, p = d.prod || {}, o = d.obj || {}, pi = d.pipe || {}, lv = d.livr || {},
             ac = d.act || {}, ld = d.leads || {}, ba = d.base, det = d.detail || {}, s = d.seuils || {};
       const lm = libellesMois();
@@ -2089,12 +2265,20 @@ OD.define('dashboard', {
         ])
       });
 
+      // Le délai n'est plus une médiane exacte mais la TRANCHE où tombe le
+      // milieu : c'est le prix à payer pour qu'il reste juste quand on change de
+      // périmètre, des médianes ne s'additionnant pas entre sites. L'affichage
+      // le dit — « moins de 4 h », pas « 3,7 h ».
+      const trMed = TRANCHES.filter(t => t.h === ld.delai_median_h)[0]
+                 || (ld.delai_median_h == null && num(ld.delai_n) > 0
+                      ? TRANCHES[TRANCHES.length - 1] : null);
       T.push({
         fam: 'leads', id: 'delai', lab: 'Premier contact',
-        v: ld.delai_median_h == null ? '—' : String(ld.delai_median_h).replace('.', ','), unite: 'h',
-        statique: true, obj: 'délai médian',
-        c: num(ld.delai_median_h) > 1 ? 'la norme est sous 1 h' : 'dans la norme',
-        sens: num(ld.delai_median_h) > 1 ? 'baisse' : 'hausse',
+        v: trMed ? (trMed.h == null ? '> 24' : String(trMed.h).replace('.', ',')) : '—',
+        unite: 'h',
+        statique: true, obj: trMed ? 'la moitié répond en ' + trMed.lab : 'aucun contact tracé',
+        c: (trMed && trMed.h != null && trMed.h <= 1) ? 'dans la norme' : 'la norme est sous 1 h',
+        sens: (trMed && trMed.h != null && trMed.h <= 1) ? 'hausse' : 'baisse',
         vues: {
           vendeur: {
             titre: 'Les plus anciens d’abord',
@@ -2104,8 +2288,8 @@ OD.define('dashboard', {
             liste: 'leads_jamais', cols: colsLeads,
             table: () => '',
             trouve: () => '<b>La première heure décide.</b> Passé ce délai, la probabilité de '
-              + 'joindre un prospect s’effondre, et le concurrent a rappelé. Le délai médian sur '
-              + 'votre périmètre est de ' + String(ld.delai_median_h).replace('.', ',') + ' heures : '
+              + 'joindre un prospect s’effondre, et le concurrent a rappelé. Sur votre périmètre, '
+              + 'la moitié des leads sont contactés en ' + (trMed ? trMed.lab : '—') + ' : '
               + 'ce n’est pas une question d’organisation, c’est la différence entre un lead qui se '
               + 'transforme et un lead qui alimente la statistique des perdus.'
           }
@@ -2516,13 +2700,10 @@ OD.define('dashboard', {
       const mien = ++jeton;
       const memoire = state.ouvert;
       try {
-        // Les trois appels partent ENSEMBLE. Ils étaient enchaînés : le stock
-        // n'était demandé qu'une fois les chiffres revenus, ce qui ajoutait son
-        // temps à celui du reste au lieu de le recouvrir.
-        //
-        // Les caches sont indexés par (année, mois, périmètre) : les vider ici,
-        // comme on le faisait, jetait des résultats parfaitement valables et
-        // obligeait à tout refaire au moindre aller-retour entre deux périmètres.
+        // Changer de PÉRIMÈTRE ne déclenche plus aucun appel : le socle, le stock
+        // et l'entonnoir sont tous ventilés par site et déjà en mémoire, et les
+        // quatre chargeurs rendent leur cache immédiatement. Seul un changement
+        // de MOIS repart chercher le socle, et le détail, qui reste périmétré.
         const pStock = chargerStock().catch(() => null);
         const pEnt   = chargerEntonnoir().catch(() => null);
         const pBase  = chargerBase().catch(() => null);
@@ -2531,10 +2712,10 @@ OD.define('dashboard', {
         if (mien !== jeton) return;            // un autre changement est passé devant
         state.d = d;
         pStock.then(j => { if (mien !== jeton || !j) return;
-                           state.stock = j; TUILES = tuiles(); rendre();
+                           state.stockBrut = j; TUILES = tuiles(); rendre();
                            if (state.ouvert) basculer(state.ouvert, true); });
         pEnt.then(j => { if (mien !== jeton || !j) return;
-                         state.entonnoir = j; TUILES = tuiles(); rendre();
+                         state.entonnoirBrut = j; TUILES = tuiles(); rendre();
                          if (state.ouvert) basculer(state.ouvert, true); });
         pBase.then(j => { if (mien !== jeton || !greffer('base', j)) return;
                           TUILES = tuiles(); rendre();
@@ -2910,10 +3091,10 @@ OD.define('dashboard', {
     TUILES = tuiles();
     rendre();
     pStock0.then(j => { if (!j) return;
-                        state.stock = j; TUILES = tuiles(); rendre();
+                        state.stockBrut = j; TUILES = tuiles(); rendre();
                         if (state.ouvert) basculer(state.ouvert, true); });
     pEnt0.then(j => { if (!j) return;
-                      state.entonnoir = j; TUILES = tuiles(); rendre();
+                      state.entonnoirBrut = j; TUILES = tuiles(); rendre();
                       if (state.ouvert) basculer(state.ouvert, true); });
     pBase0.then(j => { if (!greffer('base', j)) return;
                        TUILES = tuiles(); rendre();
