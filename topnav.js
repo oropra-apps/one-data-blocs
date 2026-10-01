@@ -34,7 +34,7 @@ OD.define('topnav', {
   const wwLib = window.wwLib;
   const doc = __anchor.ownerDocument || wwLib.getFrontDocument();
   const ROOT_ID = 'nav-root';
-  const NAV_VER = 30; // <- numéro de version (témoin de chargement)
+  const NAV_VER = 31; // <- numéro de version (témoin de chargement)
 
   // La barre du haut est un sélecteur de SITE, et rien d'autre.
   //
@@ -1350,7 +1350,23 @@ OD.define('topnav', {
     var __onArbReturn = function () { if (doc.visibilityState === 'visible') rappelArbitrageAuRetour(); };
     try { doc.addEventListener('visibilitychange', __onArbReturn); } catch (e) {}
     try { window.addEventListener('focus', __onArbReturn); } catch (e) {}
-    setTimeout(rappelArbitrageAuRetour, 1500);
+    // Les pastilles passent APRÈS l'affichage. client_file_arbitrage est la
+    // requête la plus lourde de la page d'accueil ; la lancer à 1,5 s la mettait
+    // en concurrence directe avec le tableau de bord et l'agenda, sur une
+    // instance qui ne tient qu'un seul travail à la fois.
+    //
+    // On attend donc que le navigateur n'ait plus rien à faire, avec une borne
+    // haute pour que le badge finisse toujours par arriver.
+    (function pastilleApresAffichage() {
+      let parti = false;
+      const go = function () { if (parti) return; parti = true; rappelArbitrageAuRetour(); };
+      try {
+        if (typeof window.requestIdleCallback === 'function') {
+          window.requestIdleCallback(go, { timeout: 8000 });
+        } else { setTimeout(go, 5000); }
+      } catch (e) { setTimeout(go, 5000); }
+      setTimeout(go, 9000);          // filet : la pastille arrive, quoi qu'il arrive
+    })();
   }
   boot();
 })();
