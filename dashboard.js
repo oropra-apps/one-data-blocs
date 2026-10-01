@@ -391,6 +391,17 @@ OD.define('dashboard', {
   #dash-root .dscroll table.dmini td:first-child{max-width:132px;overflow:hidden;
     text-overflow:ellipsis;white-space:nowrap}
 }
+/* L'entonnoir des commandes. Le libellé et les chiffres sont AU-DESSUS de la
+   barre, jamais dedans : dans la barre, ils devenaient illisibles sur les
+   teintes foncées, et sortaient du cadre sur les étapes trop courtes. */
+#dash-root .dent{display:flex;flex-direction:column;gap:13px;margin-top:6px}
+#dash-root .dent-l{display:flex;flex-direction:column;gap:5px}
+#dash-root .dent-h{display:flex;justify-content:space-between;align-items:baseline;gap:12px}
+#dash-root .dent-h b{font-size:12.5px;font-weight:800;color:var(--ink)}
+#dash-root .dent-h span{font-family:var(--mono);font-size:11.5px;font-variant-numeric:tabular-nums;
+  color:var(--ink-2);white-space:nowrap}
+#dash-root .dent-p{height:10px;border-radius:5px;background:var(--calme-bg);overflow:hidden}
+#dash-root .dent-b{height:100%;border-radius:5px}
 #dash-root .dferme{background:none;border:0;font:inherit;font-size:12px;font-weight:600;color:var(--ink-3);
   cursor:pointer;padding:0;margin-top:14px;text-decoration:underline;text-underline-offset:3px}
 /* La croix : refermer sans avoir à redescendre au bas du tiroir. */
@@ -441,7 +452,7 @@ OD.define('dashboard', {
     const state = { annee: today.getFullYear(), mois: today.getMonth() + 1,
                     ouvert: null, d: null, site: null, chargement: false,
                     sel: { level: 'all', key: null, label: 'Tout mon périmètre' },
-                    plis: {}, arbrePlis: {}, busSiteVu: null,
+                    plis: {}, arbrePlis: {}, busSiteVu: null, entonnoir: null,
                     replieFait: false, moisRepli: null, stock: null };
 
     // Les sites couverts par la sélection courante. null = tout le périmètre,
@@ -603,6 +614,32 @@ OD.define('dashboard', {
       return j;
     }
 
+    // -------------------------------------------------------------------------
+    //  L'ENTONNOIR DES COMMANDES
+    //
+    //  Ce n'est pas un taux de conversion mais une FILE : où en sont, à cet
+    //  instant, les commandes engagées et pas encore soldées. Les commandes
+    //  closes en sont exclues — 33 416 lignes d'historique écrasaient l'échelle
+    //  des trois étapes vivantes sans rien dire de ce qu'il reste à faire.
+    // -------------------------------------------------------------------------
+    let CACHE_ENTONNOIR = null;
+    async function chargerEntonnoir() {
+      const cle = JSON.stringify(sitesSelection());
+      if (CACHE_ENTONNOIR && CACHE_ENTONNOIR.cle === cle) return CACHE_ENTONNOIR.j;
+      const jwt = await getUserJwt();
+      if (!jwt) throw new Error('session absente');
+      const res = await fetch(SUPABASE_URL + '/rest/v1/rpc/dashboard_tc_entonnoir', {
+        method: 'POST',
+        headers: { 'apikey': SUPABASE_KEY, 'Authorization': 'Bearer ' + jwt,
+                   'Content-Type': 'application/json' },
+        body: JSON.stringify({ p_sites: sitesSelection() })
+      });
+      if (!res.ok) throw new Error('HTTP ' + res.status);
+      const j = await res.json();
+      CACHE_ENTONNOIR = { cle: cle, j: j };
+      return j;
+    }
+
     // Les séries de la RPC arrivent en douze lignes { mois, cdes, fi, ... }.
     function serie(cle) { return (state.d.serie || []).map(r => num(r[cle])); }
     function libellesMois() {
@@ -655,6 +692,38 @@ OD.define('dashboard', {
     // Graphe du tiroir. Une seule échelle, jamais deux axes : quand une seconde
     // série est tracée (le financement sous la LOA), elle partage l'axe — ce
     // sont deux pourcentages, la comparaison a un sens.
+    // L'entonnoir : une barre par étape, large comme l'argent qu'elle immobilise.
+    // En HTML et non en SVG — un viewBox étiré pour occuper la largeur aurait
+    // déformé les libellés avec lui.
+    //
+    // Les étapes ne décroissent pas forcément : « transmis » peut être plus
+    // fourni que « en préparation ». Ce sont des files d'attente, pas les
+    // paliers d'un tamis ; c'est la largeur qu'on compare, pas la pente.
+    function entonnoirHtml(j) {
+      const et = ((j || {}).etapes || []);
+      if (!et.length) return '<p class="ctx">Aucune commande en cours sur ce périmètre.</p>';
+      const mx = Math.max.apply(null, et.map(x => num(x.montant))) || 1;
+      const TEINTES = { preparation: 'var(--m-bleu)', approbation: 'var(--m-orange)',
+                        transmis: 'var(--m-vert)' };
+      const lignes = et.map(x => {
+        const w = Math.max(num(x.montant) / mx * 100, 1.5);
+        return '<div class="dent-l">'
+          + '<div class="dent-h"><b>' + esc(x.lab) + '</b>'
+          + '<span>' + fmt(x.n) + ' dossier' + (num(x.n) > 1 ? 's' : '') + ' \u00b7 '
+          + fmtEur(x.montant) + '</span></div>'
+          + '<div class="dent-p"><div class="dent-b" style="width:' + w.toFixed(1)
+          + '%;background:' + (TEINTES[x.cle] || 'var(--m-bleu)') + '"></div></div></div>';
+      }).join('');
+      const tot = (j || {}).total || {}, ref = (j || {}).refus || {};
+      return '<div class="dent">' + lignes + '</div>'
+        + '<p class="dnote"><b>' + fmt(tot.n) + ' commandes engagées, ' + fmtEur(tot.montant)
+        + '</b>, en attente d\u2019être soldées.'
+        + (num(ref.n) > 0 ? ' À côté, ' + fmt(ref.n) + ' commande' + (num(ref.n) > 1 ? 's' : '')
+           + ' refusée' + (num(ref.n) > 1 ? 's' : '') + ' pour ' + fmtEur(ref.montant)
+           + ' — elles ne sont dans aucune étape, elles sont sorties.' : '')
+        + '</p>';
+    }
+
     function graphe(vals, forme, libelles, unite, second, titre) {
       if (!vals || !vals.length) return '';
       const W = 520, H = 190, gT = 22, gR = 12, gB = 30, gL = 34;
@@ -751,7 +820,7 @@ OD.define('dashboard', {
     // que vingt dont douze ne le concernent pas.
     const JEUX = {
       // Le vendeur : ce sur quoi il agit lui-même dans la journée.
-      vendeur:   ['cdes', 'fi', 'acc', 'affaires', 'relance', 'livr', 'leads', 'delai'],
+      vendeur:   ['cdes', 'fi', 'acc', 'affaires', 'relance', 'pipecom', 'livr', 'leads', 'delai'],
       // Le chef : la production de son équipe, plus les objectifs individuels
       // qu'il suit — PHEV et utilitaires en font partie, ils sont fixés par
       // vendeur et par mois.
@@ -760,7 +829,7 @@ OD.define('dashboard', {
       // est son problème avant d'être celui du groupe.
       chef:      ['cdes', 'fi', 'loa', 'acc', 'roole', 'reprise', 'phev', 'vu',
                   'stock_vn', 'stock_vo',
-                  'affaires', 'relance', 'pipeval', 'livr', 'cloturer',
+                  'affaires', 'relance', 'pipeval', 'pipecom', 'livr', 'cloturer',
                   'rapports', 'rdv', 'leads', 'delai'],
       // La direction : NEUF tuiles, pas seize. Un directeur de groupe ou de
       // plaque ne pilote pas le détail — il pilote ce qui engage de l'argent et
@@ -776,7 +845,7 @@ OD.define('dashboard', {
       // qui n'était nulle part.
       direction: ['cdes', 'fi', 'acc',
                   'stock_vn', 'stock_vo',
-                  'pipeval', 'livr', 'leads', 'injoignables'],
+                  'pipeval', 'pipecom', 'livr', 'leads', 'injoignables'],
       marketing: ['cdes', 'leads', 'delai', 'injoignables', 'fusion', 'bloctel']
     };
     const ETIQ_ROLE = { vendeur: 'Vendeur', chef: 'Chef des ventes',
@@ -1736,6 +1805,48 @@ OD.define('dashboard', {
         table: () => ''
       });
 
+      // Où en sont les commandes engagées : la file BACS, étape par étape.
+      // La tuile porte l'argent en attente ; le dépli montre la répartition.
+      const en = state.entonnoir || {};
+      const enTot = en.total || {};
+      T.push({
+        fam: 'pipe', id: 'pipecom', lab: 'Commandes en cours',
+        v: fmt(enTot.n), statique: true,
+        obj: fmtEur(enTot.montant) + ' engagés',
+        c: (() => {
+          const et = (en.etapes || []);
+          const ap = et.find(x => x.cle === 'approbation');
+          return ap && num(ap.n) > 0 ? fmt(ap.n) + ' en attente d\u2019approbation'
+                                     : 'rien en attente d\u2019approbation';
+        })(),
+        sens: 'plat',
+        titre: 'Les commandes engagées, étape par étape',
+        ctx: 'Commandes BACS non soldées, à l\u2019instant présent. Les commandes closes '
+           + 'sont exclues : ce qui compte ici est ce qu\u2019il reste à faire.',
+        trouve: () => {
+          const et = (en.etapes || []);
+          if (!et.length) return 'Aucune commande en cours sur ce périmètre.';
+          const plus = et.slice().sort((a, b) => num(b.montant) - num(a.montant))[0];
+          const ap = et.find(x => x.cle === 'approbation');
+          const ref = en.refus || {};
+          let h = '<b>' + fmtEur(plus.montant) + ' attendent à l\u2019étape « '
+                + esc(plus.lab).toLowerCase() + ' »</b>, soit '
+                + pct(plus.montant, enTot.montant) + ' % de l\u2019argent engagé. ';
+          if (ap && num(ap.n) > 0) {
+            h += fmt(ap.n) + ' dossier' + (num(ap.n) > 1 ? 's attendent' : ' attend')
+              + ' une approbation pour ' + fmtEur(ap.montant) + ' : c\u2019est la seule étape '
+              + 'qui dépende d\u2019une signature, et la seule qu\u2019on puisse débloquer '
+              + 'aujourd\u2019hui. ';
+          }
+          if (num(ref.n) > 0) {
+            h += fmt(ref.n) + ' commande' + (num(ref.n) > 1 ? 's ont été refusées' : ' a été refusée')
+              + ' pour ' + fmtEur(ref.montant) + '.';
+          }
+          return h;
+        },
+        table: () => entonnoirHtml(en)
+      });
+
       // ------------------------------------------------------------- LIVRAISON
       T.push({
         fam: 'livr', id: 'livr', lab: 'À livrer', v: fmt(lv.en_attente), statique: true,
@@ -2297,6 +2408,7 @@ OD.define('dashboard', {
         // obligeait à tout refaire au moindre aller-retour entre deux périmètres.
         const pArbre = chargerArbre().catch(() => null);
         const pStock = chargerStock().catch(() => null);
+        const pEnt   = chargerEntonnoir().catch(() => null);
         const d = await charger();
         if (mien !== jeton) return;            // un autre changement est passé devant
         state.d = d;
@@ -2305,6 +2417,9 @@ OD.define('dashboard', {
         pStock.then(j => { if (mien !== jeton || !j) return;
                            state.stock = j; TUILES = tuiles(); rendre();
                            if (state.ouvert) basculer(state.ouvert, true); });
+        pEnt.then(j => { if (mien !== jeton || !j) return;
+                         state.entonnoir = j; TUILES = tuiles(); rendre();
+                         if (state.ouvert) basculer(state.ouvert, true); });
         TUILES = tuiles();
         state.ouvert = null;
         rendre();
@@ -2658,6 +2773,9 @@ OD.define('dashboard', {
     chargerStock().then(j => { state.stock = j; TUILES = tuiles(); rendre();
                                if (state.ouvert) basculer(state.ouvert, true); })
                   .catch(() => { });
+    chargerEntonnoir().then(j => { state.entonnoir = j; TUILES = tuiles(); rendre();
+                                   if (state.ouvert) basculer(state.ouvert, true); })
+                      .catch(() => { });
     // Une tuile est ouverte d'entrée : la page montre à quoi sert le clic sans
     // qu'on ait à le deviner. Le financement si son taux a reculé, sinon les
     // commandes.
