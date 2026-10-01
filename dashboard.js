@@ -2586,6 +2586,35 @@ OD.define('dashboard', {
         + sp + '</button>';
     }
 
+    // Le squelette : la page telle qu'elle sera, sans ses chiffres. Les familles
+    // affichées sont celles du rôle, qu'on connaît sans rien charger.
+    function rendreSquelette() {
+      const fam = familleRole();
+      const ids = (JEUX[fam] || JEUX.direction);
+      const parFam = {};
+      FAMILLES.forEach(f => { parFam[f.k] = []; });
+      // On ne connaît pas encore la famille de chaque tuile : on répartit sur
+      // l'ordre des familles, au prorata, pour que la grille ait la bonne allure.
+      const blocs = FAMILLES.map(f => {
+        const n = Math.max(1, Math.round(ids.length / FAMILLES.length));
+        let t = '';
+        for (let i = 0; i < n; i++) {
+          t += '<div class="dtuile muette" style="pointer-events:none">'
+            + '<span class="lab">&nbsp;</span>'
+            + '<span class="v" style="color:var(--line-2)">—</span>'
+            + '<span class="c plat">&nbsp;</span></div>';
+        }
+        return '<section class="dfam' + (n <= 2 ? ' etroite' : '') + '" style="grid-column:span '
+          + Math.min(n, 6) + '"><h2><span class="detat vide"></span>'
+          + '<span class="tt">' + esc(f.t) + '</span></h2>'
+          + '<div class="dgrille">' + t + '</div></section>';
+      }).join('');
+      getRoot().innerHTML = '<div class="dw">'
+        + '<div class="drail"><h1>' + esc(TITRE_ROLE[fam] || 'Le tableau du jour') + '</h1>'
+        + '<span class="dt">' + esc(dateLongue()) + '</span></div>'
+        + '<div class="dfams">' + blocs + '</div></div>';
+    }
+
     function rendre() {
       const r = getRoot();
       const fams = FAMILLES.map(f => {
@@ -3041,7 +3070,11 @@ OD.define('dashboard', {
     // =========================================================================
     //  DÉMARRAGE
     // =========================================================================
-    getRoot().innerHTML = '<div class="dvide">Chargement du tableau de bord…</div>';
+    // Le cadre est posé TOUT DE SUITE, avant la moindre requête : titre, date,
+    // familles et tuiles en attente. L'écran est donc utile dès la première
+    // image, et les chiffres viennent s'y inscrire — au lieu d'une page vide
+    // portant « Chargement… » pendant une seconde.
+    rendreSquelette();
 
     // ON N'ATTEND PLUS RIEN AVANT DE CHARGER.
     //
