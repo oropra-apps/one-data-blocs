@@ -431,7 +431,7 @@ OD.define('dashboard', {
     const state = { annee: today.getFullYear(), mois: today.getMonth() + 1,
                     ouvert: null, d: null, site: null, chargement: false,
                     sel: { level: 'all', key: null, label: 'Tout mon périmètre' },
-                    plis: {}, arbrePlis: {}, busSites: null,
+                    plis: {}, arbrePlis: {}, busSiteVu: null,
                     replieFait: false, moisRepli: null, stock: null };
 
     // Les sites couverts par la sélection courante. null = tout le périmètre,
@@ -440,8 +440,6 @@ OD.define('dashboard', {
       const per = ((state.d || {}).perimetre || []);
       const s = state.sel;
       if (!s || s.level === 'all') return null;
-      // Le bus connaît le périmètre réel : quand il l'a calculé, il fait foi.
-      if (state.busSites && state.busSites.length) return state.busSites.slice();
       if (s.level === 'reseau')
         return per.filter(x => (x.reseau || '__sans') === s.key).map(x => Number(x.id_site));
       if (s.level === 'affaire')
@@ -463,49 +461,36 @@ OD.define('dashboard', {
       try { const w = wwLib.getFrontWindow(); if (w && w.oropraSite) return w.oropraSite; } catch (e) { }
       return window.oropraSite || null;
     }
-    // Le périmètre vient du bus, qui sait désormais porter un niveau. Sur un bus
-    // v2 (siteId seul), on retombe sur l'ancien comportement sans rien casser.
-    function adopterPerimetreDuBus(d) {
-      const p = d && d.perimetre;
-      if (p) {
-        state.sel = { level: p.level, key: p.key, label: p.label || 'Tout mon périmètre' };
-        state.site = p.level === 'site' ? Number(p.key) : null;
-        state.busSites = Array.isArray(d.sites) ? d.sites.map(Number) : null;
-        return true;
-      }
-      const id = d ? d.siteId : null;
-      if (id == null) { state.sel = { level: 'all', key: null, label: 'Tout mon périmètre' }; state.site = null; }
-      else poserSite(Number(id));
-      state.busSites = null;
-      return true;
-    }
-
     function brancherBus(essais) {
       essais = essais || 0;
       const b = siteBus();
       if (!b) { if (essais < 120) setTimeout(() => brancherBus(essais + 1), 250); return; }
       try {
-        // Au montage, on adopte ce que le bus porte déjà — périmètre compris.
-        if (typeof b.getPerimetre === 'function') {
-          const p = b.getPerimetre();
-          if (p && (p.level !== state.sel.level || String(p.key) !== String(state.sel.key))) {
-            adopterPerimetreDuBus({ perimetre: p,
-              sites: typeof b.getSitesDuPerimetre === 'function' ? b.getSitesDuPerimetre() : null });
-            recharger();
-          }
-        } else {
-          const id = b.getSiteId();
-          if (id != null && String(id) !== String(siteSelection())) { poserSite(Number(id)); recharger(); }
+        // Au montage seulement, on adopte le site que porte déjà la barre du haut.
+        const id = b.getSiteId ? b.getSiteId() : null;
+        if (id != null) {
+          state.busSiteVu = Number(id);
+          if (String(id) !== String(siteSelection())) { poserSite(Number(id)); recharger(); }
         }
       } catch (e) { }
       if (window.__dashTcBusBound) return;
       window.__dashTcBusBound = true;
+      // La barre du haut ne porte qu'un SITE. Elle n'a donc le droit d'imposer un
+      // périmètre à cette page que lorsqu'elle change RÉELLEMENT de site.
+      //
+      // Sans cette mémoire, le scénario suivant se produisait : on choisissait
+      // « Tout mon périmètre » dans la page, le bus réémettait le site qu'il
+      // portait toujours, et comme ce niveau « site » différait du niveau
+      // « all » de la page, celle-ci le réadoptait aussitôt et rechargeait — la
+      // sélection revenait sur le site en une fraction de seconde, et « Tout mon
+      // périmètre » paraissait impossible à sélectionner.
       b.onChange(d => {
-        const p = d && d.perimetre;
-        // Rien de neuf : on ne recharge pas pour le même périmètre.
-        if (p && p.level === state.sel.level && String(p.key) === String(state.sel.key)) return;
-        if (!p && String(d && d.siteId) === String(siteSelection())) return;
-        adopterPerimetreDuBus(d);
+        const id = d && d.siteId != null ? Number(d.siteId) : null;
+        if (id == null) return;                        // pas un site : rien à suivre ici
+        if (state.busSiteVu != null && id === state.busSiteVu) return;   // déjà vu
+        state.busSiteVu = id;
+        if (String(id) === String(siteSelection())) return;
+        poserSite(id);
         recharger();
       });
     }
@@ -2240,7 +2225,7 @@ OD.define('dashboard', {
             const ouvertParDefaut = pli.indexOf('reseau:') === 0;
             const etat = state.plis[pli];
             state.plis[pli] = (etat === undefined) ? !ouvertParDefaut : !etat;
-            rendre(); if (state.ouvert) basculer(state.ouvert);
+            rendre(); if (state.ouvert) basculer(state.ouvert, true);
             return;
           }
           const lv = tr.getAttribute('data-lv');
@@ -2249,11 +2234,6 @@ OD.define('dashboard', {
           if (lv === state.sel.level && String(k) === String(state.sel.key == null ? '' : state.sel.key)) return;
           state.sel = { level: lv, key: lv === 'all' ? null : (lv === 'site' ? Number(k) : k), label: lab };
           state.site = lv === 'site' ? Number(k) : null;
-          // La liste de sites héritée du bus ne vaut plus rien : elle décrivait
-          // le choix de la barre du haut, pas celui qu'on vient de faire ici.
-          // Sans cette remise à zéro, choisir TOYOTA aurait continué d'interroger
-          // le seul site que portait la barre.
-          state.busSites = null;
           // La barre du haut ne sait porter qu'un site : on ne lui pousse une
           // valeur que dans ce cas, sinon les deux se contrediraient.
           if (lv === 'site') { try { const b = siteBus(); if (b) b.setSiteId(Number(k)); } catch (e) { } }
@@ -2299,16 +2279,16 @@ OD.define('dashboard', {
         state.d = d;
         // L'arbre chiffre le sélecteur de périmètre : il se charge avec la page,
         // sans la retarder — le tableau s'affiche d'abord sans ses colonnes.
-        chargerArbre().then(j => { state.arbre = j; rendre(); if (state.ouvert) basculer(state.ouvert); })
+        chargerArbre().then(j => { state.arbre = j; rendre(); if (state.ouvert) basculer(state.ouvert, true); })
                       .catch(() => { });
         chargerStock().then(j => { state.stock = j; TUILES = tuiles(); rendre();
-                                   if (state.ouvert) basculer(state.ouvert); })
+                                   if (state.ouvert) basculer(state.ouvert, true); })
                       .catch(() => { });
         TUILES = tuiles();
         state.ouvert = null;
         rendre();
         const cible = TUILES.some(t => t.id === memoire) ? memoire : tuileParDefaut();
-        if (cible) basculer(cible);
+        if (cible) basculer(cible, true);
       } catch (e) {
         console.error('[dash] rechargement', e);
       } finally {
@@ -2497,7 +2477,11 @@ OD.define('dashboard', {
         + ' · ' + m[state.mois - 1] + (estMoisEnCours() ? ' en cours' : ' ' + state.annee);
     }
 
-    function basculer(id) {
+    // `auto` : réouverture faite par la page elle-même (rechargement, arrivée
+    // d'une donnée en différé). Elle ne doit PAS faire défiler la page : c'est
+    // ce qui renvoyait l'écran vers le bas à chaque changement de périmètre,
+    // trois fois de suite — une par rechargement différé.
+    function basculer(id, auto) {
       if (state.ouvert === id) { fermer(); return; }
       const t = TUILES.find(x => x.id === id);
       if (!t) return;
@@ -2536,7 +2520,7 @@ OD.define('dashboard', {
         + '<div class="dtrouve"><div class="t">Ce que le chiffre ne dit pas</div>' + trouve + '</div>'
         + '<button class="dferme" type="button">Refermer</button></div></section>';
       zone.querySelectorAll('.dferme').forEach(b => b.addEventListener('click', fermer));
-      try { zone.scrollIntoView({ behavior: 'smooth', block: 'nearest' }); } catch (e) { }
+      if (!auto) { try { zone.scrollIntoView({ behavior: 'smooth', block: 'nearest' }); } catch (e) { } }
 
       // L'arborescence de la direction. Cliquer une ligne de marque ou d'affaire
       // la replie ; cliquer un site filtre tout le tableau de bord dessus.
@@ -2561,7 +2545,7 @@ OD.define('dashboard', {
               }
               const cle = tr.getAttribute('data-cle');
               state.arbrePlis[cle] = state.arbrePlis[cle] === false ? true : false;
-              fermer(); basculer(id);       // le dépli se redessine avec le nouveau pli
+              fermer(); basculer(id, true); // le dépli se redessine avec le nouveau pli
             });
           });
         }).catch(e => {
@@ -2646,18 +2630,18 @@ OD.define('dashboard', {
     }
     TUILES = tuiles();
     rendre();
-    chargerArbre().then(j => { state.arbre = j; rendre(); if (state.ouvert) basculer(state.ouvert); })
+    chargerArbre().then(j => { state.arbre = j; rendre(); if (state.ouvert) basculer(state.ouvert, true); })
                   .catch(() => { });
     // Le stock n'est pas dans dashboard_tc : il arrive à part, et les tuiles se
     // reconstruisent quand il est là.
     chargerStock().then(j => { state.stock = j; TUILES = tuiles(); rendre();
-                               if (state.ouvert) basculer(state.ouvert); })
+                               if (state.ouvert) basculer(state.ouvert, true); })
                   .catch(() => { });
     // Une tuile est ouverte d'entrée : la page montre à quoi sert le clic sans
     // qu'on ait à le deviner. Le financement si son taux a reculé, sinon les
     // commandes.
     const ouvrable = tuileParDefaut();
-    if (ouvrable) basculer(ouvrable);
+    if (ouvrable) basculer(ouvrable, true);
     // Le bus peut arriver après le module : on se branche une fois la page
     // posée, et il recalera le site lui-même s'il en porte déjà un.
     brancherBus();
