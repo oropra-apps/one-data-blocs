@@ -420,8 +420,6 @@ OD.define('dashboard', {
     function pct(a, b) { return num(b) > 0 ? Math.round(num(a) / num(b) * 100) : null; }
     const MOIS_COURT = ['janv.', 'févr.', 'mars', 'avr.', 'mai', 'juin',
                         'juil.', 'août', 'sept.', 'oct.', 'nov.', 'déc.'];
-    const JOURS_NOM = { '1': 'Lundi', '2': 'Mardi', '3': 'Mercredi', '4': 'Jeudi',
-                        '5': 'Vendredi', '6': 'Samedi', '7': 'Dimanche' };
 
     // =========================================================================
     //  DONNÉES
@@ -979,7 +977,10 @@ OD.define('dashboard', {
       const jj = arbreAvecStock(j);
       const marques = construireArbre((jj || {}).sites || []);
       if (!marques.length) return '<p class="ctx">Aucun site dans votre périmètre.</p>';
-      const entetes = ['Périmètre', 'Commandes', ind.t, ''];
+      // Même règle que pour l'équipe : le repère « Commandes » ne s'ajoute pas
+      // quand l'indicateur regardé est déjà les commandes.
+      const repere = ind.t !== 'Commandes';
+      const entetes = ['Périmètre'].concat(repere ? ['Commandes'] : []).concat([ind.t, '']);
       const lignes = [];
       let muets = 0;
 
@@ -993,12 +994,13 @@ OD.define('dashboard', {
                + (cle ? ' data-cle="' + esc(cle) + '"' : ''),
           c: [
             { h: (niveau < 3 ? '<span class="pli">' + (state.arbrePlis[cle] === false ? '▸' : '▾') + '</span>' : '')
-                 + esc(lab) },
-            { h: '<span class="f">' + fmt(agg.cdes) + '</span>' },
+                 + esc(lab) }
+          ].concat(repere ? [{ h: '<span class="f">' + fmt(agg.cdes) + '</span>' }] : [])
+           .concat([
             { h: '<span class="f"' + (ind.bon && ind.bon(agg) ? ' style="color:var(--m-vert)"' : '') + '>'
                  + ind.v(agg) + '</span>' },
             { h: sous ? '<span class="pale">' + sous + '</span>' : '' }
-          ]
+          ])
         };
       };
 
@@ -1099,16 +1101,22 @@ OD.define('dashboard', {
       if (!tous.length) return '<p class="ctx">Aucune activité sur votre équipe ce mois-ci.</p>';
       const l = tous.slice().sort(d.tri);
       const multi = new Set(tous.map(v => v.site)).size > 1;
-      const entetes = ['Vendeur', 'Commandes', d.t, ''].concat(multi ? ['Site'] : []);
+      // Les commandes servent de repère à côté de l'indicateur regardé — sauf
+      // quand l'indicateur EST les commandes : la colonne apparaissait alors
+      // deux fois, même intitulé et même valeur.
+      const repere = d.t !== 'Commandes';
+      const entetes = ['Vendeur'].concat(repere ? ['Commandes'] : []).concat([d.t, ''])
+        .concat(multi ? ['Site'] : []);
       return tableauLignes(entetes, l.map(v => ({
         attrs: d.mauvais && d.mauvais(v) ? ' class="dmuet"' : '',
-        c: [
-          { h: '<b>' + esc(v.nom) + '</b>' },
-          { h: '<span class="f">' + fmt(v.cdes) + '</span>' },
-          { h: '<span class="f"' + (d.mauvais && d.mauvais(v) ? ' style="color:var(--m-rouge)"' : '')
-               + '>' + d.v(v) + '</span>' },
-          { h: d.r ? '<span class="pale">' + d.r(v) + '</span>' : '' }
-        ].concat(multi ? [{ h: '<span class="pale">' + esc(v.site || '—') + '</span>' }] : [])
+        c: [{ h: '<b>' + esc(v.nom) + '</b>' }]
+          .concat(repere ? [{ h: '<span class="f">' + fmt(v.cdes) + '</span>' }] : [])
+          .concat([
+            { h: '<span class="f"' + (d.mauvais && d.mauvais(v) ? ' style="color:var(--m-rouge)"' : '')
+                 + '>' + d.v(v) + '</span>' },
+            { h: d.r ? '<span class="pale">' + d.r(v) + '</span>' : '' }
+          ])
+          .concat(multi ? [{ h: '<span class="pale">' + esc(v.site || '—') + '</span>' }] : [])
       })), 'dequipe');
     }
 
@@ -1285,8 +1293,8 @@ OD.define('dashboard', {
             liste: 'cdes_mois', cols: colsCommandes,
             trouve: () => {
               const reste = objCde > 0 ? objCde - num(p.cdes) : null;
-              const j = (det.jours || []).slice().sort((a, b) => num(b.n) - num(a.n));
-              const fort = j.length ? (JOURS_NOM[j[0].dow] || '').toLowerCase() : null;
+              const s = serie('cdes').slice(0, -1).filter(v => v > 0);
+              const moy = s.length ? s.reduce((a, b) => a + b, 0) / s.length : 0;
               let h = '';
               if (reste != null && reste > 0) {
                 h += '<b>Il vous reste ' + fmt(reste) + ' commande' + (reste > 1 ? 's' : '')
@@ -1294,10 +1302,13 @@ OD.define('dashboard', {
               } else if (reste != null) {
                 h += '<b>Objectif atteint, et dépassé de ' + fmt(Math.abs(reste)) + '.</b> ';
               }
-              if (fort) {
-                h += (h ? '' : '<b>') + 'Sur le réseau, le ' + fort + ' est le jour qui signe le plus'
-                  + (h ? '' : '.</b>') + ' — un rendez-vous posé ce jour-là ne vaut pas un rendez-vous '
-                  + 'posé un autre jour.';
+              if (moy > 0) {
+                const e = Math.round((num(p.cdes) - moy) / moy * 100);
+                h += (h ? '' : '<b>') + 'Votre moyenne des onze mois précédents est de '
+                  + moy.toFixed(1).replace('.', ',') + ' commandes par mois'
+                  + (h ? '' : '.</b>') + ' : ce mois-ci vous êtes '
+                  + (e >= 0 ? (e === 0 ? 'au même niveau' : e + ' % au-dessus') : Math.abs(e) + ' % en dessous')
+                  + '.';
               }
               return h || 'Pas encore assez de commandes ce mois-ci pour dégager une tendance.';
             },
@@ -1306,32 +1317,24 @@ OD.define('dashboard', {
         },
         titre: 'Commandes du mois',
         ctx: 'Commandes gagnées, grands comptes exclus, rattachées à leur mois de création dans BACS.',
+        // La répartition par jour de la semaine a été retirée : elle décrivait une
+        // saisonnalité hebdomadaire sur laquelle personne n'agit depuis cette page,
+        // et elle occupait la moitié du tiroir. Ce qui se lit ici désormais, c'est
+        // le mois courant rapporté aux onze précédents.
         trouve: () => {
-          const j = (det.jours || []).slice().sort((a, b) => num(b.n) - num(a.n));
-          if (!j.length) return 'Pas encore assez de commandes sur l’année pour dégager un rythme hebdomadaire.';
-          const fort = j[0], faible = j[j.length - 1];
-          const rap = num(faible.n) > 0 ? (num(fort.n) / num(faible.n)).toFixed(1).replace('.', ',') : '—';
-          const tot = j.reduce((a, x) => a + num(x.n), 0);
-          return '<b>Un ' + (JOURS_NOM[fort.dow] || '?').toLowerCase() + ' vaut ' + rap + ' '
-            + (JOURS_NOM[faible.dow] || '?').toLowerCase() + '.</b> Sur les ' + fmt(tot)
-            + ' commandes de l’année, ' + fmt(fort.n) + ' ont été signées un '
-            + (JOURS_NOM[fort.dow] || '?').toLowerCase() + ', soit ' + pct(fort.n, tot)
-            + ' % de la semaine à elles seules. Le renfort de ce jour-là cesse d’être une '
-            + 'question de ressenti.';
+          const s = serie('cdes').slice(0, -1).filter(v => v > 0);
+          if (!s.length) return 'Pas encore assez d\u2019historique pour situer ce mois.';
+          const moy = s.reduce((a, b) => a + b, 0) / s.length;
+          const haut = Math.max.apply(null, s), bas = Math.min.apply(null, s);
+          const e = moy > 0 ? Math.round((num(p.cdes) - moy) / moy * 100) : 0;
+          return '<b>' + fmt(p.cdes) + ' commandes ce mois-ci, pour une moyenne de '
+            + moy.toFixed(1).replace('.', ',') + ' sur les onze mois précédents</b> \u2014 '
+            + (e >= 0 ? (e === 0 ? 'exactement au niveau habituel' : e + ' % au-dessus')
+                      : Math.abs(e) + ' % en dessous') + '. Sur la période, le meilleur mois a '
+            + 'porté ' + fmt(haut) + ' commandes et le plus faible ' + fmt(bas)
+            + ' : c\u2019est l\u2019amplitude dans laquelle ce chiffre se lit.';
         },
-        table: () => {
-          const j = (det.jours || []);
-          if (!j.length) return '';
-          const mx = Math.max.apply(null, j.map(x => num(x.n)));
-          return tableau(['Jour', 'Commandes', 'Poids'], j.map(x => [
-            JOURS_NOM[x.dow] || x.dow,
-            { h: '<span class="f">' + fmt(x.n) + '</span>' },
-            { h: '<span style="display:inline-block;height:9px;border-radius:5px;width:'
-                 + Math.round(num(x.n) / mx * 100) + '%;background:'
-                 + (num(x.n) === mx ? 'var(--m-orange)' : 'var(--m-bleu)') + '"></span>',
-              cls: 'g' }
-          ]));
-        }
+        table: () => ''
       });
 
       const txFi = pct(p.fi, p.hors_loueurs);
@@ -2246,6 +2249,11 @@ OD.define('dashboard', {
           if (lv === state.sel.level && String(k) === String(state.sel.key == null ? '' : state.sel.key)) return;
           state.sel = { level: lv, key: lv === 'all' ? null : (lv === 'site' ? Number(k) : k), label: lab };
           state.site = lv === 'site' ? Number(k) : null;
+          // La liste de sites héritée du bus ne vaut plus rien : elle décrivait
+          // le choix de la barre du haut, pas celui qu'on vient de faire ici.
+          // Sans cette remise à zéro, choisir TOYOTA aurait continué d'interroger
+          // le seul site que portait la barre.
+          state.busSites = null;
           // La barre du haut ne sait porter qu'un site : on ne lui pousse une
           // valeur que dans ce cas, sinon les deux se contrediraient.
           if (lv === 'site') { try { const b = siteBus(); if (b) b.setSiteId(Number(k)); } catch (e) { } }
@@ -2356,10 +2364,78 @@ OD.define('dashboard', {
       state.site = Number(id);
     }
 
-    // Le sélecteur vit maintenant dans la barre du haut (topnav v3, bus v3) :
-    // deux sélecteurs pour un même choix finissaient toujours par se contredire.
-    // La page ne fait plus que RAPPELER le périmètre courant, à côté du titre.
-    function selecteurPerimetre() { return ''; }
+    // Le sélecteur de périmètre revient DANS la page. L'essai d'un sélecteur
+    // unique en barre du haut a échoué pour une raison de fond : la barre est
+    // partagée par toutes les pages, et aucune page opérationnelle (kanban,
+    // lead management, listes VN/VO) ne sait travailler sur « une marque ».
+    // Choisir TOYOTA là-haut les laissait vides ou figées. La barre redevient
+    // donc un sélecteur de SITE, et chaque page qui sait agréger porte son
+    // propre périmètre — celui-ci.
+    //
+    // Un site sélectionné ici est poussé vers la barre du haut (c'est un choix
+    // qu'elle sait porter) ; une marque ou une affaire ne l'est pas.
+    function selecteurPerimetre() {
+      const per = (state.d.perimetre || []);
+      if (per.length < 2) return '';            // un seul site : rien à choisir
+      const sel = state.sel || { level: 'all', key: null };
+      const estSel = (lv, k) =>
+        sel.level === lv && String(sel.key == null ? '' : sel.key) === String(k == null ? '' : k);
+
+      const ligne = (lv, k, lab, niveau, pliable, ouvert, suffixe) =>
+        '<tr class="' + (niveau ? 'lv' + niveau + ' ' : '') + (estSel(lv, k) ? 'actif' : '') + '"'
+        + ' data-lv="' + esc(lv) + '" data-k="' + esc(k == null ? '' : k) + '"'
+        + ' data-lab="' + esc(lab) + '"'
+        + (pliable ? ' data-pli="' + esc(lv + ':' + k) + '"' : '')
+        + '><td>'
+        + (pliable
+            ? '<span class="pli" data-role="pli">' + (ouvert ? '▾' : '▸') + '</span>'
+            : '<span class="pli"></span>')
+        + esc(lab)
+        + (suffixe ? ' <em class="pale">' + esc(suffixe) + '</em>' : '')
+        + '</td></tr>';
+
+      // Même règle que la barre du haut : un échelon qui n'offre aucun choix
+      // n'est pas un échelon. Sur un petit périmètre, une marque unique ou une
+      // affaire à site unique ne ferait que répéter la ligne suivante.
+      const compact = per.length < 7;
+      const marques = arbrePerimetre();
+      const plusieursMarques = marques.length > 1;
+      const nb = n => n + (n > 1 ? ' sites' : ' site');
+      let h = ligne('all', '', 'Tout mon périmètre', 0, false, false, nb(per.length));
+
+      marques.forEach(m => {
+        const nSites = m.aff.reduce((a, x) => a + x.sites.length, 0);
+        const rendreM = compact ? (plusieursMarques && nSites > 1) : true;
+        let d = 1;
+        if (rendreM) {
+          const pk = 'reseau:' + m.k, ouv = state.plis[pk] !== false;
+          h += ligne('reseau', m.k, m.lab, 1, true, ouv, nb(nSites));
+          if (!ouv) return;
+          d = 2;
+        }
+        const plusieursAff = m.aff.length > 1;
+        m.aff.forEach(a => {
+          const rendreA = compact ? (plusieursAff && a.sites.length > 1) : true;
+          let d2 = d;
+          if (rendreA) {
+            const ak = 'affaire:' + a.k, aouv = state.plis[ak] === true;
+            h += ligne('affaire', a.k, a.lab, d, true, aouv, nb(a.sites.length));
+            if (!aouv) return;
+            d2 = d + 1;
+          }
+          a.sites.forEach(s2 => {
+            h += ligne('site', s2.id_site, s2.nom || ('Site ' + s2.id_site),
+                       Math.min(d2, 3), false, false, '');
+          });
+        });
+      });
+
+      return '<section class="dperim">'
+        + '<div class="dperim-h">Périmètre <span class="cn">' + esc(sel.label || '')
+        + '</span></div>'
+        + '<div class="dscroll"><table class="dmini dperimt"><tbody>' + h
+        + '</tbody></table></div></section>';
+    }
 
     // -------------------------------------------------------------------------
     //  LE MOIS
