@@ -1,5 +1,5 @@
 // ============================================================================
-//  DASHBOARD — module One Data (OD.define)   v32 — PROFIL TEAM COLIN
+//  DASHBOARD — module One Data (OD.define)   v33 — PROFIL TEAM COLIN
 //
 //  Cette version est réservée au tenant Team Colin (ref ieztupavcdnubmpbjvuq),
 //  où elle est épinglée. Le défaut du registre reste la v25 « Tour de
@@ -23,6 +23,18 @@
 //  Une pastille devant chaque famille dit l'état de sa source : alimentée,
 //  partielle, ou sans donnée. Une famille sans source n'est pas masquée — une
 //  tuile vide dit ce qui manque, une tuile absente ne dit rien.
+//
+//  LE STOCK, ET MOINS DE TUILES POUR LA DIRECTION (v33)
+//  Un directeur de groupe ou de plaque recevait seize tuiles, dont la plupart
+//  relevaient du détail d'exécution : LOA, Roole, reprises, affaires ouvertes,
+//  dossiers à clôturer, délai de premier contact, file de fusion, Bloctel. Son
+//  jeu tombe à NEUF, et ce qui en sort reste accessible par l'arborescence et
+//  par les pages Performances et Activité.
+//  Et il gagne ce qui manquait : LE STOCK. 31,4 M€ immobilisés au 1er octobre,
+//  dont 11,6 qui dorment depuis plus de trois mois, et aucun indicateur ne le
+//  disait. Deux tuiles — VN disponible, VO en parc — avec l'âge du parc, qui est
+//  ce qui mange la marge. Son bandeau et son pouls parlent désormais d'argent
+//  engagé plutôt que de pourcentages qui s'érodent.
 //
 //  LE MOIS (v32)
 //  Le tableau lisait toujours le mois en cours. Le 1er octobre, cela donnait une
@@ -391,7 +403,7 @@ OD.define('dashboard', {
                     ouvert: null, d: null, site: null, chargement: false,
                     sel: { level: 'all', key: null, label: 'Tout mon périmètre' },
                     plis: {}, arbrePlis: {}, busSites: null,
-                    replieFait: false, moisRepli: null };
+                    replieFait: false, moisRepli: null, stock: null };
 
     // Les sites couverts par la sélection courante. null = tout le périmètre,
     // et c'est ce que les fonctions SQL attendent pour ne rien filtrer.
@@ -533,6 +545,32 @@ OD.define('dashboard', {
         ? '<p class="ctx">Les ' + fmt(l.length) + ' premiers sur ' + fmt(j.total)
           + '. Les ' + fmt(reste) + ' autres sont dans le kanban.</p>'
         : '');
+    }
+
+    // -------------------------------------------------------------------------
+    //  LE STOCK
+    //
+    //  Premier poste d'immobilisation d'un groupe, et il n'était nulle part :
+    //  31,4 M€ au 1er octobre, dont 11,6 qui dorment depuis plus de trois mois.
+    //  Il ne dépend pas du mois — c'est une photo à l'instant — donc il se
+    //  recharge au changement de périmètre seulement.
+    // -------------------------------------------------------------------------
+    let CACHE_STOCK = null;
+    async function chargerStock() {
+      const cle = JSON.stringify(sitesSelection());
+      if (CACHE_STOCK && CACHE_STOCK.cle === cle) return CACHE_STOCK.j;
+      const jwt = await getUserJwt();
+      if (!jwt) throw new Error('session absente');
+      const res = await fetch(SUPABASE_URL + '/rest/v1/rpc/dashboard_tc_stock', {
+        method: 'POST',
+        headers: { 'apikey': SUPABASE_KEY, 'Authorization': 'Bearer ' + jwt,
+                   'Content-Type': 'application/json' },
+        body: JSON.stringify({ p_sites: sitesSelection() })
+      });
+      if (!res.ok) throw new Error('HTTP ' + res.status);
+      const j = await res.json();
+      CACHE_STOCK = { cle: cle, j: j };
+      return j;
     }
 
     // Les séries de la RPC arrivent en douze lignes { mois, cdes, fi, ... }.
@@ -690,12 +728,21 @@ OD.define('dashboard', {
       chef:      ['cdes', 'fi', 'loa', 'acc', 'roole', 'reprise', 'phev', 'vu',
                   'affaires', 'relance', 'pipeval', 'livr', 'cloturer',
                   'rapports', 'rdv', 'leads', 'delai'],
-      // La direction : les marges et les stocks, pas les objectifs individuels.
-      // PHEV et utilitaires se pilotent au site, pas au groupe — les mettre ici
-      // ne produirait qu'une somme sans destinataire.
-      direction: ['cdes', 'fi', 'loa', 'acc', 'roole', 'reprise',
-                  'affaires', 'relance', 'pipeval', 'livr', 'cloturer',
-                  'leads', 'delai', 'injoignables', 'fusion', 'bloctel'],
+      // La direction : NEUF tuiles, pas seize. Un directeur de groupe ou de
+      // plaque ne pilote pas le détail — il pilote ce qui engage de l'argent et
+      // ce qui dérive. Tout le reste reste accessible : chaque tuile ouvre sur
+      // l'arborescence, et les pages Performances et Activité portent le détail.
+      //
+      // Ce qui est SORTI de son jeu, et pourquoi :
+      //   loa, roole, reprise  — composantes de marge, elles se pilotent au site
+      //   affaires, relance    — le travail du chef des ventes, pas le sien
+      //   cloturer             — administratif, il est déjà dans « à livrer »
+      //   delai, fusion, bloctel — détail d'exécution, pages dédiées
+      // Et ce qui ENTRE : le stock, premier poste d'immobilisation du groupe,
+      // qui n'était nulle part.
+      direction: ['cdes', 'fi', 'acc',
+                  'stock_vn', 'stock_vo',
+                  'pipeval', 'livr', 'leads', 'injoignables'],
       marketing: ['cdes', 'leads', 'delai', 'injoignables', 'fusion', 'bloctel']
     };
     const ETIQ_ROLE = { vendeur: 'Vendeur', chef: 'Chef des ventes',
@@ -810,10 +857,24 @@ OD.define('dashboard', {
       return j;
     }
 
+    // L'arbre vient de dashboard_tc_arbre, le stock de dashboard_tc_stock : deux
+    // appels, un seul tableau. On greffe l'un sur l'autre par identifiant de site
+    // plutôt que de faire une troisième requête qui les joindrait.
+    function arbreAvecStock(j) {
+      const st2 = ((state.stock || {}).sites) || [];
+      if (!j || !j.sites || !st2.length) return j;
+      const par = {};
+      st2.forEach(x => { par[String(x.id_site)] = x; });
+      return Object.assign({}, j, {
+        sites: j.sites.map(x => Object.assign({}, x, par[String(x.id_site)] || {}))
+      });
+    }
+
     // Somme de tous les compteurs d'un ensemble de sites.
     const CLES_SOMME = ['cdes', 'obj_cdes', 'hors_loueurs', 'fi', 'loa', 'roole', 'reprise',
                         'phev', 'vu', 'acc_total', 'affaires', 'a_relancer', 'froides',
-                        'livr', 'retard', 'a_cloturer', 'leads', 'leads_jamais'];
+                        'livr', 'retard', 'a_cloturer', 'leads', 'leads_jamais',
+                        'vn', 'vn_valeur', 'vn_90', 'vo', 'vo_valeur', 'vo_90'];
     function somme(sites) {
       const o = {};
       CLES_SOMME.forEach(k => { o[k] = sites.reduce((a, s2) => a + num(s2[k]), 0); });
@@ -865,14 +926,19 @@ OD.define('dashboard', {
       livr:     { t: 'À livrer', v: a => fmt(a.livr), s: a => fmt(a.retard) + ' en retard' },
       cloturer: { t: 'À clôturer', v: a => fmt(a.a_cloturer) },
       leads:    { t: 'Leads 30 j', v: a => fmt(a.leads), s: a => fmt(a.leads_jamais) + ' sans appel' },
-      delai:    { t: 'Leads sans appel', v: a => fmt(a.leads_jamais) }
+      delai:    { t: 'Leads sans appel', v: a => fmt(a.leads_jamais) },
+      stock_vn: { t: 'Stock VN', v: a => fmt(a.vn),
+                  s: a => fmtEur(a.vn_valeur) + (num(a.vn_90) > 0 ? ' · ' + fmt(a.vn_90) + ' > 90 j' : '') },
+      stock_vo: { t: 'Stock VO', v: a => fmt(a.vo),
+                  s: a => fmtEur(a.vo_valeur) + (num(a.vo_90) > 0 ? ' · ' + fmt(a.vo_90) + ' > 90 j' : '') }
     };
 
     // Rendu de l'arbre pour UN indicateur, plus la colonne commandes comme
     // repère de volume — un taux sans son volume ne se compare pas.
     function rendreArbre(j, indCle) {
       const ind = IND[indCle] || IND.cdes;
-      const marques = construireArbre((j || {}).sites || []);
+      const jj = arbreAvecStock(j);
+      const marques = construireArbre((jj || {}).sites || []);
       if (!marques.length) return '<p class="ctx">Aucun site dans votre périmètre.</p>';
       const entetes = ['Périmètre', 'Commandes', ind.t, ''];
       const lignes = [];
@@ -1064,6 +1130,10 @@ OD.define('dashboard', {
       if (indCle === 'roole') return pct(agg.roole, agg.cdes);
       if (indCle === 'reprise') return pct(agg.reprise, agg.cdes);
       if (indCle === 'acc')  return num(agg.cdes) > 0 ? Math.round(num(agg.acc_total) / num(agg.cdes)) : null;
+      // Pour le stock, ce qui se compare n'est pas un taux mais une part de
+      // véhicules trop vieux : c'est elle qui dit où l'argent dort.
+      if (indCle === 'stock_vn') return pct(agg.vn_90, agg.vn);
+      if (indCle === 'stock_vo') return pct(agg.vo_90, agg.vo);
       return null;
     }
 
@@ -1148,6 +1218,7 @@ OD.define('dashboard', {
 
     const FAMILLES = [
       { k: 'prod', t: 'Production commerciale', etat: 'plein', n: 'commandes gagnées BACS' },
+      { k: 'stock', t: 'Stock', etat: 'plein', n: 'véhicules disponibles, DMS' },
       { k: 'pipe', t: 'Pipe et relances', etat: 'plein', n: 'affaires et devis BACS' },
       { k: 'livr', t: 'Livraisons', etat: 'plein', n: 'statut BACS des commandes' },
       { k: 'act', t: 'Activité commerciale', etat: 'partiel', n: 'rapports tenus, rendez-vous jamais soldés' },
@@ -1429,6 +1500,73 @@ OD.define('dashboard', {
             : 'Le rythme reste stable autour de ' + ap.toFixed(1).replace('.', ',') + ' commandes par mois.';
         },
         table: () => ''
+      });
+
+      // --------------------------------------------------------------- STOCK
+      // Le stock est une photo, pas une série : pas de graphe, pas d'écart sur
+      // douze mois. Ce qui compte est sa VALEUR et son ÂGE — un véhicule de
+      // plus de trois mois a déjà mangé sa marge en frais financiers.
+      const stk = state.stock || {};
+      const sVn = stk.vn || {}, sVo = stk.vo || {};
+
+      T.push({
+        fam: 'stock', id: 'stock_vn', lab: 'Stock VN', v: fmt(sVn.n), statique: true,
+        obj: fmtEur(sVn.valeur) + ' en parc',
+        c: num(sVn.plus_90j) > 0 ? fmt(sVn.plus_90j) + ' au-delà de 90 jours' : 'aucun véhicule âgé',
+        sens: num(sVn.plus_90j) > num(sVn.n) * .25 ? 'baisse' : 'plat',
+        titre: 'Véhicules neufs disponibles',
+        ctx: 'Stock physique disponible à la vente. Les commandes usine non livrées en sont exclues : '
+           + 'elles ne sont pas immobilisées.',
+        trouve: () => {
+          if (!num(sVn.n)) return 'Aucun véhicule neuf disponible sur ce périmètre.';
+          const part = pct(sVn.plus_90j, sVn.n);
+          return '<b>' + fmtEur(sVn.valeur_dormante) + ' dorment depuis plus de trois mois.</b> '
+            + fmt(sVn.plus_90j) + ' des ' + fmt(sVn.n) + ' véhicules disponibles ont dépassé '
+            + '90 jours de parc' + (part != null ? ', soit ' + part + ' %' : '') + ', et '
+            + fmt(sVn.plus_180j) + ' ont dépassé six mois. À cette ancienneté, les frais '
+            + 'financiers ont déjà consommé la marge : ce ne sont plus des véhicules à vendre, '
+            + 'ce sont des véhicules à sortir.'
+            + (num(sVn.reserve) > 0 ? ' S\u2019y ajoutent ' + fmt(sVn.reserve)
+               + ' véhicules réservés, qui ne sont pas encore livrés mais déjà engagés.' : '');
+        },
+        table: () => tableau(['Âge en parc', 'Véhicules', 'Part'], [
+          ['Moins de 90 jours', { h: '<span class="f">' + fmt(num(sVn.n) - num(sVn.plus_90j)) + '</span>' },
+            pct(num(sVn.n) - num(sVn.plus_90j), sVn.n) + ' %'],
+          ['90 à 180 jours', { h: '<span class="f">' + fmt(num(sVn.plus_90j) - num(sVn.plus_180j)) + '</span>' },
+            pct(num(sVn.plus_90j) - num(sVn.plus_180j), sVn.n) + ' %'],
+          [{ h: '<b>Plus de 180 jours</b>' },
+            { h: '<span class="f mauvais">' + fmt(sVn.plus_180j) + '</span>' },
+            pct(sVn.plus_180j, sVn.n) + ' %']
+        ])
+      });
+
+      T.push({
+        fam: 'stock', id: 'stock_vo', lab: 'Stock VO', v: fmt(sVo.n), statique: true,
+        obj: fmtEur(sVo.valeur) + ' en parc',
+        c: num(sVo.age_moyen) > 0 ? fmt(sVo.age_moyen) + ' jours de parc en moyenne' : '—',
+        sens: num(sVo.age_moyen) > 90 ? 'baisse' : 'plat',
+        titre: 'Véhicules d\u2019occasion en parc',
+        ctx: 'Stock VO à la vente, valorisé au prix de vente affiché.',
+        trouve: () => {
+          if (!num(sVo.n)) return 'Aucun véhicule d\u2019occasion sur ce périmètre.';
+          const part = pct(sVo.plus_90j, sVo.n);
+          return '<b>Un VO sur ' + (num(sVo.plus_90j) > 0
+                   ? Math.max(Math.round(num(sVo.n) / num(sVo.plus_90j)), 2) : '—')
+            + ' a plus de trois mois de parc.</b> ' + fmt(sVo.plus_90j) + ' véhicules sur '
+            + fmt(sVo.n) + (part != null ? ' (' + part + ' %)' : '') + ', pour '
+            + fmtEur(sVo.valeur_dormante) + ' immobilisés. En VO la décote court avec le temps : '
+            + 'ce qui ne part pas en trois mois part moins cher, ou pas du tout. '
+            + fmt(sVo.plus_180j) + ' dépassent même six mois.';
+        },
+        table: () => tableau(['Âge en parc', 'Véhicules', 'Part'], [
+          ['Moins de 90 jours', { h: '<span class="f">' + fmt(num(sVo.n) - num(sVo.plus_90j)) + '</span>' },
+            pct(num(sVo.n) - num(sVo.plus_90j), sVo.n) + ' %'],
+          ['90 à 180 jours', { h: '<span class="f">' + fmt(num(sVo.plus_90j) - num(sVo.plus_180j)) + '</span>' },
+            pct(num(sVo.plus_90j) - num(sVo.plus_180j), sVo.n) + ' %'],
+          [{ h: '<b>Plus de 180 jours</b>' },
+            { h: '<span class="f mauvais">' + fmt(sVo.plus_180j) + '</span>' },
+            pct(sVo.plus_180j, sVo.n) + ' %']
+        ])
       });
 
       // ---------------------------------------------------------------- PIPE
@@ -1822,6 +1960,7 @@ OD.define('dashboard', {
     function phraseDuJour() {
       if (familleRole() === 'vendeur') return phraseVendeur();
       if (familleRole() === 'marketing') return phraseMarketing();
+      if (familleRole() === 'direction') return phraseDirection();
       const d = state.d, p = d.prod || {}, o = d.obj || {}, ld = d.leads || {};
       const bouts = [];
       const objCde = num(o.cdes);
@@ -1910,6 +2049,35 @@ OD.define('dashboard', {
       return ph;
     }
 
+    // Un directeur de groupe ne lit pas une liste d'érosions : il lit combien est
+    // engagé, combien dort, et si le volume suit. Trois choses, dans cet ordre.
+    function phraseDirection() {
+      const d = state.d, p = d.prod || {}, o = d.obj || {}, pi = d.pipe || {}, lv = d.livr || {};
+      const sv = (state.stock || {}).vn || {}, so = (state.stock || {}).vo || {};
+      const parc = num(sv.valeur) + num(so.valeur);
+      const dormant = num(sv.valeur_dormante) + num(so.valeur_dormante);
+      const objCde = num(o.cdes);
+
+      let ph = 'Sur ' + esc(state.sel.label) + ', ';
+      if (parc > 0) {
+        ph += '<b>' + fmtEur(parc) + ' de véhicules en parc</b>'
+           + (dormant > 0 ? ', dont <b>' + fmtEur(dormant) + ' au-delà de trois mois</b>' : '') + '. ';
+      }
+      if (objCde > 0) {
+        const r = pct(p.cdes, objCde);
+        ph += fmt(p.cdes) + ' commandes pour ' + objCde + ' demandées'
+           + (r != null ? ' (<b>' + r + ' %</b>)' : '') + '. ';
+      } else if (num(p.cdes) > 0) {
+        ph += fmt(p.cdes) + ' commandes ce mois-ci. ';
+      }
+      if (num(lv.retard) > 0) {
+        ph += '<b>' + fmt(lv.retard) + ' livraisons</b> ont dépassé leur date promise.';
+      } else if (num(pi.montant) > 0) {
+        ph += fmtEur(pi.montant) + ' de pipe commercial en cours.';
+      }
+      return ph;
+    }
+
     function nomSite(id) {
       const s2 = (state.d.perimetre || []).find(x => String(x.id_site) === String(id));
       return s2 ? (s2.nom || ('site ' + id)) : ('site ' + id);
@@ -1940,12 +2108,14 @@ OD.define('dashboard', {
         ];
       } else if (fam === 'direction') {
         // Au niveau groupe, le pouls du jour ne dit rien : un directeur regarde
-        // ce qui est engagé et ce qui traîne, pas les commandes de la matinée.
+        // ce qui est immobilisé et ce qui dort, pas les commandes de la matinée.
+        const sv = (state.stock || {}).vn || {}, so = (state.stock || {}).vo || {};
+        const dormant = num(sv.valeur_dormante) + num(so.valeur_dormante);
         r = [
-          { n: fmt(pi.dossiers), l: 'dossiers<br>au pipe' },
-          { n: fmt(pi.froides), l: 'affaires<br>froides' },
-          { n: fmt(lv.retard), l: 'livraisons<br>en retard' },
-          { n: fmt(lv.a_cloturer), l: 'dossiers<br>à clôturer' }
+          { n: fmtEur(num(sv.valeur) + num(so.valeur)), l: 'de stock<br>en parc' },
+          { n: fmtEur(dormant), l: 'dorment depuis<br>plus de 90 jours' },
+          { n: fmtEur(pi.montant), l: 'de pipe<br>commercial' },
+          { n: fmt(lv.retard), l: 'livraisons<br>en retard' }
         ];
       } else {
         r = [
@@ -2072,11 +2242,14 @@ OD.define('dashboard', {
         const d = await charger();
         if (mien !== jeton) return;            // un autre changement est passé devant
         // Périmètre ou mois changé : tout ce qui en dépend est périmé.
-        CACHE_LISTES = {}; CACHE_EQUIPE = null; CACHE_SOURCES = null;
+        CACHE_LISTES = {}; CACHE_EQUIPE = null; CACHE_SOURCES = null; CACHE_STOCK = null;
         state.d = d;
         // L'arbre chiffre le sélecteur de périmètre : il se charge avec la page,
         // sans la retarder — le tableau s'affiche d'abord sans ses colonnes.
         chargerArbre().then(j => { state.arbre = j; rendre(); if (state.ouvert) basculer(state.ouvert); })
+                      .catch(() => { });
+        chargerStock().then(j => { state.stock = j; TUILES = tuiles(); rendre();
+                                   if (state.ouvert) basculer(state.ouvert); })
                       .catch(() => { });
         TUILES = tuiles();
         state.ouvert = null;
@@ -2344,6 +2517,11 @@ OD.define('dashboard', {
     TUILES = tuiles();
     rendre();
     chargerArbre().then(j => { state.arbre = j; rendre(); if (state.ouvert) basculer(state.ouvert); })
+                  .catch(() => { });
+    // Le stock n'est pas dans dashboard_tc : il arrive à part, et les tuiles se
+    // reconstruisent quand il est là.
+    chargerStock().then(j => { state.stock = j; TUILES = tuiles(); rendre();
+                               if (state.ouvert) basculer(state.ouvert); })
                   .catch(() => { });
     // Une tuile est ouverte d'entrée : la page montre à quoi sert le clic sans
     // qu'on ait à le deviner. Le financement si son taux a reculé, sinon les
