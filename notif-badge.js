@@ -153,14 +153,24 @@ OD.define('notif-badge', {
     const me   = getConnectedUser();
     const role = me.ID_Role != null ? Number(me.ID_Role) : null;
 
-    if (role === VENDEUR_ROLE) {
-      // Vendeur : pas besoin du bus, on calcule directement son compteur.
-      fetchCount();
-    } else {
-      bindBus();    // manager : le 1er calcul part du rappel immédiat du bus
-      // filet : si le bus n'apparaît pas vite, premier calcul en repli
-      setTimeout(() => { const x = st(); if (!x.busBound) fetchCount(); }, 3000);
-    }
+    // La pastille passe APRÈS l'affichage du tableau de bord et de l'agenda.
+    // Elle informe, elle ne bloque rien : la faire patienter jusqu'au premier
+    // moment d'inactivité du navigateur ne coûte rien à l'utilisateur, et rend
+    // sa seconde aux deux écrans qu'il regarde vraiment.
+    const premierCalcul = () => {
+      if (role === VENDEUR_ROLE) {
+        fetchCount();
+      } else {
+        bindBus();    // manager : le 1er calcul part du rappel immédiat du bus
+        // filet : si le bus n'apparaît pas vite, premier calcul en repli
+        setTimeout(() => { const x = st(); if (!x.busBound) fetchCount(); }, 3000);
+      }
+    };
+    try {
+      if (typeof window.requestIdleCallback === 'function') {
+        window.requestIdleCallback(premierCalcul, { timeout: 6000 });
+      } else { setTimeout(premierCalcul, 3500); }
+    } catch (e) { setTimeout(premierCalcul, 3500); }
 
     periodic();
     bindRefresh();
