@@ -544,8 +544,20 @@ OD.define('dashboard', {
     // Les chiffres du périmètre courant, mis en cache par (année, mois,
     // périmètre). Revenir sur un périmètre déjà consulté n'appelle plus la base.
     let CACHE_TC = null;
+    // Verrou anti-doublon, repris du suivi d'activité : si un chargement pour la
+    // MÊME clé est déjà en vol, on rend sa promesse au lieu d'en lancer un
+    // second. Deux déclencheurs rapprochés — le montage et le bus, un double
+    // clic sur le périmètre — ne produisent donc plus qu'un seul appel.
+    let EN_VOL = { cle: null, p: null };
     async function charger() {
-      if (CACHE_TC && CACHE_TC.cle === cleSel()) return CACHE_TC.j;
+      const cle = cleSel();
+      if (CACHE_TC && CACHE_TC.cle === cle) return CACHE_TC.j;
+      if (EN_VOL.p && EN_VOL.cle === cle) return EN_VOL.p;
+      EN_VOL = { cle: cle, p: chargerVraiment() };
+      try { return await EN_VOL.p; }
+      finally { if (EN_VOL.cle === cle) EN_VOL = { cle: null, p: null }; }
+    }
+    async function chargerVraiment() {
       const jwt = await getUserJwt();
       if (!jwt) throw new Error('session absente');
       const res = await fetch(SUPABASE_URL + '/rest/v1/rpc/dashboard_tc', {
@@ -637,6 +649,57 @@ OD.define('dashboard', {
       const j = await res.json();
       CACHE_STOCK = { cle: cle, j: j };
       return j;
+    }
+
+    // -------------------------------------------------------------------------
+    //  CE QUI N'EST PAS SUR LE CHEMIN CRITIQUE
+    //
+    //  La qualité de la base client (169 000 fiches, plus 1,2 million de lignes
+    //  de consentement) et les détails des tiroirs coûtaient ensemble un demi-
+    //  seconde DANS dashboard_tc — alors qu'aucun des deux ne nourrit une tuile.
+    //  Ils arrivent maintenant à part, pendant que la page s'affiche déjà.
+    // -------------------------------------------------------------------------
+    let CACHE_BASE = null;
+    async function chargerBase() {
+      if (CACHE_BASE) return CACHE_BASE.j;
+      const jwt = await getUserJwt();
+      if (!jwt) throw new Error('session absente');
+      const res = await fetch(SUPABASE_URL + '/rest/v1/rpc/dashboard_tc_base', {
+        method: 'POST',
+        headers: { 'apikey': SUPABASE_KEY, 'Authorization': 'Bearer ' + jwt,
+                   'Content-Type': 'application/json' },
+        body: '{}'
+      });
+      if (!res.ok) throw new Error('HTTP ' + res.status);
+      const j = await res.json();
+      CACHE_BASE = { j: j };
+      return j;
+    }
+
+    let CACHE_DETAIL = null;
+    async function chargerDetail() {
+      const cle = cleSel();
+      if (CACHE_DETAIL && CACHE_DETAIL.cle === cle) return CACHE_DETAIL.j;
+      const jwt = await getUserJwt();
+      if (!jwt) throw new Error('session absente');
+      const res = await fetch(SUPABASE_URL + '/rest/v1/rpc/dashboard_tc_detail', {
+        method: 'POST',
+        headers: { 'apikey': SUPABASE_KEY, 'Authorization': 'Bearer ' + jwt,
+                   'Content-Type': 'application/json' },
+        body: JSON.stringify({ p_annee: state.annee, p_mois: state.mois, p_sites: sitesSelection() })
+      });
+      if (!res.ok) throw new Error('HTTP ' + res.status);
+      const j = await res.json();
+      CACHE_DETAIL = { cle: cle, j: j };
+      return j;
+    }
+
+    // Les deux se recollent dans state.d, à l'endroit où les tuiles les
+    // attendent : rien d'autre dans le module n'a besoin de le savoir.
+    function greffer(cle, j) {
+      if (!state.d || !j) return false;
+      state.d[cle] = j;
+      return true;
     }
 
     // -------------------------------------------------------------------------
@@ -2462,6 +2525,8 @@ OD.define('dashboard', {
         // obligeait à tout refaire au moindre aller-retour entre deux périmètres.
         const pStock = chargerStock().catch(() => null);
         const pEnt   = chargerEntonnoir().catch(() => null);
+        const pBase  = chargerBase().catch(() => null);
+        const pDet   = chargerDetail().catch(() => null);
         const d = await charger();
         if (mien !== jeton) return;            // un autre changement est passé devant
         state.d = d;
@@ -2470,6 +2535,12 @@ OD.define('dashboard', {
                            if (state.ouvert) basculer(state.ouvert, true); });
         pEnt.then(j => { if (mien !== jeton || !j) return;
                          state.entonnoir = j; TUILES = tuiles(); rendre();
+                         if (state.ouvert) basculer(state.ouvert, true); });
+        pBase.then(j => { if (mien !== jeton || !greffer('base', j)) return;
+                          TUILES = tuiles(); rendre();
+                          if (state.ouvert) basculer(state.ouvert, true); });
+        pDet.then(j => { if (mien !== jeton || !greffer('detail', j)) return;
+                         TUILES = tuiles(); rendre();
                          if (state.ouvert) basculer(state.ouvert, true); });
         TUILES = tuiles();
         state.ouvert = null;
@@ -2810,6 +2881,7 @@ OD.define('dashboard', {
     // leur retour. L'arbre, lui, est daté — il attend le repli de mois.
     const pStock0 = chargerStock().catch(() => null);
     const pEnt0   = chargerEntonnoir().catch(() => null);
+    const pBase0  = chargerBase().catch(() => null);
 
     try {
       state.d = await charger();
@@ -2843,6 +2915,13 @@ OD.define('dashboard', {
     pEnt0.then(j => { if (!j) return;
                       state.entonnoir = j; TUILES = tuiles(); rendre();
                       if (state.ouvert) basculer(state.ouvert, true); });
+    pBase0.then(j => { if (!greffer('base', j)) return;
+                       TUILES = tuiles(); rendre();
+                       if (state.ouvert) basculer(state.ouvert, true); });
+    chargerDetail().then(j => { if (!greffer('detail', j)) return;
+                                TUILES = tuiles(); rendre();
+                                if (state.ouvert) basculer(state.ouvert, true); })
+                   .catch(() => { });
     // Une tuile est ouverte d'entrée : la page montre à quoi sert le clic sans
     // qu'on ait à le deviner. Le financement si son taux a reculé, sinon les
     // commandes.
