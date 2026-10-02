@@ -736,10 +736,20 @@ OD.define('agenda', {
 #agenda-ov /* Un rendez-vous commercial passe et jamais conclu. Il ne crie pas : il se
    signale. Le vendeur voit son retard dans l'outil ou il travaille deja,
    plutot que dans un ecran qu'il devrait penser a ouvrir. */
-.ag-aconclure{box-shadow:inset 0 0 0 1.5px var(--m-orange,#d2941f) !important;
-  background-image:repeating-linear-gradient(135deg,rgba(210,148,31,.14) 0 6px,transparent 6px 12px)}
-.ag-aconclure .fc-event-title::after{content:' • à conclure';font-weight:700;
-  color:var(--m-orange,#d2941f);letter-spacing:.01em}
+.ag-aconclure{position:relative;overflow:visible !important;
+  background:#fdf3de !important;border:2px solid #d2941f !important;
+  box-shadow:0 0 0 3px rgba(210,148,31,.22),0 2px 6px rgba(28,43,69,.14) !important}
+.ag-aconclure .fc-event-title,.ag-aconclure .fc-event-time{color:#8a5d08 !important;font-weight:800 !important}
+/* La pastille ne depend pas de la largeur du creneau : un rendez-vous de
+   trente minutes en vue semaine se signale aussi bien qu'un bloc d'une
+   journee. Le texte, lui, se tronquait des que le creneau etait etroit. */
+.ag-aconclure::after{content:'!';position:absolute;top:-7px;right:-7px;z-index:5;
+  width:17px;height:17px;border-radius:50%;background:#d2941f;color:#fff;
+  font:800 12px/17px system-ui,sans-serif;text-align:center;
+  box-shadow:0 1px 4px rgba(28,43,69,.35)}
+.ag-aconclure-note{display:inline-block;margin-left:5px;padding:0 5px;border-radius:7px;
+  background:#d2941f;color:#fff;font:800 9px/15px system-ui,sans-serif;
+  letter-spacing:.04em;text-transform:uppercase;vertical-align:1px}
 .agm-cr-head{display:flex;gap:11px;align-items:flex-start}
 #agenda-ov .agm-cr-when{font-size:12px;font-weight:800;color:#2a5ea9;white-space:nowrap;background:#f7f9fc;border:1.5px solid #e2eaf5;border-radius:8px;padding:7px 10px;text-align:center;line-height:1.3}
 #agenda-ov .agm-cr-when small{display:block;font-size:9.5px;color:#9bb3d1;text-transform:uppercase;letter-spacing:.04em;font-weight:700}
@@ -976,7 +986,20 @@ OD.define('agenda', {
       events: fetchEvents,
       eventDidMount: (info) => {
         const c = info.event.extendedProps._accent; if (c) { info.el.style.borderLeft = '3px solid ' + c; }
-        if (resteAConclure(info.event.extendedProps)) info.el.classList.add('ag-aconclure');
+        if (resteAConclure(info.event.extendedProps)) {
+          info.el.classList.add('ag-aconclure');
+          // Le mot n'apparait que s'il tient : sur un creneau etroit la
+          // pastille suffit, et une mention tronquee ne vaut rien.
+          try {
+            const t = info.el.querySelector('.fc-event-title');
+            if (t && info.el.offsetWidth >= 150) {
+              const b = document.createElement('span');
+              b.className = 'ag-aconclure-note';
+              b.textContent = 'à conclure';
+              t.appendChild(b);
+            }
+          } catch (e) { }
+        }
         // Pas d'infobulle sur écran tactile : le tap déclenche mouseenter sans
         // jamais de mouseleave, l'infobulle restait collée par-dessus le popup.
         if (touch) return;
