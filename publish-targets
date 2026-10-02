@@ -16,11 +16,18 @@
 # Modules refondus pour Team Colin : ils appellent des fonctions SQL
 # (dashboard_tc_*, perf_equipe_tc, …) qui n'existent que dans ce tenant.
 # Les promouvoir en défaut casserait les autres clients.
-dashboard    = teamcolin
-performances = teamcolin
-site-bus     = teamcolin
-topnav       = teamcolin
-phone3cx     = teamcolin
+dashboard     = teamcolin
+performances  = teamcolin
+site-bus      = teamcolin
+topnav        = teamcolin
+phone3cx      = teamcolin
+
+# Notifications refondues (dette client) : elles appellent notif_lire,
+# notif_feu, notif_dettes, notif_reporter… qui n'existent que chez Team Colin.
+# Sans cette ligne, publish.sh les promouvrait en defaut de flotte et la page
+# Notifications des autres clients tomberait en erreur.
+notifications = teamcolin
+notif-badge   = teamcolin
 
 # Module interne OROPRA : jamais de défaut de flotte.
 onboarding   = oropra
