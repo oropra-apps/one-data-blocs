@@ -34,7 +34,7 @@ OD.define('topnav', {
   const wwLib = window.wwLib;
   const doc = __anchor.ownerDocument || wwLib.getFrontDocument();
   const ROOT_ID = 'nav-root';
-  const NAV_VER = 33; // <- numéro de version (témoin de chargement)
+  const NAV_VER = 34; // <- numéro de version (témoin de chargement)
 
   // La barre du haut est un sélecteur de SITE, et rien d'autre.
   //
@@ -593,6 +593,19 @@ OD.define('topnav', {
     (root() ? root().querySelectorAll('.od-notifs-pill') : []).forEach(function (p) {
       if (n > 0) { p.textContent = txt; p.style.display = ''; } else { p.style.display = 'none'; }
       if (f && f.feu) { p.setAttribute('data-feu', f.feu); } else { p.removeAttribute('data-feu'); }
+      // Le nombre est une SOMME : les clients qui attendent, plus les relances
+      // promises et non tenues. Sans ce survol, on lit « 3 » en face d'un
+      // onglet qui dit « 1 » et on croit a un bug.
+      if (f && f.detail) {
+        var d = f.detail, parts = [];
+        if (Number(d.dettes || 0) > 0)
+          parts.push(d.dettes + (d.dettes > 1 ? ' personnes attendent une reponse'
+                                              : ' personne attend une reponse'));
+        if (Number(d.relances_en_retard || 0) > 0)
+          parts.push(d.relances_en_retard + (d.relances_en_retard > 1
+            ? ' relances en retard' : ' relance en retard'));
+        p.setAttribute('title', parts.length ? parts.join(' \u00b7 ') : 'Rien en attente');
+      } else { p.removeAttribute('title'); }
       // Le battement ne signale que du NOUVEAU depuis le dernier passage sur la
       // page. Il s'arrete quand on a regarde ; la couleur, elle, ne bouge pas.
       if (f && f.nouveau && f.feu === 'chaud') { p.setAttribute('data-bat', '1'); }
