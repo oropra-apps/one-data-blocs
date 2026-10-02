@@ -724,6 +724,49 @@ OD.define('agenda', {
 #agenda-err-ov .agm-err-m{font-size:12px;line-height:1.45;color:#7b7a76;margin-bottom:14px}
 #agenda-err-ov .agm-err-ok{width:100%;border:none;border-radius:9px;padding:9px 14px;background:#1F4A85;color:#fff;font-family:inherit;font-weight:700;font-size:12.5px;cursor:pointer;transition:background .15s}
 #agenda-err-ov .agm-err-ok:hover{background:#163864}
+/* ---- Responsive (02/10/2026) -------------------------------------------
+   La barre FullCalendar est une rangée flex à trois blocs qui ne passe
+   jamais à la ligne : sur téléphone, le titre (centre) était écrasé jusqu'à
+   un mot par ligne et poussait les boutons hors de la carte. En dessous de
+   640 px : le titre prend toute la première ligne, navigation et vues se
+   partagent la seconde, et la barre peut encore passer à la ligne si l'écran
+   est vraiment étroit. La vue Semaine (6 colonnes illisibles) est remplacée
+   par une vue 3 jours côté JS. */
+#agenda-root .agenda-top{flex-wrap:wrap}
+@media(max-width:640px){
+  #agenda-root .agenda-card{padding:12px 10px;border-radius:12px}
+  #agenda-root .agenda-top{margin-bottom:8px;gap:8px}
+  #agenda-root #agenda-livr{margin-right:0}
+  #agenda-root .agc-name{max-width:140px}
+  #agenda-root .agc-menu{max-width:calc(100vw - 32px);min-width:220px}
+  #agenda-root .agc-cascade{width:100%}
+  #agenda-root .agc-sel{min-width:0;flex:1 1 120px}
+  #agenda-root .fc .fc-toolbar.fc-header-toolbar{flex-wrap:wrap;gap:8px;margin-bottom:10px}
+  #agenda-root .fc .fc-toolbar-chunk{display:flex;align-items:center;gap:6px;flex-wrap:nowrap}
+  #agenda-root .fc .fc-toolbar-chunk:nth-child(2){order:-1;flex:1 0 100%}
+  #agenda-root .fc .fc-toolbar-title{font-size:15px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  #agenda-root .fc .fc-toolbar-chunk .fc-button-group,#agenda-root .fc .fc-toolbar-chunk>.fc-button{margin-left:0!important}
+  #agenda-root .fc .fc-button{font-size:11.5px;padding:6px 9px}
+  #agenda-root .fc .fc-prev-button,#agenda-root .fc .fc-next-button{padding:6px 8px}
+  /* « Aujourd'hui » raccourci en CSS et non via buttonText : FullCalendar lit le
+     libellé de ce bouton dans les options du CONSTRUCTEUR, un setOption à la
+     rotation ne le change jamais. Le bouton natif garde son état grisé. */
+  #agenda-root .fc .fc-today-button{font-size:0!important}
+  #agenda-root .fc .fc-today-button::after{content:'Auj.';font-size:11.5px}
+  #agenda-root .fc .fc-col-header-cell{padding:6px 0}
+  #agenda-root .fc .fc-col-header-cell-cushion{font-size:10.5px;padding:2px 1px}
+  #agenda-root .fc .fc-timegrid-slot-label-cushion{font-size:9.5px;padding:0 3px}
+  #agenda-root .fc .fc-timegrid-slot{height:2em}
+  #agenda-root .fc .fc-timegrid-event .fc-event-title{font-size:10px}
+  #agenda-root .fc .fc-list-event-title,#agenda-root .fc .fc-list-event-time{font-size:12px}
+  #agenda-root .fc .fc-daygrid-day-number{font-size:11px;padding:3px}
+  #agenda-root .fc .fc-daygrid-event{font-size:10px}
+}
+@media(max-width:360px){
+  #agenda-root .fc .fc-button{font-size:11px;padding:5px 7px}
+  #agenda-root .fc .fc-today-button::after{font-size:11px}
+  #agenda-root .fc .fc-toolbar-chunk{flex-wrap:wrap}
+}
 `;
     (d.head || d.documentElement).appendChild(st);
   }
@@ -761,6 +804,51 @@ OD.define('agenda', {
   const refetch = () => { try { calendar && calendar.refetchEvents(); } catch (e) {} };
   function updateSundayBtn() { try { const b = document.querySelector('#agenda-root .fc-dimanche-button'); if (b) b.classList.toggle('fc-button-active', showSunday); } catch (e) {} }
 
+  // --- responsive -------------------------------------------------------------
+  // Deux jeux d'options selon la largeur. Sur téléphone, la vue Semaine
+  // (6 colonnes de 50 px) est remplacée par une vue 3 jours, le bouton
+  // Dimanche disparaît (il ne sert qu'en semaine) et les libellés raccourcissent.
+  // La bascule suit la rotation et le redimensionnement (matchMedia), sans
+  // recharger les événements.
+  const MOBILE_MQ = '(max-width: 640px)';
+  let mqList = null;
+  function isMobile() {
+    try { if (!mqList) mqList = frontWin().matchMedia(MOBILE_MQ); return mqList.matches; }
+    catch (e) { return (frontWin().innerWidth || window.innerWidth) <= 640; }
+  }
+  function isTouch() { try { return frontWin().matchMedia('(hover: none)').matches; } catch (e) { return false; } }
+  function layoutOptions(m) {
+    return m ? {
+      headerToolbar: { left: 'prev,next today', center: 'title', right: 'timeGridDay,timeGrid3,listWeek,dayGridMonth' },
+    } : {
+      headerToolbar: { left: 'prev,next today dimanche', center: 'title', right: 'dayGridMonth,timeGridWeek,timeGridDay,listWeek' },
+    };
+  }
+  let lastMobile = null;
+  function applyLayout() {
+    if (!calendar) return;
+    const m = isMobile();
+    if (m === lastMobile) return;
+    lastMobile = m;
+    const o = layoutOptions(m);
+    calendar.batchRendering(() => {
+      Object.keys(o).forEach(k => calendar.setOption(k, o[k]));
+      const v = calendar.view && calendar.view.type;
+      if (m && v === 'timeGridWeek') calendar.changeView('timeGrid3');
+      else if (!m && v === 'timeGrid3') calendar.changeView('timeGridWeek');
+    });
+    updateSundayBtn();
+  }
+  function wireLayout() {
+    if (window.__agendaMq) { try { window.__agendaMq.mq.removeEventListener('change', window.__agendaMq.fn); } catch (e) {} }
+    try {
+      isMobile();
+      const fn = () => applyLayout();
+      if (mqList.addEventListener) mqList.addEventListener('change', fn); else mqList.addListener(fn);
+      window.__agendaMq = { mq: mqList, fn: fn };
+    } catch (e) {}
+  }
+
   function init() {
     const root = __anchor;
     if (!root) { console.warn('[agenda] #' + CFG.rootId + ' absent'); return; }
@@ -769,33 +857,54 @@ OD.define('agenda', {
     root.innerHTML = '<div class="agenda-card"><div class="agenda-top"><span class="agenda-title">Agenda</span><div id="agenda-livr" style="display:none"></div><div id="agenda-collab" style="display:none"></div></div><div id="agenda-chips"></div><div id="agenda-fc"></div></div>';
     const mount = root.querySelector('#agenda-fc');
 
+    const mobile0 = isMobile();
+    const lay0 = layoutOptions(mobile0);
+    lastMobile = mobile0;
+    const touch = isTouch();
     calendar = new window.FullCalendar.Calendar(mount, {
-      timeZone: CFG.timeZone, locale: 'fr', initialView: CFG.initialView, height: 'auto', firstDay: 1,
+      timeZone: CFG.timeZone, locale: 'fr', initialView: mobile0 ? 'timeGrid3' : CFG.initialView, height: 'auto', firstDay: 1,
       nowIndicator: true, allDaySlot: false, slotMinTime: '07:00:00', slotMaxTime: '20:00:00',
       slotDuration: '00:30:00', slotLabelInterval: '01:00', expandRows: true,
       hiddenDays: showSunday ? [] : [0],                // 0 = dimanche
-      dayHeaderFormat: { weekday: 'short', day: '2-digit', month: '2-digit', omitCommas: true },
+      // dayCount (et non duration) : toujours 3 colonnes visibles, le dimanche
+      // masqué est sauté au lieu de laisser une vue à 2 jours.
+      views: {
+        // Formats d'en-tête PAR VUE : un dayHeaderFormat global s'appliquait
+        // aussi au mois, qui affichait la date de la 1re semaine sous chaque
+        // jour (« lun. 28/09 » sur toute la colonne).
+        timeGridWeek: { dayHeaderFormat: { weekday: 'short', day: '2-digit', month: '2-digit', omitCommas: true } },
+        timeGrid3: { type: 'timeGrid', dayCount: 3, buttonText: '3 j', dayHeaderFormat: { weekday: 'short', day: 'numeric', omitCommas: true } },
+        dayGridMonth: { dayHeaderFormat: { weekday: 'short' } },
+        timeGridDay: { titleFormat: { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' } },
+      },
       customButtons: { dimanche: { text: 'Dimanche', click: function () { showSunday = !showSunday; calendar.setOption('hiddenDays', showSunday ? [] : [0]); updateSundayBtn(); } } },
-      headerToolbar: { left: 'prev,next today dimanche', center: 'title', right: 'dayGridMonth,timeGridWeek,timeGridDay,listWeek' },
+      headerToolbar: lay0.headerToolbar,
       buttonText: { today: "Aujourd'hui", month: 'Mois', week: 'Semaine', day: 'Jour', list: 'Liste' },
       slotLabelFormat: { hour: '2-digit', minute: '2-digit', hour12: false },
       eventTimeFormat: { hour: '2-digit', minute: '2-digit', hour12: false },
       editable: true, selectable: true, selectMirror: true, unselectAuto: false,
       eventStartEditable: true, eventDurationEditable: true,
+      // Au doigt : appui long de 1 s par défaut, beaucoup trop lent pour créer
+      // un RDV ou déplacer un événement.
+      longPressDelay: 400, eventLongPressDelay: 400, selectLongPressDelay: 400,
       select: (sel) => openCreate(sel),
       events: fetchEvents,
       eventDidMount: (info) => {
         const c = info.event.extendedProps._accent; if (c) { info.el.style.borderLeft = '3px solid ' + c; }
+        // Pas d'infobulle sur écran tactile : le tap déclenche mouseenter sans
+        // jamais de mouseleave, l'infobulle restait collée par-dessus le popup.
+        if (touch) return;
         info.el.addEventListener('mouseenter', () => showTip(info.el, info.event));
         info.el.addEventListener('mouseleave', hideTip);
       },
-      eventClick: (arg) => { window.__agendaSelected = arg.event.extendedProps; openEdit(arg.event); },
+      eventClick: (arg) => { hideTip(); window.__agendaSelected = arg.event.extendedProps; openEdit(arg.event); },
       eventDrop: applyDragResize,
       eventResize: applyDragResize,
     });
 
     calendar.render();
     updateSundayBtn();
+    wireLayout();
     window.__agendaRefetch = refetch;
     getUserId().then(() => { renderCollab(true); refetch(); });
     wireRefresh();
