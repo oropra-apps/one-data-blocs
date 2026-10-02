@@ -34,7 +34,7 @@ OD.define('topnav', {
   const wwLib = window.wwLib;
   const doc = __anchor.ownerDocument || wwLib.getFrontDocument();
   const ROOT_ID = 'nav-root';
-  const NAV_VER = 31; // <- numéro de version (témoin de chargement)
+  const NAV_VER = 32; // <- numéro de version (témoin de chargement)
 
   // La barre du haut est un sélecteur de SITE, et rien d'autre.
   //
@@ -295,6 +295,18 @@ OD.define('topnav', {
 .od-m>button>svg{width:14px;height:14px;transition:transform .18s}
 .od-m.open>button>svg{transform:rotate(180deg)}
 .od-pill{min-width:18px;height:18px;padding:0 5px;border-radius:9px;background:#e24b4a;color:#fff;font-size:10px;font-weight:700;display:inline-flex;align-items:center;justify-content:center;line-height:1}
+/* La pastille de notifications est un FEU, pas un compteur : c'est la couleur
+   qui dit s'il y a urgence, et elle ne compte que la file personnelle. L'état
+   vient de notif-badge (window.__odNotifFeu). Sans ce module, aucune pastille
+   ne porte data-feu et le rouge historique s'applique : les deux versions
+   peuvent donc etre deployees separement. */
+.od-pill[data-feu="calme"]{background:#8b99b0;color:#fff}
+.od-pill[data-feu="tiede"]{background:#fac055;color:#5a3d05}
+.od-pill[data-feu="chaud"]{background:#e24b4a;color:#fff}
+.od-pill[data-bat="1"]{position:relative}
+.od-pill[data-bat="1"]::after{content:'';position:absolute;inset:-3px;border-radius:12px;border:2px solid #e24b4a;opacity:.45;animation:od-pouls 2.4s ease-out infinite;pointer-events:none}
+@keyframes od-pouls{0%{transform:scale(.82);opacity:.5}100%{transform:scale(1.4);opacity:0}}
+@media (prefers-reduced-motion:reduce){.od-pill[data-bat="1"]::after{animation:none;opacity:.3}}
 .od-drop{position:absolute;top:calc(100% + 6px);left:0;min-width:230px;background:#fff;border:1px solid #e8eef7;border-radius:12px;box-shadow:0 12px 32px rgba(31,74,133,.14);padding:6px;z-index:300;display:none}
 .od-m.open .od-drop,.od-user.open .od-drop,.od-site.open .od-drop{display:block}
 .od-drop a{display:flex;align-items:center;justify-content:flex-start;gap:8px;padding:10px 12px;border-radius:8px;font-size:14px;color:#1F4A85;text-decoration:none;cursor:pointer}
@@ -565,14 +577,40 @@ OD.define('topnav', {
   }
 
   // ---------------------------------------------------------------- badge Clients/Notifs
+  // Le nombre vient de la variable historique ; l'ETAT (calme / tiede / chaud)
+  // vient de notif-badge v2, qui le pose dans window.__odNotifFeu. Si ce module
+  // n'est pas charge, feu() rend null et la pastille garde son rouge d'origine.
+  function feu() {
+    try {
+      var w = (wwLib.getFrontWindow && wwLib.getFrontWindow()) || window;
+      return w.__odNotifFeu || window.__odNotifFeu || null;
+    } catch (e) { return window.__odNotifFeu || null; }
+  }
   function refreshNotifs() {
-    const n = Number(getVar(VAR_NB_NOTIFS) || 0);
+    const f = feu();
+    const n = f ? Number(f.n || 0) : Number(getVar(VAR_NB_NOTIFS) || 0);
     const txt = n > 99 ? '99+' : String(n);
     (root() ? root().querySelectorAll('.od-notifs-pill') : []).forEach(function (p) {
       if (n > 0) { p.textContent = txt; p.style.display = ''; } else { p.style.display = 'none'; }
+      if (f && f.feu) { p.setAttribute('data-feu', f.feu); } else { p.removeAttribute('data-feu'); }
+      // Le battement ne signale que du NOUVEAU depuis le dernier passage sur la
+      // page. Il s'arrete quand on a regarde ; la couleur, elle, ne bouge pas.
+      if (f && f.nouveau && f.feu === 'chaud') { p.setAttribute('data-bat', '1'); }
+      else { p.removeAttribute('data-bat'); }
     });
   }
   if (!window.__navNotifsPoll) { window.__navNotifsPoll = setInterval(refreshNotifs, 20000); }
+  // Repeindre des que notif-badge a du neuf, sans attendre le cycle de 20 s.
+  if (!window.__navNotifsFeuBound) {
+    window.__navNotifsFeuBound = true;
+    try {
+      var _wf = (wwLib.getFrontWindow && wwLib.getFrontWindow()) || window;
+      _wf.addEventListener('oropra-notif-feu', function () { refreshNotifs(); });
+      if (_wf !== window) window.addEventListener('oropra-notif-feu', function () { refreshNotifs(); });
+      (wwLib.getFrontDocument ? wwLib.getFrontDocument() : document)
+        .addEventListener('oropra-notif-feu', function () { refreshNotifs(); });
+    } catch (e) {}
+  }
 
   // ---------------------------------------------------------------- site selector
   // La nav ne fait que LIRE le site-bus (window.oropraSite). Toute la logique de
