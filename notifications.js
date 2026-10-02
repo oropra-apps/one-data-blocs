@@ -1,5 +1,5 @@
 // ============================================================================
-//  NOTIFICATIONS — module One Data (OD.define)   v4 — PROFIL TEAM COLIN
+//  NOTIFICATIONS — module One Data (OD.define)   v5 — PROFIL TEAM COLIN
 //
 //  UNE NOTIFICATION N'EST PAS UN MESSAGE, C'EST UNE DETTE
 //
@@ -130,6 +130,12 @@ OD.define('notifications', {
     //     d'historique, qui est la seule qui met TOUT à jour. -----------------
     const FICHE_WORKFLOW_ID     = 'ec8bcc55-a733-4982-a946-13e10ba3b09b';
     const FICHE_PAGE_ID         = '259f1951-a2d4-4b90-ac83-0b3febe1d4ec';
+    // En PROD on navigue par CHEMIN : un UID de page passe a goTo s'inscrit tel
+    // quel dans l'URL, qui n'est pas une route -> page blanche. Dans l'EDITEUR
+    // c'est l'inverse : un chemin relatif s'y resout sur l'origine de l'editeur,
+    // qui se recharge alors dans sa propre preview. Meme regle que la topnav.
+    const LANG_PREFIX           = '/fr';
+    const FICHE_PATH            = '/fiche-client';
     const SELECTED_CLIENT_VAR   = '55490583-c88b-4748-916e-4d203db07742';
     const FICHE_TAB_VAR         = 'fb2cad2c-cd04-42e0-8909-e3c91c8dcfac';
     const TAB_CONTACTS = 2, TAB_RDV = 3;
@@ -140,6 +146,20 @@ OD.define('notifications', {
       try { WW.wwVariable.updateValue(id, v); return; } catch (e) { }
       try { const w = FW(); if (w.variables) w.variables[id + '-value'] = v; } catch (e) { }
     }
+    function dansEditeur() {
+      try { return window.self !== window.top; } catch (e) { return true; }
+    }
+    function allerFiche() {
+      if (dansEditeur()) {
+        try { WW.wwApp.goTo(FICHE_PAGE_ID); return; } catch (e) { }
+        try { WW.goTo(FICHE_PAGE_ID); return; } catch (e) { }
+        return;   // pas d'acrobatie en editeur : on eviterait mal les poupees russes
+      }
+      const href = LANG_PREFIX + FICHE_PATH;
+      try { WW.goTo(href); return; } catch (e) { }
+      try { FW().location.href = href; } catch (e) { }
+    }
+
     async function ouvrirFiche(idvu, onglet) {
       if (idvu == null || idvu === '') return;
       const id = Number(idvu);
@@ -150,15 +170,23 @@ OD.define('notifications', {
         });
         if (res.ok) { const j = await res.json(); client = (j && j[0]) || null; }
       } catch (e) { }
-      ecrireVar(SELECTED_CLIENT_VAR, client ? Object.assign({}, client) : { IDVu: id });
+      const obj = client ? Object.assign({}, client) : { IDVu: id };
+      ecrireVar(SELECTED_CLIENT_VAR, obj);
+      // Les quatre relais de la topnav, qui est la seule mécanique éprouvée :
+      // variable globale, objet sur la fenêtre de front, sessionStorage (relu au
+      // montage de la fiche) et événement. Un seul des quatre suffit rarement.
+      try {
+        const w = FW();
+        w.__odSelectedClient = obj;
+        try { sessionStorage.setItem('od_selected_client', JSON.stringify(obj)); } catch (e2) { }
+        try { w.dispatchEvent(new CustomEvent('oropra-client-selected', { detail: obj })); } catch (e2) { }
+      } catch (e) { }
       try { WW.wwWorkflow.executeGlobal(FICHE_WORKFLOW_ID, { IDVu: id }); } catch (e) { }
-      try { FW().dispatchEvent(new CustomEvent('oropra-client-selected', { detail: client || { IDVu: id } })); } catch (e) { }
+      // L'onglet se pose UNE SEULE FOIS, avant la navigation. La topnav a paye
+      // pour l'apprendre : des re-applications differees ecrasaient le clic
+      // suivant de l'utilisateur sur un autre onglet et le laissaient vide.
       if (onglet != null) ecrireVar(FICHE_TAB_VAR, onglet);
-      try { WW.goTo(FICHE_PAGE_ID); } catch (e) {
-        try { if (WW.wwLocation && WW.wwLocation.goTo) WW.wwLocation.goTo({ pageId: FICHE_PAGE_ID }); } catch (e2) { }
-      }
-      // Filet : l'onglet se repositionne après le montage de la fiche.
-      if (onglet != null) [150, 400, 800, 1500].forEach(ms => setTimeout(() => ecrireVar(FICHE_TAB_VAR, onglet), ms));
+      allerFiche();
     }
 
     // Prévenir la pastille de la barre du haut qu'une dette vient de bouger.
