@@ -1,7 +1,10 @@
 // ============================================================================
-//  AGENDA (FullCalendar) — module One Data (OD.define)  v11 — COMPTE RENDU
+//  AGENDA (FullCalendar) — module One Data (OD.define)  v12 — COMPTE RENDU
 //
-//  AJOUT v11 : LE CRÉNEAU QUI RESTE À CONCLURE SE VOIT
+//  AJOUT v12 : LE CRÉNEAU QUI RESTE À CONCLURE SE VOIT VRAIMENT
+//  (la v11 le marquait, mais .fc-event est en overflow:hidden et sa règle
+//  est portée par « #agenda-root .fc .fc-event » : la pastille était
+//  découpée et le fond écrasé. Sélecteur complet, pastille dans le titre.)
 //  Un rendez-vous commercial passé dont personne n'a dit ce qu'il a donné est
 //  cerné d'ambre et hachuré, avec la mention « à conclure » sur son titre. Le
 //  vendeur voit son retard dans l'outil où il travaille déjà, pas dans un écran
@@ -733,24 +736,29 @@ OD.define('agenda', {
 /* ---- compte rendu de RDV ------------------------------------------------
    Le clic sur un creneau PASSE n'ouvrait rien : openEdit refusait. Il ouvre
    desormais cette fiche. A venir -> modifier, passe -> conclure. */
-#agenda-ov /* Un rendez-vous commercial passe et jamais conclu. Il ne crie pas : il se
-   signale. Le vendeur voit son retard dans l'outil ou il travaille deja,
-   plutot que dans un ecran qu'il devrait penser a ouvrir. */
-.ag-aconclure{position:relative;overflow:visible !important;
-  background:#fdf3de !important;border:2px solid #d2941f !important;
-  box-shadow:0 0 0 3px rgba(210,148,31,.22),0 2px 6px rgba(28,43,69,.14) !important}
-.ag-aconclure .fc-event-title,.ag-aconclure .fc-event-time{color:#8a5d08 !important;font-weight:800 !important}
-/* La pastille ne depend pas de la largeur du creneau : un rendez-vous de
-   trente minutes en vue semaine se signale aussi bien qu'un bloc d'une
-   journee. Le texte, lui, se tronquait des que le creneau etait etroit. */
-.ag-aconclure::after{content:'!';position:absolute;top:-7px;right:-7px;z-index:5;
-  width:17px;height:17px;border-radius:50%;background:#d2941f;color:#fff;
-  font:800 12px/17px system-ui,sans-serif;text-align:center;
-  box-shadow:0 1px 4px rgba(28,43,69,.35)}
-.ag-aconclure-note{display:inline-block;margin-left:5px;padding:0 5px;border-radius:7px;
-  background:#d2941f;color:#fff;font:800 9px/15px system-ui,sans-serif;
-  letter-spacing:.04em;text-transform:uppercase;vertical-align:1px}
-.agm-cr-head{display:flex;gap:11px;align-items:flex-start}
+/* UN RENDEZ-VOUS COMMERCIAL PASSE ET JAMAIS CONCLU.
+   Deux pieges du CSS de l'agenda rendaient le marquage invisible :
+   .fc-event porte overflow:hidden, qui decoupait une pastille placee en
+   debordement ; et sa regle est portee par « #agenda-root .fc .fc-event »,
+   dont la specificite ecrase une simple classe. D'ou le selecteur complet
+   ici, et une pastille posee DANS le titre plutot qu'au bord du bloc. */
+#agenda-root .fc .fc-event.ag-aconclure{
+  background:#fbe6bd !important;border:2px solid #d2941f !important;
+  box-shadow:0 2px 6px rgba(138,93,8,.28) !important}
+#agenda-root .fc .fc-event.ag-aconclure .fc-event-title,
+#agenda-root .fc .fc-event.ag-aconclure .fc-event-time,
+#agenda-root .fc .fc-event.ag-aconclure .fc-event-main{color:#7a5207 !important;font-weight:800 !important}
+/* La pastille vit dans le flux du titre : jamais decoupee, jamais dependante
+   de la largeur du creneau. */
+#agenda-root .fc .ag-aconclure-mk{display:inline-block;margin-right:4px;
+  width:13px;height:13px;border-radius:50%;background:#d2941f;color:#fff;
+  font:800 10px/13px system-ui,sans-serif;text-align:center;vertical-align:-1px;
+  flex:0 0 auto}
+#agenda-root .fc .ag-aconclure-note{display:inline-block;margin-left:5px;padding:0 5px;
+  border-radius:7px;background:#d2941f;color:#fff;
+  font:800 9px/15px system-ui,sans-serif;letter-spacing:.04em;text-transform:uppercase;
+  vertical-align:1px}
+#agenda-ov .agm-cr-head{display:flex;gap:11px;align-items:flex-start}
 #agenda-ov .agm-cr-when{font-size:12px;font-weight:800;color:#2a5ea9;white-space:nowrap;background:#f7f9fc;border:1.5px solid #e2eaf5;border-radius:8px;padding:7px 10px;text-align:center;line-height:1.3}
 #agenda-ov .agm-cr-when small{display:block;font-size:9.5px;color:#9bb3d1;text-transform:uppercase;letter-spacing:.04em;font-weight:700}
 #agenda-ov .agm-cr-who{min-width:0;padding-top:2px}
@@ -984,19 +992,32 @@ OD.define('agenda', {
       longPressDelay: 400, eventLongPressDelay: 400, selectLongPressDelay: 400,
       select: (sel) => openCreate(sel),
       events: fetchEvents,
+      // FullCalendar re-rend un evenement APRES eventDidMount — un creneau
+      // court est reclasse « short » au recalcul des hauteurs — et une classe
+      // posee a la main disparait alors. C'est ce qui laissait un rendez-vous
+      // de trente minutes sans marquage pendant qu'un bloc de deux heures
+      // l'avait. eventClassNames est reapplique a chaque rendu.
+      eventClassNames: (arg) => (resteAConclure(arg.event.extendedProps) ? ['ag-aconclure'] : []),
       eventDidMount: (info) => {
         const c = info.event.extendedProps._accent; if (c) { info.el.style.borderLeft = '3px solid ' + c; }
         if (resteAConclure(info.event.extendedProps)) {
-          info.el.classList.add('ag-aconclure');
-          // Le mot n'apparait que s'il tient : sur un creneau etroit la
-          // pastille suffit, et une mention tronquee ne vaut rien.
+          info.el.classList.add('ag-aconclure');   // ceinture ; la bretelle est eventClassNames
           try {
             const t = info.el.querySelector('.fc-event-title');
-            if (t && info.el.offsetWidth >= 150) {
-              const b = document.createElement('span');
-              b.className = 'ag-aconclure-note';
-              b.textContent = 'à conclure';
-              t.appendChild(b);
+            if (t) {
+              // La pastille se pose DANS le titre : le bloc est en
+              // overflow:hidden, tout ce qui deborde disparait.
+              const mk = document.createElement('span');
+              mk.className = 'ag-aconclure-mk';
+              mk.textContent = '!';
+              t.insertBefore(mk, t.firstChild);
+              // Le mot n'apparait que s'il tient. Tronque, il ne vaut rien.
+              if (info.el.offsetWidth >= 170) {
+                const b = document.createElement('span');
+                b.className = 'ag-aconclure-note';
+                b.textContent = 'à conclure';
+                t.appendChild(b);
+              }
             }
           } catch (e) { }
         }
