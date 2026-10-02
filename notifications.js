@@ -1,5 +1,5 @@
 // ============================================================================
-//  NOTIFICATIONS — module One Data (OD.define)   v2 — PROFIL TEAM COLIN
+//  NOTIFICATIONS — module One Data (OD.define)   v4 — PROFIL TEAM COLIN
 //
 //  UNE NOTIFICATION N'EST PAS UN MESSAGE, C'EST UNE DETTE
 //
@@ -32,8 +32,16 @@
 //  4. CE QUI FAIT DISPARAÎTRE UNE NOTIFICATION : UN ACTE, JAMAIS UN REGARD.
 //       message entrant  -> un sortant vers ce client
 //       relance datée    -> le rapport vendeur qui la clôt
-//       rendez-vous      -> tenu ou déplacé
-//       numéro inconnu   -> rattaché à une fiche, ou écarté
+//       rendez-vous      -> son COMPTE RENDU : venu, pas venu, reporté
+//       numéro inconnu   -> rattaché à une fiche, ou écarté sept jours
+//
+//     Le compte rendu de rendez-vous n'existait pas, et son absence rendait la
+//     règle fausse : un rendez-vous disparaissait quand son heure était passée.
+//     Le TEMPS le faisait disparaître, pas un acte. Mesuré sur Team Colin :
+//     9 135 rendez-vous passés, AUCUN avec un compte rendu — le champ prévu
+//     pour cela (TRAITE, IDResultatRdv) n'a jamais été alimenté par personne.
+//     Les rendez-vous passés depuis moins de sept jours entrent donc dans
+//     « J'ai promis », en tête, sous « À conclure », avec trois boutons.
 //     Le REPORT ne solde rien : il met la dette de côté jusqu'à l'heure dite,
 //     puis elle revient. Il remplace l'ancien « ignorer », qui la faisait
 //     disparaître sans trace et sans retour.
@@ -186,6 +194,9 @@ OD.define('notifications', {
 #notif-root .rail h1{margin:0;font-size:21px;font-weight:800;letter-spacing:-.02em}
 #notif-root .rail .role{font-size:11px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;
   color:var(--ink-3);background:var(--calme-bg);border-radius:20px;padding:5px 11px}
+#notif-root .rail .perim{font-size:11px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;
+  color:var(--bleu);background:var(--calme-bg);border:1px solid var(--bleu-clair);
+  border-radius:20px;padding:4px 10px}
 #notif-root .rail .maj{font-family:var(--mono);font-size:11.5px;color:var(--ink-3);margin-left:auto}
 
 #notif-root .dette{background:var(--card);border:1px solid var(--line);border-radius:14px;
@@ -423,7 +434,24 @@ OD.define('notifications', {
     //  ÉTAT
     // =========================================================================
     const state = { j: null, section: null, canal: 'TOUS', erreur: null,
-                    chargement: true, reportOuvert: null, busBound: false };
+                    chargement: true, reportOuvert: null, busBound: false,
+                    sig: null };
+
+    // Le périmètre choisi dans la barre du haut. « Tout mon périmètre » ne
+    // filtre rien : on envoie null plutôt que la liste complète, pour que la
+    // base garde sa propre définition du périmètre et ne la recalcule pas à
+    // partir d'une liste que le front aurait pu tronquer.
+    function sitesDuPerimetre() {
+      try {
+        const b = FW().oropraSite || window.oropraSite;
+        if (!b) return null;
+        const p = (typeof b.getPerimetre === 'function') ? b.getPerimetre() : null;
+        if (!p || p.level === 'all') return null;
+        const l = (typeof b.getSitesDuPerimetre === 'function') ? b.getSitesDuPerimetre() : null;
+        return (l && l.length) ? l : null;
+      } catch (e) { return null; }
+    }
+    function signature(l) { return l ? l.slice().sort((a, b) => a - b).join(',') : '*'; }
 
     function famille() {
       const r = num((state.j && state.j.moi && state.j.moi.role));
@@ -461,14 +489,15 @@ OD.define('notifications', {
     };
     function compteur(sec) {
       const c = (state.j && state.j.compteurs) || {};
-      if (sec === 'promesses') return num(c.relances) + num(c.rdv);
+      if (sec === 'promesses') return num(c.relances) + num(c.rdv) + num(c.a_conclure);
       if (sec === 'perimetre') return num(c.equipe);
       return num(c[sec]);
     }
     function tonSection(sec) {
       const c = (state.j && state.j.compteurs) || {};
       if (sec === 'ma_file') return num(c.chaud) > 0 ? 'chaud' : (num(c.tiede) > 0 ? 'tiede' : '');
-      if (sec === 'promesses') return num(c.relances_retard) > 0 ? 'chaud' : '';
+      if (sec === 'promesses')
+        return num(c.relances_retard) > 0 ? 'chaud' : (num(c.a_conclure) > 0 ? 'tiede' : '');
       if (sec === 'equipe' || sec === 'perimetre') {
         const l = (state.j[sec] || []);
         return l.some(x => num(x.en_retard) > 0) ? 'chaud' : '';
@@ -490,8 +519,9 @@ OD.define('notifications', {
       if (EN_VOL) return EN_VOL;
       EN_VOL = (async () => {
         try {
-          const j = await rpc('notif_lire');
-          state.j = j; state.erreur = null;
+          const sites = sitesDuPerimetre();
+          const j = await rpc('notif_lire', { p_sites: sites });
+          state.j = j; state.erreur = null; state.sig = signature(sites);
         } catch (e) {
           state.erreur = (e && e.message) || 'erreur inconnue';
         } finally {
@@ -699,8 +729,8 @@ OD.define('notifications', {
           + '<div><b>Relancer ' + esc(p.client_nom || ('client ' + p.id_client)) + '</b>'
           +   (p.quoi ? '<div class="quoi">' + esc(p.quoi) + '</div>' : '') + '</div>'
           + '<div class="actes">'
-          +   (p.tel ? '<a class="btn p" href="tel:' + esc(String(p.tel).replace(/\s/g, ''))
-                     + '">Appeler</a>' : '')
+          +   (p.id_client ? '<button type="button" class="btn p" data-role="repondre">'
+                           + 'Contacter</button>' : '')
           +   '<button type="button" class="btn t" data-role="reporter-rpv">Reporter</button>'
           + '</div></article>';
       }
@@ -716,6 +746,32 @@ OD.define('notifications', {
         +   '</div></div>'
         + '<div class="actes">'
         +   '<button type="button" class="btn s" data-role="repondre-rdv">Ouvrir la fiche</button>'
+        + '</div></article>';
+    }
+
+    // Le compte rendu : trois issues, pas plus. Un vendeur entre deux clients
+    // ne remplit pas un formulaire — il clique sur ce qui s'est passé. Le
+    // détail commercial appartient au rapport vendeur, dans la fiche.
+    function ligneAConclure(p) {
+      const n = num(p.n);
+      const vins = (p.vins || []).length;
+      return '<article class="pr" data-conclure="' + esc(p.id_rdv) + '"'
+        + ' data-client="' + esc(p.id_client || '') + '">'
+        + '<div class="h">' + esc(heure(p.quand))
+        +   '<small>' + esc(jourLisible(p.quand)) + '</small></div>'
+        + '<div><b>' + esc(p.client_nom || ('client ' + p.id_client)) + '</b>'
+        +   '<div class="quoi">' + (p.quoi ? esc(p.quoi) : 'Rendez-vous')
+        +   (vins > 1 ? ' \u00b7 ' + fmt(vins) + ' v\u00e9hicules'
+                      : (vins === 1 ? ' \u00b7 VIN ' + esc(p.vins[0]) : ''))
+        +   '</div>'
+        +   '<div class="report" style="margin-top:9px">Que s\u2019est-il pass\u00e9 ?'
+        +     '<button type="button" class="q" data-issue="venu">Le client est venu</button>'
+        +     '<button type="button" class="q" data-issue="absent">Il n\u2019est pas venu</button>'
+        +     '<button type="button" class="q" data-issue="reporte">Report\u00e9</button>'
+        +   '</div>'
+        + '</div>'
+        + '<div class="actes">'
+        +   '<button type="button" class="btn t" data-role="repondre-rdv">Ouvrir la fiche</button>'
         + '</div></article>';
     }
 
@@ -792,7 +848,8 @@ OD.define('notifications', {
           + '<svg viewBox="0 0 24 24"><path d="m5 13 4 4L19 7"/></svg></div>'
           + '<h3>Aucune promesse en attente</h3>'
           + '<p>Les relances datées que vous posez dans One Data apparaîtront ici le jour '
-          + 'prévu, avec vos rendez-vous.</p></div>';
+          + 'prévu, avec vos rendez-vous à venir et ceux qui attendent encore leur compte '
+          + 'rendu.</p></div>';
       }
       if (sec === 'inconnus') {
         return '<div class="vide"><div class="ico">'
@@ -816,8 +873,10 @@ OD.define('notifications', {
     function enTete() {
       const j = state.j;
       const role = ROLES[num(j.moi.role)] || '';
+      const f = j.filtre || {};
       return '<div class="rail"><h1>' + esc(TITRES[famille()]) + '</h1>'
         + (role ? '<span class="role">' + esc(role) + '</span>' : '')
+        + (f.actif && f.libelle ? '<span class="perim">' + esc(f.libelle) + '</span>' : '')
         + '<span class="maj">temps réel · ' + heure(new Date().toISOString()) + '</span></div>';
     }
     function onglets() {
@@ -859,8 +918,22 @@ OD.define('notifications', {
       if (sec === 'promesses') {
         const rel = (j.promesses && j.promesses.relances) || [];
         const rdv = groupeRdv((j.promesses && j.promesses.rdv) || []);
-        if (!rel.length && !rdv.length) return vide('promesses');
+        const con = groupeRdv((j.promesses && j.promesses.a_conclure) || []);
+        if (!rel.length && !rdv.length && !con.length) return vide('promesses');
         let h = '';
+        // Les rendez-vous PASSÉS dont personne n'a dit ce qu'ils ont donné.
+        // Ils passent en premier : c'est le seul endroit de l'application où
+        // l'on saura si le client est venu, et plus on attend moins on s'en
+        // souvient.
+        if (con.length) {
+          h += '<div class="jour"><span class="t">\u00c0 conclure</span>'
+            + '<span class="ligne"></span><span class="n">' + fmt(con.length) + '</span></div>'
+            + '<p class="dnote" style="font-size:12px;color:var(--ink-3);margin:0 0 10px">'
+            + 'Ces rendez-vous sont pass\u00e9s et personne n\u2019a dit ce qu\u2019ils ont '
+            + 'donn\u00e9. Sans r\u00e9ponse, ils dispara\u00eetraient tout seuls \u2014 et '
+            + 'c\u2019est pr\u00e9cis\u00e9ment ce qu\u2019on ne veut plus.</p>'
+            + '<div class="pile">' + con.map(x => ligneAConclure(x)).join('') + '</div>';
+        }
         if (rel.length) {
           h += '<div class="jour"><span class="t">Relances promises</span>'
             + '<span class="ligne"></span><span class="n">' + fmt(rel.length) + '</span></div>'
@@ -910,7 +983,8 @@ OD.define('notifications', {
       return '<p class="pied"><b>Ce qui fait disparaître une notification.</b> Jamais un '
         + 'regard : seul un acte. Un message entrant se solde par un message ou un appel sortant '
         + 'vers ce client. Une relance se solde par le rapport vendeur qui la clôt. Un '
-        + 'rendez-vous se solde quand il est tenu ou déplacé. Un numéro inconnu se '
+        + 'rendez-vous se solde par son COMPTE RENDU — venu, pas venu, reporté — et non '
+        + 'par l’heure qui passe. Un numéro inconnu se '
         + 'solde quand il est rattaché à une fiche. Un <b>report</b> ne solde rien : il '
         + 'met la dette de côté jusqu’à l’heure dite, puis elle revient. '
         + 'Les leads ne sont pas ici : ils sont traités dans le lead management.</p>';
@@ -977,7 +1051,10 @@ OD.define('notifications', {
       if (p && r.contains(p)) { state.canal = p.getAttribute('data-canal'); rendre(); return; }
 
       // --- échéances de report
-      const q = ev.target.closest('.report .q');
+      //     Le compte rendu de rendez-vous réutilise la même boîte visuelle,
+      //     sans data-scope : sans cette condition, il était intercepté ici et
+      //     ne partait jamais.
+      const q = ev.target.closest('.report[data-scope] .q');
       if (q && r.contains(q)) {
         const z = q.closest('.report');
         const d = echeance(q);
@@ -1065,6 +1142,31 @@ OD.define('notifications', {
         return;
       }
 
+      // --- conclure un rendez-vous passé
+      const iss = ev.target.closest('[data-issue]');
+      if (iss && r.contains(iss)) {
+        const art = iss.closest('[data-conclure]');
+        const quoi = iss.getAttribute('data-issue');
+        let quand = null;
+        if (quoi === 'reporte') {
+          // Reporter DÉPLACE le rendez-vous : il garde son identité et
+          // redevient à venir. Par défaut demain 10 h — le vendeur ajustera
+          // depuis l'agenda, qui est fait pour ça.
+          const d = new Date();
+          d.setDate(d.getDate() + 1); d.setHours(10, 0, 0, 0);
+          quand = d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-'
+                + String(d.getDate()).padStart(2, '0') + 'T10:00:00';
+        }
+        iss.textContent = '\u2026';
+        try {
+          await rpc('notif_rdv_conclure', {
+            p_id_rdv: Number(art.getAttribute('data-conclure')),
+            p_issue: quoi, p_commentaire: null, p_nouvelle_date: quand });
+          await recharger();
+        } catch (e) { iss.textContent = '\u00e9chec'; }
+        return;
+      }
+
       // --- ouvrir la fiche
       const rep = ev.target.closest('[data-role="repondre"]');
       if (rep && r.contains(rep)) { ouvrirFiche(clientDe(rep), TAB_CONTACTS); return; }
@@ -1110,8 +1212,14 @@ OD.define('notifications', {
       const b = FW().oropraSite || window.oropraSite;
       if (b && typeof b.onChange === 'function' && !state.busBound) {
         state.busBound = true;
-        let premier = true;
-        b.onChange(() => { if (premier) { premier = false; return; } recharger(); });
+        // On ne compte pas les tours : le bus annonce son état courant dès
+        // l'abonnement, et ce premier état peut déjà différer de celui qui a
+        // servi au chargement si le bus n'était pas prêt. Seule la signature
+        // du périmètre décide d'un rechargement.
+        b.onChange(() => {
+          if (signature(sitesDuPerimetre()) === state.sig) return;
+          recharger();
+        });
       }
     } catch (e) { }
   }
