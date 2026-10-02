@@ -1,5 +1,12 @@
 // ============================================================================
-//  NOTIFICATIONS — module One Data (OD.define)   v5 — PROFIL TEAM COLIN
+//  NOTIFICATIONS — module One Data (OD.define)   v3 — PROFIL TEAM COLIN
+//
+//  LE COMPTE RENDU EST LE MEME DES DEUX COTES. Trois boutons posaient ici
+//  trois questions fermees — venu, pas venu, reporté — et appelaient une RPC
+//  qui n'existait plus. La page ouvre maintenant la fiche complete de
+//  l'agenda : issue, température, motif de perte, relance proposée, preuve
+//  d'appel. Un seul formulaire, un seul geste à apprendre, un seul endroit à
+//  corriger.
 //
 //  UNE NOTIFICATION N'EST PAS UN MESSAGE, C'EST UNE DETTE
 //
@@ -32,7 +39,7 @@
 //  4. CE QUI FAIT DISPARAÎTRE UNE NOTIFICATION : UN ACTE, JAMAIS UN REGARD.
 //       message entrant  -> un sortant vers ce client
 //       relance datée    -> le rapport vendeur qui la clôt
-//       rendez-vous      -> son COMPTE RENDU : venu, pas venu, reporté
+//       rendez-vous      -> son COMPTE RENDU, la même fiche que dans l'agenda
 //       numéro inconnu   -> rattaché à une fiche, ou écarté sept jours
 //
 //     Le compte rendu de rendez-vous n'existait pas, et son absence rendait la
@@ -146,6 +153,28 @@ OD.define('notifications', {
       try { WW.wwVariable.updateValue(id, v); return; } catch (e) { }
       try { const w = FW(); if (w.variables) w.variables[id + '-value'] = v; } catch (e) { }
     }
+    function lireVar(id) {
+      try { return WW.wwVariable.getValue(id); } catch (e) { return undefined; }
+    }
+    // L'onglet de la fiche : la variable est posée AVANT la navigation, mais le
+    // composant Tabs se monte après et peut la remettre à sa valeur par défaut.
+    // On la repose donc quelques fois — et UNIQUEMENT tant que l'utilisateur n'a
+    // rien cliqué. C'est la nuance que la topnav avait payée : des réapplications
+    // aveugles écrasaient le clic suivant sur un autre onglet et le laissaient
+    // vide. Ici, le premier clic éteint le filet.
+    function poserOnglet(idx) {
+      if (idx == null) return;
+      ecrireVar(FICHE_TAB_VAR, idx);
+      let vivant = true;
+      const w = FW();
+      const eteindre = () => { vivant = false; try { w.removeEventListener('click', eteindre, true); } catch (e) { } };
+      try { w.addEventListener('click', eteindre, true); } catch (e) { }
+      [120, 350, 700, 1200].forEach(ms => setTimeout(() => {
+        if (!vivant) return;
+        if (Number(lireVar(FICHE_TAB_VAR)) !== Number(idx)) ecrireVar(FICHE_TAB_VAR, idx);
+      }, ms));
+      setTimeout(eteindre, 1400);
+    }
     function dansEditeur() {
       try { return window.self !== window.top; } catch (e) { return true; }
     }
@@ -182,10 +211,7 @@ OD.define('notifications', {
         try { w.dispatchEvent(new CustomEvent('oropra-client-selected', { detail: obj })); } catch (e2) { }
       } catch (e) { }
       try { WW.wwWorkflow.executeGlobal(FICHE_WORKFLOW_ID, { IDVu: id }); } catch (e) { }
-      // L'onglet se pose UNE SEULE FOIS, avant la navigation. La topnav a paye
-      // pour l'apprendre : des re-applications differees ecrasaient le clic
-      // suivant de l'utilisateur sur un autre onglet et le laissaient vide.
-      if (onglet != null) ecrireVar(FICHE_TAB_VAR, onglet);
+      if (onglet != null) poserOnglet(onglet);
       allerFiche();
     }
 
@@ -222,6 +248,73 @@ OD.define('notifications', {
 #notif-root .rail h1{margin:0;font-size:21px;font-weight:800;letter-spacing:-.02em}
 #notif-root .rail .role{font-size:11px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;
   color:var(--ink-3);background:var(--calme-bg);border-radius:20px;padding:5px 11px}
+/* === LA FICHE DE COMPTE RENDU — reprise telle quelle de l'agenda, pour que
+   le vendeur retrouve le meme formulaire des deux cotes === */
+#notif-ov{position:fixed;inset:0;background:rgba(42,94,169,.18);z-index:3000;display:flex;align-items:center;justify-content:center;font-family:"Nunito Sans",system-ui,sans-serif}
+#notif-ov .agm{background:#fff;border-radius:16px;box-shadow:0 16px 50px rgba(42,94,169,.22);width:94%;max-width:520px;max-height:90vh;overflow:hidden;display:flex;flex-direction:column}
+#notif-ov .agm-head{display:flex;align-items:center;justify-content:space-between;padding:14px 18px;border-bottom:1.5px solid #eef2f8}
+#notif-ov .agm-title{font-size:13px;font-weight:800;color:#1F4A85;text-transform:uppercase;letter-spacing:.04em}
+#notif-ov .agm-x{width:28px;height:28px;padding:0;border:none;background:#f2f6fc;border-radius:8px;color:#2a5ea9;font-size:18px;cursor:pointer;line-height:1;display:flex;align-items:center;justify-content:center}
+#notif-ov .agm-x:hover{background:#e6eefb}
+#notif-ov .agm-body{padding:16px 18px;overflow-y:auto;display:flex;flex-direction:column;gap:12px}
+#notif-ov .agm-seg{display:flex;border:1.5px solid #e2eaf5;border-radius:10px;overflow:hidden}
+#notif-ov .agm-seg button{flex:1;padding:9px 6px;border:none;background:#fff;color:#7a98c5;font-family:inherit;font-weight:700;font-size:12px;cursor:pointer;transition:all .12s}
+#notif-ov .agm-seg button:not(:last-child){border-right:1.5px solid #e2eaf5}
+#notif-ov .agm-seg button.on{background:#2a5ea9;color:#fff}
+#notif-ov .agm-row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+#notif-ov .agm-inp,#notif-ov .agm-sel{border:1.5px solid #e2eaf5;border-radius:9px;padding:8px 11px;font-size:13px;font-family:inherit;color:#1F4A85;font-weight:600;background:#fff;outline:none}
+#notif-ov .agm-inp:focus,#notif-ov .agm-sel:focus,#notif-ov .agm-ta:focus{border-color:#2a5ea9}
+#notif-ov .agm-ta{width:100%;min-height:64px;resize:vertical;border:1.5px solid #e2eaf5;border-radius:9px;padding:8px 11px;font-size:13px;font-family:inherit;color:#1F4A85;font-weight:500;background:#fff;outline:none}
+#notif-ov .agm-lbl{font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:.05em;color:#9bb3d1;margin-bottom:5px}
+#notif-ov .agm-err{color:#a32d2d;font-size:12px;font-weight:700}
+#notif-ov .agm-cr-head{display:flex;gap:11px;align-items:flex-start}
+#notif-ov .agm-cr-when{font-size:12px;font-weight:800;color:#2a5ea9;white-space:nowrap;background:#f7f9fc;border:1.5px solid #e2eaf5;border-radius:8px;padding:7px 10px;text-align:center;line-height:1.3}
+#notif-ov .agm-cr-when small{display:block;font-size:9.5px;color:#9bb3d1;text-transform:uppercase;letter-spacing:.04em;font-weight:700}
+#notif-ov .agm-cr-who{min-width:0;padding-top:2px}
+#notif-ov .agm-cr-who b{display:block;font-size:15px;font-weight:800;color:#1F4A85;line-height:1.3}
+#notif-ov .agm-cr-who span{display:block;font-size:11.5px;color:#7a98c5;font-weight:600;margin-top:2px}
+#notif-ov .ct-call{background:#F0F9FF;border:1px solid rgba(96,174,223,.25);border-radius:12px;padding:11px 13px;display:flex;gap:11px;align-items:flex-start}
+#notif-ov .ct-ar{flex-shrink:0;width:30px;height:30px;border-radius:50%;border:1.5px solid #60AEDF;display:flex;align-items:center;justify-content:center;background:#fff}
+#notif-ov .ct-mid{min-width:0;flex:1}
+#notif-ov .ct-top{display:flex;align-items:flex-start;gap:10px}
+#notif-ov .ct-who{font-size:13px;font-weight:700;color:#1F4A85;display:flex;align-items:center;gap:6px;min-width:0}
+#notif-ov .ct-meta{margin-left:auto;display:flex;flex-direction:column;align-items:flex-end;gap:4px}
+#notif-ov .ct-date{font-size:11px;color:#9ca3af;white-space:nowrap;text-align:right;line-height:1.4}
+#notif-ov .ct-ton{font-size:11px;color:#60AEDF;background:rgba(96,174,223,.1);border:1px solid rgba(96,174,223,.3);border-radius:999px;padding:1px 8px;white-space:nowrap}
+#notif-ov .ct-pill{display:inline-flex;align-items:center;gap:8px;background:#60AEDF1f;border-radius:999px;padding:5px 14px;margin-top:7px;max-width:100%;box-sizing:border-box}
+#notif-ov .ct-pill button{background:none;border:none;cursor:pointer;padding:0;width:16px;height:16px;display:flex;align-items:center;justify-content:center;flex-shrink:0}
+#notif-ov .ct-pill .t{font-size:12px;color:#60AEDF;min-width:28px;font-variant-numeric:tabular-nums}
+#notif-ov .ct-bar{flex:1 1 60px;min-width:40px;max-width:130px;height:3px;background:#60AEDF4d;border-radius:2px;cursor:pointer;position:relative}
+#notif-ov .ct-bar i{display:block;height:100%;width:0%;background:#60AEDF;border-radius:2px;pointer-events:none;transition:width .1s linear}
+#notif-ov .ct-txt{font-size:13px;color:#4b5563;line-height:1.6;margin-top:7px}
+#notif-ov .ct-txt .tg{background:none;border:none;cursor:pointer;padding:0 2px;font-size:12px;color:#9ca3af;font-family:inherit}
+#notif-ov .ct-full{display:none;margin-top:8px;padding:12px;background:#f8fbff;border-radius:8px;border:1px solid rgba(96,174,223,.2);font-size:13px;color:#374151;line-height:1.5;white-space:pre-wrap}
+#notif-ov .agm-ech{display:grid;gap:6px;grid-template-columns:repeat(3,1fr)}
+#notif-ov .agm-ech.quatre{grid-template-columns:repeat(2,1fr)}
+#notif-ov .agm-ech button{border:1.5px solid #e2eaf5;background:#fff;border-radius:10px;padding:9px 8px;font-family:inherit;cursor:pointer;text-align:left;transition:all .12s}
+#notif-ov .agm-ech button:hover{border-color:#acc5e4}
+#notif-ov .agm-ech b{display:flex;align-items:center;gap:6px;font-size:13px;font-weight:800;color:#1F4A85}
+#notif-ov .agm-ech i{width:9px;height:9px;border-radius:3px;flex:0 0 auto;display:inline-block}
+#notif-ov .agm-ech small{display:block;font-size:10.5px;color:#9bb3d1;font-weight:700;margin-top:3px;padding-left:15px}
+#notif-ov .agm-ech button.on{border-color:#2a5ea9;background:#eef4fc;box-shadow:inset 0 0 0 1px #2a5ea9}
+#notif-ov .agm-ech button.on small{color:#2a5ea9}
+#notif-ov .agm-quand{display:flex;gap:6px;flex-wrap:wrap;align-items:center}
+#notif-ov .agm-quand button{border:1.5px solid #e2eaf5;background:#fff;color:#2a5ea9;border-radius:8px;padding:7px 12px;font-family:inherit;font-size:12px;font-weight:700;cursor:pointer}
+#notif-ov .agm-quand button.on{background:#2a5ea9;border-color:#2a5ea9;color:#fff}
+#notif-ov .agm-note{font-size:11.5px;color:#7a98c5;line-height:1.5;font-weight:600}
+#notif-ov .agm-note b{color:#2a5ea9;font-weight:800}
+#notif-ov .agm-avis{font-size:11.5px;color:#8a6d1f;background:#fdf3de;border:1.5px solid #f0d9a0;border-radius:9px;padding:9px 11px;font-weight:600;line-height:1.45}
+#notif-ov .agm-deplace{font-size:11.5px;color:#9bb3d1;font-weight:600;text-align:center}
+#notif-ov .agm-deplace button{background:none;border:none;color:#2a5ea9;font-family:inherit;font-size:11.5px;font-weight:700;text-decoration:underline;cursor:pointer;padding:0}
+#notif-ov .agm-done{display:flex;gap:10px;align-items:flex-start;background:#e4f4f0;border:1.5px solid #9ed8c9;border-radius:11px;padding:11px 13px;font-size:13px;color:#0b6b57;font-weight:700;line-height:1.4}
+#notif-ov .agm-foot{padding:14px 18px;border-top:1.5px solid #eef2f8}
+#notif-ov .agm-save{width:100%;border:none;border-radius:10px;padding:12px;background:#53bda7;color:#fff;font-family:inherit;font-weight:800;font-size:14px;cursor:pointer;transition:background .15s}
+#notif-ov .agm-save:hover{background:#46a892}
+#notif-ov .agm-save:disabled{opacity:.55;cursor:default}
+#notif-ov .agm-foot-edit .agm-save{flex:1}
+
+#notif-root h3.tel{cursor:pointer;font-variant-numeric:tabular-nums}
+#notif-root h3.tel:hover{color:var(--bleu)}
 #notif-root .rail .perim{font-size:11px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;
   color:var(--bleu);background:var(--calme-bg);border:1px solid var(--bleu-clair);
   border-radius:20px;padding:4px 10px}
@@ -378,6 +471,10 @@ OD.define('notifications', {
       .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
     const num = v => { const n = Number(v); return isFinite(n) ? n : 0; };
     const FINE = ' ';
+    // Un lien tel: n'ouvre rien sur un poste de travail : le bouton y copiait
+    // le vide. Sur telephone il compose, sur ordinateur il copie le numero.
+    const SUR_MOBILE = /Mobi|Android|iPhone|iPad|iPod/i.test(
+      (navigator && navigator.userAgent) || '');
     const fmt = n => String(Math.round(num(n))).replace(/\B(?=(\d{3})+(?!\d))/g, FINE);
 
     // Une durée se lit, elle ne se calcule pas : « 17 h » plutôt que
@@ -432,10 +529,19 @@ OD.define('notifications', {
     // Un numéro ne s'affiche jamais en entier dans une liste : les quatre
     // derniers chiffres suffisent à reconnaître un appel, et le reste n'a pas
     // à traîner sur un écran partagé en concession.
-    function telMasque(t) {
-      const s = String(t || '').replace(/\s/g, '');
-      if (s.length < 6) return s || '—';
-      return s.slice(0, 4) + FINE + '••' + FINE + '••' + FINE + s.slice(-2);
+    // Le numéro s'affiche EN ENTIER : c'est la seule chose qu'on sache de cet
+    // appelant, et le masquer rendait la carte inutile. Groupé par deux, en
+    // gardant un éventuel indicatif international devant.
+    function telLisible(t) {
+      let s = String(t || '').replace(/[^0-9+]/g, '');
+      if (!s) return '—';
+      // La telephonie stocke en E.164 (+33603439144). Un vendeur lit 06 03 43
+      // 91 44 : on rend la forme nationale pour la France, et on garde
+      // l'indicatif devant pour tout le reste.
+      let p = '';
+      if (/^\+33[1-9][0-9]{8}$/.test(s)) { s = '0' + s.slice(3); }
+      else if (s.charAt(0) === '+') { p = s.slice(0, 3) + FINE; s = s.slice(3); }
+      return p + (s.match(/.{1,2}/g) || [s]).join(FINE);
     }
 
     const CANAL = {
@@ -677,9 +783,7 @@ OD.define('notifications', {
         +   (ouvert ? blocReport('client', x.id_client) : '')
         + '</div>'
         + '<div class="actes">'
-        +   (x.tel ? '<a class="btn p" href="tel:' + esc(String(x.tel).replace(/\s/g, ''))
-                   + '" data-role="appeler">Rappeler</a>' : '')
-        +   '<button type="button" class="btn s" data-role="repondre">Répondre</button>'
+        +   '<button type="button" class="btn p" data-role="repondre">Contacter</button>'
         +   '<button type="button" class="btn t" data-role="reporter">Reporter</button>'
         + '</div></article>';
     }
@@ -716,7 +820,8 @@ OD.define('notifications', {
       const ton = n > 1 ? 'tiede' : 'froid';
       return '<article class="cli ' + ton + '" data-inconnu="' + esc(i.interlocuteur) + '">'
         + '<div class="av">?</div>'
-        + '<div><h3>' + esc(telMasque(i.interlocuteur))
+        + '<div><h3 class="tel" data-tel="' + esc(i.interlocuteur) + '">'
+        +   esc(telLisible(i.interlocuteur))
         +   (n > 1 ? ' <span class="enjeu livr">' + fmt(n) + ' appels</span>' : '') + '</h3>'
         + '<p class="attend">A appelé <span class="depuis'
         +   (n > 1 ? ' tiede' : ' calme') + '">'
@@ -728,8 +833,9 @@ OD.define('notifications', {
         + (i.apercu ? '<p class="extrait">' + esc(i.apercu) + '</p>' : '')
         + '</div>'
         + '<div class="actes">'
-        +   '<a class="btn p" href="tel:' + esc(String(i.interlocuteur).replace(/\s/g, ''))
-        +     '">Rappeler</a>'
+        +   '<button type="button" class="btn p" data-role="appeler" data-tel="'
+        +     esc(i.interlocuteur) + '">' + (SUR_MOBILE ? 'Appeler' : 'Copier le numéro')
+        +     '</button>'
         +   '<button type="button" class="btn t" data-role="ecarter">Écarter 7 jours</button>'
         + '</div></article>';
     }
@@ -792,13 +898,9 @@ OD.define('notifications', {
         +   (vins > 1 ? ' \u00b7 ' + fmt(vins) + ' v\u00e9hicules'
                       : (vins === 1 ? ' \u00b7 VIN ' + esc(p.vins[0]) : ''))
         +   '</div>'
-        +   '<div class="report" style="margin-top:9px">Que s\u2019est-il pass\u00e9 ?'
-        +     '<button type="button" class="q" data-issue="venu">Le client est venu</button>'
-        +     '<button type="button" class="q" data-issue="absent">Il n\u2019est pas venu</button>'
-        +     '<button type="button" class="q" data-issue="reporte">Report\u00e9</button>'
-        +   '</div>'
         + '</div>'
         + '<div class="actes">'
+        +   '<button type="button" class="btn p" data-role="cr">Compte rendu</button>'
         +   '<button type="button" class="btn t" data-role="repondre-rdv">Ouvrir la fiche</button>'
         + '</div></article>';
     }
@@ -1011,8 +1113,8 @@ OD.define('notifications', {
       return '<p class="pied"><b>Ce qui fait disparaître une notification.</b> Jamais un '
         + 'regard : seul un acte. Un message entrant se solde par un message ou un appel sortant '
         + 'vers ce client. Une relance se solde par le rapport vendeur qui la clôt. Un '
-        + 'rendez-vous se solde par son COMPTE RENDU — venu, pas venu, reporté — et non '
-        + 'par l’heure qui passe. Un numéro inconnu se '
+        + 'rendez-vous se solde par son COMPTE RENDU — la même fiche que dans l’agenda — '
+        + 'et non par l’heure qui passe. Un numéro inconnu se '
         + 'solde quand il est rattaché à une fiche. Un <b>report</b> ne solde rien : il '
         + 'met la dette de côté jusqu’à l’heure dite, puis elle revient. '
         + 'Les leads ne sont pas ici : ils sont traités dans le lead management.</p>';
@@ -1044,6 +1146,366 @@ OD.define('notifications', {
       rendre();
       prevenirBadge();
     }
+
+      const SB = () => ctx.supabase;
+      function crErreur(a, b) {
+        if (!crs) return;
+        crs.err = [a, b].filter(Boolean).join(' ');
+        renderCR();
+      }
+
+    let crs = null;
+
+    const CR_ECH = [
+      { c: 'commande', lab: 'Commande',    sous: 'relance facultative', j: null, col: '#00997f', appel: false },
+      { c: 'devis',    lab: 'Devis remis', sous: 'relance à 3 j',   j: 3,    col: '#3f7cba', appel: false },
+      { c: 'chaud',    lab: 'Chaud',       sous: 'relance à 7 j',   j: 7,    col: '#d2941f', appel: true  },
+      { c: 'tiede',    lab: 'Tiède',  sous: 'relance à 1 mois', j: 30,  col: '#9bb3d1', appel: true  },
+      { c: 'froid',    lab: 'Froid',       sous: 'relance à 6 mois', j: 180, col: '#acc5e4', appel: true  },
+      { c: 'perdu',    lab: 'Perdu',       sous: 'relance facultative', j: null, col: '#c0524f', appel: true  }
+    ];
+    const CR_MOTIFS = ['Prix', 'Délai', 'Concurrent', 'Abandon'];
+    const CR_LIB = {
+      rencontre: { t: 'Rencontre', vu: 'Je l’ai rencontré', non: 'Il n’est pas venu',
+                   lbl: 'Où en est le client' },
+      appel:     { t: 'Appel', vu: 'Je l’ai eu', non: 'Pas joint',
+                   lbl: 'La température de l’appel' },
+      autre:     { t: 'Rendez-vous', vu: 'Fait', non: 'Pas fait', lbl: '' }
+    };
+
+    function crFamille(idType) {
+      const t = Number(idType);
+      if (t === 4 || t === 9) return 'livraison';
+      if (t === 5 || t === 2 || t === 3) return 'rencontre';
+      if (t === 10 || t === 6) return 'appel';
+      return 'autre';
+    }
+    function crDegres() {
+      return CR_ECH.filter(e => crs.famille !== 'appel' || e.appel);
+    }
+    function crJour(iso) {
+      if (!iso) return '';
+      const d = new Date(String(iso).replace(' ', 'T'));
+      const a = new Date();
+      const j0 = new Date(a.getFullYear(), a.getMonth(), a.getDate());
+      const j1 = new Date(d.getFullYear(), d.getMonth(), d.getDate());
+      const e = Math.round((j1 - j0) / 86400000);
+      if (e === 0) return 'aujourd’hui';
+      if (e === -1) return 'hier';
+      if (e > -7 && e < 0) return ['dimanche','lundi','mardi','mercredi','jeudi','vendredi','samedi'][d.getDay()];
+      return d.toLocaleDateString('fr-FR', { day: '2-digit', month: 'short' });
+    }
+
+    // Ouverture : on charge la preuve AVANT de dessiner, pour ne jamais poser une
+    // question dont on a deja la reponse.
+    // La fiche s'ouvre ici sur une LIGNE de la page, pas sur un evenement du
+    // calendrier : c'est la seule difference avec l'agenda. Tout le reste —
+    // l'echelle, la preuve d'appel, le report, l'enregistrement — est le meme
+    // code, pour que le vendeur retrouve exactement le meme geste des deux
+    // cotes. Deux formulaires qui divergent, c'est deux comportements a
+    // expliquer et deux bugs a corriger.
+    async function openCompteRendu(p) {
+      const fam = crFamille(p.id_rdv_type);
+      if (fam === 'livraison') return;
+      crs = {
+        idRdv: p.id_rdv, idClient: (p.id_client != null ? Number(p.id_client) : null),
+        famille: fam,
+        client: [p.civilite, p.client_nom].filter(Boolean).join(' ').trim()
+                || ('Client ' + (p.id_client != null ? p.id_client : '')),
+        type: p.type_libelle || 'Rendez-vous', quand: p.quand || '',
+        deja: false,
+        preuve: null, chargement: true,
+        issue: 'vu', deg: null, relance: null, motif: CR_MOTIFS[0],
+        comment: '', saving: false, err: '', avis: ''
+      };
+      renderCR();
+      try {
+        const { data, error } = await SB().rpc('rdv_preuve', { p_id_rdv: Number(crs.idRdv) });
+        // Le socle SQL du compte rendu n'existe pas encore partout : la ou il
+        // manque, on referme sans bruit plutot que d'afficher une panne.
+        if (error && (error.code === 'PGRST202'
+                      || /rdv_preuve/.test(error.message || ''))) {
+          closeCR(); return;
+        }
+        if (error) throw error;
+        crs.preuve = data || null;
+        // Le bucket des enregistrements est PRIVE : l'URL doit etre signee.
+        const a = crs.preuve && crs.preuve.appel;
+        if (a && a.recording_url) {
+          try {
+            const chemin = String(a.recording_url).split('/call-recordings/').pop();
+            const r = await SB().storage.from('call-recordings').createSignedUrl(chemin, 3600);
+            if (r && r.data && r.data.signedUrl) a.url_signee = r.data.signedUrl;
+          } catch (e) { /* pas d'audio : le reste de la fiche tient debout */ }
+        }
+      } catch (e) { console.error('[notifs] rdv_preuve', e); }
+      crs.chargement = false;
+      renderCR();
+    }
+
+    function crCarteAppel(a) {
+      const sec = Number(a.secondes) || 0;
+      const dur = Math.floor(sec / 60) + ':' + String(sec % 60).padStart(2, '0');
+      const entrant = String(a.sens || '') === 'inbound';
+      const fleche = entrant
+        ? '<line x1="17" y1="7" x2="7" y2="17"/><polyline points="17 17 7 17 7 7"/>'
+        : '<line x1="7" y1="17" x2="17" y2="7"/><polyline points="7 7 17 7 17 17"/>';
+      const d = a.quand ? new Date(String(a.quand).replace(' ', 'T')) : null;
+      const quand = d ? (d.toLocaleDateString('fr-FR') + '<br>'
+        + String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0')) : '';
+      const ton = a.tonalite ? '<span class="ct-ton">' + esc(a.tonalite) + '</span>' : '';
+      const resume = a.objet || a.transcription || '';
+      const complet = a.transcription && a.objet && a.transcription !== a.objet ? a.transcription : '';
+      return '<div class="ct-call">'
+        + '<div class="ct-ar"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#60AEDF" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">' + fleche + '</svg></div>'
+        + '<div class="ct-mid"><div class="ct-top">'
+        +   '<div class="ct-who"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#60AEDF" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07A19.5 19.5 0 0 1 4.69 13.1a19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 3.6 2.24h3a2 2 0 0 1 2 1.72c.127.96.361 1.903.7 2.81a2 2 0 0 1-.45 2.11L7.91 9.91a16 16 0 0 0 6.08 6.08l1.03-.95a2 2 0 0 1 2.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0 1 22 16.92z"/></svg>'
+        +   '<span>' + esc(crs.client) + '</span></div>'
+        +   '<div class="ct-meta"><span class="ct-date">' + quand + '</span>' + ton + '</div>'
+        + '</div>'
+        + (a.url_signee
+            ? '<div class="ct-pill"><button type="button" id="cr-play"><svg width="10" height="12" viewBox="0 0 10 12" fill="#60AEDF"><path d="M0 0l10 6-10 6z"/></svg></button>'
+              + '<span class="t" id="cr-cur">0:00</span><div class="ct-bar" id="cr-bar"><i id="cr-prg"></i></div>'
+              + '<span class="t" id="cr-rem" style="text-align:right">' + dur + '</span>'
+              + '<div id="cr-src" data-src="' + esc(a.url_signee) + '" style="display:none"></div></div>'
+            : '<div class="ct-pill"><span class="t" style="min-width:0">Appel de ' + dur + ', sans enregistrement</span></div>')
+        + (resume ? '<div class="ct-txt"><span>' + esc(resume) + '</span>'
+            + (complet ? '<button type="button" class="tg" id="cr-tg">▸ voir plus</button>'
+                       + '<div class="ct-full" id="cr-full">' + esc(complet) + '</div>' : '')
+            + '</div>' : '')
+        + '</div></div>';
+    }
+
+    function crBody() {
+      if (crs.chargement) return '<div class="agm-note">Lecture du rendez-vous…</div>';
+      const L = CR_LIB[crs.famille] || CR_LIB.autre;
+      const pr = crs.preuve || {};
+      const appel = pr.appel || null;
+      const aPreuve = !!appel && !crs.corrige;
+
+      let h = '<div class="agm-cr-head">'
+        + '<div class="agm-cr-when">' + esc(String(crs.quand).slice(11, 16))
+        +   '<small>' + esc(crJour(crs.quand)) + '</small></div>'
+        + '<div class="agm-cr-who"><b>' + esc(crs.client) + '</b>'
+        +   '<span>' + esc(crs.type) + '</span></div></div>';
+
+      if (crs.deja) {
+        h += '<div class="agm-done">Ce rendez-vous a déjà son compte rendu'
+          + (pr.issue_connue ? ' : ' + esc(pr.issue_connue) : '') + '.</div>';
+      }
+
+      if (aPreuve) h += crCarteAppel(appel);
+
+      // La question ne se pose que si la telephonie n'a pas deja repondu.
+      if (!aPreuve) {
+        h += '<div><div class="agm-lbl">Ce qui s’est passé</div><div class="agm-seg">'
+          + '<button data-cri="vu" class="' + (crs.issue === 'vu' ? 'on' : '') + '">' + esc(L.vu) + '</button>'
+          + '<button data-cri="absent" class="' + (crs.issue === 'absent' ? 'on' : '') + '">' + esc(L.non) + '</button>'
+          + '</div></div>';
+      }
+
+      const vu = aPreuve || crs.issue === 'vu';
+      const l = crDegres();
+      if (crs.deg == null || !l.some(e => e.c === crs.deg)) crs.deg = 'chaud';
+      const montreEch = crs.famille !== 'autre' && vu;
+      if (montreEch) {
+        h += '<div><div class="agm-lbl">' + esc(L.lbl) + '</div>'
+          + '<div class="agm-ech' + (l.length <= 4 ? ' quatre' : '') + '">'
+          + l.map(e => '<button data-cre="' + e.c + '" class="' + (e.c === crs.deg ? 'on' : '') + '">'
+              + '<b><i style="background:' + e.col + '"></i>' + esc(e.lab) + '</b>'
+              + '<small>' + esc(e.sous) + '</small></button>').join('')
+          + '</div>';
+        if (crs.deg === 'perdu') {
+          h += '<div style="margin-top:10px"><div class="agm-lbl">Pourquoi perdu</div><div class="agm-seg">'
+            + CR_MOTIFS.map(m => '<button data-crm="' + esc(m) + '" class="' + (crs.motif === m ? 'on' : '') + '">'
+                + esc(m) + '</button>').join('')
+            + '</div></div>';
+        }
+        if (crs.deg === 'commande') {
+          h += '<div class="agm-avis" style="margin-top:10px">Pensez à saisir la commande dans BACS : '
+            + 'le tableau de bord ne compte que les commandes BACS.</div>';
+        }
+        h += '</div>';
+      }
+
+      // La relance : decidee par le degre, modifiable d'un clic.
+      const e = l.find(x => x.c === crs.deg);
+      let j = montreEch ? (e ? e.j : null) : null;
+      if (!vu) j = 2;                                  // un lapin se rattrape a deux jours
+      if (crs.famille === 'autre') j = null;
+      const libre = montreEch && (crs.deg === 'commande' || crs.deg === 'perdu');
+      if (j !== null || libre) {
+        if (crs.relance == null) crs.relance = (j !== null ? String(j) : 'x');
+        const choix = (j !== null)
+          ? [[String(j), 'dans ' + (j >= 30 ? Math.round(j / 30) + ' mois' : j + ' jours')],
+             ['0', 'une autre date…'], ['x', 'rien']]
+          : [['x', 'rien'],
+             [crs.deg === 'commande' ? '30' : '180',
+              crs.deg === 'commande' ? 'suivi dans 1 mois' : 'retenter dans 6 mois'],
+             ['0', 'une autre date…']];
+        h += '<div><div class="agm-lbl">La relance</div><div class="agm-quand">'
+          + choix.map(x => '<button data-crj="' + x[0] + '" class="' + (x[0] === crs.relance ? 'on' : '') + '">'
+              + esc(x[1]) + '</button>').join('') + '</div>'
+          + (crs.relance === '0'
+              ? '<div class="agm-row" style="margin-top:8px"><input type="date" class="agm-inp" id="cr-date" value="'
+                + esc(crs.dateLibre || agToday()) + '" style="flex:1;min-width:130px">'
+                + '<input type="time" class="agm-inp" id="cr-heure" value="' + esc(crs.heureLibre || '09:00')
+                + '" step="900" style="width:104px"></div>'
+              : '')
+          + '<p class="agm-note" style="margin:9px 0 0">'
+          + (crs.relance === 'x'
+              ? 'Rien ne sera programmé. Le dossier se referme.'
+              : 'Elle apparaîtra dans votre agenda et dans <b>« J’ai promis »</b> le jour venu.')
+          + '</p></div>';
+      }
+
+      h += '<div><div class="agm-lbl">Commentaire</div>'
+        + '<textarea class="agm-ta" id="cr-com" placeholder="Ce qu’il faut retenir…">'
+        + esc(crs.comment) + '</textarea></div>';
+
+      if (aPreuve) {
+        h += '<div class="agm-deplace">Ce n’est pas ce qui s’est passé ? '
+          + '<button type="button" id="cr-corriger">Le dire autrement</button></div>';
+      }
+      h += '<div class="agm-deplace">Le rendez-vous doit être repoussé ? '
+        + '<button type="button" id="cr-deplacer">Le déplacer dans l’agenda</button></div>';
+
+      if (crs.err) h += '<div class="agm-err">' + esc(crs.err) + '</div>';
+      if (crs.avis) h += '<div class="agm-avis">' + esc(crs.avis) + '</div>';
+      return h;
+    }
+
+    function renderCR() {
+      const d = doc; let ov = d.getElementById('notif-ov');
+      if (!ov) {
+        ov = d.createElement('div'); ov.id = 'notif-ov';
+        (d.body || d.documentElement).appendChild(ov);
+        ov.addEventListener('mousedown', (e) => { if (e.target === ov) closeCR(); });
+      }
+      const titre = 'Compte rendu — ' + ((CR_LIB[crs.famille] || CR_LIB.autre).t);
+      ov.innerHTML = '<div class="agm"><div class="agm-head"><span class="agm-title">' + esc(titre) + '</span>'
+        + '<button class="agm-x" id="cr-x">×</button></div>'
+        + '<div class="agm-body">' + crBody() + '</div>'
+        + '<div class="agm-foot"><button class="agm-save" id="cr-save"' + (crs.saving ? ' disabled' : '') + '>'
+        + (crs.saving ? 'Enregistrement…' : 'Enregistrer') + '</button></div></div>';
+      wireCR();
+    }
+
+    function crSync() {
+      const d = doc;
+      const c = d.getElementById('cr-com'); if (c) crs.comment = c.value;
+      const dd = d.getElementById('cr-date'); if (dd) crs.dateLibre = dd.value;
+      const hh = d.getElementById('cr-heure'); if (hh) crs.heureLibre = hh.value;
+    }
+
+    function wireCR() {
+      const d = doc; const g = (id) => d.getElementById(id);
+      if (g('cr-x')) g('cr-x').addEventListener('click', closeCR);
+      d.querySelectorAll('#notif-ov [data-cri]').forEach(b => b.addEventListener('click', () => {
+        crSync(); crs.issue = b.getAttribute('data-cri'); crs.relance = null; crs.err = ''; renderCR(); }));
+      d.querySelectorAll('#notif-ov [data-cre]').forEach(b => b.addEventListener('click', () => {
+        crSync(); crs.deg = b.getAttribute('data-cre'); crs.relance = null; renderCR(); }));
+      d.querySelectorAll('#notif-ov [data-crm]').forEach(b => b.addEventListener('click', () => {
+        crSync(); crs.motif = b.getAttribute('data-crm'); renderCR(); }));
+      d.querySelectorAll('#notif-ov [data-crj]').forEach(b => b.addEventListener('click', () => {
+        crSync(); crs.relance = b.getAttribute('data-crj'); renderCR(); }));
+      if (g('cr-corriger')) g('cr-corriger').addEventListener('click', () => {
+        crSync(); crs.corrige = true; crs.relance = null; renderCR(); });
+      if (g('cr-deplacer')) g('cr-deplacer').addEventListener('click', () => {
+        // Deplacer, c'est l'affaire de l'agenda : le glisser-deposer sait deja
+        // le faire, et le rendez-vous y garde son identite. Dans l'agenda, ce
+        // message s'affichait dans un bandeau apres fermeture ; ici il n'y a
+        // pas de bandeau, donc il s'ecrit DANS la fiche — la refermer d'abord
+        // l'aurait efface avant meme qu'il soit lu, puisque crErreur n'ecrit
+        // que sur une fiche ouverte.
+        crErreur('Déplacez le rendez-vous directement dans l’agenda :',
+                 'faites-le glisser sur son nouveau créneau, il garde son identité et redevient à venir.');
+      });
+      if (g('cr-save')) g('cr-save').addEventListener('click', crSave);
+      // Le lecteur audio, repris de la fiche client.
+      if (g('cr-play')) g('cr-play').addEventListener('click', () => {
+        const src = g('cr-src') && g('cr-src').getAttribute('data-src');
+        if (!src) return;
+        if (!window.__voipAudio) window.__voipAudio = new Audio();
+        const a = window.__voipAudio;
+        if (a.src !== src) { a.src = src; a.currentTime = 0; }
+        if (!a.paused) { a.pause(); return; }
+        a.ontimeupdate = () => {
+          const D = a.duration || 0, c = a.currentTime;
+          if (g('cr-prg')) g('cr-prg').style.width = (D > 0 ? c / D * 100 : 0) + '%';
+          if (g('cr-cur')) g('cr-cur').textContent = Math.floor(c / 60) + ':' + String(Math.floor(c % 60)).padStart(2, '0');
+        };
+        a.play().catch(e => console.warn('[notifs] audio', e));
+      });
+      if (g('cr-tg')) g('cr-tg').addEventListener('click', () => {
+        const f = g('cr-full'); if (!f) return;
+        const ouvert = f.style.display !== 'none' && f.style.display !== '';
+        f.style.display = ouvert ? 'none' : 'block';
+        g('cr-tg').innerHTML = ouvert ? '▸ voir plus' : '▸ voir moins';
+      });
+    }
+
+    function closeCR() {
+      const o = doc.getElementById('notif-ov'); if (o) o.remove();
+      crs = null;
+    
+    }
+
+    async function crSave() {
+      crSync();
+      crs.err = ''; crs.avis = '';
+      const aPreuve = !!(crs.preuve && crs.preuve.appel) && !crs.corrige;
+      const vu = aPreuve || crs.issue === 'vu';
+      const l = crDegres();
+      const e = l.find(x => x.c === crs.deg);
+
+      let relance = null;
+      if (crs.relance && crs.relance !== 'x') {
+        if (crs.relance === '0') {
+          if (!crs.dateLibre) { crs.err = 'Choisissez une date de relance.'; return renderCR(); }
+          relance = crs.dateLibre + ' ' + (crs.heureLibre || '09:00') + ':00';
+        } else {
+          const d = new Date();
+          d.setDate(d.getDate() + Number(crs.relance));
+          d.setHours(9, 0, 0, 0);
+          const z = (n) => String(n).padStart(2, '0');
+          relance = d.getFullYear() + '-' + z(d.getMonth() + 1) + '-' + z(d.getDate()) + ' 09:00:00';
+        }
+      }
+
+      crs.saving = true; renderCR();
+      try {
+        const { data, error } = await SB().rpc('rdv_conclure', {
+          p_id_rdv: Number(crs.idRdv),
+          p_issue: vu ? 'vu' : 'absent',
+          p_temperature: (crs.famille === 'autre' || !vu) ? null : crs.deg,
+          p_commentaire: crs.comment || null,
+          p_motif_perte: (crs.deg === 'perdu' ? crs.motif : null),
+          p_relance_le: relance
+        });
+        if (error && (error.code === 'PGRST202'
+                      || /rdv_conclure/.test(error.message || ''))) {
+          crs.saving = false;
+          crs.err = 'Le compte rendu n\u2019est pas encore activ\u00e9 sur cette base.';
+          return renderCR();
+        }
+        if (error) throw error;
+        if (data && data.ok === false) {
+          crs.saving = false;
+          crs.err = data.message || ('Enregistrement refusé : ' + (data.erreur || 'raison inconnue'));
+          return renderCR();
+        }
+        closeCR();
+        recharger();                            // le compte rendu et sa relance entrent dans l'agenda
+        prevenirBadge();
+      } catch (err) {
+        console.error('[notifs] rdv_conclure', err);
+        crs.saving = false;
+        crs.err = (err && err.message) ? err.message : 'Enregistrement impossible.';
+        renderCR();
+      }
+    }
+
 
     // =========================================================================
     //  LES CLICS
@@ -1130,6 +1592,40 @@ OD.define('notifications', {
         return;
       }
 
+      // --- un numéro inconnu : composer sur téléphone, copier sur ordinateur
+      const ap = ev.target.closest('[data-tel]');
+      if (ap && r.contains(ap)) {
+        const brut = String(ap.getAttribute('data-tel') || '').replace(/[^0-9+]/g, '');
+        if (!brut) return;
+        if (SUR_MOBILE) {
+          try { FW().location.href = 'tel:' + brut; } catch (e) { }
+          return;
+        }
+        const dire = (txt) => {
+          if (ap.tagName !== 'BUTTON') return;
+          const avant = ap.textContent;
+          ap.textContent = txt;
+          setTimeout(() => { try { ap.textContent = avant; } catch (e) { } }, 1600);
+        };
+        try {
+          if (navigator.clipboard && navigator.clipboard.writeText) {
+            await navigator.clipboard.writeText(brut);
+            dire('Copié'); return;
+          }
+        } catch (e) { }
+        // Repli : l'API du presse-papiers est refusée hors contexte sécurisé
+        // et dans certaines iframes. La vieille méthode, elle, passe partout.
+        try {
+          const z = doc.createElement('textarea');
+          z.value = brut;
+          z.style.cssText = 'position:fixed;left:-9999px;top:0';
+          doc.body.appendChild(z); z.select();
+          doc.execCommand('copy'); doc.body.removeChild(z);
+          dire('Copié');
+        } catch (e) { dire('à copier : ' + brut); }
+        return;
+      }
+
       // --- écarter un numéro inconnu (sept jours, pas pour toujours)
       const ec = ev.target.closest('[data-role="ecarter"]');
       if (ec && r.contains(ec)) {
@@ -1171,27 +1667,18 @@ OD.define('notifications', {
       }
 
       // --- conclure un rendez-vous passé
-      const iss = ev.target.closest('[data-issue]');
-      if (iss && r.contains(iss)) {
-        const art = iss.closest('[data-conclure]');
-        const quoi = iss.getAttribute('data-issue');
-        let quand = null;
-        if (quoi === 'reporte') {
-          // Reporter DÉPLACE le rendez-vous : il garde son identité et
-          // redevient à venir. Par défaut demain 10 h — le vendeur ajustera
-          // depuis l'agenda, qui est fait pour ça.
-          const d = new Date();
-          d.setDate(d.getDate() + 1); d.setHours(10, 0, 0, 0);
-          quand = d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-'
-                + String(d.getDate()).padStart(2, '0') + 'T10:00:00';
-        }
-        iss.textContent = '\u2026';
-        try {
-          await rpc('notif_rdv_conclure', {
-            p_id_rdv: Number(art.getAttribute('data-conclure')),
-            p_issue: quoi, p_commentaire: null, p_nouvelle_date: quand });
-          await recharger();
-        } catch (e) { iss.textContent = '\u00e9chec'; }
+      // --- le compte rendu : la MEME fiche que dans l'agenda
+      // Trois boutons posaient trois questions fermees et appelaient une RPC
+      // qui n'existait plus. Le vendeur ouvre maintenant le formulaire complet
+      // — issue, temperature, motif de perte, relance, preuve d'appel — celui
+      // qu'il connait deja par l'agenda.
+      const cr = ev.target.closest('[data-role="cr"]');
+      if (cr && r.contains(cr)) {
+        const art = cr.closest('[data-conclure]');
+        const id = art && art.getAttribute('data-conclure');
+        const liste = ((state.j && state.j.promesses) || {}).a_conclure || [];
+        const l = liste.filter(x => String(x.id_rdv) === String(id))[0];
+        if (l) openCompteRendu(l);
         return;
       }
 
