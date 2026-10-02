@@ -1,5 +1,13 @@
 // ============================================================================
-//  AGENDA (FullCalendar) — module One Data (OD.define)  v10 — COMPTE RENDU
+//  AGENDA (FullCalendar) — module One Data (OD.define)  v11 — COMPTE RENDU
+//
+//  AJOUT v11 : LE CRÉNEAU QUI RESTE À CONCLURE SE VOIT
+//  Un rendez-vous commercial passé dont personne n'a dit ce qu'il a donné est
+//  cerné d'ambre et hachuré, avec la mention « à conclure » sur son titre. Le
+//  vendeur voit son retard dans l'outil où il travaille déjà, pas dans un écran
+//  qu'il devrait penser à ouvrir. Les livraisons en sont exclues : elles sont
+//  tenues par les secrétaires, et un véhicule livré est un véhicule facturé.
+//  Voir resteAConclure(), à côté de familleEvt().
 //
 //  AJOUT v10 : LE COMPTE RENDU DE RENDEZ-VOUS
 //  Le clic sur un créneau PASSÉ ne faisait rien (openEdit refusait d'ouvrir).
@@ -443,6 +451,20 @@ OD.define('agenda', {
     return 'creneau';
   }
 
+  // Reste a conclure : un rendez-vous AVEC CLIENT, commercial (ni livraison ni
+  // bilaterale), dont l'heure est passee et dont TRAITE n'a jamais ete pose.
+  // get_calendar_events renvoie status = nullif(TRAITE,'false') : null tant que
+  // personne n'a dit ce que le rendez-vous a donne.
+  function resteAConclure(p) {
+    if (!p || p.source_type !== 'rdv') return false;
+    if (p.status) return false;
+    if (!(Number(p.id_client) > 0)) return false;
+    const f = crFamille(p.id_rdv_type != null ? p.id_rdv_type
+                        : (p.extra && p.extra.ID_Rdv_Type));
+    if (f === 'livraison') return false;
+    return isPastSlot(p.event_start_time || '');
+  }
+
   function renderChips() {
     const host = document.getElementById('agenda-chips');
     if (!host) return;
@@ -711,7 +733,14 @@ OD.define('agenda', {
 /* ---- compte rendu de RDV ------------------------------------------------
    Le clic sur un creneau PASSE n'ouvrait rien : openEdit refusait. Il ouvre
    desormais cette fiche. A venir -> modifier, passe -> conclure. */
-#agenda-ov .agm-cr-head{display:flex;gap:11px;align-items:flex-start}
+#agenda-ov /* Un rendez-vous commercial passe et jamais conclu. Il ne crie pas : il se
+   signale. Le vendeur voit son retard dans l'outil ou il travaille deja,
+   plutot que dans un ecran qu'il devrait penser a ouvrir. */
+.ag-aconclure{box-shadow:inset 0 0 0 1.5px var(--m-orange,#d2941f) !important;
+  background-image:repeating-linear-gradient(135deg,rgba(210,148,31,.14) 0 6px,transparent 6px 12px)}
+.ag-aconclure .fc-event-title::after{content:' • à conclure';font-weight:700;
+  color:var(--m-orange,#d2941f);letter-spacing:.01em}
+.agm-cr-head{display:flex;gap:11px;align-items:flex-start}
 #agenda-ov .agm-cr-when{font-size:12px;font-weight:800;color:#2a5ea9;white-space:nowrap;background:#f7f9fc;border:1.5px solid #e2eaf5;border-radius:8px;padding:7px 10px;text-align:center;line-height:1.3}
 #agenda-ov .agm-cr-when small{display:block;font-size:9.5px;color:#9bb3d1;text-transform:uppercase;letter-spacing:.04em;font-weight:700}
 #agenda-ov .agm-cr-who{min-width:0;padding-top:2px}
@@ -947,6 +976,7 @@ OD.define('agenda', {
       events: fetchEvents,
       eventDidMount: (info) => {
         const c = info.event.extendedProps._accent; if (c) { info.el.style.borderLeft = '3px solid ' + c; }
+        if (resteAConclure(info.event.extendedProps)) info.el.classList.add('ag-aconclure');
         // Pas d'infobulle sur écran tactile : le tap déclenche mouseenter sans
         // jamais de mouseleave, l'infobulle restait collée par-dessus le popup.
         if (touch) return;
