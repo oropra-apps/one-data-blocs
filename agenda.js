@@ -1,4 +1,12 @@
 // ============================================================================
+//  AGENDA (FullCalendar) — module One Data (OD.define)  v10 — COMPTE RENDU
+//
+//  AJOUT v10 : LE COMPTE RENDU DE RENDEZ-VOUS
+//  Le clic sur un créneau PASSÉ ne faisait rien (openEdit refusait d'ouvrir).
+//  Il ouvre maintenant une fiche de compte rendu. À venir → modifier, passé →
+//  conclure. Aucun bouton nouveau à chercher : c'est le même geste.
+//  Voir le bloc « COMPTE RENDU DE RENDEZ-VOUS » plus bas.
+//
 //  AGENDA (FullCalendar) — module One Data (OD.define)  v1 (checklist)
 //  Rendu dans __anchor ; client via __OD_SB__ ; frontDoc/Win -> ancre ;
 //  self-boot retiré ; re-render (ex-bloc « Re-render agenda ») intégré.
@@ -700,6 +708,54 @@ OD.define('agenda', {
 #agenda-ov .agm-tg.on .sw::after{left:21px}
 #agenda-ov .agm-lbl{font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:.05em;color:#9bb3d1;margin-bottom:5px}
 #agenda-ov .agm-err{color:#a32d2d;font-size:12px;font-weight:700}
+/* ---- compte rendu de RDV ------------------------------------------------
+   Le clic sur un creneau PASSE n'ouvrait rien : openEdit refusait. Il ouvre
+   desormais cette fiche. A venir -> modifier, passe -> conclure. */
+#agenda-ov .agm-cr-head{display:flex;gap:11px;align-items:flex-start}
+#agenda-ov .agm-cr-when{font-size:12px;font-weight:800;color:#2a5ea9;white-space:nowrap;background:#f7f9fc;border:1.5px solid #e2eaf5;border-radius:8px;padding:7px 10px;text-align:center;line-height:1.3}
+#agenda-ov .agm-cr-when small{display:block;font-size:9.5px;color:#9bb3d1;text-transform:uppercase;letter-spacing:.04em;font-weight:700}
+#agenda-ov .agm-cr-who{min-width:0;padding-top:2px}
+#agenda-ov .agm-cr-who b{display:block;font-size:15px;font-weight:800;color:#1F4A85;line-height:1.3}
+#agenda-ov .agm-cr-who span{display:block;font-size:11.5px;color:#7a98c5;font-weight:600;margin-top:2px}
+/* La carte d'appel reprend EXACTEMENT le rendu de la fiche client
+   (contacts.js v6) : memes teintes, meme lecteur, meme badge de tonalite. Le
+   vendeur ne doit pas avoir a reconnaitre deux presentations d'un meme appel. */
+#agenda-ov .ct-call{background:#F0F9FF;border:1px solid rgba(96,174,223,.25);border-radius:12px;padding:11px 13px;display:flex;gap:11px;align-items:flex-start}
+#agenda-ov .ct-ar{flex-shrink:0;width:30px;height:30px;border-radius:50%;border:1.5px solid #60AEDF;display:flex;align-items:center;justify-content:center;background:#fff}
+#agenda-ov .ct-mid{min-width:0;flex:1}
+#agenda-ov .ct-top{display:flex;align-items:flex-start;gap:10px}
+#agenda-ov .ct-who{font-size:13px;font-weight:700;color:#1F4A85;display:flex;align-items:center;gap:6px;min-width:0}
+#agenda-ov .ct-meta{margin-left:auto;display:flex;flex-direction:column;align-items:flex-end;gap:4px}
+#agenda-ov .ct-date{font-size:11px;color:#9ca3af;white-space:nowrap;text-align:right;line-height:1.4}
+#agenda-ov .ct-ton{font-size:11px;color:#60AEDF;background:rgba(96,174,223,.1);border:1px solid rgba(96,174,223,.3);border-radius:999px;padding:1px 8px;white-space:nowrap}
+#agenda-ov .ct-pill{display:inline-flex;align-items:center;gap:8px;background:#60AEDF1f;border-radius:999px;padding:5px 14px;margin-top:7px;max-width:100%;box-sizing:border-box}
+#agenda-ov .ct-pill button{background:none;border:none;cursor:pointer;padding:0;width:16px;height:16px;display:flex;align-items:center;justify-content:center;flex-shrink:0}
+#agenda-ov .ct-pill .t{font-size:12px;color:#60AEDF;min-width:28px;font-variant-numeric:tabular-nums}
+#agenda-ov .ct-bar{flex:1 1 60px;min-width:40px;max-width:130px;height:3px;background:#60AEDF4d;border-radius:2px;cursor:pointer;position:relative}
+#agenda-ov .ct-bar i{display:block;height:100%;width:0%;background:#60AEDF;border-radius:2px;pointer-events:none;transition:width .1s linear}
+#agenda-ov .ct-txt{font-size:13px;color:#4b5563;line-height:1.6;margin-top:7px}
+#agenda-ov .ct-txt .tg{background:none;border:none;cursor:pointer;padding:0 2px;font-size:12px;color:#9ca3af;font-family:inherit}
+#agenda-ov .ct-full{display:none;margin-top:8px;padding:12px;background:#f8fbff;border-radius:8px;border:1px solid rgba(96,174,223,.2);font-size:13px;color:#374151;line-height:1.5;white-space:pre-wrap}
+/* L'echelle : une ligne, du signe au perdu. Chaque degre porte sa cadence —
+   le vendeur ne choisit pas une date, il dit ou en est son client. */
+#agenda-ov .agm-ech{display:grid;gap:6px;grid-template-columns:repeat(3,1fr)}
+#agenda-ov .agm-ech.quatre{grid-template-columns:repeat(2,1fr)}
+#agenda-ov .agm-ech button{border:1.5px solid #e2eaf5;background:#fff;border-radius:10px;padding:9px 8px;font-family:inherit;cursor:pointer;text-align:left;transition:all .12s}
+#agenda-ov .agm-ech button:hover{border-color:#acc5e4}
+#agenda-ov .agm-ech b{display:flex;align-items:center;gap:6px;font-size:13px;font-weight:800;color:#1F4A85}
+#agenda-ov .agm-ech i{width:9px;height:9px;border-radius:3px;flex:0 0 auto;display:inline-block}
+#agenda-ov .agm-ech small{display:block;font-size:10.5px;color:#9bb3d1;font-weight:700;margin-top:3px;padding-left:15px}
+#agenda-ov .agm-ech button.on{border-color:#2a5ea9;background:#eef4fc;box-shadow:inset 0 0 0 1px #2a5ea9}
+#agenda-ov .agm-ech button.on small{color:#2a5ea9}
+#agenda-ov .agm-quand{display:flex;gap:6px;flex-wrap:wrap;align-items:center}
+#agenda-ov .agm-quand button{border:1.5px solid #e2eaf5;background:#fff;color:#2a5ea9;border-radius:8px;padding:7px 12px;font-family:inherit;font-size:12px;font-weight:700;cursor:pointer}
+#agenda-ov .agm-quand button.on{background:#2a5ea9;border-color:#2a5ea9;color:#fff}
+#agenda-ov .agm-note{font-size:11.5px;color:#7a98c5;line-height:1.5;font-weight:600}
+#agenda-ov .agm-note b{color:#2a5ea9;font-weight:800}
+#agenda-ov .agm-avis{font-size:11.5px;color:#8a6d1f;background:#fdf3de;border:1.5px solid #f0d9a0;border-radius:9px;padding:9px 11px;font-weight:600;line-height:1.45}
+#agenda-ov .agm-deplace{font-size:11.5px;color:#9bb3d1;font-weight:600;text-align:center}
+#agenda-ov .agm-deplace button{background:none;border:none;color:#2a5ea9;font-family:inherit;font-size:11.5px;font-weight:700;text-decoration:underline;cursor:pointer;padding:0}
+#agenda-ov .agm-done{display:flex;gap:10px;align-items:flex-start;background:#e4f4f0;border:1.5px solid #9ed8c9;border-radius:11px;padding:11px 13px;font-size:13px;color:#0b6b57;font-weight:700;line-height:1.4}
 #agenda-ov .agm-foot{padding:14px 18px;border-top:1.5px solid #eef2f8}
 #agenda-ov .agm-save{width:100%;border:none;border-radius:10px;padding:12px;background:#53bda7;color:#fff;font-family:inherit;font-weight:800;font-size:14px;cursor:pointer;transition:background .15s}
 #agenda-ov .agm-save:hover{background:#46a892}
@@ -1418,6 +1474,385 @@ OD.define('agenda', {
   function fmtDuree(min) { min = Number(min) || 0; const h = Math.floor(min / 60), m = min % 60; if (h === 0) return m + ' min'; if (m === 0) return h + 'h'; return h + 'h ' + m + ' min'; }
 
   let cs = null; // \u00e9tat cr\u00e9ation / \u00e9dition
+  // =========================================================================
+  //  COMPTE RENDU DE RENDEZ-VOUS
+  //
+  //  Avant : un rendez-vous disparaissait de l'agenda quand son heure etait
+  //  passee. Le TEMPS le soldait, pas un acte — et personne, dans One Data, ne
+  //  savait dire si un client etait venu. Mesure du 02/10/2026 : 9 135
+  //  rendez-vous passes, AUCUN avec un compte rendu.
+  //
+  //  Trois principes :
+  //
+  //  1. ON NE DEMANDE PAS CE QU'ON PEUT SAVOIR. rdv_preuve cherche d'abord un
+  //     appel decroche autour du creneau. S'il en trouve un, la question « ca a
+  //     eu lieu ? » ne se pose pas : la fiche l'affiche, exactement comme la
+  //     fiche client l'affiche, et passe directement a la suite.
+  //
+  //  2. UNE SEULE ECHELLE, DU SIGNE AU PERDU. Pas « issue » puis
+  //     « temperature » : un vendeur ne raisonne pas en deux temps. Six degres,
+  //     et c'est le degre qui FIXE LA CADENCE de relance. On ne choisit pas une
+  //     date, on dit ou en est le client.
+  //
+  //  3. LES LIVRAISONS N'Y SONT PAS. Elles sont tenues par les secretaires de
+  //     livraison, et un vehicule livre est un vehicule facture : BACS porte
+  //     deja la date. rdv_famille les ecarte.
+  // =========================================================================
+  let crs = null;
+
+  const CR_ECH = [
+    { c: 'commande', lab: 'Commande',    sous: 'relance facultative', j: null, col: '#00997f', appel: false },
+    { c: 'devis',    lab: 'Devis remis', sous: 'relance à 3 j',   j: 3,    col: '#3f7cba', appel: false },
+    { c: 'chaud',    lab: 'Chaud',       sous: 'relance à 7 j',   j: 7,    col: '#d2941f', appel: true  },
+    { c: 'tiede',    lab: 'Tiède',  sous: 'relance à 1 mois', j: 30,  col: '#9bb3d1', appel: true  },
+    { c: 'froid',    lab: 'Froid',       sous: 'relance à 6 mois', j: 180, col: '#acc5e4', appel: true  },
+    { c: 'perdu',    lab: 'Perdu',       sous: 'relance facultative', j: null, col: '#c0524f', appel: true  }
+  ];
+  const CR_MOTIFS = ['Prix', 'Délai', 'Concurrent', 'Abandon'];
+  const CR_LIB = {
+    rencontre: { t: 'Rencontre', vu: 'Je l’ai rencontré', non: 'Il n’est pas venu',
+                 lbl: 'Où en est le client' },
+    appel:     { t: 'Appel', vu: 'Je l’ai eu', non: 'Pas joint',
+                 lbl: 'La température de l’appel' },
+    autre:     { t: 'Rendez-vous', vu: 'Fait', non: 'Pas fait', lbl: '' }
+  };
+
+  function crFamille(idType) {
+    const t = Number(idType);
+    if (t === 4 || t === 9) return 'livraison';
+    if (t === 5 || t === 2 || t === 3) return 'rencontre';
+    if (t === 10 || t === 6) return 'appel';
+    return 'autre';
+  }
+  function crDegres() {
+    return CR_ECH.filter(e => crs.famille !== 'appel' || e.appel);
+  }
+  function crJour(iso) {
+    if (!iso) return '';
+    const d = new Date(String(iso).replace(' ', 'T'));
+    const a = new Date();
+    const j0 = new Date(a.getFullYear(), a.getMonth(), a.getDate());
+    const j1 = new Date(d.getFullYear(), d.getMonth(), d.getDate());
+    const e = Math.round((j1 - j0) / 86400000);
+    if (e === 0) return 'aujourd’hui';
+    if (e === -1) return 'hier';
+    if (e > -7 && e < 0) return ['dimanche','lundi','mardi','mercredi','jeudi','vendredi','samedi'][d.getDay()];
+    return d.toLocaleDateString('fr-FR', { day: '2-digit', month: 'short' });
+  }
+
+  // Ouverture : on charge la preuve AVANT de dessiner, pour ne jamais poser une
+  // question dont on a deja la reponse.
+  async function openCompteRendu(ev) {
+    const p = ev.extendedProps || {};
+    const fam = crFamille(p.id_rdv_type);
+    if (fam === 'livraison') {
+      showAgError('Les livraisons se soldent sur la facturation.',
+                  'Elles sont tenues par les secrétaires de livraison : un véhicule livré est un véhicule facturé.');
+      return;
+    }
+    crs = {
+      idRdv: p.origin_id, idClient: (p.id_client != null ? Number(p.id_client) : null),
+      famille: fam,
+      client: [p.civilite, p.nom, p.prenom].filter(Boolean).join(' ').trim()
+              || ('Client ' + (p.id_client != null ? p.id_client : '')),
+      type: ev.title || '', quand: ev.startStr || p.event_start_time || '',
+      deja: !!p.status,                 // status = TRAITE, pose par get_calendar_events
+      preuve: null, chargement: true,
+      issue: 'vu', deg: null, relance: null, motif: CR_MOTIFS[0],
+      comment: '', saving: false, err: '', avis: ''
+    };
+    renderCR();
+    try {
+      const { data, error } = await sb().rpc('rdv_preuve', { p_id_rdv: Number(crs.idRdv) });
+      // Le socle SQL du compte rendu (rdv_preuve, rdv_conclure, rdv_famille)
+      // n'existe pas encore partout. La ou il manque, on referme sans bruit et
+      // le clic sur un creneau passe ne fait rien — exactement le comportement
+      // d'avant. Un module de flotte ne doit jamais supposer que sa base a
+      // recu la migration.
+      if (error && (error.code === 'PGRST202'
+                    || /rdv_preuve/.test(error.message || ''))) {
+        closeCR(); return;
+      }
+      if (error) throw error;
+      crs.preuve = data || null;
+      // Le bucket des enregistrements est PRIVE : l'URL doit etre signee, comme
+      // dans la fiche client.
+      const a = crs.preuve && crs.preuve.appel;
+      if (a && a.recording_url) {
+        try {
+          const chemin = String(a.recording_url).split('/call-recordings/').pop();
+          const r = await sb().storage.from('call-recordings').createSignedUrl(chemin, 3600);
+          if (r && r.data && r.data.signedUrl) a.url_signee = r.data.signedUrl;
+        } catch (e) { /* pas d'audio : le reste de la fiche tient debout */ }
+      }
+    } catch (e) { console.error('[agenda] rdv_preuve', e); }
+    crs.chargement = false;
+    renderCR();
+  }
+
+  function crCarteAppel(a) {
+    const sec = Number(a.secondes) || 0;
+    const dur = Math.floor(sec / 60) + ':' + String(sec % 60).padStart(2, '0');
+    const entrant = String(a.sens || '') === 'inbound';
+    const fleche = entrant
+      ? '<line x1="17" y1="7" x2="7" y2="17"/><polyline points="17 17 7 17 7 7"/>'
+      : '<line x1="7" y1="17" x2="17" y2="7"/><polyline points="7 7 17 7 17 17"/>';
+    const d = a.quand ? new Date(String(a.quand).replace(' ', 'T')) : null;
+    const quand = d ? (d.toLocaleDateString('fr-FR') + '<br>'
+      + String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0')) : '';
+    const ton = a.tonalite ? '<span class="ct-ton">' + esc(a.tonalite) + '</span>' : '';
+    const resume = a.objet || a.transcription || '';
+    const complet = a.transcription && a.objet && a.transcription !== a.objet ? a.transcription : '';
+    return '<div class="ct-call">'
+      + '<div class="ct-ar"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#60AEDF" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">' + fleche + '</svg></div>'
+      + '<div class="ct-mid"><div class="ct-top">'
+      +   '<div class="ct-who"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#60AEDF" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07A19.5 19.5 0 0 1 4.69 13.1a19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 3.6 2.24h3a2 2 0 0 1 2 1.72c.127.96.361 1.903.7 2.81a2 2 0 0 1-.45 2.11L7.91 9.91a16 16 0 0 0 6.08 6.08l1.03-.95a2 2 0 0 1 2.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0 1 22 16.92z"/></svg>'
+      +   '<span>' + esc(crs.client) + '</span></div>'
+      +   '<div class="ct-meta"><span class="ct-date">' + quand + '</span>' + ton + '</div>'
+      + '</div>'
+      + (a.url_signee
+          ? '<div class="ct-pill"><button type="button" id="cr-play"><svg width="10" height="12" viewBox="0 0 10 12" fill="#60AEDF"><path d="M0 0l10 6-10 6z"/></svg></button>'
+            + '<span class="t" id="cr-cur">0:00</span><div class="ct-bar" id="cr-bar"><i id="cr-prg"></i></div>'
+            + '<span class="t" id="cr-rem" style="text-align:right">' + dur + '</span>'
+            + '<div id="cr-src" data-src="' + esc(a.url_signee) + '" style="display:none"></div></div>'
+          : '<div class="ct-pill"><span class="t" style="min-width:0">Appel de ' + dur + ', sans enregistrement</span></div>')
+      + (resume ? '<div class="ct-txt"><span>' + esc(resume) + '</span>'
+          + (complet ? '<button type="button" class="tg" id="cr-tg">▸ voir plus</button>'
+                     + '<div class="ct-full" id="cr-full">' + esc(complet) + '</div>' : '')
+          + '</div>' : '')
+      + '</div></div>';
+  }
+
+  function crBody() {
+    if (crs.chargement) return '<div class="agm-note">Lecture du rendez-vous…</div>';
+    const L = CR_LIB[crs.famille] || CR_LIB.autre;
+    const pr = crs.preuve || {};
+    const appel = pr.appel || null;
+    const aPreuve = !!appel && !crs.corrige;
+
+    let h = '<div class="agm-cr-head">'
+      + '<div class="agm-cr-when">' + esc(String(crs.quand).slice(11, 16))
+      +   '<small>' + esc(crJour(crs.quand)) + '</small></div>'
+      + '<div class="agm-cr-who"><b>' + esc(crs.client) + '</b>'
+      +   '<span>' + esc(crs.type) + '</span></div></div>';
+
+    if (crs.deja) {
+      h += '<div class="agm-done">Ce rendez-vous a déjà son compte rendu'
+        + (pr.issue_connue ? ' : ' + esc(pr.issue_connue) : '') + '.</div>';
+    }
+
+    if (aPreuve) h += crCarteAppel(appel);
+
+    // La question ne se pose que si la telephonie n'a pas deja repondu.
+    if (!aPreuve) {
+      h += '<div><div class="agm-lbl">Ce qui s’est passé</div><div class="agm-seg">'
+        + '<button data-cri="vu" class="' + (crs.issue === 'vu' ? 'on' : '') + '">' + esc(L.vu) + '</button>'
+        + '<button data-cri="absent" class="' + (crs.issue === 'absent' ? 'on' : '') + '">' + esc(L.non) + '</button>'
+        + '</div></div>';
+    }
+
+    const vu = aPreuve || crs.issue === 'vu';
+    const l = crDegres();
+    if (crs.deg == null || !l.some(e => e.c === crs.deg)) crs.deg = 'chaud';
+    const montreEch = crs.famille !== 'autre' && vu;
+    if (montreEch) {
+      h += '<div><div class="agm-lbl">' + esc(L.lbl) + '</div>'
+        + '<div class="agm-ech' + (l.length <= 4 ? ' quatre' : '') + '">'
+        + l.map(e => '<button data-cre="' + e.c + '" class="' + (e.c === crs.deg ? 'on' : '') + '">'
+            + '<b><i style="background:' + e.col + '"></i>' + esc(e.lab) + '</b>'
+            + '<small>' + esc(e.sous) + '</small></button>').join('')
+        + '</div>';
+      if (crs.deg === 'perdu') {
+        h += '<div style="margin-top:10px"><div class="agm-lbl">Pourquoi perdu</div><div class="agm-seg">'
+          + CR_MOTIFS.map(m => '<button data-crm="' + esc(m) + '" class="' + (crs.motif === m ? 'on' : '') + '">'
+              + esc(m) + '</button>').join('')
+          + '</div></div>';
+      }
+      if (crs.deg === 'commande') {
+        h += '<div class="agm-avis" style="margin-top:10px">Pensez à saisir la commande dans BACS : '
+          + 'le tableau de bord ne compte que les commandes BACS.</div>';
+      }
+      h += '</div>';
+    }
+
+    // La relance : decidee par le degre, modifiable d'un clic.
+    const e = l.find(x => x.c === crs.deg);
+    let j = montreEch ? (e ? e.j : null) : null;
+    if (!vu) j = 2;                                  // un lapin se rattrape a deux jours
+    if (crs.famille === 'autre') j = null;
+    const libre = montreEch && (crs.deg === 'commande' || crs.deg === 'perdu');
+    if (j !== null || libre) {
+      if (crs.relance == null) crs.relance = (j !== null ? String(j) : 'x');
+      const choix = (j !== null)
+        ? [[String(j), 'dans ' + (j >= 30 ? Math.round(j / 30) + ' mois' : j + ' jours')],
+           ['0', 'une autre date…'], ['x', 'rien']]
+        : [['x', 'rien'],
+           [crs.deg === 'commande' ? '30' : '180',
+            crs.deg === 'commande' ? 'suivi dans 1 mois' : 'retenter dans 6 mois'],
+           ['0', 'une autre date…']];
+      h += '<div><div class="agm-lbl">La relance</div><div class="agm-quand">'
+        + choix.map(x => '<button data-crj="' + x[0] + '" class="' + (x[0] === crs.relance ? 'on' : '') + '">'
+            + esc(x[1]) + '</button>').join('') + '</div>'
+        + (crs.relance === '0'
+            ? '<div class="agm-row" style="margin-top:8px"><input type="date" class="agm-inp" id="cr-date" value="'
+              + esc(crs.dateLibre || agToday()) + '" style="flex:1;min-width:130px">'
+              + '<input type="time" class="agm-inp" id="cr-heure" value="' + esc(crs.heureLibre || '09:00')
+              + '" step="900" style="width:104px"></div>'
+            : '')
+        + '<p class="agm-note" style="margin:9px 0 0">'
+        + (crs.relance === 'x'
+            ? 'Rien ne sera programmé. Le dossier se referme.'
+            : 'Elle apparaîtra dans votre agenda et dans <b>« J’ai promis »</b> le jour venu.')
+        + '</p></div>';
+    }
+
+    h += '<div><div class="agm-lbl">Commentaire</div>'
+      + '<textarea class="agm-ta" id="cr-com" placeholder="Ce qu’il faut retenir…">'
+      + esc(crs.comment) + '</textarea></div>';
+
+    if (aPreuve) {
+      h += '<div class="agm-deplace">Ce n’est pas ce qui s’est passé ? '
+        + '<button type="button" id="cr-corriger">Le dire autrement</button></div>';
+    }
+    h += '<div class="agm-deplace">Le rendez-vous doit être repoussé ? '
+      + '<button type="button" id="cr-deplacer">Le déplacer dans l’agenda</button></div>';
+
+    if (crs.err) h += '<div class="agm-err">' + esc(crs.err) + '</div>';
+    if (crs.avis) h += '<div class="agm-avis">' + esc(crs.avis) + '</div>';
+    return h;
+  }
+
+  function renderCR() {
+    const d = frontDoc(); let ov = d.getElementById('agenda-ov');
+    if (!ov) {
+      ov = d.createElement('div'); ov.id = 'agenda-ov';
+      (d.body || d.documentElement).appendChild(ov);
+      ov.addEventListener('mousedown', (e) => { if (e.target === ov) closeCR(); });
+    }
+    const titre = 'Compte rendu — ' + ((CR_LIB[crs.famille] || CR_LIB.autre).t);
+    ov.innerHTML = '<div class="agm"><div class="agm-head"><span class="agm-title">' + esc(titre) + '</span>'
+      + '<button class="agm-x" id="cr-x">×</button></div>'
+      + '<div class="agm-body">' + crBody() + '</div>'
+      + '<div class="agm-foot"><button class="agm-save" id="cr-save"' + (crs.saving ? ' disabled' : '') + '>'
+      + (crs.saving ? 'Enregistrement…' : 'Enregistrer') + '</button></div></div>';
+    wireCR();
+  }
+
+  function crSync() {
+    const d = frontDoc();
+    const c = d.getElementById('cr-com'); if (c) crs.comment = c.value;
+    const dd = d.getElementById('cr-date'); if (dd) crs.dateLibre = dd.value;
+    const hh = d.getElementById('cr-heure'); if (hh) crs.heureLibre = hh.value;
+  }
+
+  function wireCR() {
+    const d = frontDoc(); const g = (id) => d.getElementById(id);
+    if (g('cr-x')) g('cr-x').addEventListener('click', closeCR);
+    d.querySelectorAll('#agenda-ov [data-cri]').forEach(b => b.addEventListener('click', () => {
+      crSync(); crs.issue = b.getAttribute('data-cri'); crs.relance = null; crs.err = ''; renderCR(); }));
+    d.querySelectorAll('#agenda-ov [data-cre]').forEach(b => b.addEventListener('click', () => {
+      crSync(); crs.deg = b.getAttribute('data-cre'); crs.relance = null; renderCR(); }));
+    d.querySelectorAll('#agenda-ov [data-crm]').forEach(b => b.addEventListener('click', () => {
+      crSync(); crs.motif = b.getAttribute('data-crm'); renderCR(); }));
+    d.querySelectorAll('#agenda-ov [data-crj]').forEach(b => b.addEventListener('click', () => {
+      crSync(); crs.relance = b.getAttribute('data-crj'); renderCR(); }));
+    if (g('cr-corriger')) g('cr-corriger').addEventListener('click', () => {
+      crSync(); crs.corrige = true; crs.relance = null; renderCR(); });
+    if (g('cr-deplacer')) g('cr-deplacer').addEventListener('click', () => {
+      // Deplacer, c'est l'affaire de l'agenda : on referme et on laisse la main
+      // au glisser-deposer, qui sait deja le faire.
+      closeCR();
+      showAgError('Déplacez le rendez-vous directement dans l’agenda.',
+                  'Faites-le glisser sur son nouveau créneau : il garde son identité et redevient à venir.');
+    });
+    if (g('cr-save')) g('cr-save').addEventListener('click', crSave);
+    // Le lecteur audio, repris de la fiche client.
+    if (g('cr-play')) g('cr-play').addEventListener('click', () => {
+      const src = g('cr-src') && g('cr-src').getAttribute('data-src');
+      if (!src) return;
+      if (!window.__voipAudio) window.__voipAudio = new Audio();
+      const a = window.__voipAudio;
+      if (a.src !== src) { a.src = src; a.currentTime = 0; }
+      if (!a.paused) { a.pause(); return; }
+      a.ontimeupdate = () => {
+        const D = a.duration || 0, c = a.currentTime;
+        if (g('cr-prg')) g('cr-prg').style.width = (D > 0 ? c / D * 100 : 0) + '%';
+        if (g('cr-cur')) g('cr-cur').textContent = Math.floor(c / 60) + ':' + String(Math.floor(c % 60)).padStart(2, '0');
+      };
+      a.play().catch(e => console.warn('[agenda] audio', e));
+    });
+    if (g('cr-tg')) g('cr-tg').addEventListener('click', () => {
+      const f = g('cr-full'); if (!f) return;
+      const ouvert = f.style.display !== 'none' && f.style.display !== '';
+      f.style.display = ouvert ? 'none' : 'block';
+      g('cr-tg').innerHTML = ouvert ? '▸ voir plus' : '▸ voir moins';
+    });
+  }
+
+  function closeCR() {
+    const o = frontDoc().getElementById('agenda-ov'); if (o) o.remove();
+    crs = null;
+    try { calendar && calendar.unselect(); } catch (e) {}
+  }
+
+  async function crSave() {
+    crSync();
+    crs.err = ''; crs.avis = '';
+    const aPreuve = !!(crs.preuve && crs.preuve.appel) && !crs.corrige;
+    const vu = aPreuve || crs.issue === 'vu';
+    const l = crDegres();
+    const e = l.find(x => x.c === crs.deg);
+
+    let relance = null;
+    if (crs.relance && crs.relance !== 'x') {
+      if (crs.relance === '0') {
+        if (!crs.dateLibre) { crs.err = 'Choisissez une date de relance.'; return renderCR(); }
+        relance = crs.dateLibre + ' ' + (crs.heureLibre || '09:00') + ':00';
+      } else {
+        const d = new Date();
+        d.setDate(d.getDate() + Number(crs.relance));
+        d.setHours(9, 0, 0, 0);
+        const z = (n) => String(n).padStart(2, '0');
+        relance = d.getFullYear() + '-' + z(d.getMonth() + 1) + '-' + z(d.getDate()) + ' 09:00:00';
+      }
+    }
+
+    crs.saving = true; renderCR();
+    try {
+      const { data, error } = await sb().rpc('rdv_conclure', {
+        p_id_rdv: Number(crs.idRdv),
+        p_issue: vu ? 'vu' : 'absent',
+        p_temperature: (crs.famille === 'autre' || !vu) ? null : crs.deg,
+        p_commentaire: crs.comment || null,
+        p_motif_perte: (crs.deg === 'perdu' ? crs.motif : null),
+        p_relance_le: relance
+      });
+      if (error && (error.code === 'PGRST202'
+                    || /rdv_conclure/.test(error.message || ''))) {
+        crs.saving = false;
+        crs.err = 'Le compte rendu n\u2019est pas encore activ\u00e9 sur cette base.';
+        return renderCR();
+      }
+      if (error) throw error;
+      if (data && data.ok === false) {
+        crs.saving = false;
+        crs.err = data.message || ('Enregistrement refusé : ' + (data.erreur || 'raison inconnue'));
+        return renderCR();
+      }
+      closeCR();
+      refetch();                            // le compte rendu et sa relance entrent dans l'agenda
+      try {
+        const w = (wwLib.getFrontWindow && wwLib.getFrontWindow()) || window;
+        if (typeof w.oropraNotifBadgeRefresh === 'function') w.oropraNotifBadgeRefresh();
+      } catch (e2) {}
+    } catch (err) {
+      console.error('[agenda] rdv_conclure', err);
+      crs.saving = false;
+      crs.err = (err && err.message) ? err.message : 'Enregistrement impossible.';
+      renderCR();
+    }
+  }
+
   function closeCreate() { const o = frontDoc().getElementById('agenda-ov'); if (o) o.remove(); cs = null; try { calendar && calendar.unselect(); } catch (e) {} }
   function openCreate(sel) {
     if (isPastSlot(sel.startStr || '')) { try { calendar && calendar.unselect(); } catch (e) {} hideTip(); showAgError('Impossible de placer un \u00e9v\u00e9nement dans le pass\u00e9.', 'Choisis un cr\u00e9neau \u00e0 partir de maintenant.'); return; }
@@ -1436,7 +1871,13 @@ OD.define('agenda', {
     const p = ev.extendedProps || {};
     const st = String(p.source_type || '');
     if (st === 'bilat' && !p.can_edit) return;            // bilat\u00e9rale : lecture seule c\u00f4t\u00e9 vendeur
-    if (isPastSlot(ev.startStr || '') || isPastSlot(p.event_start_time || '')) return; // pass\u00e9 : lecture seule
+    // PASSE : la modale d'edition refusait, et le clic ne faisait rien. Il
+    // ouvre desormais le COMPTE RENDU — a venir on modifie, passe on conclut.
+    // Un creneau sans client et une bilaterale n'ont rien a conclure.
+    if (isPastSlot(ev.startStr || '') || isPastSlot(p.event_start_time || '')) {
+      if (st === 'rdv' && Number(p.id_client) > 0) { openCompteRendu(ev); }
+      return;
+    }
     if (st !== 'rdv' && st !== 'bilat') return;            // rpv : non \u00e9ditable ici
     const date = (ev.startStr || '').slice(0, 10) || '';
     const time = (ev.startStr || '').slice(11, 16) || '09:00';
