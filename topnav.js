@@ -34,7 +34,7 @@ OD.define('topnav', {
   const wwLib = window.wwLib;
   const doc = __anchor.ownerDocument || wwLib.getFrontDocument();
   const ROOT_ID = 'nav-root';
-  const NAV_VER = 32; // <- numéro de version (témoin de chargement)
+  const NAV_VER = 33; // <- numéro de version (témoin de chargement)
 
   // La barre du haut est un sélecteur de SITE, et rien d'autre.
   //
@@ -1366,22 +1366,44 @@ OD.define('topnav', {
       afficherBandeauArbitrage(n);
     } catch (e) {}
   }
+  // 02/10/2026 \u2014 sur t\u00E9l\u00E9phone, le bandeau (fix\u00E9 en haut \u00E0 droite) recouvrait
+  // le nom de l'utilisateur et le s\u00E9lecteur de site, sans moyen de le fermer.
+  // D\u00E9sormais : en bas d'\u00E9cran sous 640 px (\u00E0 gauche du bouton Pulse), et une
+  // croix qui le met en sourdine 30 min \u2014 le badge du menu reste \u00E0 jour.
+  let arbBandeauSourdine = 0;
+  function cssBandeauArbitrage() {
+    if (doc.getElementById('od-arb-rappel-css')) return;
+    const st = doc.createElement('style'); st.id = 'od-arb-rappel-css';
+    st.textContent = '#od-arb-rappel{position:fixed;top:64px;right:16px;z-index:99999;background:#1F4A85;color:#fff;'
+      + 'padding:10px 10px 10px 14px;border-radius:10px;box-shadow:0 3px 12px rgba(0,0,0,.25);'
+      + 'font:600 13px "Nunito Sans",system-ui,sans-serif;cursor:pointer;display:flex;align-items:center;gap:10px;max-width:360px}'
+      + '#od-arb-rappel .arb-go{opacity:.85;text-decoration:underline;white-space:nowrap}'
+      + '#od-arb-rappel .arb-x{border:none;background:rgba(255,255,255,.14);color:#fff;width:22px;height:22px;border-radius:6px;'
+      + 'font:700 14px/1 system-ui,sans-serif;cursor:pointer;display:flex;align-items:center;justify-content:center;flex:0 0 auto;padding:0}'
+      + '#od-arb-rappel .arb-x:hover{background:rgba(255,255,255,.28)}'
+      + '@media(max-width:640px){#od-arb-rappel{top:auto;right:72px;left:12px;bottom:calc(16px + env(safe-area-inset-bottom,0px));'
+      + 'max-width:none;font-size:12.5px;padding:9px 8px 9px 12px}#od-arb-rappel .arb-txt{flex:1;min-width:0}}';
+    (doc.head || doc.documentElement).appendChild(st);
+  }
   function afficherBandeauArbitrage(n) {
     const r = root(); if (!r) return;
     let b = r.querySelector('#od-arb-rappel');
-    if (!n || n <= 0) { if (b) b.remove(); return; }
+    if (!n || n <= 0 || Date.now() < arbBandeauSourdine) { if (b) b.remove(); return; }
+    cssBandeauArbitrage();
     if (!b) {
       b = doc.createElement('div');
       b.id = 'od-arb-rappel';
-      b.style.cssText = 'position:fixed;top:64px;right:16px;z-index:99999;background:#1F4A85;color:#fff;'
-        + 'padding:10px 14px;border-radius:10px;box-shadow:0 3px 12px rgba(0,0,0,.25);'
-        + 'font:600 13px "Nunito Sans",system-ui,sans-serif;cursor:pointer;display:flex;'
-        + 'align-items:center;gap:10px;max-width:340px';
-      b.addEventListener('click', function () { b.remove(); openArbitrage(); });
+      b.addEventListener('click', function (e) {
+        if (e.target && e.target.closest && e.target.closest('.arb-x')) {
+          e.stopPropagation(); arbBandeauSourdine = Date.now() + 30 * 60 * 1000; b.remove(); return;
+        }
+        b.remove(); openArbitrage();
+      });
       r.appendChild(b);
     }
-    b.innerHTML = '<span>\u26A0\uFE0F ' + n + ' client' + (n > 1 ? 's' : '') + ' \u00E0 arbitrer</span>'
-      + '<span style="opacity:.85;text-decoration:underline">Ouvrir</span>';
+    b.innerHTML = '<span class="arb-txt">\u26A0\uFE0F ' + n + ' client' + (n > 1 ? 's' : '') + ' \u00E0 arbitrer</span>'
+      + '<span class="arb-go">Ouvrir</span>'
+      + '<button type="button" class="arb-x" aria-label="Masquer">\u00D7</button>';
   }
   if (!window.__navArbReturnBound) {
     window.__navArbReturnBound = true;
