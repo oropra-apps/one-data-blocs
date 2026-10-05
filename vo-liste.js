@@ -1,4 +1,9 @@
 // ============================================================================
+//  v8 (05/10/2026) : le select Civilite proposait `libelle` comme valeur
+//  ("Monsieur") alors que la base stocke `libelle_court` ("M."), comme le fait
+//  deja le select Type des societes. Aucune valeur ne correspondait donc jamais
+//  et le champ retombait sur « Selectionner » : 145 fiches sur 60 181 affichaient
+//  leur civilite. Le correctif en repare 45 708.
 //  LISTE VO — module One Data (OD.define)  v1
 //  Rendu dans __anchor ; SUPABASE_URL + clé -> ctx.tenant (9 edge functions) ;
 //  client via ctx.supabase ; attente d'ancre + garde de version retirées.
@@ -1182,7 +1187,7 @@ OD.define('vo-liste', {
         body += `<div class="vop-field two"><label class="vop-label">SIRET / Raison sociale <span style="color:#e24b4a">*</span></label><input class="vop-input" type="text" data-vop-mfield="__siretQuery" value="${vopEsc(m.siretQuery || '')}" placeholder="Rechercher SIRENE"/>${m.siretSuggestions && m.siretSuggestions.length ? `<div class="vop-suggestions">${m.siretSuggestions.map((s, i) => `<div class="vop-sg" data-vop-action="pick-siret" data-idx="${i}"><strong>${vopEsc(s.raison_sociale || '')}</strong><div style="font-size:11px;color:#9bb3d1">${vopEsc(s.siret || '')} — ${vopEsc(s.commune || '')}</div></div>`).join('')}</div>` : ''}</div>`;
         body += mfieldInput('Raison sociale', 'NOM', 'text', { gridClass: 'full', required: true });
       } else {
-        body += mfieldInput('Civilité', 'CIVILITE', 'select', { options: civilitesP.map(c => ({ value: c.libelle, label: c.libelle })), required: true });
+        body += mfieldInput('Civilité', 'CIVILITE', 'select', { options: civilitesP.map(c => ({ value: c.libelle_court, label: c.libelle })), required: true });
         body += mfieldInput('Nom', 'NOM', 'text', { required: true });
         body += mfieldInput('Prénom', 'PRENOM', 'text', { required: true });
         body += mfieldInput('Date de naissance', 'BIRTHDAY', 'date');
