@@ -1,4 +1,9 @@
 // ============================================================================
+//  v8 (05/10/2026) : le select Civilite proposait `libelle` comme valeur
+//  ("Monsieur") alors que la base stocke `libelle_court` ("M."), comme le fait
+//  deja le select Type des societes. Aucune valeur ne correspondait donc jamais
+//  et le champ retombait sur « Selectionner » : 145 fiches sur 60 181 affichaient
+//  leur civilite. Le correctif en repare 45 708.
 //  FICHE CLIENT (onglet) — module One Data (OD.define)  v1 (Lot A)
 //  cfMain migré : rendu dans __anchor ; client via ctx.supabase ; self-boots
 //  retirés ; edge sirène via functions.invoke (tenant). Vars WeWeb conservées.
@@ -662,7 +667,7 @@ function render() {
     body += renderSiretField();
     body += fieldInput('Raison sociale', 'NOM', 'text', { gridClass: 'full', required: true });
   } else {
-    body += fieldInput('Civilité', 'CIVILITE', 'select', { options: civilitesP.map(c => ({ value: c.libelle, label: c.libelle })), required: true });
+    body += fieldInput('Civilité', 'CIVILITE', 'select', { options: civilitesP.map(c => ({ value: c.libelle_court, label: c.libelle })), required: true });
     body += fieldInput('Nom', 'NOM', 'text', { required: true });
     body += fieldInput('Prénom', 'PRENOM', 'text', { required: true });
     body += fieldInput('Date de naissance', 'BIRTHDAY', 'date');
