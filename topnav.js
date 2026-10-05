@@ -1,5 +1,5 @@
 // ============================================================================
-//  TOP NAV — module One Data (OD.define)  v27 — SÉLECTEUR DE PÉRIMÈTRE
+//  TOP NAV — module One Data (OD.define)  v28 — SÉLECTEUR DE PÉRIMÈTRE
 //  v24 (06/10/2026) : l'arbitrage gagne une TROISIEME COLONNE de saisie et la
 //  ligne NATURE (particulier / societe), jusque-la totalement absente alors
 //  qu'elle commande toute la presentation de la fiche client. 15,2 % des
@@ -41,6 +41,17 @@
 //  message etait pose dans #od-arb, que arbRender reconstruit par innerHTML,
 //  et vivait donc 430 ms au lieu des six secondes prevues — pour tous les
 //  messages de fin d'action, pas seulement celui-ci.
+//
+//  v28 (06/10/2026) : les colonnes de l'arbitrage tombent enfin en face. Deux
+//  causes, mesurees au rendu dans Chromium. 1) `1fr` vaut `minmax(auto,1fr)`,
+//  donc chaque colonne gardait un plancher a la largeur de son contenu
+//  insecable ; comme chaque ligne est une grille independante, un e-mail ou
+//  une adresse longue elargissait sa colonne sur SA ligne seulement. Passe en
+//  minmax(0,1fr). 2) La ligne d'en-tete portait la classe `od-arb-head`, deja
+//  prise par la barre de titre de la modale (gap:14px, padding:18px 22px) :
+//  elle en heritait et resolvait ses colonnes a 166,7 px contre 181,3 px pour
+//  les autres. Renommee `od-arb-cols`. Les sept lignes partagent desormais
+//  exactement les memes bords.
 //  Chaque ligne a trancher porte un champ de saisie libre, alimente par
 //  ref_type_client pour la civilite : BACS annoncait « Mme » pour un monsieur
 //  prenomme Francois Xavier, et l'arbitre devait fusionner l'erreur avant de
@@ -1022,12 +1033,18 @@ OD.define('topnav', {
 '.od-arb-res .rv{font-size:13px;font-weight:600;min-height:18px}.od-arb-res .rv.vide{color:#7a98c5;opacity:.6;font-weight:400;font-style:italic}' +
 '.od-arb-res .pin{display:inline-block;width:7px;height:7px;border-radius:99px;margin-right:6px;vertical-align:1px}.od-arb-res .pin.a{background:#2a5ea9}.od-arb-res .pin.b{background:#53bda7}' +
 '.od-arb-peint .ct{font-size:11px;font-weight:800;color:#7a98c5;text-transform:uppercase;letter-spacing:.04em;margin:0 0 7px}' +
-'.od-arb-peint .ct + .od-arb-head{margin-top:0}.od-arb-peint .od-arb-cf + .ct{margin-top:14px}' +
-'.od-arb-cf{display:grid;grid-template-columns:74px 1fr 1fr 1fr;gap:6px;align-items:stretch;margin-bottom:6px}.od-arb-cf .ck{display:flex;align-items:center;font-size:12px;font-weight:700;color:#5a72a0}' +
-'.od-arb-opt{display:flex;align-items:center;border:2px solid #e8eef7;border-radius:10px;padding:8px 22px 8px 10px;text-align:left;background:#fff;cursor:pointer;position:relative;transition:.15s;font-family:inherit;min-height:40px}.od-arb-opt:hover{border-color:#acc5e4}' +
-'.od-arb-opt .ov{font-size:13px;font-weight:700;color:#1F4A85;word-break:normal;overflow-wrap:break-word;hyphens:none;line-height:1.25}.od-arb-opt .ov.vide{color:#7a98c5;opacity:.6;font-weight:400;font-style:italic;white-space:nowrap}' +
-'.od-arb-head{margin-bottom:3px}.od-arb-head .he{font-size:10px;font-weight:700;letter-spacing:.03em;text-transform:uppercase;padding-left:10px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}' +
-'.od-arb-head .he.a{color:#2a5ea9}.od-arb-head .he.b{color:#53bda7}.od-arb-head .he.c{color:#d2941f}' +
+'.od-arb-peint .ct + .od-arb-cols{margin-top:0}.od-arb-peint .od-arb-cf + .ct{margin-top:14px}' +
+// minmax(0,1fr) et non 1fr : `1fr` vaut `minmax(auto,1fr)`, donc chaque colonne
+// garde un plancher a la largeur de son contenu insecable. Comme chaque ligne
+// est une grille independante, un e-mail ou une adresse longue elargissait sa
+// colonne sur SA ligne seulement — d'ou des colonnes qui ne tombaient pas en
+// face. Avec un plancher a zero, les quatre colonnes se resolvent a l'identique
+// sur toutes les lignes, en-tete compris.
+'.od-arb-cf{display:grid;grid-template-columns:74px minmax(0,1fr) minmax(0,1fr) minmax(0,1fr);gap:6px;align-items:stretch;margin-bottom:6px}.od-arb-cf .ck{display:flex;align-items:center;font-size:12px;font-weight:700;color:#5a72a0}' +
+'.od-arb-opt{display:flex;align-items:center;min-width:0;border:2px solid #e8eef7;border-radius:10px;padding:8px 22px 8px 10px;text-align:left;background:#fff;cursor:pointer;position:relative;transition:.15s;font-family:inherit;min-height:40px}.od-arb-opt:hover{border-color:#acc5e4}' +
+'.od-arb-opt .ov{font-size:13px;font-weight:700;color:#1F4A85;min-width:0;word-break:normal;overflow-wrap:anywhere;hyphens:none;line-height:1.25}.od-arb-opt .ov.vide{color:#7a98c5;opacity:.6;font-weight:400;font-style:italic;white-space:nowrap}' +
+'.od-arb-cols{margin-bottom:3px}.od-arb-cols .he{font-size:10px;font-weight:700;letter-spacing:.03em;text-transform:uppercase;padding-left:10px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}' +
+'.od-arb-cols .he.a{color:#2a5ea9}.od-arb-cols .he.b{color:#53bda7}.od-arb-cols .he.c{color:#d2941f}' +
 '.od-arb-opt.a[aria-pressed="true"]{border-color:#2a5ea9;background:#eef4fc}.od-arb-opt.b[aria-pressed="true"]{border-color:#53bda7;background:#eaf7f4}' +
 '.od-arb-opt[aria-pressed="true"]::after{content:"\\2713";position:absolute;top:50%;right:7px;transform:translateY(-50%);font-size:11px;font-weight:900}' +
 '.od-arb-opt.a[aria-pressed="true"]::after{color:#2a5ea9}.od-arb-opt.b[aria-pressed="true"]::after{color:#53bda7}.od-arb-opt.c[aria-pressed="true"]::after{color:#d2941f}' +
@@ -1051,7 +1068,7 @@ OD.define('topnav', {
 '.od-arb-vide{padding:60px 30px;text-align:center}.od-arb-vide .ok{width:64px;height:64px;border-radius:50%;background:#eaf7f4;display:flex;align-items:center;justify-content:center;margin:0 auto 16px;color:#53bda7}.od-arb-vide .ok svg{width:30px;height:30px}' +
 '.od-arb-vide h2{font-size:18px;font-weight:900;margin:0 0 6px}.od-arb-vide p{color:#7a98c5;margin:0;font-size:13px}' +
 '.od-arb-badge{display:inline-flex;align-items:center;justify-content:center;min-width:18px;height:18px;padding:0 5px;margin-left:auto;background:#e24b4a;color:#fff;font-size:11px;font-weight:800;border-radius:99px}' +
-'@media(max-width:620px){.od-arb-modal{width:100%}.od-arb-res .rg{grid-template-columns:1fr}.od-arb-cf{grid-template-columns:1fr;gap:5px}.od-arb-head{display:none}.od-arb-act{flex-wrap:wrap}.od-arb-b{flex:1 1 100%}}' +
+'@media(max-width:620px){.od-arb-modal{width:100%}.od-arb-res .rg{grid-template-columns:1fr}.od-arb-cf{grid-template-columns:1fr;gap:5px}.od-arb-cols{display:none}.od-arb-act{flex-wrap:wrap}.od-arb-b{flex:1 1 100%}}' +
 '</style>';
 
 
@@ -1424,11 +1441,15 @@ OD.define('topnav', {
     return '<button class="od-arb-opt ' + cote + '" data-champ="' + k + '" data-cote="' + cote + '" aria-pressed="' + on + '" title="' + esc(plein) + '">' +
       '<span class="ov' + (v ? '' : ' vide') + '">' + (esc(arbAff(k, v)) || 'non renseigné') + '</span></button>';
   }
-  // En-tete de colonnes : la provenance est identique sur toutes les lignes, la
+  // En-tete de colonnes. CLASSE `od-arb-cols` ET NON `od-arb-head` : ce dernier
+  // nom est deja pris par la barre de titre de la modale, avec gap:14px et
+  // padding:18px 22px — la ligne en heritait et ses colonnes ne tombaient plus
+  // en face des autres (166,7 px contre 181,3 px, mesure au rendu).
+  // La provenance est identique sur toutes les lignes, la
   // repeter dans chaque carte mangeait la largeur et coupait les valeurs au
   // milieu des mots (« 12 RUE DE L'INSURRECTIO / N »).
   function arbEntete() {
-    return '<div class="od-arb-cf od-arb-head" aria-hidden="true"><div class="ck"></div>' +
+    return '<div class="od-arb-cf od-arb-cols" aria-hidden="true"><div class="ck"></div>' +
       '<div class="he a">Existante</div>' +
       '<div class="he b" title="' + esc((ARB && ARB.srcLabel) || '') + '">' + esc(arbSrcCourt('b')) + '</div>' +
       '<div class="he c">Saisie</div></div>';
