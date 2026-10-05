@@ -1,5 +1,5 @@
 // ============================================================================
-//  TOP NAV — module One Data (OD.define)  v24 — SÉLECTEUR DE PÉRIMÈTRE
+//  TOP NAV — module One Data (OD.define)  v25 — SÉLECTEUR DE PÉRIMÈTRE
 //  v24 (06/10/2026) : l'arbitrage gagne une TROISIEME COLONNE de saisie et la
 //  ligne NATURE (particulier / societe), jusque-la totalement absente alors
 //  qu'elle commande toute la presentation de la fiche client. 15,2 % des
@@ -7,7 +7,24 @@
 //  reste donc affichee meme quand les deux cotes sont d'accord, et une alerte
 //  signale « societe sans SIRET ». Corrige aussi un cas ou le choix de
 //  l'arbitre etait ignore : quand un seul des deux cotes portait une valeur,
-//  cliquer « non renseigne » ne changeait rien.
+//  cliquer « non renseigne » ne changeait rien. Et le COMPTEUR passe sur la
+//  barre, a cote de Delco : il ne vivait que dans le menu de l'avatar, et le
+//  bandeau, seule surface visible, se tait 30 minutes quand on clique sa croix.
+//
+//  v25 (06/10/2026) : trois corrections d'affichage du meme defaut.
+//  1. Le compteur survit a la reconstruction de la nav. build() repart d'un
+//     `r.innerHTML = …`, ce qui effacait le bandeau accroche au conteneur :
+//     a chaque navigation dans le SPA il disparaissait, et rien ne le
+//     redessinait avant le prochain retour sur l'onglet. D'ou un compteur
+//     present, puis absent, puis present, sans que personne n'ait rien
+//     touche. On repeint depuis le dernier compte connu, sans requete.
+//  2. Il parait des la connexion (1,2 s) au lieu d'attendre que le
+//     navigateur s'ennuie (jusqu'a 9 s). Cette attente se justifiait quand le
+//     comptage coutait 5 s de serveur ; il en coute 8 a 49 ms.
+//  3. Les lignes d'arbitrage tiennent sur une ligne : la provenance, qui
+//     etait repetee dans chaque carte, passe en en-tete de colonne une fois
+//     pour toutes. Mesure au rendu : 5 lignes sur 6 a 40-42 px, seule une
+//     adresse de 34 caracteres en occupe trois.
 //  Chaque ligne a trancher porte un champ de saisie libre, alimente par
 //  ref_type_client pour la civilite : BACS annoncait « Mme » pour un monsieur
 //  prenomme Francois Xavier, et l'arbitre devait fusionner l'erreur avant de
@@ -345,6 +362,11 @@ OD.define('topnav', {
 #delco-header-badge[data-state="idle"]{display:none}
 #delco-header-badge[data-state="warn"]{background:#fac055;color:#5a3d05}
 #delco-header-badge[data-state="urgent"]{background:#e24b4a;color:#fff}
+.od-arb-bar{display:flex;align-items:center;gap:7px;padding:10px 14px;border-radius:9px;cursor:pointer;font-size:14px;font-weight:600;color:#1F4A85;text-decoration:none;transition:background .15s}
+.od-arb-bar:hover{background:#fdf6e9;color:#8a5d08}
+.od-arb-bar svg{width:17px;height:17px;color:#d2941f;flex:0 0 auto}
+#od-arb-bar-n{min-width:18px;height:18px;padding:0 5px;border-radius:9px;font-size:10px;font-weight:700;display:inline-flex;align-items:center;justify-content:center;background:#d2941f;color:#fff}
+@media(max-width:1100px){.od-arb-bar-txt{display:none}}
 .od-user{position:relative;flex:0 0 auto}
 .od-user>button{display:flex;align-items:center;gap:7px;background:none;border:none;cursor:pointer;padding:4px 6px 4px 4px;border-radius:30px;transition:background .15s}
 .od-user>button:hover{background:#f2f6fc}
@@ -485,6 +507,16 @@ OD.define('topnav', {
           '<button class="od-burger" data-burger>' + I.burger + '</button>' +
           '<div class="od-menus">' + menusHtml +
             '<a class="od-delco" id="delco-header-link">' + I.delco + '<span class="od-delco-txt">Delco</span><span id="delco-header-badge" data-state="idle"><span class="delco-header-badge-num"></span></span></a>' +
+            // Compteur d'arbitrage sur la barre (06/10/2026). Il ne vivait que
+            // dans le menu de l'avatar, donc invisible tant qu'on ne l'ouvre pas,
+            // et le bandeau — seule surface visible — se tait 30 minutes des
+            // qu'on clique sa croix. Un chef des ventes avec 99 dossiers en
+            // attente ne voyait alors plus rien nulle part.
+            '<a class="od-arb-bar" id="od-arb-bar" hidden title="Clients à arbitrer">'
+              + '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">'
+              + '<path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/>'
+              + '<path d="M12 9v4"/><path d="M12 17h.01"/></svg>'
+              + '<span class="od-arb-bar-txt">Arbitrage</span><span id="od-arb-bar-n"></span></a>' +
           '</div>' +
           '<div class="od-user"><button class="od-user-btn" data-toggle="user" data-tip="' + esc(userFullName()) + '"><span class="od-avatar">' + esc(userInitials()) + '</span></button>' +
             '<div class="od-drop">' + userItems + '</div></div>' +
@@ -552,6 +584,8 @@ OD.define('topnav', {
     // Delco : on gère le clic nous-mêmes (l'embed externe ne fait QUE le badge/compteur)
     const delcoLink = r.querySelector('#delco-header-link');
     if (delcoLink) delcoLink.addEventListener('click', function (e) { e.preventDefault(); e.stopPropagation(); closeAll(); closeBurger(); goPage(P.delco); });
+    const arbBar = r.querySelector('#od-arb-bar');
+    if (arbBar) arbBar.addEventListener('click', function (e) { e.preventDefault(); e.stopPropagation(); closeAll(); openArbitrage(); });
     // clic dehors
     if (!window.__navOutside) {
       doc.addEventListener('mousedown', function (e) { const rr = root(); if (rr && !rr.contains(e.target)) { closeAll(); } }, true);
@@ -571,6 +605,19 @@ OD.define('topnav', {
     // filet : suit la variable client en continu (au cas où l'event est manqué)
     if (!window.__navClientPoll) {
       window.__navClientPoll = setInterval(function () { refreshClient(); }, 1200);
+    }
+
+    // LE COMPTEUR SURVIT A LA RECONSTRUCTION DE LA NAV (06/10/2026).
+    // build() repart d'un `r.innerHTML = …` : tout ce qui etait accroche au
+    // conteneur disparait, y compris le bandeau d'arbitrage, qui y est ajoute
+    // par appendChild. A chaque navigation dans le SPA la nav se reconstruit,
+    // le bandeau s'evaporait donc, et rien ne le redessinait avant le prochain
+    // retour sur l'onglet — d'ou un compteur present, puis absent, puis
+    // present, sans que personne n'ait rien touche. On repeint ici depuis le
+    // dernier compte connu : aucune requete, juste le reaffichage.
+    if (arbDernierCompte != null) {
+      majBadgeArbitrage(arbDernierCompte);
+      afficherBandeauArbitrage(arbDernierCompte);
     }
   }
   function closeBurger() { const n = root() && root().querySelector('.od-nav'); if (n) n.classList.remove('open'); }
@@ -958,20 +1005,23 @@ OD.define('topnav', {
 '.od-arb-res .rc{display:flex;flex-direction:column;gap:1px}.od-arb-res .rk{font-size:10px;font-weight:700;color:#7a98c5;text-transform:uppercase;letter-spacing:.03em}' +
 '.od-arb-res .rv{font-size:13px;font-weight:600;min-height:18px}.od-arb-res .rv.vide{color:#7a98c5;opacity:.6;font-weight:400;font-style:italic}' +
 '.od-arb-res .pin{display:inline-block;width:7px;height:7px;border-radius:99px;margin-right:6px;vertical-align:1px}.od-arb-res .pin.a{background:#2a5ea9}.od-arb-res .pin.b{background:#53bda7}' +
-'.od-arb-peint .ct{font-size:11px;font-weight:800;color:#7a98c5;text-transform:uppercase;letter-spacing:.04em;margin:0 0 9px}' +
-'.od-arb-cf{display:grid;grid-template-columns:76px 1fr 1fr 1fr;gap:7px;align-items:stretch;margin-bottom:8px}.od-arb-cf .ck{display:flex;align-items:center;font-size:12px;font-weight:700;color:#5a72a0}' +
-'.od-arb-opt{border:2px solid #e8eef7;border-radius:10px;padding:9px 24px 9px 11px;text-align:left;background:#fff;cursor:pointer;position:relative;transition:.15s;font-family:inherit}.od-arb-opt:hover{border-color:#acc5e4}' +
-'.od-arb-opt .ov{font-size:13px;font-weight:700;color:#1F4A85;word-break:break-word;line-height:1.3}.od-arb-opt .ov.vide{color:#7a98c5;opacity:.6;font-weight:400;font-style:italic}' +
-'.od-arb-opt .os{font-size:10px;font-weight:600;margin-left:6px;white-space:nowrap}.od-arb-opt.a .os{color:#2a5ea9}.od-arb-opt.b .os{color:#53bda7}' +
+'.od-arb-peint .ct{font-size:11px;font-weight:800;color:#7a98c5;text-transform:uppercase;letter-spacing:.04em;margin:0 0 7px}' +
+'.od-arb-peint .ct + .od-arb-head{margin-top:0}.od-arb-peint .od-arb-cf + .ct{margin-top:14px}' +
+'.od-arb-cf{display:grid;grid-template-columns:74px 1fr 1fr 1fr;gap:6px;align-items:stretch;margin-bottom:6px}.od-arb-cf .ck{display:flex;align-items:center;font-size:12px;font-weight:700;color:#5a72a0}' +
+'.od-arb-opt{display:flex;align-items:center;border:2px solid #e8eef7;border-radius:10px;padding:8px 22px 8px 10px;text-align:left;background:#fff;cursor:pointer;position:relative;transition:.15s;font-family:inherit;min-height:40px}.od-arb-opt:hover{border-color:#acc5e4}' +
+'.od-arb-opt .ov{font-size:13px;font-weight:700;color:#1F4A85;word-break:normal;overflow-wrap:break-word;hyphens:none;line-height:1.25}.od-arb-opt .ov.vide{color:#7a98c5;opacity:.6;font-weight:400;font-style:italic;white-space:nowrap}' +
+'.od-arb-head{margin-bottom:3px}.od-arb-head .he{font-size:10px;font-weight:700;letter-spacing:.03em;text-transform:uppercase;padding-left:10px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}' +
+'.od-arb-head .he.a{color:#2a5ea9}.od-arb-head .he.b{color:#53bda7}.od-arb-head .he.c{color:#d2941f}' +
 '.od-arb-opt.a[aria-pressed="true"]{border-color:#2a5ea9;background:#eef4fc}.od-arb-opt.b[aria-pressed="true"]{border-color:#53bda7;background:#eaf7f4}' +
-'.od-arb-opt[aria-pressed="true"]::after{content:"✓";position:absolute;top:8px;right:9px;font-size:11px;font-weight:900}.od-arb-opt.a[aria-pressed="true"]::after{color:#2a5ea9}.od-arb-opt.b[aria-pressed="true"]::after{color:#53bda7}' +
+'.od-arb-opt[aria-pressed="true"]::after{content:"\\2713";position:absolute;top:50%;right:7px;transform:translateY(-50%);font-size:11px;font-weight:900}' +
+'.od-arb-opt.a[aria-pressed="true"]::after{color:#2a5ea9}.od-arb-opt.b[aria-pressed="true"]::after{color:#53bda7}.od-arb-opt.c[aria-pressed="true"]::after{color:#d2941f}' +
 // Saisie libre : troisieme ligne sous les deux propositions, en orange de la
 // charte pour la distinguer de l'existante (bleu) et de la source (vert).
-'.od-arb-opt.c{display:flex;flex-direction:column;align-items:stretch;justify-content:center;gap:4px;padding:7px 9px;cursor:default}' +
-'.od-arb-opt.c .os{color:#d2941f;margin-left:0}.od-arb-opt.c[aria-pressed="true"]{border-color:#d2941f;background:#fdf6e9}' + '.od-arb-opt.c::after{display:none}.od-arb-opt.c[aria-pressed="true"] .os::after{content:" \\2713";font-weight:900}' +
-'.od-arb-si{flex:1;min-width:0;border:1px solid #cfdcef;border-radius:7px;padding:6px 8px;font:700 13px inherit;color:#1F4A85;background:#fff;font-family:inherit}' +
+'.od-arb-opt.c{display:flex;align-items:center;padding:5px 20px 5px 6px;cursor:default}' +
+'.od-arb-opt.c[aria-pressed="true"]{border-color:#d2941f;background:#fdf6e9}' +
+'.od-arb-si{flex:1 1 auto;width:100%;min-width:0;border:1px solid #cfdcef;border-radius:7px;padding:5px 6px;font-size:12px;font-weight:700;color:#1F4A85;background:#fff;font-family:inherit}' +
 '.od-arb-si:focus{outline:none;border-color:#d2941f;box-shadow:0 0 0 2px rgba(210,148,31,.18)}' +
-'.od-arb-nat-a{margin:-2px 0 10px 76px;font-size:11px;font-weight:700;color:#c0524f}' +
+'.od-arb-nat-a{margin:-1px 0 10px 74px;font-size:11px;font-weight:700;color:#c0524f}' +
 '.od-arb-id{margin-top:5px}.od-arb-id summary{font-size:12px;color:#7a98c5;cursor:pointer;padding:8px 0;font-weight:600;list-style:none}.od-arb-id summary::-webkit-details-marker{display:none}.od-arb-id summary::before{content:"▸ ";color:#acc5e4}.od-arb-id[open] summary::before{content:"▾ "}' +
 '.od-arb-id .idr{display:grid;grid-template-columns:90px 1fr;gap:9px;font-size:12px;padding:4px 0;color:#5a72a0}.od-arb-id .idk{font-weight:700;color:#7a98c5}' +
 '.od-arb-act{display:flex;gap:9px;padding:15px 22px;border-top:1px solid #e8eef7;background:#f7f9fc}' +
@@ -982,7 +1032,7 @@ OD.define('topnav', {
 '.od-arb-vide{padding:60px 30px;text-align:center}.od-arb-vide .ok{width:64px;height:64px;border-radius:50%;background:#eaf7f4;display:flex;align-items:center;justify-content:center;margin:0 auto 16px;color:#53bda7}.od-arb-vide .ok svg{width:30px;height:30px}' +
 '.od-arb-vide h2{font-size:18px;font-weight:900;margin:0 0 6px}.od-arb-vide p{color:#7a98c5;margin:0;font-size:13px}' +
 '.od-arb-badge{display:inline-flex;align-items:center;justify-content:center;min-width:18px;height:18px;padding:0 5px;margin-left:auto;background:#e24b4a;color:#fff;font-size:11px;font-weight:800;border-radius:99px}' +
-'@media(max-width:620px){.od-arb-modal{width:100%}.od-arb-res .rg{grid-template-columns:1fr}.od-arb-cf{grid-template-columns:1fr;gap:5px}.od-arb-act{flex-wrap:wrap}.od-arb-b{flex:1 1 100%}}' +
+'@media(max-width:620px){.od-arb-modal{width:100%}.od-arb-res .rg{grid-template-columns:1fr}.od-arb-cf{grid-template-columns:1fr;gap:5px}.od-arb-head{display:none}.od-arb-act{flex-wrap:wrap}.od-arb-b{flex:1 1 100%}}' +
 '</style>';
 
 
@@ -1027,10 +1077,12 @@ OD.define('topnav', {
 
   // ---- badge compteur dans le menu -------------------------------
   function majBadgeArbitrage(n) {
-    const el = root() && root().querySelector('#od-arb-badge');
-    if (!el) return;
-    if (n > 0) { el.textContent = n > 99 ? '99+' : String(n); el.hidden = false; }
-    else { el.hidden = true; }
+    const r = root(); if (!r) return;
+    const texte = n > 99 ? '99+' : String(n);
+    const el = r.querySelector('#od-arb-badge');
+    if (el) { if (n > 0) { el.textContent = texte; el.hidden = false; } else { el.hidden = true; } }
+    const bar = r.querySelector('#od-arb-bar'), barN = r.querySelector('#od-arb-bar-n');
+    if (bar && barN) { if (n > 0) { barN.textContent = texte; bar.hidden = false; } else { bar.hidden = true; } }
   }
   // Comptage unique, partage par le badge et le bandeau.
   // Le badge n'affiche qu'un nombre : client_file_arbitrage_compte s'arrete au
@@ -1069,8 +1121,10 @@ OD.define('topnav', {
     }
   }
   async function rafraichirBadgeArbitrage() {
-    const el = root() && root().querySelector('#od-arb-badge');
-    if (!el) return;
+    // On exigeait la presence du badge du menu de l'avatar pour seulement
+    // compter. Depuis que le compteur vit aussi sur la barre, il suffit que la
+    // nav soit la.
+    if (!root()) return;
     const n = await arbCompter();
     if (n != null) majBadgeArbitrage(n);
   }
@@ -1118,11 +1172,10 @@ OD.define('topnav', {
     const bg = doc.querySelector('.od-arb-bg'); if (bg) bg.remove(); ARB = null;
     let parti = false;
     const go = function () { if (parti) return; parti = true; rafraichirBadgeArbitrage(); };
-    try {
-      if (typeof window.requestIdleCallback === 'function') window.requestIdleCallback(go, { timeout: 6000 });
-      else setTimeout(go, 3000);
-    } catch (e) { setTimeout(go, 3000); }
-    setTimeout(go, 7000);   // filet : le badge finit toujours par se remettre a jour
+    // 1,5 s : la fiche client a le temps de se monter, et le comptage qui suit
+    // ne coute plus que quelques dizaines de millisecondes.
+    setTimeout(go, 1500);
+    setTimeout(go, 6000);   // filet : le compteur finit toujours par se remettre a jour
   }
 
   // ---- rendu ------------------------------------------------------
@@ -1271,7 +1324,7 @@ OD.define('topnav', {
     const sansSiret = !arbVal(d.a, 'siret') && !arbVal(d.b, 'siret');
     const alerte = (retenue === 'Société' && sansSiret)
       ? '<p class="od-arb-nat-a">Marquée entreprise, mais aucun SIRET des deux côtés.</p>' : '';
-    return '<p class="ct">Nature de la fiche</p>' +
+    return '<p class="ct">Nature de la fiche</p>' + arbEntete() +
       arbLigne(d, ['nature', 'Nature', va, vb]) + alerte;
   }
   function arbResultat(d, conflits) {
@@ -1328,14 +1381,30 @@ OD.define('topnav', {
         '" data-saisie="' + k + '" value="' + esc(v) + '" placeholder="autre valeur">';
     }
     return '<div class="od-arb-opt c" data-champ="' + k + '" data-cote="c" aria-pressed="' + on + '">' +
-      champ + '<span class="os">(saisie)</span></div>';
+      champ + '</div>';
+  }
+  // Le libelle complet de la source (« BACS2 (Toyota/Lexus) ») tenait sur deux
+  // lignes et forcait la valeur a se couper au milieu d'un mot. On n'affiche que
+  // sa premiere partie ; le detail reste en infobulle.
+  function arbSrcCourt(cote) {
+    if (cote === 'a') return 'existante';
+    const l = (ARB && ARB.srcLabel) ? String(ARB.srcLabel) : 'saisie vendeur';
+    return l.split(' (')[0].trim() || l;
   }
   function arbOpt(cote, k, v) {
     const on = (ARB.choix[k] || 'a') === cote;
-    const src = (cote === 'a') ? 'existante' : ((ARB && ARB.srcLabel) ? ARB.srcLabel : 'saisie vendeur');
-    return '<button class="od-arb-opt ' + cote + '" data-champ="' + k + '" data-cote="' + cote + '" aria-pressed="' + on + '">' +
-      '<span class="ov' + (v ? '' : ' vide') + '">' + (esc(v) || 'non renseigné') + '</span>' +
-      '<span class="os">(' + src + ')</span></button>';
+    const plein = (cote === 'a') ? 'Valeur déjà dans la fiche' : ((ARB && ARB.srcLabel) ? String(ARB.srcLabel) : 'saisie vendeur');
+    return '<button class="od-arb-opt ' + cote + '" data-champ="' + k + '" data-cote="' + cote + '" aria-pressed="' + on + '" title="' + esc(plein) + '">' +
+      '<span class="ov' + (v ? '' : ' vide') + '">' + (esc(v) || 'non renseigné') + '</span></button>';
+  }
+  // En-tete de colonnes : la provenance est identique sur toutes les lignes, la
+  // repeter dans chaque carte mangeait la largeur et coupait les valeurs au
+  // milieu des mots (« 12 RUE DE L'INSURRECTIO / N »).
+  function arbEntete() {
+    return '<div class="od-arb-cf od-arb-head" aria-hidden="true"><div class="ck"></div>' +
+      '<div class="he a">Existante</div>' +
+      '<div class="he b" title="' + esc((ARB && ARB.srcLabel) || '') + '">' + esc(arbSrcCourt('b')) + '</div>' +
+      '<div class="he c">Saisie</div></div>';
   }
   function arbIdentiques(identiques) {
     return '<details class="od-arb-id"><summary>' + identiques.length + ' champ' + (identiques.length > 1 ? 's identiques' : ' identique') + '</summary>' +
@@ -1628,22 +1697,19 @@ OD.define('topnav', {
     var __onArbReturn = function () { if (doc.visibilityState === 'visible') rappelArbitrageAuRetour(); };
     try { doc.addEventListener('visibilitychange', __onArbReturn); } catch (e) {}
     try { window.addEventListener('focus', __onArbReturn); } catch (e) {}
-    // Les pastilles passent APRÈS l'affichage. client_file_arbitrage est la
-    // requête la plus lourde de la page d'accueil ; la lancer à 1,5 s la mettait
-    // en concurrence directe avec le tableau de bord et l'agenda, sur une
-    // instance qui ne tient qu'un seul travail à la fois.
-    //
-    // On attend donc que le navigateur n'ait plus rien à faire, avec une borne
-    // haute pour que le badge finisse toujours par arriver.
-    (function pastilleApresAffichage() {
+    // LE COMPTEUR DOIT ETRE LA DES LA CONNEXION (06/10/2026).
+    // Il attendait que le navigateur n'ait plus rien a faire, avec un filet a
+    // 9 s : c'etait justifie quand le comptage passait par la fonction
+    // complete, qui coutait jusqu'a 5 s de serveur. Depuis
+    // client_file_arbitrage_compte il coute 8 a 49 ms, et la tache planifiee
+    // qui saturait l'instance quatre fois par heure est corrigee. Plus rien ne
+    // justifie de faire attendre : on part a 1,2 s, le temps que la page
+    // s'affiche, et le filet a 6 s ne sert plus qu'aux demarrages pateux.
+    (function pastilleDesLaConnexion() {
       let parti = false;
       const go = function () { if (parti) return; parti = true; rappelArbitrageAuRetour(); };
-      try {
-        if (typeof window.requestIdleCallback === 'function') {
-          window.requestIdleCallback(go, { timeout: 8000 });
-        } else { setTimeout(go, 5000); }
-      } catch (e) { setTimeout(go, 5000); }
-      setTimeout(go, 9000);          // filet : la pastille arrive, quoi qu'il arrive
+      setTimeout(go, 1200);
+      setTimeout(go, 6000);
     })();
   }
   boot();
