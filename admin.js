@@ -1,5 +1,7 @@
 // ============================================================================
-//  ADMIN — module One Data (OD.define)  v1
+//  ADMIN — module One Data (OD.define)  v10
+//  v10 (05/10/2026) : currentRole() lit l'auth_uid dans la session en memoire
+//  (getSession) au lieu d'appeler /auth/v1/user. Repli conserve.
 //  Rendu dans __anchor ; SUPA_URL -> ctx.tenant (couvre les 7 edge functions) ;
 //  client via ctx.supabase ; self-boot + garde de version + ensureRoot retirés
 //  (le loader possède le cycle de vie et re-monte à chaque navigation SPA).
@@ -2078,7 +2080,12 @@ OD.define('admin', {
     if (role != null) return role;
     try {
       var c = sb(); if (!c) return null;
-      var u = await c.auth.getUser(); var uid = u && u.data && u.data.user ? u.data.user.id : null; if (!uid) return null;
+      // getSession() lit le jeton local ; getUser() interrogeait /auth/v1/user
+      // pour le meme identifiant. Repli sur getUser() si la session manque.
+      var s = await c.auth.getSession();
+      var uid = s && s.data && s.data.session && s.data.session.user ? s.data.session.user.id : null;
+      if (!uid) { var u = await c.auth.getUser(); uid = u && u.data && u.data.user ? u.data.user.id : null; }
+      if (!uid) return null;
       var res = await c.from(TABLE_VIEW).select('user_role_id').eq('auth_uid', uid).limit(1);
       var r0 = res && res.data && res.data[0]; var n = r0 ? Number(r0.user_role_id) : NaN;
       return Number.isFinite(n) ? n : null;
