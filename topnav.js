@@ -1,5 +1,5 @@
 // ============================================================================
-//  TOP NAV — module One Data (OD.define)  v25 — SÉLECTEUR DE PÉRIMÈTRE
+//  TOP NAV — module One Data (OD.define)  v26 — SÉLECTEUR DE PÉRIMÈTRE
 //  v24 (06/10/2026) : l'arbitrage gagne une TROISIEME COLONNE de saisie et la
 //  ligne NATURE (particulier / societe), jusque-la totalement absente alors
 //  qu'elle commande toute la presentation de la fiche client. 15,2 % des
@@ -25,6 +25,12 @@
 //     etait repetee dans chaque carte, passe en en-tete de colonne une fois
 //     pour toutes. Mesure au rendu : 5 lignes sur 6 a 40-42 px, seule une
 //     adresse de 34 caracteres en occupe trois.
+//
+//  v26 (06/10/2026) : les dates de naissance s'affichent en jj/mm/aaaa dans
+//  les deux colonnes de valeurs, dans la fiche finale et dans le repli des
+//  champs identiques. Affichage seul : la valeur transmise a client_arbitrer
+//  est relue depuis la fiche, jamais depuis le texte a l'ecran, et reste donc
+//  en ISO.
 //  Chaque ligne a trancher porte un champ de saisie libre, alimente par
 //  ref_type_client pour la civilite : BACS annoncait « Mme » pour un monsieur
 //  prenomme Francois Xavier, et l'arbitre devait fusionner l'erreur avant de
@@ -1067,6 +1073,14 @@ OD.define('topnav', {
     const v = pick(u, ['ID_User','id_user','ID_USER']);
     return v !== '' ? Number(v) : null;
   }
+  // Affichage seulement : la base et l'envoi gardent l'ISO (aaaa-mm-jj), c'est
+  // l'ecran qui parle francais. Ne touche jamais a la valeur transmise, qui est
+  // relue depuis la fiche et non depuis le texte affiche.
+  function arbAff(k, v) {
+    if (k !== 'naissance' || !v) return v;
+    const m = String(v).match(/^(\d{4})-(\d{2})-(\d{2})/);
+    return m ? (m[3] + '/' + m[2] + '/' + m[1]) : v;
+  }
   function arbVal(f, k) {
     // La nature n'est pas une colonne mais un booleen (idmultivu = 1). On la
     // presente comme un champ ordinaire pour qu'elle se tranche comme les autres.
@@ -1342,7 +1356,7 @@ OD.define('topnav', {
       // (existante vide, BACS faux). On l'honore.
       else { src = ch || (va ? 'a' : 'b'); v = (src === 'a') ? va : vb; }
       const pin = src ? '<span class="pin ' + src + '"></span>' : '';
-      return '<div class="rc"><span class="rk">' + lbl + '</span><span class="rv' + (v ? '' : ' vide') + '">' + pin + (esc(v) || '—') + '</span></div>';
+      return '<div class="rc"><span class="rk">' + lbl + '</span><span class="rv' + (v ? '' : ' vide') + '">' + pin + (esc(arbAff(k, v)) || '—') + '</span></div>';
     }).join('');
     return '<div class="od-arb-res"><div class="rg">' + cells + '</div></div>';
   }
@@ -1395,7 +1409,7 @@ OD.define('topnav', {
     const on = (ARB.choix[k] || 'a') === cote;
     const plein = (cote === 'a') ? 'Valeur déjà dans la fiche' : ((ARB && ARB.srcLabel) ? String(ARB.srcLabel) : 'saisie vendeur');
     return '<button class="od-arb-opt ' + cote + '" data-champ="' + k + '" data-cote="' + cote + '" aria-pressed="' + on + '" title="' + esc(plein) + '">' +
-      '<span class="ov' + (v ? '' : ' vide') + '">' + (esc(v) || 'non renseigné') + '</span></button>';
+      '<span class="ov' + (v ? '' : ' vide') + '">' + (esc(arbAff(k, v)) || 'non renseigné') + '</span></button>';
   }
   // En-tete de colonnes : la provenance est identique sur toutes les lignes, la
   // repeter dans chaque carte mangeait la largeur et coupait les valeurs au
@@ -1408,7 +1422,7 @@ OD.define('topnav', {
   }
   function arbIdentiques(identiques) {
     return '<details class="od-arb-id"><summary>' + identiques.length + ' champ' + (identiques.length > 1 ? 's identiques' : ' identique') + '</summary>' +
-      identiques.map(function (r) { return '<div class="idr"><span class="idk">' + r[1] + '</span><span>' + esc(r[2]) + '</span></div>'; }).join('') + '</details>';
+      identiques.map(function (r) { return '<div class="idr"><span class="idk">' + r[1] + '</span><span>' + esc(arbAff(r[0], r[2])) + '</span></div>'; }).join('') + '</details>';
   }
 
   function arbActions(simple) {
