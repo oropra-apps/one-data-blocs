@@ -127,12 +127,27 @@ const HOST_MAP = {
     // Exposée pour être rappelée par auth.js après un login réussi.
     const syncUserVar = (u) => { try { wwLib.wwVariable.updateValue(OROPRA_USER_VAR, u || null); } catch (e) {} };
     FW.oropraLoadUser = async function () {
-        // uid via getUser() (fiable même avec plusieurs instances GoTrueClient)
+        // uid : on demande D'ABORD au stockage local, ensuite seulement au serveur.
+        // getSession() lit le jeton deja range dans le navigateur — aucun
+        // aller-retour. getUser() le fait VALIDER par le serveur : c'est fiable
+        // meme avec plusieurs instances de GoTrueClient, mais c'est une requete
+        // reseau a chaque tour, et cette boucle en fait jusqu'a vingt-cinq.
+        // Mesure du 05/10/2026 sur un HAR de demarrage : dix appels a
+        // /auth/v1/user pour 671 ms. Le secours serveur reste, espace d'un tour
+        // sur cinq : si le local ne sait rien apres une seconde, c'est qu'il
+        // faut vraiment demander.
         let uid = null;
         try {
             for (let i = 0; i < 25; i++) {
-                const r = await sb.auth.getUser();
-                if (r && r.data && r.data.user) { uid = r.data.user.id; break; }
+                try {
+                    const s = await sb.auth.getSession();
+                    const u = s && s.data && s.data.session && s.data.session.user;
+                    if (u && u.id) { uid = u.id; break; }
+                } catch (e) { }
+                if (i % 5 === 4) {
+                    const r = await sb.auth.getUser();
+                    if (r && r.data && r.data.user) { uid = r.data.user.id; break; }
+                }
                 await new Promise(res => setTimeout(res, 200));
             }
         } catch (e) { console.error('[user] session', e); }
@@ -728,8 +743,15 @@ const HOST_MAP = {
     // setSession ci-dessus, donc un getUser() immédiat tranche sans attente.
     // Pas de session (ex. page d'auth au 1er chargement) → on n'attend PAS, on
     // monte tout de suite pour afficher le login sans loader interminable.
+    // Le pre-check se contente du stockage local : il ne s'agit que de savoir
+    // s'il faut attendre l'utilisateur ou montrer la page de connexion tout de
+    // suite. Faire valider le jeton par le serveur pour cela coutait un
+    // aller-retour sur le chemin critique du demarrage.
     let hasSession = false;
-    try { const r = await sb.auth.getUser(); hasSession = !!(r && r.data && r.data.user); } catch (e) {}
+    try {
+        const s = await sb.auth.getSession();
+        hasSession = !!(s && s.data && s.data.session);
+    } catch (e) { }
 
     let user = null;
     if (hasSession) {
