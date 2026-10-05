@@ -629,7 +629,10 @@ OD.define('dashboard', {
     // =========================================================================
     function famille() {
       const r = num((state.j || {}).role);
-      if (r === 4) return 'vendeur';
+      // Tout rôle connu hors des rôles manager (vendeur, opérateur plateau = 10)
+      // reçoit la vue vendeur. Miroir de public.role_est_manager(), 05/10/2026 :
+      // avant, un rôle inconnu tombait sur la vue direction.
+      if (r === 4 || (r > 0 && ![1, 2, 3, 5, 6, 7, 8, 9].includes(r))) return 'vendeur';
       if (r === 3 || r === 9) return 'chef';
       if (r === 5) return 'marketing';
       return 'direction';
@@ -642,7 +645,8 @@ OD.define('dashboard', {
     };
     const NOM_ROLE = { 1: 'Admin', 2: 'Direction', 3: 'Chef des ventes', 4: 'Vendeur',
                        5: 'Marketing', 6: 'Directeur plaque', 7: 'Directeur marque',
-                       8: 'Directeur groupe', 9: 'Secrétariat commercial' };
+                       8: 'Directeur groupe', 9: 'Secrétariat commercial',
+                       10: 'Opérateur plateau' };
 
     // Regroupement par entité : affaire, réseau ou site. Sert aux déplis de la
     // direction — « quelle entité décroche, et de combien ».
