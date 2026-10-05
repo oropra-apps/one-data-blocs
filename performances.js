@@ -140,23 +140,49 @@ OD.define('performances', {
   // Il était pourtant relu à chaque montage du module — trois fois au
   // démarrage, d'après le HAR du 05/10/2026. Une lecture en vol est partagée,
   // et le résultat est gardé pour la durée de la session de la page.
-  let PERIM_EN_VOL = null, PERIM_POUR = null;
+  // LE CACHE VIT SUR LA FENETRE, PAS DANS LE MODULE.
+  // Mesure du 05/10/2026 : la page monte performances.js DEUX FOIS — le HAR
+  // montre le module, les assets WeWeb de la page et jusqu'au favicon chargés
+  // en double. Deux instances, donc deux jeux de variables : un cache local au
+  // module ne voit pas l'autre instance et chacune repart en base. Le cache est
+  // donc posé sur la fenêtre de front, que les deux instances partagent.
+  function cache() {
+    try {
+      const w = (wwLib.getFrontWindow && wwLib.getFrontWindow()) || window;
+      if (!w.__perfCache) w.__perfCache = { enVol: null, cle: '', dernier: { cle: '', t: 0 },
+                                            perimEnVol: null, perimPour: null };
+      return w.__perfCache;
+    } catch (e) {
+      if (!window.__perfCache) window.__perfCache = { enVol: null, cle: '', dernier: { cle: '', t: 0 },
+                                                      perimEnVol: null, perimPour: null };
+      return window.__perfCache;
+    }
+  }
+
   async function loadPerimeter() {
     const me = (((wwLib.getFrontWindow && wwLib.getFrontWindow()) || window).oropraUser) || {};
     if (me.ID_User == null) return perimSites;
-    if (PERIM_POUR === me.ID_User && perimSites.length) return perimSites;
-    if (PERIM_EN_VOL && PERIM_POUR === me.ID_User) return PERIM_EN_VOL;
-    PERIM_POUR = me.ID_User;
-    PERIM_EN_VOL = (async () => {
+    const C = cache();
+    // Une instance a déjà le périmètre : on le reprend tel quel.
+    if (C.perimPour === me.ID_User && Array.isArray(C.perimSites) && C.perimSites.length) {
+      perimSites = C.perimSites;
+      return perimSites;
+    }
+    if (C.perimEnVol && C.perimPour === me.ID_User) {
+      perimSites = await C.perimEnVol;
+      return perimSites;
+    }
+    C.perimPour = me.ID_User;
+    C.perimEnVol = (async () => {
       try {
         const { data, error } = await sb.from('v_mon_perimetre').select('id_site').eq('viewer_id_user', me.ID_User);
-        if (error) { console.error('[perf] v_mon_perimetre', error); PERIM_POUR = null; return perimSites; }
+        if (error) { console.error('[perf] v_mon_perimetre', error); C.perimPour = null; return perimSites; }
         const arr = [...new Set((data || []).map(r => Number(r.id_site)).filter(n => !isNaN(n)))];
-        if (arr.length) perimSites = arr; else PERIM_POUR = null;
+        if (arr.length) { perimSites = arr; C.perimSites = arr; } else { C.perimPour = null; }
         return perimSites;
-      } finally { PERIM_EN_VOL = null; }
+      } finally { C.perimEnVol = null; }
     })();
-    return PERIM_EN_VOL;
+    return C.perimEnVol;
   }
   // FOLD : requête directe v_performances_v2 (dates + sites du périmètre) au lieu
   // de fetcher col_performances_equipe via workflow puis lire une variable.
@@ -189,7 +215,6 @@ OD.define('performances', {
   // re-rendu WeWeb) et rien ne retenait les appels. Une requête en vol est
   // désormais partagée, et son résultat est gardé une seconde : les montages
   // en rafale se servent du même aller-retour.
-  let EN_VOL = null, EN_VOL_CLE = '', DERNIER = { cle: '', t: 0 };
   const TTL_MS = 1000;
 
   async function loadPerfData(deb, fin) {
@@ -197,11 +222,15 @@ OD.define('performances', {
     const d = String(deb).slice(0, 10), f = String(fin).slice(0, 10);
     const cle = d + '|' + f + '|' + perimSites.slice().sort().join(',');
 
-    if (EN_VOL && EN_VOL_CLE === cle) return EN_VOL;
-    if (DERNIER.cle === cle && (Date.now() - DERNIER.t) < TTL_MS) return allRawData;
+    const C = cache();
+    if (C.enVol && C.cle === cle) { allRawData = await C.enVol; return allRawData; }
+    if (C.dernier.cle === cle && (Date.now() - C.dernier.t) < TTL_MS && C.donnees) {
+      allRawData = C.donnees;
+      return allRawData;
+    }
 
-    EN_VOL_CLE = cle;
-    EN_VOL = (async () => {
+    C.cle = cle;
+    C.enVol = (async () => {
       try {
         if (IS_TC && EST_VENDEUR()) {
           const { data, error } = await sb.rpc('perf_equipe_tc', { p_deb: d, p_fin: f });
@@ -233,11 +262,12 @@ OD.define('performances', {
         allRawData = data || [];
         return allRawData;
       } finally {
-        EN_VOL = null;
-        DERNIER = { cle: cle, t: Date.now() };
+        C.enVol = null;
+        C.donnees = allRawData;
+        C.dernier = { cle: cle, t: Date.now() };
       }
     })();
-    return EN_VOL;
+    return C.enVol;
   }
   function refreshRawData() { return allRawData; } // FOLD : data en mémoire
 
