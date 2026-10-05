@@ -73,7 +73,9 @@ function getViewerRole() {
 function isDirection() { return DIRECTION_ROLES.includes(getViewerRole()); }
   // Vendeur (rôle 4) : interface personnelle, pas la vue chef/direction.
   const VENDEUR_ROLE = 4;
-  function isVendeur() { return getViewerRole() === VENDEUR_ROLE; }
+  // Interface personnelle pour tout rôle non manager (vendeur, opérateur
+  // plateau) : miroir de public.role_est_manager(), 04/10/2026.
+  function isVendeur() { const r = getViewerRole(); return r != null && ![1, 2, 3, 5, 6, 7, 8, 9].includes(r); }
   function daysSinceTs(ts) { if (!ts) return null; const d = new Date(String(ts).replace(' ', 'T')); if (isNaN(d)) return null; return Math.max(0, Math.floor((Date.now() - d.getTime()) / 86400000)); }
 
 // --- État -------------------------------------------------------------------
