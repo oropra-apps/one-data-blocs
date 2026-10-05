@@ -1,4 +1,9 @@
 // ============================================================================
+//  v9 (05/10/2026) : filet d'affichage. Une valeur stockee hors referentiel
+//  ("Other", une variante d'un import) ne retombe plus sur « Selectionner » :
+//  elle est ajoutee comme option, avec son libelle propre quand on sait la
+//  reconnaitre (casse, accents, point final), sinon telle quelle. Aucune
+//  ecriture : la donnee reste visible et l'utilisateur corrige s'il le souhaite.
 //  v8 (05/10/2026) : le select Civilite proposait `libelle` comme valeur
 //  ("Monsieur") alors que la base stocke `libelle_court` ("M."), comme le fait
 //  deja le select Type des societes. Aucune valeur ne correspondait donc jamais
@@ -553,7 +558,19 @@ function fieldInput(label, field, type, opts) {
   if (type === 'textarea') {
     inputHtml = `<textarea class="cf-input" data-cf-field="${esc(field)}" rows="3"${dis}>${esc(v)}</textarea>`;
   } else if (type === 'select') {
-    const options = (opts.options || []).map(o => `<option value="${esc(o.value)}"${String(o.value) === String(v) ? ' selected' : ''}>${esc(o.label)}</option>`).join('');
+    // Filet d'affichage (05/10/2026) : une valeur deja en base qui ne figure
+    // pas dans la liste faisait retomber le select sur « Selectionner », et la
+    // donnee disparaissait de l'ecran sans prevenir. On l'ajoute en option, avec
+    // le libelle propre quand on sait la reconnaitre (casse, accents, point final),
+    // sinon telle quelle. Rien n'est ecrit : l'utilisateur voit et corrige s'il veut.
+    let _listeOD = (opts.options || []).slice();
+    if (v != null && String(v) !== '' && !_listeOD.some(function (o) { return String(o.value) === String(v); })) {
+      var _cleOD = function (s) { return String(s == null ? '' : s).toLowerCase()
+        .normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]/g, ''); };
+      var _procheOD = _listeOD.filter(function (o) { return _cleOD(o.value) === _cleOD(v) || _cleOD(o.label) === _cleOD(v); })[0];
+      _listeOD = _listeOD.concat([{ value: v, label: _procheOD ? _procheOD.label : String(v) }]);
+    }
+    const options = _listeOD.map(o => `<option value="${esc(o.value)}"${String(o.value) === String(v) ? ' selected' : ''}>${esc(o.label)}</option>`).join('');
     const ph = opts.noPlaceholder ? '' : '<option value="">— Sélectionner —</option>';
     inputHtml = `<select class="cf-input" data-cf-field="${esc(field)}"${dis}>${ph}${options}</select>`;
   } else if (type === 'checkbox') {
