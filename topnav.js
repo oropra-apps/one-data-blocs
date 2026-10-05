@@ -1,5 +1,5 @@
 // ============================================================================
-//  TOP NAV — module One Data (OD.define)  v26 — SÉLECTEUR DE PÉRIMÈTRE
+//  TOP NAV — module One Data (OD.define)  v27 — SÉLECTEUR DE PÉRIMÈTRE
 //  v24 (06/10/2026) : l'arbitrage gagne une TROISIEME COLONNE de saisie et la
 //  ligne NATURE (particulier / societe), jusque-la totalement absente alors
 //  qu'elle commande toute la presentation de la fiche client. 15,2 % des
@@ -31,6 +31,16 @@
 //  champs identiques. Affichage seul : la valeur transmise a client_arbitrer
 //  est relue depuis la fiche, jamais depuis le texte a l'ecran, et reste donc
 //  en ISO.
+//
+//  v27 (06/10/2026) : apres une fusion, on ENCHAINE sur le dossier suivant au
+//  lieu de fermer la modale et de partir sur la fiche client. Ce detour se
+//  justifiait tant que l'arbitrage ne montrait pas tout ; depuis que la
+//  nature, la civilite et la saisie libre y sont, il ne coute plus qu'une
+//  navigation complete entre deux dossiers. La fiche reste a un clic depuis
+//  le message de confirmation. Corrige au passage un defaut ancien : ce
+//  message etait pose dans #od-arb, que arbRender reconstruit par innerHTML,
+//  et vivait donc 430 ms au lieu des six secondes prevues — pour tous les
+//  messages de fin d'action, pas seulement celui-ci.
 //  Chaque ligne a trancher porte un champ de saisie libre, alimente par
 //  ref_type_client pour la civilite : BACS annoncait « Mme » pour un monsieur
 //  prenomme Francois Xavier, et l'arbitre devait fusionner l'erreur avant de
@@ -1028,6 +1038,9 @@ OD.define('topnav', {
 '.od-arb-si{flex:1 1 auto;width:100%;min-width:0;border:1px solid #cfdcef;border-radius:7px;padding:5px 6px;font-size:12px;font-weight:700;color:#1F4A85;background:#fff;font-family:inherit}' +
 '.od-arb-si:focus{outline:none;border-color:#d2941f;box-shadow:0 0 0 2px rgba(210,148,31,.18)}' +
 '.od-arb-nat-a{margin:-1px 0 10px 74px;font-size:11px;font-weight:700;color:#c0524f}' +
+'.od-arb-bg .od-arb-info{position:fixed;top:16px;left:50%;transform:translateX(-50%);z-index:100001;max-width:min(560px,92vw);background:#eaf7f4;border:1px solid #53bda7;color:#1F4A85;border-radius:10px;padding:10px 14px;font-size:13px;font-weight:700;box-shadow:0 6px 18px rgba(31,74,133,.18);display:flex;align-items:center;gap:4px;flex-wrap:wrap}' +
+'.od-arb-info-lien{margin-left:10px;border:none;background:none;padding:0;font:inherit;font-weight:800;color:#2a5ea9;text-decoration:underline;cursor:pointer}' +
+'.od-arb-info-lien:hover{color:#1F4A85}' +
 '.od-arb-id{margin-top:5px}.od-arb-id summary{font-size:12px;color:#7a98c5;cursor:pointer;padding:8px 0;font-weight:600;list-style:none}.od-arb-id summary::-webkit-details-marker{display:none}.od-arb-id summary::before{content:"▸ ";color:#acc5e4}.od-arb-id[open] summary::before{content:"▾ "}' +
 '.od-arb-id .idr{display:grid;grid-template-columns:90px 1fr;gap:9px;font-size:12px;padding:4px 0;color:#5a72a0}.od-arb-id .idk{font-weight:700;color:#7a98c5}' +
 '.od-arb-act{display:flex;gap:9px;padding:15px 22px;border-top:1px solid #e8eef7;background:#f7f9fc}' +
@@ -1565,16 +1578,25 @@ OD.define('topnav', {
       return;
     }
 
-    // Validation (fusion / application) -> redirection vers la fiche client mise a jour.
+    // Validation (fusion / application) : ON ENCHAINE SUR LE DOSSIER SUIVANT.
+    // On fermait la modale pour partir sur la fiche client fusionnee. C'etait
+    // utile tant que l'arbitrage ne montrait pas tout : il fallait aller
+    // verifier le resultat ailleurs. Depuis que la nature, la civilite et la
+    // saisie libre sont dans la fenetre, ce detour coute une navigation
+    // complete entre deux dossiers — mesuree a plus d'une seconde le
+    // 06/10/2026 — et oblige a rouvrir la file a chaque fois. La fiche reste
+    // accessible d'un clic depuis le message de confirmation.
     if (action === 'fusion') {
-      // Des champs ont pu etre ecartes parce qu'ils ne divergeaient plus.
-      if (__arbData && Array.isArray(__arbData.ecartes) && __arbData.ecartes.length) {
-        arbInfo('Champs deja a jour, non modifies : ' + __arbData.ecartes.join(', ') + '.');
-      }
       ARB.fus++;
       const cid = (__arbData && (__arbData.id_client != null ? __arbData.id_client : __arbData.survivant)) || (d.a && d.a.idvu);
-      arbClose();
-      if (cid != null) odGoToClientFiche(cid);
+      const ecartes = (__arbData && Array.isArray(__arbData.ecartes) && __arbData.ecartes.length)
+        ? ' Champs déjà à jour, non modifiés : ' + __arbData.ecartes.join(', ') + '.' : '';
+      arbInfo('Fiches fusionnées.' + ecartes, (cid != null) ? { libelle: 'Ouvrir la fiche', cid: cid } : null);
+      if (carte) carte.classList.add(anim);
+      setTimeout(function () {
+        ARB.i++; ARB.detail = null; ARB.choix = {}; ARB.saisie = {}; ARB.survivant = 'a'; ARB.busy = false;
+        arbRender();
+      }, 430);
       return;
     }
     if (action === 'rejet') ARB.rej++;
@@ -1586,13 +1608,26 @@ OD.define('topnav', {
   }
 
   // Information neutre, la ou od-arb-erru signale un echec.
-  function arbInfo(msg) {
-    const box = doc.getElementById('od-arb');
-    if (!box) { console.log('[arbitrage]', msg); return; }
+  // Le message etait pose dans #od-arb, que arbRender reconstruit par innerHTML :
+  // il vivait 430 ms, le temps de l'animation, puis disparaissait. Les six
+  // secondes prevues n'ont donc jamais existe, pour aucun des messages de fin
+  // d'action. On l'accroche desormais au fond de la modale, qui n'est pas
+  // reconstruit, et il survit a l'enchainement sur le dossier suivant.
+  function arbInfo(msg, lien) {
+    const fond = doc.querySelector('.od-arb-bg');
+    if (!fond) { console.log('[arbitrage]', msg); return; }
+    const vieux = fond.querySelector('.od-arb-info'); if (vieux) vieux.remove();
     const w = doc.createElement('div');
     w.className = 'od-arb-info';
     w.textContent = msg;
-    box.prepend(w);
+    // Lien facultatif : la fiche reste a un clic, sans l'imposer a chaque fusion.
+    if (lien && lien.cid != null) {
+      const b = doc.createElement('button');
+      b.type = 'button'; b.className = 'od-arb-info-lien'; b.textContent = lien.libelle || 'Ouvrir';
+      b.addEventListener('click', function (e) { e.stopPropagation(); arbClose(); odGoToClientFiche(lien.cid); });
+      w.appendChild(b);
+    }
+    fond.appendChild(w);
     setTimeout(function () { try { w.remove(); } catch (e) {} }, 6000);
   }
 
