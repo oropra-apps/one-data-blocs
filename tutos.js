@@ -24,7 +24,8 @@ OD.define('tutos', {
     } catch (e) { return null; }
   }
   function groupOf(role) {
-    if (role === 4) return 'vendeur';
+    // Vendeur et tout rôle connu hors des rôles manager (opérateur plateau = 10).
+    if (role === 4 || (role > 0 && ![1, 2, 3, 5, 6, 7, 8, 9].includes(role))) return 'vendeur';
     if (role === 3) return 'chef';
     return 'manager'; // 1,2,5,6,7,8
   }
