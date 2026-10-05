@@ -229,7 +229,9 @@ OD.define('agenda', {
   // null = pas encore prêt ; {mode:'none'} = pas de sélecteur (vendeur)
   function buildCollaborators() {
     const role = viewerRole();
-    if (role === 4) return { mode: 'none' };
+    // Pas de sélecteur de collaborateur hors des rôles manager (vendeur,
+    // opérateur plateau) : miroir de public.role_est_manager(), 04/10/2026.
+    if (role != null && ![1, 2, 3, 5, 6, 7, 8, 9].includes(role)) return { mode: 'none' };
     // Plus aucune dépendance à window.__dash ici : les deux modes (chef et
     // cascade) s'alimentent désormais à la RPC de périmètre. Le sélecteur
     // n'attend donc plus le chargement du module dashboard.
