@@ -38,6 +38,12 @@ const TAB_CALL         = 2;
 
 const ROLE_VENDEUR     = 4;
 const ROLE_CHEF_VENTES = 3;
+const ROLE_PLATEAU     = 10;
+// Rôles qui voient au-delà de leurs propres dossiers. Miroir de la fonction
+// SQL public.role_est_manager() (04/10/2026) : 4 (vendeur) et 10 (opérateur
+// plateau, VROOM chez Team Colin) n'y sont pas. Tout rôle non listé est
+// traité comme un vendeur : fermé par défaut, jamais manager par accident.
+const ROLES_MANAGER    = [1, 2, 3, 5, 6, 7, 8, 9];
 
 // --- 0. Bus de site (oropra-site-bus.js) --------------------
 function siteBus() {
@@ -72,7 +78,7 @@ async function fetchCyclesData(vendeurCible) {
 }
 
 // Cible initiale : un vendeur ne voit que ses cycles ; un manager voit tout (null).
-const __initialVendeurCible = (userConnected.ID_Role === ROLE_VENDEUR) ? userConnected.ID_User : null;
+const __initialVendeurCible = (userConnected.ID_Role != null && !ROLES_MANAGER.includes(Number(userConnected.ID_Role))) ? userConnected.ID_User : null;
 
 // PERF : les cycles (v_cycles_actifs / v_cycles_kanban, les 2 vues les plus
 // lourdes) ne sont PLUS chargés au montage. Ils le sont à la demande, à l'entrée
@@ -112,9 +118,12 @@ const userSiteIds = userSites.map(r => r.id_site ?? r.ID_SITE);
 const userRole    = userConnected.ID_Role;
 const userId      = userConnected.ID_User;
 
-const isVendeur    = userRole === ROLE_VENDEUR;
+// « Vendeur » au sens des droits : tout ce qui n'est pas manager (vendeur,
+// opérateur plateau). Avant le 04/10, seul le rôle 4 l'était et tout autre
+// rôle recevait la vue manager.
+const isVendeur    = userRole != null && !ROLES_MANAGER.includes(Number(userRole));
 const isChefVentes = userRole === ROLE_CHEF_VENTES;
-const isManager    = !isVendeur && userRole != null;
+const isManager    = userRole != null && ROLES_MANAGER.includes(Number(userRole));
 
 // ============================================================
 //  SOCLE DE NAVIGATION PAR RÔLE      (refonte du 27/08/2026)
@@ -158,6 +167,9 @@ const LIB_SECTION = {
 function profilDuRole(r) {
   if (r === ROLE_SECRETAIRE) return 'aucun';
   if (r === ROLE_VENDEUR)    return 'vendeur';
+  // Opérateur plateau : vue vendeur (ses propres leads) en attendant l'écran
+  // dédié au plateau VROOM. Jamais une vue de manager.
+  if (r === ROLE_PLATEAU)    return 'vendeur';
   if (r === ROLE_CHEF_VENTES) return 'chef';
   if (r === ROLE_MARKETING)  return 'marketing';
   if (r === ROLE_DIRECTEUR || r === ROLE_DIR_PLAQUE
