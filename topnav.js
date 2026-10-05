@@ -34,7 +34,7 @@ OD.define('topnav', {
   const wwLib = window.wwLib;
   const doc = __anchor.ownerDocument || wwLib.getFrontDocument();
   const ROOT_ID = 'nav-root';
-  const NAV_VER = 34; // <- numéro de version (témoin de chargement)
+  const NAV_VER = 35; // <- numéro de version (témoin de chargement)
 
   // La barre du haut est un sélecteur de SITE, et rien d'autre.
   //
@@ -422,9 +422,17 @@ OD.define('topnav', {
     if (r.querySelector('#onedata-nav-css') && r.getAttribute('data-nav-ver') === String(NAV_VER)) return; // déjà rendu (même version)
 
     let menusHtml = '';
+    // Opérateur plateau (rôle 10, VROOM chez Team Colin) : il qualifie et
+    // oriente des leads. Pas de pages de pilotage commercial (ventes,
+    // objectifs, bilatérales, activité, import VN). Les droits sont tenus
+    // en base ; ce filtre évite seulement d'ouvrir des pages vides.
+    var __roleMenu = Number((user() || {}).ID_Role != null ? user().ID_Role : (user() || {}).id_role);
+    var __masque = (__roleMenu === 10) ? [P.pipe, P.perf, P.objectifs, P.bilat, P.activite, P.vnConfig] : [];
     MENUS.forEach(function (m, mi) {
+      if (!m.items.some(function (it) { return __masque.indexOf(it.p) === -1; })) return;
       let items = '';
       m.items.forEach(function (it) {
+        if (__masque.indexOf(it.p) !== -1) return;
         items += '<a data-page="' + it.p + '">' + esc(it.t) +
           (it.badge ? '<span class="od-pill od-notifs-pill" style="display:none"></span>' : '') + '</a>';
       });
