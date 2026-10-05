@@ -1,13 +1,17 @@
 // ============================================================================
 //  TOP NAV — module One Data (OD.define)  v24 — SÉLECTEUR DE PÉRIMÈTRE
-//  v24 (06/10/2026) : l'arbitrage sait enfin saisir une TROISIEME valeur.
-//  Il ne proposait que le choix entre la fiche existante et la source ; quand
-//  les deux sont fausses — BACS annoncant « Mme » pour un monsieur prenomme
-//  Francois Xavier — l'arbitre devait fusionner une erreur puis la corriger
-//  dans la fiche. Chaque ligne a trancher porte desormais un champ de saisie,
-//  alimente par ref_type_client pour la civilite. Corrige au passage un cas
-//  ou le choix de l'arbitre etait ignore : quand un seul des deux cotes
-//  portait une valeur, cliquer « non renseigne » ne changeait rien.
+//  v24 (06/10/2026) : l'arbitrage gagne une TROISIEME COLONNE de saisie et la
+//  ligne NATURE (particulier / societe), jusque-la totalement absente alors
+//  qu'elle commande toute la presentation de la fiche client. 15,2 % des
+//  fiches de la file sont marquees entreprise sans porter de SIRET : la ligne
+//  reste donc affichee meme quand les deux cotes sont d'accord, et une alerte
+//  signale « societe sans SIRET ». Corrige aussi un cas ou le choix de
+//  l'arbitre etait ignore : quand un seul des deux cotes portait une valeur,
+//  cliquer « non renseigne » ne changeait rien.
+//  Chaque ligne a trancher porte un champ de saisie libre, alimente par
+//  ref_type_client pour la civilite : BACS annoncait « Mme » pour un monsieur
+//  prenomme Francois Xavier, et l'arbitre devait fusionner l'erreur avant de
+//  la corriger dans la fiche.
 //  v23 (06/10/2026) : un echec du comptage n'efface plus le badge ni le
 //  bandeau d'arbitrage. Trois reponses 500 relevees en une heure dans la nuit
 //  du 05 au 06/10, toutes des depassements du statement_timeout de 8 s : le
@@ -955,7 +959,7 @@ OD.define('topnav', {
 '.od-arb-res .rv{font-size:13px;font-weight:600;min-height:18px}.od-arb-res .rv.vide{color:#7a98c5;opacity:.6;font-weight:400;font-style:italic}' +
 '.od-arb-res .pin{display:inline-block;width:7px;height:7px;border-radius:99px;margin-right:6px;vertical-align:1px}.od-arb-res .pin.a{background:#2a5ea9}.od-arb-res .pin.b{background:#53bda7}' +
 '.od-arb-peint .ct{font-size:11px;font-weight:800;color:#7a98c5;text-transform:uppercase;letter-spacing:.04em;margin:0 0 9px}' +
-'.od-arb-cf{display:grid;grid-template-columns:90px 1fr 1fr;gap:9px;align-items:stretch;margin-bottom:8px}.od-arb-cf .ck{display:flex;align-items:center;font-size:12px;font-weight:700;color:#5a72a0}' +
+'.od-arb-cf{display:grid;grid-template-columns:76px 1fr 1fr 1fr;gap:7px;align-items:stretch;margin-bottom:8px}.od-arb-cf .ck{display:flex;align-items:center;font-size:12px;font-weight:700;color:#5a72a0}' +
 '.od-arb-opt{border:2px solid #e8eef7;border-radius:10px;padding:9px 24px 9px 11px;text-align:left;background:#fff;cursor:pointer;position:relative;transition:.15s;font-family:inherit}.od-arb-opt:hover{border-color:#acc5e4}' +
 '.od-arb-opt .ov{font-size:13px;font-weight:700;color:#1F4A85;word-break:break-word;line-height:1.3}.od-arb-opt .ov.vide{color:#7a98c5;opacity:.6;font-weight:400;font-style:italic}' +
 '.od-arb-opt .os{font-size:10px;font-weight:600;margin-left:6px;white-space:nowrap}.od-arb-opt.a .os{color:#2a5ea9}.od-arb-opt.b .os{color:#53bda7}' +
@@ -963,10 +967,11 @@ OD.define('topnav', {
 '.od-arb-opt[aria-pressed="true"]::after{content:"✓";position:absolute;top:8px;right:9px;font-size:11px;font-weight:900}.od-arb-opt.a[aria-pressed="true"]::after{color:#2a5ea9}.od-arb-opt.b[aria-pressed="true"]::after{color:#53bda7}' +
 // Saisie libre : troisieme ligne sous les deux propositions, en orange de la
 // charte pour la distinguer de l'existante (bleu) et de la source (vert).
-'.od-arb-opt.c{grid-column:2 / span 2;display:flex;align-items:center;gap:9px;padding:7px 24px 7px 11px;cursor:default}' +
-'.od-arb-opt.c .os{color:#d2941f}.od-arb-opt.c[aria-pressed="true"]{border-color:#d2941f;background:#fdf6e9}.od-arb-opt.c[aria-pressed="true"]::after{color:#d2941f}' +
+'.od-arb-opt.c{display:flex;flex-direction:column;align-items:stretch;justify-content:center;gap:4px;padding:7px 9px;cursor:default}' +
+'.od-arb-opt.c .os{color:#d2941f;margin-left:0}.od-arb-opt.c[aria-pressed="true"]{border-color:#d2941f;background:#fdf6e9}' + '.od-arb-opt.c::after{display:none}.od-arb-opt.c[aria-pressed="true"] .os::after{content:" \\2713";font-weight:900}' +
 '.od-arb-si{flex:1;min-width:0;border:1px solid #cfdcef;border-radius:7px;padding:6px 8px;font:700 13px inherit;color:#1F4A85;background:#fff;font-family:inherit}' +
 '.od-arb-si:focus{outline:none;border-color:#d2941f;box-shadow:0 0 0 2px rgba(210,148,31,.18)}' +
+'.od-arb-nat-a{margin:-2px 0 10px 76px;font-size:11px;font-weight:700;color:#c0524f}' +
 '.od-arb-id{margin-top:5px}.od-arb-id summary{font-size:12px;color:#7a98c5;cursor:pointer;padding:8px 0;font-weight:600;list-style:none}.od-arb-id summary::-webkit-details-marker{display:none}.od-arb-id summary::before{content:"▸ ";color:#acc5e4}.od-arb-id[open] summary::before{content:"▾ "}' +
 '.od-arb-id .idr{display:grid;grid-template-columns:90px 1fr;gap:9px;font-size:12px;padding:4px 0;color:#5a72a0}.od-arb-id .idk{font-weight:700;color:#7a98c5}' +
 '.od-arb-act{display:flex;gap:9px;padding:15px 22px;border-top:1px solid #e8eef7;background:#f7f9fc}' +
@@ -977,7 +982,7 @@ OD.define('topnav', {
 '.od-arb-vide{padding:60px 30px;text-align:center}.od-arb-vide .ok{width:64px;height:64px;border-radius:50%;background:#eaf7f4;display:flex;align-items:center;justify-content:center;margin:0 auto 16px;color:#53bda7}.od-arb-vide .ok svg{width:30px;height:30px}' +
 '.od-arb-vide h2{font-size:18px;font-weight:900;margin:0 0 6px}.od-arb-vide p{color:#7a98c5;margin:0;font-size:13px}' +
 '.od-arb-badge{display:inline-flex;align-items:center;justify-content:center;min-width:18px;height:18px;padding:0 5px;margin-left:auto;background:#e24b4a;color:#fff;font-size:11px;font-weight:800;border-radius:99px}' +
-'@media(max-width:620px){.od-arb-modal{width:100%}.od-arb-res .rg{grid-template-columns:1fr}.od-arb-cf{grid-template-columns:1fr;gap:5px}.od-arb-opt.c{grid-column:1}.od-arb-act{flex-wrap:wrap}.od-arb-b{flex:1 1 100%}}' +
+'@media(max-width:620px){.od-arb-modal{width:100%}.od-arb-res .rg{grid-template-columns:1fr}.od-arb-cf{grid-template-columns:1fr;gap:5px}.od-arb-act{flex-wrap:wrap}.od-arb-b{flex:1 1 100%}}' +
 '</style>';
 
 
@@ -988,6 +993,7 @@ OD.define('topnav', {
   //  client_arbitrer. Périmètre géré côté RPC.
   // ================================================================
   const ARB_CHAMPS = [
+    ['nature','Nature'],
     ['civilite','Civilité'], ['nom','Nom'], ['prenom','Prénom'],
     ['mobile','Portable'], ['email','E-mail'], ['adresse','Adresse'],
     ['code_postal','Code postal'], ['ville','Ville'], ['naissance','Naissance']
@@ -1011,7 +1017,12 @@ OD.define('topnav', {
     const v = pick(u, ['ID_User','id_user','ID_USER']);
     return v !== '' ? Number(v) : null;
   }
-  function arbVal(f, k) { return f && f[k] != null ? String(f[k]).trim() : ''; }
+  function arbVal(f, k) {
+    // La nature n'est pas une colonne mais un booleen (idmultivu = 1). On la
+    // presente comme un champ ordinaire pour qu'elle se tranche comme les autres.
+    if (k === 'nature') return f ? (f.societe ? 'Société' : 'Particulier') : '';
+    return f && f[k] != null ? String(f[k]).trim() : '';
+  }
   function arbNom(f) { return [f.civilite, f.nom, (f.societe ? '' : f.prenom)].filter(Boolean).join(' '); }
 
   // ---- badge compteur dans le menu -------------------------------
@@ -1168,6 +1179,9 @@ OD.define('topnav', {
     const majKeys = (ARB && ARB.type === 'maj' && ARB.diff) ? Object.keys(ARB.diff) : null;
     ARB_CHAMPS.forEach(function (pair) {
       const k = pair[0], lbl = pair[1];
+      // La nature a sa ligne dediee, toujours affichee : elle ne rejoint ni les
+      // conflits ni le repli des champs identiques.
+      if (k === 'nature') return;
       const va = arbVal(d.a, k), vb = arbVal(d.b, k);
       if (majKeys) {
         if (majKeys.indexOf(k) >= 0) conflits.push([k, lbl, va, vb]);
@@ -1235,9 +1249,30 @@ OD.define('topnav', {
     return '<div class="od-arb-peint">' +
       '<p class="intro">Pour chaque ligne, <b>touchez la valeur à conserver</b>. La fiche finale se compose au-dessus.</p>' +
       arbResultat(d, conflits) +
+      arbNature(d) +
       '<p class="ct">À trancher — ' + conflits.length + ' champ' + (conflits.length > 1 ? 's' : '') + '</p>' +
       conflits.map(function (c) { return arbLigne(d, c); }).join('') +
       (identiques.length ? arbIdentiques(identiques) : '') + '</div>';
+  }
+  // NATURE DE LA FICHE (06/10/2026). Elle ne figurait nulle part dans
+  // l'arbitrage, alors qu'elle commande toute la presentation de la fiche
+  // client : a 1, le formulaire bascule en mode entreprise et remplace
+  // civilite/nom/prenom par type/SIRET/raison sociale. Resultat, un
+  // particulier arbitre proprement ressortait en societe sans que rien ne
+  // l'ait annonce. Mesure du 06/10/2026 : 15,2 % des fiches de la file sont
+  // marquees entreprise SANS porter le moindre SIRET.
+  // La ligne est donc toujours affichee, meme quand les deux cotes sont
+  // d'accord — c'est justement le cas ou les deux ont tort.
+  function arbNature(d) {
+    const va = arbVal(d.a, 'nature'), vb = arbVal(d.b, 'nature');
+    const ch = ARB.choix.nature;
+    const retenue = (ch === 'c') ? ((ARB.saisie && ARB.saisie.nature) || '')
+                  : (ch === 'b') ? vb : (ch === 'a') ? va : (va || vb);
+    const sansSiret = !arbVal(d.a, 'siret') && !arbVal(d.b, 'siret');
+    const alerte = (retenue === 'Société' && sansSiret)
+      ? '<p class="od-arb-nat-a">Marquée entreprise, mais aucun SIRET des deux côtés.</p>' : '';
+    return '<p class="ct">Nature de la fiche</p>' +
+      arbLigne(d, ['nature', 'Nature', va, vb]) + alerte;
   }
   function arbResultat(d, conflits) {
     const cells = ARB_CHAMPS.map(function (pair) {
@@ -1275,7 +1310,13 @@ OD.define('topnav', {
     const on = ARB.choix[k] === 'c';
     const v = (ARB.saisie && ARB.saisie[k] != null) ? String(ARB.saisie[k]) : '';
     let champ;
-    if (k === 'civilite' && ARB.civilites && ARB.civilites.length) {
+    if (k === 'nature') {
+      champ = '<select class="od-arb-si" data-saisie="nature">' +
+        '<option value="">— autre —</option>' +
+        ['Particulier', 'Société'].map(function (o) {
+          return '<option value="' + o + '"' + (v === o ? ' selected' : '') + '>' + o + '</option>';
+        }).join('') + '</select>';
+    } else if (k === 'civilite' && ARB.civilites && ARB.civilites.length) {
       champ = '<select class="od-arb-si" data-saisie="' + k + '">' +
         '<option value="">— autre valeur —</option>' +
         ARB.civilites.map(function (c) {
@@ -1393,6 +1434,18 @@ OD.define('topnav', {
             champs[k] = f[k];
           }
         });
+        // La nature est presentee a part : on la traduit ici en idmultivu, et
+        // seulement si elle differe de celle que porte deja le survivant.
+        const chNat = ARB.choix.nature;
+        if (chNat) {
+          const nat = (chNat === 'c') ? ((ARB.saisie && ARB.saisie.nature) || '')
+                    : arbVal(chNat === 'a' ? d.a : d.b, 'nature');
+          if (nat) {
+            const vise = (nat === 'Société') ? '1' : '0';
+            const porte = ((survCote === 'a' ? d.a : d.b) || {}).societe ? '1' : '0';
+            if (vise !== porte) champs.idmultivu = vise;
+          }
+        }
         params = { p_id_file: d.id_file, p_decision: 'fusionner', p_survivant: Number(survivant), p_absorbe: Number(absorbe), p_id_user: uid, p_champs: champs };
       } else if (action === 'rejet') {
         params = { p_id_file: d.id_file, p_decision: 'rejeter', p_id_user: uid };
