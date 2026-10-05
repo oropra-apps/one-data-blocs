@@ -1,5 +1,10 @@
 // ============================================================================
-//  VOIP-INIT — module One Data (OD.define)  v1 (Lot C)
+//  VOIP-INIT — module One Data (OD.define)  v6
+//  v6 (05/10/2026) : deux attentes inutiles retirees. getUser() remplace par la
+//  session deja en memoire (un appel /auth/v1/user de moins au demarrage), et le
+//  sommeil fixe de 2000 ms avant la creation du Device remplace par une attente
+//  conditionnelle sur Twilio.Device — le poste s'enregistre deux secondes plus
+//  tot pour tout vendeur equipe d'un numero VOIP.
 //  Procédure d'init Twilio (SDK + token + Device + stockage multi-contexte).
 //  Migré : user via ctx.supabase.auth ; URL/clé via ctx.tenant (token + REST) ;
 //  plus d'esehl ni de wwAuth. Auto-gate : sans token VOIP -> abandon propre
@@ -26,10 +31,14 @@ if (existingDevice?.state && existingDevice.state !== 'destroyed') {
 }
 
 // 2. Utilisateur
-const { data: { user } } = await ctx.supabase.auth.getUser()
+// getSession() lit le jeton deja en memoire ; getUser() faisait un aller-retour
+// vers /auth/v1/user (120 ms mesures au demarrage du 05/10/2026) pour une
+// information que la session porte deja — et la session etait de toute facon
+// lue deux lignes plus bas. Un appel reseau de moins, valeurs identiques.
+const { data: { session } } = await ctx.supabase.auth.getSession()
+const user = session?.user || null
 const email = user?.email
 const authUid = user?.id
-const { data: { session } } = await ctx.supabase.auth.getSession()
 const jwt = session?.access_token || null
 console.log('👤 Email utilisateur:', email, '| Auth UID:', authUid)
 if (!email) { console.error('❌ Pas d\'utilisateur connecté'); return { success: false } }
@@ -61,7 +70,20 @@ if (!data.identity) {
 }
 console.log('✅ Token récupéré pour:', data.identity)
 if (!window.Twilio) { console.error('❌ SDK Twilio toujours non disponible'); return { success: false } }
-await new Promise(r => setTimeout(r, 2000))
+
+// Attente de la disponibilite reelle du constructeur, au lieu d'un sommeil
+// aveugle de 2000 ms. Le plafond reste le meme (40 x 50 ms), mais on en sort des
+// que `Twilio.Device` existe — c'est-a-dire tout de suite dans le cas normal,
+// ou le SDK a fini de s'evaluer bien avant l'arrivee du token. Le sommeil fixe
+// retardait l'enregistrement du poste de deux secondes pleines pour CHAQUE
+// vendeur equipe d'un numero VOIP, donc deux secondes pendant lesquelles un
+// appel entrant ne trouvait personne.
+for (let i = 0; i < 40 && typeof window.Twilio?.Device !== 'function'; i++) {
+  await new Promise(r => setTimeout(r, 50))
+}
+if (typeof window.Twilio?.Device !== 'function') {
+  console.error('❌ SDK Twilio charge mais Device indisponible'); return { success: false }
+}
 
 // 4. Device
 const device = new window.Twilio.Device(data.token, {
