@@ -136,14 +136,27 @@ OD.define('performances', {
   // Périmètre : dérivé directement de v_mon_perimetre (ne dépend plus de VAR_SITES,
   // qui n'est plus alimentée de façon fiable depuis la migration). Self-sufficient.
   let perimSites = [];
+  // Le périmètre d'un utilisateur ne change pas pendant qu'il regarde la page.
+  // Il était pourtant relu à chaque montage du module — trois fois au
+  // démarrage, d'après le HAR du 05/10/2026. Une lecture en vol est partagée,
+  // et le résultat est gardé pour la durée de la session de la page.
+  let PERIM_EN_VOL = null, PERIM_POUR = null;
   async function loadPerimeter() {
     const me = (((wwLib.getFrontWindow && wwLib.getFrontWindow()) || window).oropraUser) || {};
     if (me.ID_User == null) return perimSites;
-    const { data, error } = await sb.from('v_mon_perimetre').select('id_site').eq('viewer_id_user', me.ID_User);
-    if (error) { console.error('[perf] v_mon_perimetre', error); return perimSites; }
-    const arr = [...new Set((data || []).map(r => Number(r.id_site)).filter(n => !isNaN(n)))];
-    if (arr.length) perimSites = arr;
-    return perimSites;
+    if (PERIM_POUR === me.ID_User && perimSites.length) return perimSites;
+    if (PERIM_EN_VOL && PERIM_POUR === me.ID_User) return PERIM_EN_VOL;
+    PERIM_POUR = me.ID_User;
+    PERIM_EN_VOL = (async () => {
+      try {
+        const { data, error } = await sb.from('v_mon_perimetre').select('id_site').eq('viewer_id_user', me.ID_User);
+        if (error) { console.error('[perf] v_mon_perimetre', error); PERIM_POUR = null; return perimSites; }
+        const arr = [...new Set((data || []).map(r => Number(r.id_site)).filter(n => !isNaN(n)))];
+        if (arr.length) perimSites = arr; else PERIM_POUR = null;
+        return perimSites;
+      } finally { PERIM_EN_VOL = null; }
+    })();
+    return PERIM_EN_VOL;
   }
   // FOLD : requête directe v_performances_v2 (dates + sites du périmètre) au lieu
   // de fetcher col_performances_equipe via workflow puis lire une variable.
@@ -169,24 +182,62 @@ OD.define('performances', {
   // miroir de public.role_est_manager(), 04/10/2026.
   const EST_VENDEUR = () => { const r = monRole(); return r != null && ![1, 2, 3, 5, 6, 7, 8, 9].includes(r); };
 
+  // --- LE CHARGEMENT ----------------------------------------------------------
+  // Mesuré le 05/10/2026 sur un HAR : la page lançait TROIS fois la même
+  // requête, à la milliseconde et au corps près, pour 1,4 s cumulée. Le module
+  // se remonte plusieurs fois au démarrage (bus de site, utilisateur connecté,
+  // re-rendu WeWeb) et rien ne retenait les appels. Une requête en vol est
+  // désormais partagée, et son résultat est gardé une seconde : les montages
+  // en rafale se servent du même aller-retour.
+  let EN_VOL = null, EN_VOL_CLE = '', DERNIER = { cle: '', t: 0 };
+  const TTL_MS = 1000;
+
   async function loadPerfData(deb, fin) {
     if (!perimSites.length) await loadPerimeter();
-    if (IS_TC && EST_VENDEUR()) {
-      const { data, error } = await sb.rpc('perf_equipe_tc', {
-        p_deb: String(deb).slice(0, 10), p_fin: String(fin).slice(0, 10) });
-      if (!error) { allRawData = data || []; return allRawData; }
-      // La fonction peut manquer sur un tenant non migré : on retombe alors sur
-      // la vue, c'est-à-dire sur l'ancien comportement, plutôt que sur du vide.
-      console.warn('[perf] perf_equipe_tc indisponible, repli sur la vue', error);
-    }
-    let q = sb.from(PERF_VIEW).select('*')
-      .gte('date_mois', String(deb).slice(0, 10))
-      .lte('date_mois', String(fin).slice(0, 10));
-    if (perimSites.length) q = q.in('id_site', perimSites);
-    const { data, error } = await q;
-    if (error) { console.error('[perf] ' + PERF_VIEW, error); return allRawData; }
-    allRawData = data || [];
-    return allRawData;
+    const d = String(deb).slice(0, 10), f = String(fin).slice(0, 10);
+    const cle = d + '|' + f + '|' + perimSites.slice().sort().join(',');
+
+    if (EN_VOL && EN_VOL_CLE === cle) return EN_VOL;
+    if (DERNIER.cle === cle && (Date.now() - DERNIER.t) < TTL_MS) return allRawData;
+
+    EN_VOL_CLE = cle;
+    EN_VOL = (async () => {
+      try {
+        if (IS_TC && EST_VENDEUR()) {
+          const { data, error } = await sb.rpc('perf_equipe_tc', { p_deb: d, p_fin: f });
+          if (!error) { allRawData = data || []; return allRawData; }
+          // La fonction peut manquer sur un tenant non migré : on retombe alors
+          // sur la vue, c'est-à-dire sur l'ancien comportement, plutôt que sur
+          // du vide.
+          console.warn('[perf] perf_equipe_tc indisponible, repli sur la vue', error);
+        }
+        // perf_lire porte les bornes de date et les descend jusqu'au cache des
+        // attributs, où un index les attend. La vue, elle, agrégeait tout
+        // l'historique avant de jeter ce qui sortait de la période : 518 ms
+        // pour six lignes, contre 244 ms maintenant. Le repli sur la vue reste
+        // en place pour un tenant qui n'a pas encore la fonction.
+        if (IS_TC) {
+          const { data, error } = await sb.rpc('perf_lire', { p_deb: d, p_fin: f });
+          if (!error) {
+            allRawData = (perimSites.length && Array.isArray(data))
+              ? data.filter(r => perimSites.indexOf(Number(r.id_site)) >= 0)
+              : (data || []);
+            return allRawData;
+          }
+          console.warn('[perf] perf_lire indisponible, repli sur la vue', error);
+        }
+        let q = sb.from(PERF_VIEW).select('*').gte('date_mois', d).lte('date_mois', f);
+        if (perimSites.length) q = q.in('id_site', perimSites);
+        const { data, error } = await q;
+        if (error) { console.error('[perf] ' + PERF_VIEW, error); return allRawData; }
+        allRawData = data || [];
+        return allRawData;
+      } finally {
+        EN_VOL = null;
+        DERNIER = { cle: cle, t: Date.now() };
+      }
+    })();
+    return EN_VOL;
   }
   function refreshRawData() { return allRawData; } // FOLD : data en mémoire
 
