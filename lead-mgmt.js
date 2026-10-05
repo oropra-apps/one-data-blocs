@@ -1,7361 +1,1109 @@
 // ============================================================================
-//  LEAD MANAGEMENT (Marketing) — module One Data (OD.define)  v1
-//  Le bloc d'origine était du code racine (enveloppé par WeWeb) -> encapsulé ici.
-//  Rendu dans __anchor ; client via ctx.supabase ; aucune URL en dur.
-//  User via socle oropraUser (cas tableau géré). bindLeadBus / bindLeadNarrow
-//  conservés (bus de site + responsive).
+//  LEAD MANAGEMENT — module One Data (OD.define 'lead-mgmt')
+//  VERSION TEAM COLIN (v49) — déploiement CIBLÉ (publish-targets :
+//  lead-mgmt = teamcolin). Le reste de la flotte reste sur la v48.
+//
+//  Refonte du lead management de Team Colin. Un poste de travail à deux
+//  zones, le même pour tous les profils :
+//    · à gauche, les SIGNAUX : ce qui arrive, chacun avec son action ;
+//    · à droite, les ACTIONS : quelques onglets, chacun répond à une question.
+//
+//  ÉTAPE 1 (cette version) : le poste du plateau VROOM.
+//    · Rôle 10 (opérateur plateau) : le poste VROOM.
+//    · Rôles 1 et 8 : la vue habituelle, et le poste VROOM en aperçu avec
+//      #plateau dans l'adresse de la page.
+//    · Tous les autres rôles : la version 48 du module, chargée telle quelle
+//      depuis le CDN (épinglée par son commit). Rien ne change pour eux.
+//
+//  DONNÉES : uniquement les fonctions plateau_* du tenant Team Colin
+//  (teamcolin_plateau_vroom.sql). Elles lisent la copie BACS synchronisée par
+//  l'extension, refusent tout utilisateur hors rôles 1, 8 et 10, et
+//  n'écrivent dans BACS que si lead_collecte_config.plateau_ecrire_bacs = oui.
+//
+//  ⚠️ CE FICHIER EST DÉSORMAIS CELUI DE TEAM COLIN (comme objectifs.js).
+//  La version de flotte vit au tag lead-mgmt-v48. Pour la corriger :
+//  repartir de `git show lead-mgmt-v48:lead-mgmt.js`, jamais de ce fichier.
+//  Retour arrière Team Colin : ré-épingler la v48 sur le tenant.
 // ============================================================================
-OD.define('lead-mgmt', {
-  async mount(__anchor, ctx) {
-  __anchor.id = 'lead-mgmt-root';
+(function () {
+  'use strict';
 
-// ============================================================
-// LEAD MANAGEMENT v25 — Responsive
-//  Base v24 (bus de site + date picker calendrier + onglet Campagnes), INCHANGÉE
-//  côté logique. Ajout responsive uniquement :
-//   - tableau d'équipe dans un conteneur à scroll horizontal interne
-//     (.lm-team-scroll) : il ne pousse plus la page en largeur ;
-//   - kanban empilé en 1 colonne en étroit (hauteur auto, corps de colonne
-//     plafonné à 55vh) ;
-//   - cartes en grille fluide (plus de minmax 360px qui déborde sous 360) ;
-//   - recherche pleine largeur, grilles KPI/synthèse/campagnes en 1-2 col ;
-//   - calendrier borné à la largeur de l'écran ;
-//   - repli .lm-narrow : règles mobiles déclenchées par la largeur RÉELLE de
-//     #lead-mgmt-root (ResizeObserver), en plus des @media.
-//   PRÉREQUIS : conteneur de section de la page en width:100% (comme Pipe).
-// ============================================================
+  // Version d'origine, servie aux rôles qui n'ont pas encore leur poste.
+  var LEGACY_URL = 'https://cdn.jsdelivr.net/gh/oropra-apps/one-data-blocs@6383ae37cc242b32685fd155feefae361f23e9f6/lead-mgmt.js';
+  var ROLES_PLATEAU = [10];
+  var ROLES_APERCU = [1, 8];
 
-const VAR_VENDEUR_CIBLE = '7759f3ba-c260-4297-9e28-3713c305684c';
-
-// --- Configuration ------------------------------------------
-
-const WF_GET_FICHE     = '53250f54-d14c-4622-baf4-0b89064316b6';
-const PAGE_FICHE_ID    = '259f1951-a2d4-4b90-ac83-0b3febe1d4ec';
-const TAB_DEFAULT      = 0;
-const TAB_WHATSAPP     = 2;
-const TAB_CYCLE        = 2;
-const TAB_CALL         = 2;
-
-const ROLE_VENDEUR     = 4;
-const ROLE_CHEF_VENTES = 3;
-const ROLE_PLATEAU     = 10;
-// Rôles qui voient au-delà de leurs propres dossiers. Miroir de la fonction
-// SQL public.role_est_manager() (04/10/2026) : 4 (vendeur) et 10 (opérateur
-// plateau, VROOM chez Team Colin) n'y sont pas. Tout rôle non listé est
-// traité comme un vendeur : fermé par défaut, jamais manager par accident.
-const ROLES_MANAGER    = [1, 2, 3, 5, 6, 7, 8, 9];
-
-// --- 0. Bus de site (oropra-site-bus.js) --------------------
-function siteBus() {
-  try { const w = wwLib.getFrontWindow(); if (w && w.oropraSite) return w.oropraSite; } catch (e) {}
-  return window.oropraSite || null;
-}
-
-// --- 1. Récupération des données ----------------------------
-// (helper asArray() retiré : plus aucune collection WeWeb n'est lue)
-
-// --- FOLD : chargement direct des 9 vues (plus de collections WeWeb) ---------
-//  Auparavant : workflow (étapes 2 & 3) + auto-fetch, lues via asArray().
-//  Désormais : requêtes Supabase directes ici, pour que la page ne dépende
-//  d'aucune collection WeWeb (portabilité multi-clients : mêmes vues partout).
-const sb = ctx.supabase;
-let userConnected        = (((wwLib.getFrontWindow && wwLib.getFrontWindow()) || window).oropraUser);
-if (Array.isArray(userConnected)) userConnected = userConnected[0];
-userConnected            = userConnected || {};
-
-// Cycles : filtre serveur user_ids_actifs && [vendeurCible] (overlap).
-// vendeurCible null => tout le périmètre (RLS), le filtrage fin reste client-side.
-async function fetchCyclesData(vendeurCible) {
-  const aQ = sb.from('v_cycles_actifs').select('*');
-  const kQ = sb.from('v_cycles_kanban').select('*');
-  const [a, k] = await Promise.all([
-    (vendeurCible != null ? aQ.overlaps('user_ids_actifs', [Number(vendeurCible)]) : aQ),
-    (vendeurCible != null ? kQ.overlaps('user_ids_actifs', [Number(vendeurCible)]) : kQ)
-  ]);
-  if (a.error) console.error('[leadMgmt] v_cycles_actifs', a.error);
-  if (k.error) console.error('[leadMgmt] v_cycles_kanban', k.error);
-  return { actifs: a.data || [], kanban: k.data || [] };
-}
-
-// Cible initiale : un vendeur ne voit que ses cycles ; un manager voit tout (null).
-const __initialVendeurCible = (userConnected.ID_Role != null && !ROLES_MANAGER.includes(Number(userConnected.ID_Role))) ? userConnected.ID_User : null;
-
-// PERF : les cycles (v_cycles_actifs / v_cycles_kanban, les 2 vues les plus
-// lourdes) ne sont PLUS chargés au montage. Ils le sont à la demande, à l'entrée
-// de « Suivi leads » (voir ensureCycles), scopés au vendeur ciblé. Un manager sur
-// « Synthèse » (page par défaut) n'en charge aucun -> premier affichage rapide.
-// ⚡ CHARGEMENT PARESSEUX (27/08/2026).
-//
-// Auparavant SEPT vues étaient chargées EN BLOQUANT au montage, avant même
-// de savoir quelle section serait affichée. Relevé au réseau par Antoine :
-// v_lead_kpi_vendeur 3,1 s, v_lead_kpi_site 1,45 s, v_user_cycles_recent
-// 1,28 s, v_premier_contact 0,72 s — soit plusieurs secondes avant le
-// premier pixel, pour un vendeur qui arrive sur « Ma file » et n'a besoin
-// QUE de v_lead_sla (116 ms mesurées).
-//
-// Seul le PÉRIMÈTRE reste bloquant : il décide du rôle et des sites, donc
-// de ce qu'on affiche. Tout le reste passe par ensureKpis().
-const __perim = await sb.from('v_mon_perimetre').select('*')
-  .eq('viewer_id_user', userConnected.ID_User);
-if (__perim && __perim.error) console.error('[leadMgmt] v_mon_perimetre', __perim.error);
-
-let dataActifs           = [];   // chargés à la demande (ensureCycles)
-let dataKanban           = [];
-let cyclesLoadedFor      = undefined;   // cible (idUser|null) pour laquelle les cycles sont chargés
-const userSites          = __perim.data || [];
-let dataKpiSite          = [];
-let dataKpiVend          = [];
-let dataClotures         = [];
-let dataLeads            = [];
-let dataUserCycles       = [];
-let dataPremierContact   = [];
-let kpisCharges          = false;
-let kpisEnCours          = null;
-let kpiVendeurCharge     = false;   // « Ma synthese » : v_lead_kpi_vendeur seule
-let kpiVendeurEnCours    = null;
-
-const userSiteIds = userSites.map(r => r.id_site ?? r.ID_SITE);
-const userRole    = userConnected.ID_Role;
-const userId      = userConnected.ID_User;
-
-// « Vendeur » au sens des droits : tout ce qui n'est pas manager (vendeur,
-// opérateur plateau). Avant le 04/10, seul le rôle 4 l'était et tout autre
-// rôle recevait la vue manager.
-const isVendeur    = userRole != null && !ROLES_MANAGER.includes(Number(userRole));
-const isChefVentes = userRole === ROLE_CHEF_VENTES;
-const isManager    = userRole != null && ROLES_MANAGER.includes(Number(userRole));
-
-// ============================================================
-//  SOCLE DE NAVIGATION PAR RÔLE      (refonte du 27/08/2026)
-//
-//  Chaque rôle arrive avec UNE question, et l'écran d'entrée y répond
-//  avant tout le reste :
-//    vendeur   « qu'est-ce que je fais maintenant ? »  -> l'action
-//    chef      « qui décroche, qui laisse filer ? »    -> le VENDEUR
-//    directeur « mes sites tiennent-ils leurs objectifs ? » -> le SITE
-//    marketing « mes campagnes rapportent-elles ? »    -> la SOURCE
-//
-//  Avant cette refonte, les quatre recevaient les MÊMES six sections :
-//  un chef entrait sur une liste de cartes alors qu'il lui faut ses
-//  vendeurs. D'où « les onglets sont vides et peu compréhensibles ».
-// ============================================================
-const ROLE_DIRECTEUR   = 2;
-const ROLE_MARKETING   = 5;
-const ROLE_DIR_PLAQUE  = 6;
-const ROLE_DIR_MARQUE  = 7;
-const ROLE_DIR_GROUPE  = 8;
-const ROLE_SECRETAIRE  = 9;
-const ROLE_ADMIN       = 1;
-
-// ⚠️ La SECRÉTAIRE COMMERCIALE n'a PAS de lead management (décision
-//    d'Antoine, 27/08). Elle doit être traitée explicitement : la laisser
-//    tomber dans le cas par défaut lui donnerait la vue vendeur.
-const PROFILS = {
-  vendeur:   { sections:['ma_file','mes_cycles','mes_chiffres'] },
-  chef:      { sections:['mon_equipe','ma_file','leads','cycles'] },
-  directeur: { sections:['mes_sites','cycles','leads','campagnes','ma_file'] },
-  marketing: { sections:['par_source','campagnes'] },
-  aucun:     { sections:[] }
-};
-
-const LIB_SECTION = {
-  ma_file:'Ma file', mes_cycles:'Mes cycles', mes_chiffres:'Mes chiffres',
-  mon_equipe:'Mon équipe', leads:'Leads', cycles:'Cycles',
-  mes_sites:'Mes sites', campagnes:'Campagnes', par_source:'Par source'
-};
-
-function profilDuRole(r) {
-  if (r === ROLE_SECRETAIRE) return 'aucun';
-  if (r === ROLE_VENDEUR)    return 'vendeur';
-  // Opérateur plateau : vue vendeur (ses propres leads) en attendant l'écran
-  // dédié au plateau VROOM. Jamais une vue de manager.
-  if (r === ROLE_PLATEAU)    return 'vendeur';
-  if (r === ROLE_CHEF_VENTES) return 'chef';
-  if (r === ROLE_MARKETING)  return 'marketing';
-  if (r === ROLE_DIRECTEUR || r === ROLE_DIR_PLAQUE
-   || r === ROLE_DIR_MARQUE || r === ROLE_DIR_GROUPE || r === ROLE_ADMIN) return 'directeur';
-  return 'vendeur';   // repli : un rôle inconnu voit au moins sa file
-}
-
-const PROFIL   = profilDuRole(userRole);
-const SECTIONS_ROLE = PROFILS[PROFIL].sections;
-
-// 30 jours : au-delà, une demande n'est plus un lead à rappeler en priorité
-// mais une affaire à requalifier. Déclarée ICI, en tête : fetchMaFile peut
-// s'exécuter avant que le module n'atteigne le bloc des gestes (TDZ).
-// ⚠️ 30 jours, et non 90. Mesure du 28/09 sur les dossiers prenables :
-//    371 en attente, dont 356 de plus de 30 jours, le plus ancien à 2 094
-//    jours — presque six ans. Un écran rempli d'archives ne montre pas du
-//    retard : le vendeur cesse de le regarder. Le seuil est aussi en base
-//    (`lead_collecte_config.arriere_jours`), où le mur le lit ; garder les
-//    deux valeurs égales.
-const LM_ARRIERE_MIN = 30 * 1440;
-// Un manager qui n'a pas « mon_equipe » n'est pas un chef : le drapeau
-// sert à décider des boutons (réaffecter), pas des sections.
-const PEUT_REAFFECTER = PROFIL === 'chef' || PROFIL === 'directeur';
-
-// --- 2. Index pré-calculés ----------------------------------
-// Ils dérivent des vues KPI : ils sont donc VIDES tant qu'ensureKpis()
-// n'a pas tourné, et RECONSTRUITS à chaque chargement. Toute section qui
-// les lit doit avoir appelé ensureKpis() avant.
-let dataKpiSiteScope    = [];
-let dataKpiVendScope    = [];
-let cyclesAvecLeadSet   = new Set();
-let vendeurCyclesMap    = new Map();
-let premierContactMap   = {};
-let vendeurInfoMap      = new Map();
-
-function reconstruireIndexKpi() {
-  dataKpiSiteScope = dataKpiSite.filter(r => userSiteIds.includes(r.id_site));
-  dataKpiVendScope = dataKpiVend.filter(r => userSiteIds.includes(r.id_site));
-
-  cyclesAvecLeadSet = new Set();
-  for (const l of dataLeads) {
-    if (l.id_cycle_comm) cyclesAvecLeadSet.add(l.id_cycle_comm);
+  function frontWindow() {
+    try { var w = window.wwLib && wwLib.getFrontWindow && wwLib.getFrontWindow(); if (w) return w; } catch (e) {}
+    return window;
   }
 
-  vendeurCyclesMap = new Map();
-  for (const uc of dataUserCycles) {
-    if (!vendeurCyclesMap.has(uc.id_user)) vendeurCyclesMap.set(uc.id_user, new Set());
-    vendeurCyclesMap.get(uc.id_user).add(uc.id_cycle_com);
-  }
-
-  premierContactMap = {};
-  for (const pc of dataPremierContact) {
-    premierContactMap[pc.id_cycle_com] = pc.premier_outbound_at;
-  }
-
-  vendeurInfoMap = new Map();
-  for (const v of dataKpiVendScope) {
-    if (!vendeurInfoMap.has(v.id_user)) {
-      vendeurInfoMap.set(v.id_user, {
-        id_user: v.id_user,
-        vendeur_nom: v.vendeur_nom,
-        sites: new Set(),
-        cycles_total: 0
-      });
-    }
-    const info = vendeurInfoMap.get(v.id_user);
-    info.sites.add(v.id_site);
-    info.cycles_total += (v.cycles_total || 0);
-  }
-}
-
-// Charge les six vues KPI, UNE SEULE FOIS. Les appels concurrents
-// partagent la même promesse : deux sections ouvertes coup sur coup ne
-// déclenchent pas deux fois le réseau.
-function ensureKpis() {
-  if (kpisCharges) return Promise.resolve();
-  if (kpisEnCours) return kpisEnCours;
-  kpisEnCours = (async function () {
-    const [kSite, kVend, clot, leads, uCycles, premier] = await Promise.all([
-      sb.from('v_lead_kpi_site').select('*'),
-      sb.from('v_lead_kpi_vendeur').select('*'),
-      sb.from('v_cloture_cycle').select('*'),
-      sb.from('v_leads').select('*'),
-      sb.from('v_user_cycles_recent').select('*'),
-      sb.from('v_premier_contact').select('*')
-    ]);
-    [kSite, kVend, clot, leads, uCycles, premier]
-      .forEach(r => { if (r && r.error) console.error('[leadMgmt] chargement vue KPI', r.error); });
-    dataKpiSite        = kSite.data   || [];
-    dataKpiVend        = kVend.data   || [];
-    dataClotures       = clot.data    || [];
-    dataLeads          = leads.data   || [];
-    dataUserCycles     = uCycles.data || [];
-    dataPremierContact = premier.data || [];
-    reconstruireIndexKpi();
-    kpisCharges = true;
-    kpiVendeurCharge = true;   // le lot complet contient v_lead_kpi_vendeur
-    kpisEnCours = null;
-    if (window.__renderLeadMgmt) window.__renderLeadMgmt();
-  })();
-  return kpisEnCours;
-}
-
-// Chargeur MINIMAL pour « Ma synthese » du vendeur.
-//
-// Mesure du 27/08 : renderSyntheseVendeur ne lit QUE dataKpiVend, et
-// renderViewActifs / renderViewKanban ne lisent AUCUN index KPI. Un
-// vendeur qui ouvrait sa synthese declenchait pourtant les six vues —
-// cinq requetes pour rien, dont v_lead_kpi_site (1,25 s),
-// v_user_cycles_recent (1,28 s) et v_premier_contact (0,88 s).
-function ensureKpiVendeur() {
-  if (kpisCharges || kpiVendeurCharge) return Promise.resolve();
-  if (kpiVendeurEnCours) return kpiVendeurEnCours;
-  kpiVendeurEnCours = (async function () {
-    // ⚠️ NE PAS ajouter de .eq('id_user', …) : mesure du 27/08, filtrer
-    //    cette vue la rend NEUF FOIS PLUS LENTE (2,35 s contre 270 ms).
-    //    Le planificateur bascule sur un Merge Join qui ecarte 599 886
-    //    lignes. On charge tout et on filtre cote client.
-    const r = await sb.from('v_lead_kpi_vendeur').select('*');
-    if (r && r.error) console.error('[leadMgmt] v_lead_kpi_vendeur', r.error);
-    dataKpiVend = r.data || [];
-    dataKpiVendScope = dataKpiVend.filter(x => userSiteIds.includes(x.id_site));
-    kpiVendeurCharge = true;
-    kpiVendeurEnCours = null;
-    if (window.__renderLeadMgmt) window.__renderLeadMgmt();
-  })();
-  return kpiVendeurEnCours;
-}
-
-function getVendeurCycleIds(idUser) {
-  return vendeurCyclesMap.get(idUser) || new Set();
-}
-
-const doc = __anchor.ownerDocument || document;
-const root = __anchor;
-try { window.__leadVer = 'v25-responsive'; } catch (e) {}
-
-const LM_SLA_CSS = `
-#lead-mgmt-root .lmf-bandeau { display:flex; align-items:baseline; gap:10px; margin-bottom:14px; }
-#lead-mgmt-root .lmf-bandeau-n { font-size:26px; font-weight:700; font-variant-numeric:tabular-nums; }
-#lead-mgmt-root .lmf-bandeau-n.retard { color:var(--red-soft); }
-#lead-mgmt-root .lmf-bandeau-n.ok     { color:var(--green); }
-#lead-mgmt-root .lmf-bandeau-txt { font-size:13px; color:var(--text-soft); }
-#lead-mgmt-root .lmf-groupe { font-size:11px; font-weight:700; letter-spacing:.4px; text-transform:uppercase; margin:18px 0 8px; }
-#lead-mgmt-root .lmf-groupe.retard  { color:var(--red-soft); }
-#lead-mgmt-root .lmf-groupe.bientot { color:#b8851a; }
-#lead-mgmt-root .lmf-groupe.calme   { color:var(--green); }
-#lead-mgmt-root .lmf-card { background:var(--card); border:1px solid var(--border); border-left:3px solid var(--text-mut); padding:12px 14px; margin-bottom:8px; cursor:pointer; transition:background .12s ease; }
-#lead-mgmt-root .lmf-card:hover { background:var(--blue-bg); }
-#lead-mgmt-root .lmf-card.retard  { border-left-color:var(--red-soft); }
-#lead-mgmt-root .lmf-card.bientot { border-left-color:#b8851a; }
-#lead-mgmt-root .lmf-card.calme   { border-left-color:#53bda7; }
-#lead-mgmt-root .lmf-card.hors    { border-left-color:#b4b2a9; }
-#lead-mgmt-root .lmf-head { display:flex; justify-content:space-between; align-items:baseline; gap:10px; }
-#lead-mgmt-root .lmf-nom { font-size:14px; font-weight:600; color:var(--text); }
-#lead-mgmt-root .lmf-temps { font-size:13px; font-weight:600; font-variant-numeric:tabular-nums; white-space:nowrap; }
-#lead-mgmt-root .lmf-temps.retard  { color:var(--red-soft); }
-#lead-mgmt-root .lmf-temps.bientot { color:#b8851a; }
-#lead-mgmt-root .lmf-temps.calme   { color:var(--green); }
-#lead-mgmt-root .lmf-temps.hors    { color:var(--text-mut); font-weight:500; }
-#lead-mgmt-root .lmf-jauge { height:3px; background:#eef2f8; border-radius:2px; margin:8px 0 6px; overflow:hidden; }
-#lead-mgmt-root .lmf-jauge span { display:block; height:3px; border-radius:2px; }
-#lead-mgmt-root .lmf-meta { font-size:12px; color:var(--text-soft); display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
-#lead-mgmt-root .lmf-src { font-size:10px; font-weight:600; padding:2px 8px; border-radius:4px; background:#eaf0f9; color:var(--blue-dk); }
-#lead-mgmt-root .lmf-src.hors { background:#f1efe8; color:#5f5e5a; }
-#lead-mgmt-root .lmf-reaff { margin-left:auto; font-size:11px; font-weight:600; padding:4px 10px; border-radius:5px; border:1px solid var(--border); background:var(--card); color:var(--blue-dk); cursor:pointer; font-family:inherit; }
-#lead-mgmt-root .lmf-reaff:hover { background:var(--blue-bg); }
-#lead-mgmt-root .lmf-note { font-size:11px; color:var(--text-mut); margin-top:14px; padding-top:10px; border-top:1px solid var(--border); }
-#lead-mgmt-root .lmf-vend { display:flex; justify-content:space-between; align-items:center; padding:10px 14px; border:1px solid var(--border); background:var(--card); margin-bottom:6px; border-radius:6px; }
-#lead-mgmt-root .lmf-vend-n { font-size:16px; font-weight:700; font-variant-numeric:tabular-nums; }
-#lead-mgmt-root .lm-spin { display:inline-block; width:12px; height:12px; margin-right:8px; vertical-align:-1px;
-  border:2px solid #dfe6f0; border-top-color:#2a5ea9; border-radius:50%; animation:lm-spin .7s linear infinite; }
-@keyframes lm-spin { to { transform:rotate(360deg); } }
-`;
-
-const LM_ROLE_CSS = `
-#lead-mgmt-root .lmr-tbl { width:100%; border-collapse:collapse; background:var(--card);
-  border:1px solid var(--border); border-radius:8px; overflow:hidden; }
-#lead-mgmt-root .lmr-tbl th { text-align:left; font-size:10.5px; text-transform:uppercase;
-  letter-spacing:.05em; color:var(--text-mut); font-weight:700; padding:11px 14px;
-  background:var(--blue-bg); border-bottom:1px solid var(--border); white-space:nowrap; }
-#lead-mgmt-root .lmr-tbl td { padding:12px 14px; border-bottom:1px solid #eef2f8; font-size:13px; }
-#lead-mgmt-root .lmr-tbl tbody tr:last-child td { border-bottom:none; }
-#lead-mgmt-root .lmr-tbl tbody tr.lmr-clic { cursor:pointer; }
-#lead-mgmt-root .lmr-tbl tbody tr.lmr-clic:hover { background:var(--blue-bg); }
-#lead-mgmt-root .lmr-num { text-align:right; font-variant-numeric:tabular-nums; white-space:nowrap; }
-#lead-mgmt-root .lmr-nom { font-weight:600; }
-#lead-mgmt-root .lmr-sous { font-size:11px; color:var(--text-mut); font-weight:400; }
-#lead-mgmt-root .lmr-bar { height:5px; background:#eef2f8; border-radius:3px; overflow:hidden;
-  min-width:74px; margin-top:5px; }
-#lead-mgmt-root .lmr-bar i { display:block; height:5px; border-radius:3px; }
-#lead-mgmt-root .lmr-ok   { color:var(--green); font-weight:600; }
-#lead-mgmt-root .lmr-warn { color:#b8851a; font-weight:600; }
-#lead-mgmt-root .lmr-ko   { color:var(--red-soft); font-weight:600; }
-#lead-mgmt-root .lmr-b-ok i   { background:#53bda7; }
-#lead-mgmt-root .lmr-b-warn i { background:#b8851a; }
-#lead-mgmt-root .lmr-b-ko i   { background:var(--red-soft); }
-#lead-mgmt-root .lmr-fil { display:flex; align-items:center; gap:7px; margin:0 0 16px;
-  font-size:12px; flex-wrap:wrap; }
-#lead-mgmt-root .lmr-fil button { background:none; border:none; color:var(--blue-dk); padding:0;
-  font-size:12px; font-family:inherit; cursor:pointer; text-decoration:underline;
-  text-underline-offset:2px; }
-#lead-mgmt-root .lmr-fil span { color:var(--text-mut); }
-#lead-mgmt-root .lmr-fil .ici { color:var(--text); font-weight:600; text-decoration:none; }
-#lead-mgmt-root .lmr-alerte { background:#fdf6e6; border-left:3px solid #b8851a;
-  padding:11px 15px; border-radius:0 5px 5px 0; font-size:12px; color:#7a5a12; margin:16px 0 0; }
-`;
-
-
-const LM_REGLES_CSS = `
-/* --- Regles d'attribution : bouton du fil + modale ---------- */
-#lead-mgmt-root .v2-regles-b { background:var(--blue-bg); border:1px solid var(--border);
-  color:var(--blue); border-radius:8px; padding:5px 11px; font-size:11px; font-weight:700;
-  cursor:pointer; margin-left:auto; white-space:nowrap; }
-#lead-mgmt-root .v2-regles-b:hover { background:var(--blue); color:#fff; }
-#lead-mgmt-root .rg-ovl { position:fixed; inset:0; background:rgba(20,40,70,.42); z-index:900; }
-#lead-mgmt-root .rg-mod { position:fixed; z-index:901; top:50%; left:50%;
-  transform:translate(-50%,-50%); width:720px; max-width:94vw; max-height:90vh;
-  background:var(--card); border-radius:14px; box-shadow:0 24px 70px -18px rgba(20,40,70,.45);
-  display:flex; flex-direction:column; overflow:hidden; }
-#lead-mgmt-root .rg-h { padding:15px 20px; border-bottom:1px solid var(--border);
-  display:flex; align-items:flex-start; gap:12px; }
-#lead-mgmt-root .rg-h b { font-size:15px; }
-#lead-mgmt-root .rg-h .n { font-size:11px; color:var(--text-mut); margin-top:5px; line-height:1.5; }
-#lead-mgmt-root .rg-site { display:flex; align-items:center; gap:7px; margin-top:6px; }
-#lead-mgmt-root .rg-site > span { color:var(--text-mut); font-size:11px; }
-#lead-mgmt-root .rg-site select { padding:4px 8px; border:1px solid var(--border);
-  border-radius:7px; font:inherit; font-size:12px; font-weight:700; color:var(--text);
-  background:var(--card); max-width:340px; }
-#lead-mgmt-root .rg-x { margin-left:auto; background:none; border:none; font-size:22px;
-  line-height:1; color:var(--text-mut); cursor:pointer; padding:0 4px; }
-#lead-mgmt-root .rg-b { padding:14px 20px 18px; overflow-y:auto; flex:1; }
-#lead-mgmt-root .rg-sec { margin-bottom:16px; }
-#lead-mgmt-root .rg-sec > .t { font-size:10px; text-transform:uppercase; letter-spacing:.07em;
-  color:var(--text-mut); font-weight:700; margin-bottom:7px; }
-#lead-mgmt-root .rg-opt { display:flex; align-items:flex-start; gap:9px; padding:8px 10px;
-  border:1px solid var(--border); border-radius:9px; margin-bottom:6px; cursor:pointer;
-  font-size:12px; line-height:1.5; }
-#lead-mgmt-root .rg-opt.on { border-color:var(--blue); background:var(--blue-bg); }
-#lead-mgmt-root .rg-opt input { margin-top:2px; flex:0 0 auto; }
-#lead-mgmt-root .rg-opt .d { display:block; color:var(--text-mut); font-size:11px; margin-top:2px; }
-#lead-mgmt-root .rg-num { display:flex; align-items:center; gap:8px; font-size:12px;
-  margin:8px 0 0 28px; color:var(--text-mut); }
-#lead-mgmt-root .rg-num input { width:64px; padding:4px 7px; border:1px solid var(--border);
-  border-radius:6px; font:inherit; font-size:12px; color:var(--text); }
-#lead-mgmt-root .rg-tab { width:100%; border-collapse:collapse; font-size:12px; }
-#lead-mgmt-root .rg-tab th { text-align:left; font-size:10px; text-transform:uppercase;
-  letter-spacing:.06em; color:var(--text-mut); padding:5px 8px; border-bottom:1px solid var(--border); }
-#lead-mgmt-root .rg-tab td { padding:6px 8px; border-bottom:1px solid var(--border); }
-#lead-mgmt-root .rg-tab tr.suiv td { background:var(--blue-bg); font-weight:700; }
-#lead-mgmt-root .rg-tab tr.exclu td { color:var(--text-mut); text-decoration:line-through; }
-#lead-mgmt-root .rg-tab .rg-ex { background:none; border:1px solid var(--border); border-radius:6px;
-  padding:2px 8px; font-size:11px; cursor:pointer; color:var(--text-mut); }
-#lead-mgmt-root .rg-tab .rg-ex:hover { border-color:var(--blue); color:var(--blue); }
-#lead-mgmt-root .rg-note { background:#fdf6e6; border-left:3px solid #b8851a; padding:9px 13px;
-  border-radius:0 5px 5px 0; font-size:11px; color:#7a5a12; line-height:1.55; margin-top:8px; }
-#lead-mgmt-root .rg-f { padding:11px 20px; border-top:1px solid var(--border); display:flex;
-  gap:9px; align-items:center; }
-#lead-mgmt-root .rg-f .msg { font-size:11px; color:var(--text-mut); flex:1; }
-#lead-mgmt-root .rg-f button { padding:8px 16px; border-radius:8px; font:inherit; font-size:12px;
-  font-weight:700; cursor:pointer; border:1px solid var(--border); background:var(--card);
-  color:var(--text); }
-#lead-mgmt-root .rg-f button.ok { background:var(--blue); border-color:var(--blue); color:#fff; }
-#lead-mgmt-root .rg-f button[disabled] { opacity:.5; cursor:default; }
-@media(max-width:620px){ #lead-mgmt-root .rg-mod { width:100%; max-height:96vh; } }
-`;
-
-/* 📌 PIÈGE DE LA TDZ, QUATRIÈME FOIS : cette constante est interpolée dans le
-   bloc « --- 3. Style » plus bas. Déclarée APRÈS lui, elle lève une
-   ReferenceError et l'écran reste ENTIÈREMENT vide. */
-const LM_V3_CSS = `
-#lead-mgmt-root .v3-bloc { background:#fff; border:1px solid var(--border,#e3e6ea);
-  border-radius:12px; overflow:hidden; margin-top:14px; }
-#lead-mgmt-root .v3-niv { margin-left:8px; font-size:11px; font-weight:650;
-  padding:2px 8px; border-radius:999px; background:var(--blue-bg,#eaf0ff);
-  color:var(--blue-dk,#2a5ea9); }
-#lead-mgmt-root .v3-reglages { padding:13px 18px; border-bottom:1px solid var(--border,#e3e6ea);
-  display:flex; gap:18px; flex-wrap:wrap; align-items:flex-end; }
-#lead-mgmt-root .v3-champ label { display:block; font-size:10.5px; text-transform:uppercase;
-  letter-spacing:.06em; color:var(--text-mut,#6b7684); font-weight:650; margin-bottom:5px; }
-#lead-mgmt-root .v3-seg { display:flex; gap:3px; background:#f4f5f7;
-  border:1px solid var(--border,#e3e6ea); border-radius:9px; padding:3px; }
-#lead-mgmt-root .v3-seg button { border:0; background:none; padding:6px 11px; border-radius:6px;
-  font-size:12.5px; font-weight:600; color:var(--text-mut,#6b7684); cursor:pointer; }
-#lead-mgmt-root .v3-seg button.on { background:#fff; color:var(--text,#12171f);
-  box-shadow:0 1px 2px rgba(16,24,40,.08); }
-#lead-mgmt-root .v3-expli { flex:1 1 240px; margin:0; font-size:12px; line-height:1.5;
-  color:var(--text-mut,#6b7684); min-width:200px; }
-/* Les puces de source. Multi-sélection : plusieurs sources peuvent cohabiter,
-   contrairement au segment « depuis », qui est un choix exclusif. */
-#lead-mgmt-root .v3-src { display:flex; gap:5px; flex-wrap:wrap; align-items:center; }
-#lead-mgmt-root .v3-src button { border:1px solid var(--border,#e3e6ea); background:#fff;
-  padding:5px 10px; border-radius:999px; font-size:12px; font-weight:600; font-family:inherit;
-  color:var(--text-mut,#6b7684); cursor:pointer; display:inline-flex; align-items:center;
-  gap:6px; line-height:1.3; }
-#lead-mgmt-root .v3-src button:hover { border-color:#b9c2cd; }
-#lead-mgmt-root .v3-src button.on { background:var(--blue-bg,#eaf0ff);
-  border-color:var(--blue-dk,#2a5ea9); color:var(--blue-dk,#2a5ea9); }
-#lead-mgmt-root .v3-src button i { font-style:normal; font-size:11px; font-weight:700;
-  padding:1px 5px; border-radius:999px; background:#f1f3f6; color:#6b7684; }
-#lead-mgmt-root .v3-src button.on i { background:#fff; color:var(--blue-dk,#2a5ea9); }
-/* Une source que le groupe ne suit pas : visiblement à part, jamais cachée. */
-#lead-mgmt-root .v3-src button.hors { border-style:dashed; color:#97a1ad; }
-#lead-mgmt-root .v3-src button.hors.on { border-style:solid; background:#fdf6e6;
-  border-color:#b8851a; color:#7a5a12; }
-#lead-mgmt-root .v3-src button.hors.on i { color:#7a5a12; }
-#lead-mgmt-root .v3-ecarte { margin:8px 0 0; font-size:11.5px; line-height:1.5;
-  color:var(--text-mut,#6b7684); }
-#lead-mgmt-root .v3-ecarte b { color:#7a5a12; }
-#lead-mgmt-root .v3-tab { overflow:auto; }
-#lead-mgmt-root .v3-tab table { border-collapse:collapse; width:100%; min-width:560px; }
-#lead-mgmt-root .v3-tab th { font-size:10.5px; text-transform:uppercase; letter-spacing:.06em;
-  color:var(--text-mut,#6b7684); font-weight:650; padding:12px 10px; text-align:center;
-  border-bottom:1px solid var(--border,#e3e6ea); }
-#lead-mgmt-root .v3-tab th:first-child { text-align:left; padding-left:18px; }
-#lead-mgmt-root .v3-tab td { padding:8px 10px; text-align:center;
-  border-bottom:1px solid var(--border,#e3e6ea); }
-#lead-mgmt-root .v3-tab td:first-child { text-align:left; font-size:13.5px; font-weight:600; }
-#lead-mgmt-root .v3-tab td:first-child small { display:block; font-weight:400; font-size:11.5px;
-  color:var(--text-mut,#6b7684); margin-left:23px; }
-#lead-mgmt-root .v3-tab tr:last-child td { border-bottom:0; }
-#lead-mgmt-root .v3-tab tr.v3-lv-marque td { background:var(--blue-bg,#eaf0ff); font-weight:700; }
-#lead-mgmt-root .v3-tab tr.v3-lv-affaire td { background:#fafbfd; }
-#lead-mgmt-root .v3-exp { width:18px; height:18px; border:0; background:none; padding:0;
-  margin-right:5px; font-size:11px; line-height:1; color:var(--text-mut,#6b7684); cursor:pointer; }
-#lead-mgmt-root .v3-exp.vide { visibility:hidden; display:inline-block; }
-#lead-mgmt-root .v3-pas { width:38px; height:38px; border-radius:50%; display:inline-grid;
-  place-items:center; font-size:12.5px; font-weight:700; border:1.5px solid; cursor:pointer;
-  transition:transform .12s; }
-#lead-mgmt-root .v3-pas:hover { transform:scale(1.12); }
-#lead-mgmt-root .v3-pas.vide { border-style:dashed; border-color:var(--border,#e3e6ea);
-  color:#97a1ad; font-weight:500; cursor:default; }
-#lead-mgmt-root .v3-pas.vide:hover { transform:none; }
-#lead-mgmt-root .v3-entete { padding:15px 18px; border-bottom:1px solid var(--border,#e3e6ea); }
-#lead-mgmt-root .v3-entete h3 { margin:0; font-size:15px; }
-#lead-mgmt-root .v3-entete p { margin:5px 0 0; font-size:12.5px; line-height:1.55;
-  color:var(--text-mut,#6b7684); max-width:74ch; }
-#lead-mgmt-root .v3-piste { padding:15px 18px; border-bottom:1px solid var(--border,#e3e6ea); }
-#lead-mgmt-root .v3-piste:last-of-type { border-bottom:0; }
-#lead-mgmt-root .v3-p1 { display:flex; align-items:baseline; gap:10px; flex-wrap:wrap; }
-#lead-mgmt-root .v3-p1 b { font-size:14.5px; }
-#lead-mgmt-root .v3-n { font-size:12px; color:var(--text-mut,#6b7684); }
-#lead-mgmt-root .v3-part { margin-left:auto; font-size:12px; font-weight:650;
-  color:var(--text-mut,#6b7684); }
-#lead-mgmt-root .v3-part.fort { color:var(--red-dk,#c02626); }
-#lead-mgmt-root .v3-baton { display:flex; align-items:center; gap:2px; height:32px; margin-top:10px; }
-#lead-mgmt-root .v3-sg { height:32px; display:flex; align-items:center; justify-content:center;
-  font-size:11.5px; font-weight:700; color:#fff; overflow:hidden; white-space:nowrap;
-  border-radius:8px; }
-/* Sans propriétaire : gris hachuré. On voit au premier coup d'œil que ce
-   segment n'est imputable à personne. */
-#lead-mgmt-root .v3-sg.sans { background:#97a1ad;
-  background-image:repeating-linear-gradient(45deg, rgba(255,255,255,.25) 0 5px,
-    transparent 5px 10px); }
-#lead-mgmt-root .v3-leg { display:flex; gap:14px; margin-top:8px; font-size:11.5px;
-  color:var(--text-mut,#6b7684); flex-wrap:wrap; }
-#lead-mgmt-root .v3-leg span { display:flex; align-items:center; gap:5px; }
-#lead-mgmt-root .v3-leg i { width:9px; height:9px; border-radius:3px; display:block; }
-#lead-mgmt-root .v3-leg i.hach { background:#97a1ad;
-  background-image:repeating-linear-gradient(45deg, rgba(255,255,255,.35) 0 3px,
-    transparent 3px 6px); }
-#lead-mgmt-root .v3-leg em { font-style:normal; color:#97a1ad; }
-#lead-mgmt-root .v3-nm { color:#97a1ad; }
-#lead-mgmt-root .v3-reserve { margin:0; padding:12px 18px; font-size:11.5px; line-height:1.55;
-  color:var(--text-mut,#6b7684); background:#fafbfd; border-top:1px solid var(--border,#e3e6ea); }
-#lead-mgmt-root .v3-vide { padding:38px 20px; text-align:center; font-size:12.5px;
-  color:var(--text-mut,#6b7684); }
-#lead-mgmt-root .v3-vide b { display:block; font-size:15px; color:var(--text,#12171f);
-  margin-bottom:6px; }
-
-/* ── « Le prochain » ─────────────────────────────────────────────────── */
-#lead-mgmt-root .v3-scene { display:grid; grid-template-columns:1fr 280px; gap:16px;
-  align-items:start; margin-top:14px; }
-@media (max-width:920px){ #lead-mgmt-root .v3-scene { grid-template-columns:1fr; } }
-#lead-mgmt-root .v3-dossier { background:#fff; border:1px solid var(--border,#e3e6ea);
-  border-radius:12px; overflow:hidden; }
-#lead-mgmt-root .v3-verrou { display:flex; align-items:center; gap:8px; padding:9px 18px;
-  font-size:12.5px; font-weight:650; background:#f0eafd; color:#7a4ddb;
-  border-bottom:1px solid var(--border,#e3e6ea); }
-#lead-mgmt-root .v3-verrou span { font-weight:500; opacity:.85; }
-/* En piscine, le bandeau n'annonce pas une réservation mais une COURSE : le
-   ton change, sinon le vendeur croit le dossier acquis. */
-#lead-mgmt-root .v3-verrou.piscine { background:#fdf5e4; color:#b8851a; }
-#lead-mgmt-root .v3-verrou.pris { background:#e6f6f0; color:#0f9b6c; }
-#lead-mgmt-root .v3-haut { display:flex; gap:18px; padding:16px 18px;
-  border-bottom:1px solid var(--border,#e3e6ea); align-items:center; }
-#lead-mgmt-root .v3-qui { min-width:0; flex:1; }
-#lead-mgmt-root .v3-min { flex:0 0 auto; }
-#lead-mgmt-root .v3-min-v { width:72px; height:72px; border-radius:50%; display:flex;
-  flex-direction:column; align-items:center; justify-content:center; gap:1px;
-  font-size:20px; font-weight:800; letter-spacing:-.03em; line-height:1;
-  border:3px solid var(--ok-dk,#0f9b6c); color:var(--ok-dk,#0f9b6c);
-  overflow:hidden; flex:0 0 auto; }
-#lead-mgmt-root .v3-min-v.ko { border-color:var(--red-dk,#c02626); color:var(--red-dk,#c02626); }
-#lead-mgmt-root .v3-min-v span { display:block; font-size:9.5px; font-weight:600;
-  text-transform:uppercase; letter-spacing:.06em; opacity:.75; }
-#lead-mgmt-root .v3-qui h3 { margin:0; font-size:21px; font-weight:800; letter-spacing:-.4px;
-  color:#1F4A85; }
-#lead-mgmt-root .v3-meta { display:flex; flex-wrap:wrap; gap:18px; font-size:13px;
-  color:#7a98c5; font-weight:600; margin-top:6px; }
-#lead-mgmt-root .v3-meta span { display:inline-flex; align-items:center; gap:6px; }
-#lead-mgmt-root .v3-meta svg { width:14px; height:14px; opacity:.8; }
-#lead-mgmt-root .v3-pi { display:flex; gap:6px; flex-wrap:wrap; margin-top:9px; }
-#lead-mgmt-root .v3-p { font-size:11.5px; font-weight:650; padding:3px 9px; border-radius:999px;
-  border:1px solid var(--border,#e3e6ea); color:var(--text-mut,#6b7684); background:#f4f5f7; }
-#lead-mgmt-root .v3-p.src { border-color:transparent; background:var(--blue-bg,#eaf0ff);
-  color:var(--blue-dk,#2a5ea9); }
-#lead-mgmt-root .v3-corps { padding:15px 18px; }
-#lead-mgmt-root .v3-dem { font-size:15px; line-height:1.6; border-left:3px solid
-  var(--border,#e3e6ea); padding-left:13px; }
-#lead-mgmt-root .v3-veh { margin-top:12px; padding:10px 12px; background:#f4f5f7;
-  border-radius:9px; font-size:13.5px; }
-
-/* Barre de communication : COPIE de « .fs-btn » (fiche-shell.js). Mêmes paires
-   couleur / bordure / survol, pour qu'un vendeur n'ait rien à réapprendre. */
-#lead-mgmt-root .v3-gestes { display:flex; flex-wrap:wrap; gap:10px; padding:14px 18px 16px;
-  align-items:center; }
-#lead-mgmt-root .v3-canaux { display:flex; flex-wrap:wrap; gap:10px; }
-#lead-mgmt-root .v3-canaux.inerte { opacity:.4; filter:grayscale(.7); }
-#lead-mgmt-root .v3-cm { display:inline-flex; align-items:center; gap:8px;
-  border:1.5px solid var(--border,#e3e6ea); background:#fff; border-radius:10px;
-  padding:9px 16px; font:inherit; font-size:14px; font-weight:700; cursor:pointer;
-  transition:.15s; color:#1F4A85; }
-#lead-mgmt-root .v3-cm svg { width:17px; height:17px; flex:0 0 auto; }
-#lead-mgmt-root .v3-cm .num { font-weight:600; font-size:12px; opacity:.65; }
-#lead-mgmt-root .v3-cm[disabled] { cursor:not-allowed; }
-#lead-mgmt-root .v3-cm.call { color:#2a5ea9; border-color:#c9d9ee; }
-#lead-mgmt-root .v3-cm.call:hover { background:#eef4fc; }
-#lead-mgmt-root .v3-cm.wa   { color:#1f9d63; border-color:#bfe6cf; }
-#lead-mgmt-root .v3-cm.wa:hover { background:#eafaf1; }
-#lead-mgmt-root .v3-cm.mail { color:#1F4A85; border-color:#d7dfe9; }
-#lead-mgmt-root .v3-cm.mail:hover { background:#f2f5f9; }
-#lead-mgmt-root .v3-cm.sms  { color:#e6a817; border-color:#f0dca6; }
-#lead-mgmt-root .v3-cm.sms:hover { background:#fdf7e8; }
-#lead-mgmt-root .v3-cm.rpv  { color:#e24b4a; border-color:#f2c4c4; }
-#lead-mgmt-root .v3-cm.rpv:hover { background:#fdf1f1; }
-/* Les gestes de FLUX ne sont pas des canaux : « Passer » ne doit jamais
-   ressembler à « Appeler ». */
-#lead-mgmt-root .v3-flux { padding:9px 15px; border-radius:6px; font-size:12.5px;
-  font-weight:500; cursor:pointer; border:1px solid #2a5ea9; background:transparent;
-  color:#2a5ea9; font:inherit; font-size:12.5px; text-transform:uppercase;
-  letter-spacing:.3px; }
-#lead-mgmt-root .v3-flux:hover { background:#f2f6fc; }
-#lead-mgmt-root .v3-flux.p { background:#53bda7; border-color:#53bda7; color:#fff; }
-#lead-mgmt-root .v3-flux.p:hover { background:#45a791; }
-#lead-mgmt-root .v3-rappel { padding:10px 18px; border-top:1px solid var(--border,#e3e6ea);
-  font-size:12.5px; color:var(--text-mut,#6b7684); background:#fafbfd; }
-
-#lead-mgmt-root .v3-file { background:#fff; border:1px solid var(--border,#e3e6ea);
-  border-radius:12px; overflow:hidden; position:sticky; top:12px; }
-#lead-mgmt-root .v3-file h4 { margin:0; padding:13px 15px 9px; font-size:12px;
-  text-transform:uppercase; letter-spacing:.07em; color:var(--text-mut,#6b7684); }
-#lead-mgmt-root .v3-file ul { list-style:none; margin:0; padding:0 8px 8px; }
-#lead-mgmt-root .v3-file li { display:flex; gap:10px; align-items:center; padding:8px;
-  font-size:13px; }
-#lead-mgmt-root .v3-file li > div { min-width:0; flex:1; }
-#lead-mgmt-root .v3-file li b { display:block; white-space:nowrap; overflow:hidden;
-  text-overflow:ellipsis; }
-#lead-mgmt-root .v3-file li + li { border-top:1px solid var(--border,#e3e6ea); }
-#lead-mgmt-root .v3-file li.occ { opacity:.5; }
-#lead-mgmt-root .v3-file li b { font-weight:600; }
-#lead-mgmt-root .v3-file li small { display:block; font-size:11.5px;
-  color:var(--text-mut,#6b7684); }
-#lead-mgmt-root .v3-file li .t { margin-left:auto; font-weight:650; font-size:12.5px;
-  font-variant-numeric:tabular-nums; white-space:nowrap; flex:0 0 auto; }
-#lead-mgmt-root .v3-file li.v3-rien { color:var(--text-mut,#6b7684); }
-#lead-mgmt-root .v3-pied { padding:10px 15px; border-top:1px solid var(--border,#e3e6ea);
-  font-size:11.5px; color:var(--text-mut,#6b7684); background:#fafbfd; }
-
-/* ── Panneau d'une cellule ───────────────────────────────────────────── */
-/* ⚠️ RELEVÉ LE 28/09 : la liste à prendre était coupée par la topnav — ses
-   deux barres recouvraient le premier dossier et ses boutons. Le panneau est
-   en position fixed, donc placé par rapport à la fenêtre, et la topnav monte
-   jusqu'à z-index 1200 : lui passer devant l'aurait masquée et empêché de
-   naviguer. On ouvre donc le panneau SOUS elle. La variable --v3-haut est
-   MESURÉE à chaque rendu (v3PoserHautPanneau) et jamais codée en dur : la
-   barre n'a pas la même hauteur sur mobile, où le logo passe de 44 à 34 px.
-   ⚠️ AUCUN accent grave dans ce bloc : il est dans un gabarit LM_V3_CSS,
-   qu'un accent grave refermerait — c'est ce qui avait cassé la v39. */
-#lead-mgmt-root .v3-voile { position:fixed; left:0; right:0; bottom:0;
-  top:var(--v3-haut,0px); background:rgba(16,24,40,.42); z-index:50; }
-#lead-mgmt-root .v3-pan { position:fixed; top:var(--v3-haut,0px); right:0; bottom:0; width:420px;
-  max-width:94vw; z-index:51; background:#fff; border-left:1px solid var(--border,#e3e6ea);
-  display:flex; flex-direction:column; box-shadow:-18px 0 50px -24px rgba(16,24,40,.5); }
-#lead-mgmt-root .v3-pan-h { padding:15px 16px; border-bottom:1px solid var(--border,#e3e6ea);
-  display:flex; gap:10px; align-items:flex-start; }
-#lead-mgmt-root .v3-pan-h b { font-size:15px; display:block; }
-#lead-mgmt-root .v3-pan-h small { display:block; margin-top:3px; font-size:12px;
-  color:var(--text-mut,#6b7684); }
-#lead-mgmt-root .v3-pan-h .x { margin-left:auto; border:0; background:none; font-size:22px;
-  line-height:1; color:var(--text-mut,#6b7684); cursor:pointer; padding:0 4px; }
-#lead-mgmt-root .v3-pan-b { flex:1; overflow-y:auto; padding:8px 10px 14px; }
-#lead-mgmt-root .v3-pan-f { padding:10px 16px; border-top:1px solid var(--border,#e3e6ea);
-  font-size:11.5px; color:var(--text-mut,#6b7684); background:#fafbfd; }
-#lead-mgmt-root .v3-ld { display:flex; gap:10px; align-items:center; padding:10px 8px;
-  border-radius:9px; }
-#lead-mgmt-root .v3-ld + .v3-ld { border-top:1px solid var(--border,#e3e6ea); }
-#lead-mgmt-root .v3-ld.prem { background:var(--blue-bg,#eaf0ff); }
-#lead-mgmt-root .v3-ld .q { flex:1; min-width:0; }
-#lead-mgmt-root .v3-ld .q b { display:block; font-size:13.5px; font-weight:650;
-  white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
-#lead-mgmt-root .v3-ld .q small { font-size:11.5px; color:var(--text-mut,#6b7684); }
-#lead-mgmt-root .v3-ld .q em { font-style:normal; font-weight:700;
-  color:var(--blue-dk,#2a5ea9); }
-#lead-mgmt-root .v3-ld .a { font-weight:650; font-size:12.5px;
-  font-variant-numeric:tabular-nums; flex:0 0 auto; }
-#lead-mgmt-root .v3-ld .occ { font-size:11.5px; font-weight:600; color:#7a4ddb;
-  flex:0 0 auto; }
-#lead-mgmt-root .v3-ld .pr { border:1px solid #2a5ea9; background:#2a5ea9; color:#fff;
-  border-radius:8px; padding:6px 11px; font-size:12px; font-weight:650; cursor:pointer;
-  flex:0 0 auto; }
-#lead-mgmt-root .v3-ld .al { border:1px solid #2a5ea9; background:transparent;
-  color:#2a5ea9; border-radius:8px; padding:6px 11px; font-size:12px; font-weight:600;
-  cursor:pointer; flex:0 0 auto; margin-right:4px; }
-#lead-mgmt-root .v3-choix { display:flex; gap:6px; flex-wrap:wrap; align-items:center;
-  padding:9px 10px 11px; background:var(--blue-bg,#eaf0ff); border-radius:9px;
-  margin:0 0 6px; }
-#lead-mgmt-root .v3-choix span { font-size:11.5px; font-weight:650;
-  color:var(--blue-dk,#2a5ea9); }
-#lead-mgmt-root .v3-choix button { border:1px solid var(--border,#e3e6ea); background:#fff;
-  border-radius:8px; padding:5px 10px; font-size:12px; font-weight:600; cursor:pointer; }
-#lead-mgmt-root .v3-choix button.ann { border-style:dashed;
-  color:var(--text-mut,#6b7684); font-weight:500; }
-#lead-mgmt-root .v3-pan-note { margin:10px 8px 0; padding:10px 12px; border-radius:9px;
-  background:#fdf5e4; color:#b8851a; font-size:11.5px; line-height:1.5; font-weight:500; }
-`;
-
-const LM_V2_CSS = `
-/* --- Fil de périmètre ------------------------------------- */
-#lead-mgmt-root .v2-fil { display:flex; align-items:center; gap:6px; flex-wrap:wrap;
-  background:var(--card); border:1px solid var(--border); border-radius:10px;
-  padding:8px 12px; margin-bottom:14px; }
-#lead-mgmt-root .v2-fil-l { font-size:10px; text-transform:uppercase; letter-spacing:.07em;
-  color:var(--text-mut); font-weight:700; margin-right:2px; }
-#lead-mgmt-root .v2-fil button { background:none; border:none; color:var(--blue); padding:5px 9px;
-  border-radius:5px; font-size:12px; font-weight:600; font-family:inherit; cursor:pointer; }
-#lead-mgmt-root .v2-fil button:hover { background:var(--blue-bg); }
-#lead-mgmt-root .v2-fil .v2-sep { color:var(--text-mut); font-size:12px; }
-#lead-mgmt-root .v2-fil .v2-ici { background:var(--blue); color:#fff; padding:5px 11px;
-  border-radius:5px; font-size:12px; font-weight:600; }
-#lead-mgmt-root .v2-per { margin-left:auto; display:flex; align-items:center; gap:6px; }
-
-/* --- Bascule ---------------------------------------------- */
-#lead-mgmt-root .v2-vues { display:inline-flex; gap:3px; background:var(--blue-bg);
-  border:1px solid var(--border); border-radius:7px; padding:3px; margin-bottom:14px; }
-#lead-mgmt-root .v2-vues button { background:none; border:none; padding:7px 16px; font-size:12.5px;
-  font-weight:600; color:var(--text-soft); border-radius:5px; font-family:inherit; cursor:pointer; }
-#lead-mgmt-root .v2-vues button:hover { color:var(--blue-dk); }
-#lead-mgmt-root .v2-vues button.on { background:var(--card); color:var(--blue-dk);
-  box-shadow:0 1px 3px rgba(28,43,61,.14); }
-
-/* --- Bandeau : une phrase, pas des cartes ----------------- */
-#lead-mgmt-root .v2-tete { margin:2px 0 20px; font-size:14.5px; line-height:1.65; }
-#lead-mgmt-root .v2-tete b { font-size:28px; font-weight:700; font-variant-numeric:tabular-nums;
-  vertical-align:-3px; letter-spacing:-.02em; }
-#lead-mgmt-root .v2-tete b.ko { color:var(--red-soft); }
-#lead-mgmt-root .v2-tete b.ok { color:var(--green); }
-#lead-mgmt-root .v2-tete .q { color:var(--text-soft); }
-
-/* --- LE MUR : des pastilles, pas des aplats --------------- */
-#lead-mgmt-root .v2-mur { background:var(--card); border:1px solid var(--border);
-  border-radius:12px; padding:4px 0 0; overflow-x:auto; }
-#lead-mgmt-root .v2-mur-h { display:grid; padding:0 6px 8px 0; min-width:620px; }
-#lead-mgmt-root .v2-mur-h div { padding:10px 6px 6px; font-size:9.5px; text-transform:uppercase;
-  letter-spacing:.07em; color:var(--text-mut); font-weight:600; text-align:center; }
-#lead-mgmt-root .v2-mur-h div:first-child { text-align:left; padding-left:18px; }
-#lead-mgmt-root .v2-mur-r { display:grid; align-items:center; padding:0 6px 0 0;
-  position:relative; min-width:620px; }
-#lead-mgmt-root .v2-mur-r::after { content:''; position:absolute; left:18px; right:12px; bottom:0;
-  height:1px; background:#f0f4f9; }
-#lead-mgmt-root .v2-mur-r:last-child::after { display:none; }
-#lead-mgmt-root .v2-mur-n { padding:9px 8px 9px 18px; display:flex; flex-direction:column;
-  justify-content:center; cursor:pointer; min-width:0; }
-#lead-mgmt-root .v2-mur-n b { font-size:13px; font-weight:600; white-space:nowrap;
-  overflow:hidden; text-overflow:ellipsis; }
-#lead-mgmt-root .v2-mur-n:hover b { color:var(--blue); }
-#lead-mgmt-root .v2-mur-n i { font-style:normal; font-size:10.5px; color:var(--text-mut);
-  white-space:nowrap; overflow:hidden; text-overflow:ellipsis; margin-top:1px; }
-#lead-mgmt-root .v2-cell { display:flex; align-items:center; justify-content:center;
-  cursor:pointer; min-height:44px; }
-#lead-mgmt-root .v2-pas { border-radius:50%; display:flex; align-items:center;
-  justify-content:center; font-size:12px; font-weight:600; font-variant-numeric:tabular-nums;
-  transition:transform .13s cubic-bezier(.34,1.4,.64,1); line-height:1; }
-#lead-mgmt-root .v2-cell:hover .v2-pas { transform:scale(1.14); }
-#lead-mgmt-root .v2-cell.vide { cursor:default; }
-#lead-mgmt-root .v2-cell.vide::after { content:''; width:3px; height:3px; border-radius:50%;
-  background:#e3eaf3; }
-#lead-mgmt-root .v2-leg { display:flex; align-items:center; gap:16px; flex-wrap:wrap;
-  margin-top:12px; font-size:11px; color:var(--text-mut); }
-#lead-mgmt-root .v2-leg i { display:inline-block; width:9px; height:9px; border-radius:50%;
-  vertical-align:-1px; margin-right:6px; }
-/* Le détail s'ouvre SOUS le mur, jamais ailleurs : on ne perd pas la
-   vue d'ensemble en descendant dans un dossier. */
-/* L'escalier : une colonne par palier, la hauteur porte le taux.
-   On VOIT la marche descendre — quatre barres horizontales noyaient
-   exactement le propos qu'elles devaient servir. */
-#lead-mgmt-root .v2-esc-w { background:var(--card); border:1px solid var(--border);
-  border-radius:12px; padding:16px 18px; margin-bottom:14px; }
-#lead-mgmt-root .v2-esc { display:grid; grid-template-columns:repeat(4,1fr); gap:10px;
-  align-items:end; margin:6px 0 2px; }
-@media (max-width:640px) { #lead-mgmt-root .v2-esc { grid-template-columns:repeat(2,1fr); } }
-#lead-mgmt-root .v2-esc-c { text-align:center; }
-#lead-mgmt-root .v2-esc-v { font-size:19px; font-weight:700; font-variant-numeric:tabular-nums;
-  color:var(--text-soft); letter-spacing:-.02em; margin-bottom:5px; }
-#lead-mgmt-root .v2-esc-v.best { color:var(--green); }
-#lead-mgmt-root .v2-esc-b { height:74px; display:flex; align-items:flex-end;
-  justify-content:center; }
-#lead-mgmt-root .v2-esc-b i { display:block; width:100%; max-width:64px; border-radius:5px 5px 0 0;
-  background:var(--blue-line); }
-#lead-mgmt-root .v2-esc-b i.best { background:#53bda7; }
-#lead-mgmt-root .v2-esc-l { font-size:11.5px; font-weight:600; margin-top:7px;
-  padding-top:7px; border-top:1px solid var(--border); }
-#lead-mgmt-root .v2-esc-n { font-size:10.5px; color:var(--text-mut); margin-top:2px; }
-#lead-mgmt-root .v2-esc-note { margin-top:14px; padding-top:12px;
-  border-top:1px solid #f0f4f9; font-size:12.5px; line-height:1.6; color:var(--text-soft); }
-#lead-mgmt-root .v2-esc-res { margin-top:6px; font-size:11px; color:var(--text-mut); }
-/* Micro-jauge en cellule de tableau : la proportion se lit mieux qu'un
-   chiffre, mais elle ne doit pas peser plus qu'une ligne de texte. */
-/* Un chiffre cliquable doit LE MONTRER, sans devenir un bouton : on
-   garde la typographie du tableau et on souligne au survol. */
-#lead-mgmt-root .v2-lien { background:none; border:none; padding:0; font-family:inherit;
-  font-size:13px; font-weight:700; color:var(--blue); cursor:pointer;
-  font-variant-numeric:tabular-nums; }
-#lead-mgmt-root .v2-lien:hover { text-decoration:underline; text-underline-offset:2px; }
-#lead-mgmt-root .v2-lien.v2-ko { color:var(--red-soft); }
-#lead-mgmt-root .v2-mini { height:3px; background:#eef2f8; border-radius:2px; margin-top:4px;
-  overflow:hidden; }
-#lead-mgmt-root .v2-mini i { display:block; height:3px; border-radius:2px;
-  background:var(--blue-line); }
-#lead-mgmt-root .v2-mini i.v2-ok { background:#53bda7; }
-#lead-mgmt-root .v2-mini i.v2-warn { background:#b8851a; }
-#lead-mgmt-root .v2-mini i.v2-ko { background:var(--red-soft); }
-/* VOLET LATÉRAL GAUCHE, en modal : la liste s'ouvre PAR-DESSUS, à
-   portée de regard, au lieu d'apparaître en bas de page où il fallait
-   défiler pour la trouver (relevé le 27/08). Le fond assombri isole la
-   lecture ; Échap et le clic dehors referment. */
-#lead-mgmt-root .v2-ovl { position:fixed; inset:0; background:rgba(28,43,61,.34);
-  z-index:9998; animation:v2fade .16s ease; }
-@keyframes v2fade { from { opacity:0; } }
-#lead-mgmt-root .v2-pan { position:fixed; top:0; left:0; bottom:0; width:420px; max-width:92vw;
-  background:var(--card); z-index:9999; display:flex; flex-direction:column;
-  box-shadow:4px 0 28px rgba(28,43,61,.2); animation:v2slide .2s cubic-bezier(.22,1,.36,1); }
-@keyframes v2slide { from { transform:translateX(-100%); } }
-#lead-mgmt-root .v2-pan-h { padding:15px 18px; border-bottom:1px solid var(--border);
-  display:flex; justify-content:space-between; align-items:flex-start; gap:10px;
-  flex-shrink:0; }
-#lead-mgmt-root .v2-pan-h b { font-size:14px; }
-#lead-mgmt-root .v2-pan-n { font-size:11px; color:var(--text-mut); margin-top:2px; }
-#lead-mgmt-root .v2-x { background:none; border:none; color:var(--text-mut); font-size:20px;
-  line-height:1; padding:0 2px; cursor:pointer; font-family:inherit; }
-#lead-mgmt-root .v2-x:hover { color:var(--text); }
-/* Une seule colonne, dense : on parcourt une LISTE de clients, on ne
-   compare pas des cartes. */
-#lead-mgmt-root .v2-pan-b { padding:8px 12px 18px; overflow-y:auto; flex:1; }
-#lead-mgmt-root .v2-pan-f { padding:10px 18px; border-top:1px solid var(--border);
-  font-size:11px; color:var(--text-mut); flex-shrink:0; }
-#lead-mgmt-root .v2-lead { border-left:2px solid var(--text-mut); padding:8px 11px;
-  border-radius:0 6px 6px 0; position:relative; cursor:pointer; }
-#lead-mgmt-root .v2-lead + .v2-lead { margin-top:2px; }
-#lead-mgmt-root .v2-lead:hover { background:var(--blue-bg); }
-#lead-mgmt-root .v2-lead.ko { border-left-color:var(--red-soft); }
-#lead-mgmt-root .v2-lead.warn { border-left-color:#b8851a; }
-#lead-mgmt-root .v2-lead.ok { border-left-color:#53bda7; }
-#lead-mgmt-root .v2-lead-h { display:flex; justify-content:space-between; gap:8px;
-  align-items:baseline; }
-#lead-mgmt-root .v2-lead-h b { font-size:13px; }
-#lead-mgmt-root .v2-lead-h em { font-style:normal; font-size:12px; font-weight:600;
-  font-variant-numeric:tabular-nums; white-space:nowrap; }
-#lead-mgmt-root .v2-lead-h em.ko { color:var(--red-soft); }
-#lead-mgmt-root .v2-lead-h em.warn { color:#b8851a; }
-#lead-mgmt-root .v2-lead-h em.ok { color:var(--green); }
-#lead-mgmt-root .v2-lead-m { font-size:11px; color:var(--text-soft); margin-top:3px; }
-#lead-mgmt-root .v2-tag { display:inline-block; font-size:9.5px; font-weight:700;
-  padding:2px 7px; border-radius:9px; background:var(--blue-bg); color:var(--blue-dk); }
-#lead-mgmt-root .v2-reaff { margin-top:7px; font-size:11px; font-weight:600; padding:4px 10px;
-  border-radius:5px; border:1px solid var(--border); background:var(--card);
-  color:var(--blue-dk); cursor:pointer; font-family:inherit; }
-#lead-mgmt-root .v2-reaff:hover { background:var(--blue-bg); }
-
-/* --- Campagnes : DEUX PAR LIGNE --------------------------- */
-#lead-mgmt-root .v2-grid2 { display:grid; grid-template-columns:1fr 1fr; gap:14px;
-  align-items:start; }
-@media (max-width:900px) { #lead-mgmt-root .v2-grid2 { grid-template-columns:1fr; } }
-#lead-mgmt-root.lm-narrow .v2-grid2 { grid-template-columns:1fr; }
-#lead-mgmt-root .v2-flux { background:var(--card); border:1px solid var(--border);
-  border-radius:12px; padding:16px 18px; }
-#lead-mgmt-root .v2-flux-t { display:flex; justify-content:space-between; align-items:baseline;
-  gap:10px; flex-wrap:wrap; margin-bottom:14px; }
-#lead-mgmt-root .v2-flux-t h3 { font-size:10px; text-transform:uppercase; letter-spacing:.07em;
-  color:var(--text-mut); font-weight:600; margin:0; }
-#lead-mgmt-root .v2-r { display:grid; grid-template-columns:1fr 78px; gap:10px;
-  align-items:center; padding:7px 0; }
-#lead-mgmt-root .v2-r + .v2-r { border-top:1px solid #f4f7fb; }
-#lead-mgmt-root .v2-n b { font-size:12.5px; display:block; letter-spacing:-.01em; }
-#lead-mgmt-root .v2-n i { font-style:normal; font-size:10.5px; color:var(--text-mut);
-  margin-top:1px; display:block; }
-/* Barre PLUS ÉPAISSE : elle porte sa propre légende, donc elle doit
-   pouvoir accueillir un chiffre lisible. 18 px suffisent. */
-#lead-mgmt-root .v2-b { display:flex; align-items:center; height:18px; border-radius:4px;
-  overflow:hidden; background:#f0f4f9; margin-top:5px; }
-#lead-mgmt-root .v2-seg { height:18px; display:flex; align-items:center; justify-content:center;
-  font-size:10px; font-weight:700; color:#fff; overflow:hidden; white-space:nowrap;
-  font-variant-numeric:tabular-nums; }
-#lead-mgmt-root .v2-s1 { background:var(--blue-line); color:var(--blue-dk); }
-#lead-mgmt-root .v2-s2 { background:#53bda7; }
-#lead-mgmt-root .v2-s3 { background:#e8eef6; color:var(--text-soft); }
-#lead-mgmt-root .v2-s4 { background:#8fc9bb; }
-#lead-mgmt-root .v2-sko { background:#eab3b3; color:#7a2020; }
-#lead-mgmt-root .v2-v { text-align:right; font-variant-numeric:tabular-nums; white-space:nowrap; }
-#lead-mgmt-root .v2-v b { font-size:14px; font-weight:700; }
-#lead-mgmt-root .v2-v i { font-style:normal; font-size:10.5px; color:var(--text-mut);
-  display:block; margin-top:1px; }
-#lead-mgmt-root .v2-tot { display:grid; grid-template-columns:1fr 78px; gap:10px;
-  align-items:center; padding:11px 0 0; margin-top:6px; border-top:1.5px solid var(--blue-line); }
-#lead-mgmt-root .v2-lg { display:flex; gap:12px; flex-wrap:wrap; margin-top:12px; padding-top:10px;
-  border-top:1px solid #f0f4f9; font-size:10.5px; color:var(--text-mut); }
-#lead-mgmt-root .v2-lg i { display:inline-block; width:9px; height:9px; border-radius:3px;
-  vertical-align:-1px; margin-right:5px; }
-
-/* --- Rapport croisé --------------------------------------- */
-#lead-mgmt-root .v2-rep { background:var(--card); border:1px solid var(--border);
-  border-radius:12px; overflow-x:auto; }
-#lead-mgmt-root .v2-rep table { width:100%; border-collapse:collapse; min-width:840px; }
-#lead-mgmt-root .v2-rep th { text-align:right; font-size:10px; text-transform:uppercase;
-  letter-spacing:.05em; color:var(--text-mut); font-weight:700; padding:10px 12px;
-  background:var(--blue-bg); border-bottom:1px solid var(--border); white-space:nowrap; }
-#lead-mgmt-root .v2-rep th:first-child { text-align:left; }
-#lead-mgmt-root .v2-rep td { padding:12px 13px; border-bottom:1px solid #f4f7fb; font-size:13px;
-  text-align:right; font-variant-numeric:tabular-nums; white-space:nowrap; }
-#lead-mgmt-root .v2-rep td:first-child { text-align:left; }
-#lead-mgmt-root .v2-rep tbody tr { cursor:pointer; }
-#lead-mgmt-root .v2-rep tbody tr:hover { background:var(--blue-bg); }
-#lead-mgmt-root .v2-rep tfoot td { background:var(--blue-bg); font-weight:700;
-  border-top:2px solid var(--blue-line); }
-#lead-mgmt-root .v2-ok { color:var(--green); font-weight:700; }
-#lead-mgmt-root .v2-warn { color:#b8851a; font-weight:700; }
-#lead-mgmt-root .v2-ko { color:var(--red-soft); font-weight:700; }
-#lead-mgmt-root .v2-sous { font-size:11px; color:var(--text-mut); font-weight:400; }
-`;
-
-const LM_GESTES_CSS = `
-/* ⚠️ RELEVÉ LE 21/09 : --blue, --blue-line et --blue-pale étaient
-   utilisées mais JAMAIS définies. Tout ce qui en dépendait devenait
-   transparent, texte blanc compris : le bouton « Créer le rendez-vous »
-   et chaque créneau sélectionné n'apparaissaient qu'au survol. */
-#lead-mgmt-root { --blue:#2a5ea9; --blue-hover:#1f4a87; --blue-line:#acc5e4; --blue-pale:#f5f8fc; }
-#lead-mgmt-root .g-bandeau { display:flex; align-items:center; gap:11px; padding:11px 16px;
-  border-radius:10px; margin-bottom:14px; font-size:13px; }
-#lead-mgmt-root .g-bandeau.off { background:#fdf6e6; border:1px solid #b8851a; color:#7a5a12; }
-#lead-mgmt-root .g-bandeau.on { background:var(--green-bg,#e1f5ee); border:1px solid #53bda7;
-  color:var(--green); font-size:12px; padding:7px 14px; }
-#lead-mgmt-root .g-bandeau b { color:#5d4409; }
-#lead-mgmt-root .g-pastille { width:9px; height:9px; border-radius:50%; flex-shrink:0; }
-#lead-mgmt-root .g-bandeau.off .g-pastille { background:var(--red-soft); animation:gpulse 1.6s infinite; }
-#lead-mgmt-root .g-bandeau.on .g-pastille { background:#53bda7; }
-@keyframes gpulse { 50% { opacity:.35; } }
-#lead-mgmt-root .g-bandeau .g-act { margin-left:auto; background:#b8851a; color:#fff;
-  border:none; padding:6px 14px; border-radius:5px; font-size:12px; font-weight:600;
-  font-family:inherit; cursor:pointer; white-space:nowrap; }
-
-/* La source : une pastille discrète, jamais un pavé coloré. */
-#lead-mgmt-root .g-src { display:inline-flex; align-items:center; gap:5px; font-size:10px;
-  font-weight:700; padding:2px 8px; border-radius:10px; background:#f1efe8; color:#5f5e5a; }
-#lead-mgmt-root .g-src i { width:6px; height:6px; border-radius:50%; background:currentColor;
-  font-style:normal; }
-#lead-mgmt-root .g-src.bacs { background:#e8eef7; color:#2a5ea9; }
-#lead-mgmt-root .g-src.lbc { background:#fdeee6; color:#c2410c; }
-#lead-mgmt-root .g-src.centrale { background:#e9e7f8; color:#4c3fa8; }
-#lead-mgmt-root .g-src.stock { background:#e6f2ef; color:#166b56; }
-#lead-mgmt-root .g-src.web { background:var(--blue-bg); color:var(--blue-dk); }
-
-/* Les gestes : ce que la source PERMET. */
-#lead-mgmt-root .v2-lead { cursor:pointer; }
-#lead-mgmt-root .v2-lead-on { background:var(--blue-bg); border-left-width:4px; }
-#lead-mgmt-root .v2-lead-g { margin-top:10px; padding-top:10px;
-  border-top:1px solid var(--border); }
-#lead-mgmt-root .g-grille { display:grid; grid-template-columns:1fr 1fr; gap:8px; }
-@media (max-width:560px) { #lead-mgmt-root .g-grille { grid-template-columns:1fr; } }
-#lead-mgmt-root .g-btn { border:1px solid var(--border); border-radius:8px; padding:10px 12px;
-  background:var(--card); text-align:left; display:flex; flex-direction:column; gap:3px;
-  font-family:inherit; cursor:pointer; }
-#lead-mgmt-root .g-btn:hover:not(:disabled) { border-color:var(--blue-line); background:var(--blue-bg); }
-#lead-mgmt-root .g-btn b { font-size:12.5px; font-weight:600; color:var(--text); }
-#lead-mgmt-root .g-btn i { font-style:normal; font-size:10.5px; color:var(--text-mut); }
-#lead-mgmt-root .g-btn:disabled { opacity:.45; cursor:not-allowed; }
-#lead-mgmt-root .g-ou { font-size:9px; font-weight:700; padding:1px 5px; border-radius:8px;
-  margin-left:6px; vertical-align:1px; }
-#lead-mgmt-root .g-ou.bacs { color:var(--blue); background:var(--blue-bg); }
-#lead-mgmt-root .g-ou.od { color:var(--green); background:#e1f5ee; }
-
-/* Modale : transfert, rendez-vous, relance. */
-#lead-mgmt-root .g-modal { position:fixed; inset:0; background:rgba(28,43,61,.38); z-index:10000;
-  display:flex; align-items:center; justify-content:center; padding:20px; }
-#lead-mgmt-root .g-modal-c { background:var(--card); border-radius:12px; width:520px;
-  max-width:100%; max-height:88vh; display:flex; flex-direction:column;
-  box-shadow:0 12px 40px rgba(28,43,61,.28); }
-#lead-mgmt-root .g-modal-h { padding:16px 20px; border-bottom:1px solid var(--border); }
-#lead-mgmt-root .g-modal-h b { font-size:16px; }
-#lead-mgmt-root .g-modal-h p { margin:4px 0 0; font-size:12px; color:var(--text-soft); }
-#lead-mgmt-root .g-modal-b { padding:16px 20px; overflow-y:auto; }
-#lead-mgmt-root .g-modal-f { padding:14px 20px; border-top:1px solid var(--border);
-  display:flex; gap:8px; justify-content:flex-end; }
-#lead-mgmt-root .g-site { display:flex; align-items:center; gap:11px; padding:11px 13px;
-  border:1px solid var(--border); border-radius:8px; margin-bottom:7px; cursor:pointer; }
-#lead-mgmt-root .g-site:hover { background:var(--blue-pale,#f5f8fc); }
-#lead-mgmt-root .g-site.on { border-color:var(--blue); background:var(--blue-bg); }
-#lead-mgmt-root .g-site b { font-size:13px; display:block; }
-#lead-mgmt-root .g-site i { font-style:normal; font-size:11px; color:var(--text-mut); }
-#lead-mgmt-root .g-site .g-charge { margin-left:auto; font-size:11px; color:var(--text-soft);
-  white-space:nowrap; }
-#lead-mgmt-root .g-champ { margin-top:12px; }
-#lead-mgmt-root .g-champ label { font-size:11.5px; color:var(--text-mut); display:block;
-  margin-bottom:5px; }
-#lead-mgmt-root .g-champ input, #lead-mgmt-root .g-champ textarea,
-#lead-mgmt-root .g-champ select { width:100%; border:1px solid var(--border); border-radius:6px;
-  padding:8px; font-family:inherit; font-size:13px; color:var(--text); background:var(--card); }
-/* Boutons de la modale. ⚠️ La classe « lmf-btn » était utilisée ici mais
-   définie NULLE PART : « Annuler » et « Créer » s'affichaient en texte
-   brut (relevé le 21/09). */
-#lead-mgmt-root .g-act { border:1px solid var(--border); background:var(--card); color:var(--blue-dk);
-  border-radius:8px; padding:9px 18px; font-size:13px; font-weight:600; font-family:inherit; cursor:pointer; }
-#lead-mgmt-root .g-act:hover { background:var(--blue-bg); }
-#lead-mgmt-root .g-act.p { background:var(--blue); border-color:var(--blue); color:#fff; }
-#lead-mgmt-root .g-act.p:hover { background:var(--blue-hover); border-color:var(--blue-hover); }
-#lead-mgmt-root .g-act:disabled { opacity:.5; cursor:not-allowed; }
-
-/* Créneaux : un jour, une heure, une durée — trois clics au lieu de
-   trois sélecteurs natifs. */
-#lead-mgmt-root .g-lab { font-size:10.5px; text-transform:uppercase; letter-spacing:.06em; font-weight:700;
-  color:var(--text-mut); margin:14px 0 7px; }
-#lead-mgmt-root .g-chips { display:flex; flex-wrap:wrap; gap:6px; }
-#lead-mgmt-root .g-chip { border:1px solid var(--border); background:var(--card); color:var(--text);
-  border-radius:7px; padding:7px 11px; font-size:12.5px; font-family:inherit; cursor:pointer;
-  font-variant-numeric:tabular-nums; line-height:1.2; text-align:center; }
-#lead-mgmt-root .g-chip small { display:block; font-size:10.5px; color:var(--text-mut); margin-top:1px; }
-#lead-mgmt-root .g-chip:hover:not(:disabled) { border-color:var(--blue-line); background:var(--blue-bg); }
-#lead-mgmt-root .g-chip.on { background:var(--blue); border-color:var(--blue); color:#fff; }
-#lead-mgmt-root .g-chip.on small { color:#dbe6f5; }
-#lead-mgmt-root .g-chip:disabled { opacity:.35; cursor:not-allowed; }
-#lead-mgmt-root .g-heures { display:grid; grid-template-columns:repeat(6, 1fr); gap:6px; }
-@media (max-width:520px) { #lead-mgmt-root .g-heures { grid-template-columns:repeat(4, 1fr); } }
-#lead-mgmt-root .g-recap { margin-top:14px; padding:10px 13px; border-radius:8px; background:var(--blue-bg);
-  color:var(--blue-dk); font-size:13px; font-weight:600; }
-#lead-mgmt-root .g-note { background:#fdf6e6; border-left:3px solid #b8851a; padding:10px 13px;
-  border-radius:0 5px 5px 0; font-size:12px; color:#7a5a12; margin-bottom:14px; }
-`;
-
-// --- 3. Style (injection forcée) ----------------------------
-const STYLE_ID = 'lead-mgmt-style';
-const existing = doc.getElementById(STYLE_ID);
-if (existing) existing.remove();
-const styleEl = doc.createElement('style');
-styleEl.id = STYLE_ID;
-styleEl.textContent = `
-#lead-mgmt-root {
-  --green:#53bda7; --blue-lt:#acc5e4; --orange:#fac055; --blue-dk:#2a5ea9;
-  --bg:#fafbfd; --card:#fff; --border:#eaf0f9;
-  --text:#2a5ea9; --text-mut:#7a9cc4; --text-soft:#4a6a8a;
-  --red-soft:#c4554a; --red-bg:#fcebeb; --orange-bg:#fdf2dd; --green-bg:#e1f5ee; --blue-bg:#eaf0f9;
-  --grey-bg:#f0f2f5; --grey-text:#8a96a8; --grey-border:#dde2ea;
-  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
-  font-size:13px; color:var(--text);
-}
-#lead-mgmt-root *, #lead-mgmt-root *::before, #lead-mgmt-root *::after { box-sizing:border-box; }
-
-#lead-mgmt-root .lm-consultation-banner { background:var(--blue-dk); color:#fff; padding:10px 14px; border-radius:8px; display:flex; align-items:center; justify-content:space-between; margin-bottom:14px; font-size:12px; }
-#lead-mgmt-root .lm-consultation-banner-text { font-weight:500; }
-#lead-mgmt-root .lm-consultation-banner-text strong { font-weight:700; margin-left:4px; }
-#lead-mgmt-root .lm-consultation-close { background:rgba(255,255,255,.15); color:#fff; border:none; padding:4px 10px; border-radius:4px; cursor:pointer; font-size:11px; font-weight:600; }
-#lead-mgmt-root .lm-consultation-close:hover { background:rgba(255,255,255,.25); }
-
-#lead-mgmt-root .lm-team { background:var(--card); border:1px solid var(--border); border-radius:8px; margin-bottom:18px; overflow:hidden; }
-#lead-mgmt-root .lm-team-header { padding:10px 14px; background:#f5f8fc; border-bottom:1px solid var(--border); display:flex; align-items:center; justify-content:space-between; }
-#lead-mgmt-root .lm-team-title { font-size:11px; font-weight:600; color:var(--text-soft); text-transform:uppercase; letter-spacing:.5px; }
-#lead-mgmt-root .lm-bus-chip { font-size:10px; color:#085041; background:#e1f5ee; border:1px solid #9ad9c5; border-radius:999px; padding:1px 8px; font-weight:600; }
-#lead-mgmt-root .lm-team-scroll { width:100%; overflow-x:auto; -webkit-overflow-scrolling:touch; }
-#lead-mgmt-root .lm-team-table { width:100%; border-collapse:collapse; }
-#lead-mgmt-root .lm-team-table th { font-size:10px; font-weight:600; color:var(--text-mut); text-transform:uppercase; letter-spacing:.4px; padding:8px 10px; background:#f9fbfd; border-bottom:1px solid var(--border); text-align:center; }
-#lead-mgmt-root .lm-team-table th:first-child { text-align:left; }
-#lead-mgmt-root .lm-team-table tr { border-bottom:0.5px solid var(--border); }
-#lead-mgmt-root .lm-team-table tr.row-reseau  { background:#f5f8fc; cursor:pointer; }
-#lead-mgmt-root .lm-team-table tr.row-affaire { background:#fafbfd; cursor:pointer; }
-#lead-mgmt-root .lm-team-table tr.row-site    { background:#fff; cursor:pointer; }
-#lead-mgmt-root .lm-team-table tr.row-vendeur { background:#fff; cursor:pointer; }
-#lead-mgmt-root .lm-team-table tr.row-vendeur:hover { background:var(--blue-bg); }
-#lead-mgmt-root .lm-team-table tr.row-vendeur.is-selected { background:var(--blue-bg); }
-#lead-mgmt-root .lm-team-table tr.row-vendeur.is-selected td:first-child { font-weight:700; color:var(--blue-dk); }
-#lead-mgmt-root .lm-team-table tr.row-site.is-bus-focus { background:#e1f5ee; }
-#lead-mgmt-root .lm-team-table tr.row-site.is-bus-focus td:first-child { font-weight:700; color:#085041; }
-#lead-mgmt-root .lm-team-table tr.row-reseau:hover, #lead-mgmt-root .lm-team-table tr.row-affaire:hover, #lead-mgmt-root .lm-team-table tr.row-site:hover { filter:brightness(.97); }
-#lead-mgmt-root .lm-team-table td { padding:7px 10px; font-size:12px; text-align:center; color:var(--text); }
-#lead-mgmt-root .lm-team-table td:first-child { text-align:left; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:300px; }
-#lead-mgmt-root .lm-team-table .row-reseau td:first-child  { color:var(--blue-dk); font-weight:600; }
-#lead-mgmt-root .lm-team-table .row-affaire td:first-child { color:var(--blue-dk); font-weight:500; padding-left:24px; }
-#lead-mgmt-root .lm-team-table .row-site td:first-child    { color:var(--text-soft); font-weight:500; padding-left:44px; }
-#lead-mgmt-root .lm-team-table .row-vendeur td:first-child { color:var(--text-soft); padding-left:64px; }
-#lead-mgmt-root .lm-team-table .row-vendeur.is-direct td:first-child { padding-left:24px; }
-#lead-mgmt-root .lm-site-pin { margin-left:6px; font-size:10px; }
-#lead-mgmt-root .lm-expand-icon { display:inline-flex; align-items:center; justify-content:center; width:16px; height:16px; border-radius:3px; background:#eaf0f9; font-size:9px; color:var(--text-mut); margin-right:6px; }
-#lead-mgmt-root .lm-team-kpi { font-variant-numeric:tabular-nums; }
-#lead-mgmt-root .lm-team-kpi.kpi-warn   { color:#b8851a; font-weight:600; }
-#lead-mgmt-root .lm-team-kpi.kpi-critique { color:var(--red-soft); font-weight:700; }
-#lead-mgmt-root .lm-team-kpi.kpi-good   { color:var(--green); font-weight:600; }
-#lead-mgmt-root .lm-team-kpi.kpi-zero   { color:var(--text-mut); }
-
-#lead-mgmt-root .lm-toggle { display:inline-flex; background:var(--card); border:1px solid var(--border); border-radius:8px; padding:4px; margin-bottom:18px; box-shadow:0 1px 2px rgba(42,94,169,.04); }
-#lead-mgmt-root .lm-toggle-btn { padding:10px 22px; font-size:13px; font-weight:600; background:transparent; border:none; color:var(--text-soft); cursor:pointer; font-family:inherit; border-radius:6px; transition:all .15s ease; }
-#lead-mgmt-root .lm-toggle-btn:not(.active):hover { background:var(--blue-bg); color:var(--blue-dk); }
-#lead-mgmt-root .lm-toggle-btn.active { background:var(--blue-dk); color:#fff; box-shadow:0 1px 3px rgba(42,94,169,.25); }
-
-#lead-mgmt-root .lm-subtoggle { display:inline-flex; gap:0; margin-bottom:14px; border-bottom:1px solid var(--border); }
-#lead-mgmt-root .lm-subtoggle-btn { padding:7px 14px; font-size:11px; font-weight:600; background:transparent; border:none; color:var(--text-mut); cursor:pointer; font-family:inherit; border-bottom:2px solid transparent; margin-bottom:-1px; text-transform:uppercase; letter-spacing:.3px; transition:all .12s ease; }
-#lead-mgmt-root .lm-subtoggle-btn:not(.active):hover { color:var(--blue-dk); }
-#lead-mgmt-root .lm-subtoggle-btn.active { color:var(--blue-dk); border-bottom-color:var(--blue-dk); }
-
-#lead-mgmt-root .lm-period-bar { display:flex; align-items:center; gap:14px; margin-bottom:16px; flex-wrap:wrap; }
-#lead-mgmt-root .lm-period-label { font-size:11px; color:var(--text-mut); font-weight:500; text-transform:uppercase; letter-spacing:.5px; }
-#lead-mgmt-root .lm-range { border:1px solid var(--blue-lt); border-radius:6px; padding:6px 12px; font-size:11px; color:var(--blue-dk); background:#fff; cursor:pointer; font-family:inherit; font-weight:600; display:inline-flex; align-items:center; gap:6px; }
-#lead-mgmt-root .lm-range:hover { background:#f5f8fc; border-color:var(--blue-dk); }
-#lead-mgmt-root .lm-range-car { font-size:9px; color:var(--text-mut); }
-#lead-mgmt-root .lm-period-resume { font-size:11px; color:var(--text-mut); font-style:italic; }
-
-#lead-mgmt-root .lm-synthese { display:flex; flex-direction:column; gap:18px; }
-#lead-mgmt-root .lm-block { background:var(--card); border:1px solid var(--border); border-radius:8px; padding:14px 16px; }
-#lead-mgmt-root .lm-block-title { font-size:11px; font-weight:600; color:var(--text-soft); text-transform:uppercase; letter-spacing:.5px; margin-bottom:12px; display:flex; align-items:center; justify-content:space-between; }
-/* AJOUT 20/08/2026 — portee de la synthese */
-#lead-mgmt-root .lm-portee { display:flex; align-items:center; gap:9px; flex-wrap:wrap; margin-bottom:10px; }
-#lead-mgmt-root .lm-portee-l { font-size:11.5px; color:var(--text-mut); }
-#lead-mgmt-root .lm-portee-v { font-size:14px; font-weight:700; color:var(--blue-dk); }
-#lead-mgmt-root .lm-portee-x, #lead-mgmt-root .lm-portee-go { border:1px solid var(--border); background:var(--card); color:var(--blue-dk); font:inherit; font-size:11.5px; font-weight:600; padding:4px 11px; border-radius:99px; cursor:pointer; }
-#lead-mgmt-root .lm-portee-x:hover, #lead-mgmt-root .lm-portee-go:hover { background:#eaf0f9; }
-#lead-mgmt-root .lm-portee-go { margin-left:auto; }
-#lead-mgmt-root .lm-team-table tr.is-scope { box-shadow:inset 3px 0 0 var(--blue-dk); }
-#lead-mgmt-root .lm-team-table tr.is-scope td:first-child { font-weight:700; }
-
-/* AJOUT 20/08/2026 — compteurs du vendeur */
-#lead-mgmt-root .lm-focus { background:var(--card); border:1px solid var(--border); border-radius:8px; padding:14px 18px; margin-bottom:12px; }
-#lead-mgmt-root .lm-focus-h { display:flex; align-items:center; gap:12px; flex-wrap:wrap; margin-bottom:14px; }
-#lead-mgmt-root .lm-focus-back { border:1px solid var(--border); background:var(--card); color:var(--blue-dk); font:inherit; font-size:12px; font-weight:600; padding:6px 13px; border-radius:99px; cursor:pointer; }
-#lead-mgmt-root .lm-focus-back:hover { background:#eaf0f9; }
-#lead-mgmt-root .lm-focus-nom { font-size:17px; font-weight:700; color:var(--blue-dk); letter-spacing:-.01em; }
-#lead-mgmt-root .lm-focus-kpi { display:grid; grid-template-columns:repeat(4,1fr); gap:10px; }
-#lead-mgmt-root .lm-focus-c { background:#f5f8fc; border:1px solid transparent; border-radius:8px; padding:11px 13px; text-align:left; font:inherit; cursor:pointer; transition:background .14s, border-color .14s; }
-#lead-mgmt-root .lm-focus-c:hover { background:#eaf0f9; border-color:var(--border); }
-#lead-mgmt-root .lm-focus-c:focus-visible { outline:2px solid var(--blue-dk); outline-offset:2px; }
-#lead-mgmt-root .lm-focus-c.alerte .lm-focus-n { color:#b8851a; }
-#lead-mgmt-root .lm-focus-n { display:block; font-size:23px; font-weight:700; color:var(--blue-dk); line-height:1; letter-spacing:-.03em; font-variant-numeric:tabular-nums; }
-#lead-mgmt-root .lm-focus-l { display:block; font-size:10.5px; color:var(--text-mut); margin-top:5px; }
-#lead-mgmt-root .lm-focus-go { text-align:right; margin-bottom:12px; }
-#lead-mgmt-root .lm-focus-btn { border:1px solid var(--border); background:var(--card); color:var(--blue-dk); font:inherit; font-size:12.5px; font-weight:600; padding:8px 16px; border-radius:99px; cursor:pointer; }
-#lead-mgmt-root .lm-focus-btn:hover { background:#eaf0f9; }
-@media (max-width:640px) { #lead-mgmt-root .lm-focus-kpi { grid-template-columns:repeat(2,1fr); } }
-
-/* AJOUT 20/08/2026 — entonnoir de cohorte */
-#lead-mgmt-root .lm-ent { background:var(--card); border:1px solid var(--border); border-radius:8px; padding:16px 18px; margin-bottom:12px; }
-#lead-mgmt-root .lm-ent-h { display:flex; align-items:baseline; gap:10px; flex-wrap:wrap; margin-bottom:16px; }
-#lead-mgmt-root .lm-ent-t { font-size:13px; font-weight:700; color:var(--blue-dk); }
-#lead-mgmt-root .lm-ent-per { font-size:12px; font-weight:600; color:var(--blue-dk); background:#eaf0f9; padding:3px 10px; border-radius:99px; }
-#lead-mgmt-root .lm-ent-s { font-size:11px; color:var(--text-mut); }
-#lead-mgmt-root .lm-ent-chaine { display:flex; align-items:stretch; gap:0; flex-wrap:wrap; }
-#lead-mgmt-root .lm-ent-pas { flex:1 1 110px; min-width:96px; padding:12px 10px; border-radius:8px; background:#f5f8fc; text-align:center; }
-#lead-mgmt-root .lm-ent-pas.fin { background:#e1f5ee; }
-#lead-mgmt-root .lm-ent-nb { font-size:27px; font-weight:700; line-height:1; letter-spacing:-.03em; color:var(--blue-dk); font-variant-numeric:tabular-nums; }
-#lead-mgmt-root .lm-ent-pas.fin .lm-ent-nb { color:#085041; }
-#lead-mgmt-root .lm-ent-lb { font-size:10.5px; color:var(--text-mut); margin-top:5px; line-height:1.3; }
-#lead-mgmt-root .lm-ent-fle { flex:0 0 62px; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:3px; color:#9bb3d1; }
-#lead-mgmt-root .lm-ent-fle svg { width:40px; height:8px; display:block; }
-#lead-mgmt-root .lm-ent-tx { font-size:13px; font-weight:700; color:var(--blue-dk); font-variant-numeric:tabular-nums; }
-#lead-mgmt-root .lm-ent-fle.bas { color:var(--red-soft); }
-#lead-mgmt-root .lm-ent-fle.bas .lm-ent-tx { color:var(--red-soft); }
-#lead-mgmt-root .lm-ent-bas { margin-top:16px; padding-top:13px; border-top:1px solid var(--border); display:flex; flex-direction:column; gap:6px; }
-#lead-mgmt-root .lm-ent-glob { font-size:12.5px; color:var(--text-mut); }
-#lead-mgmt-root .lm-ent-glob b { color:var(--blue-dk); font-weight:700; font-size:14px; }
-#lead-mgmt-root .lm-ent-et { font-size:12.5px; color:var(--text-mut); }
-#lead-mgmt-root .lm-ent-et b { color:var(--red-soft); font-weight:700; font-size:14px; }
-#lead-mgmt-root .lm-ent-et i { font-style:normal; color:var(--red-soft); font-weight:600; }
-#lead-mgmt-root .lm-ent-note { margin-top:10px; font-size:10.5px; color:var(--text-mut); line-height:1.5; }
-#lead-mgmt-root .lm-ent-sk { height:74px; border-radius:8px; background:linear-gradient(90deg,#eef2f8 25%,#e2eaf5 50%,#eef2f8 75%); background-size:200% 100%; animation:lmentsk 1.4s infinite; }
-@keyframes lmentsk { 0%{background-position:200% 0} 100%{background-position:-200% 0} }
-@media (max-width:700px) {
-  #lead-mgmt-root .lm-ent-chaine { flex-direction:column; }
-  #lead-mgmt-root .lm-ent-pas { flex:none; width:100%; display:flex; align-items:baseline; gap:10px; text-align:left; }
-  #lead-mgmt-root .lm-ent-lb { margin-top:0; }
-  #lead-mgmt-root .lm-ent-fle { flex:none; width:100%; flex-direction:row; gap:8px; padding:4px 0; }
-  #lead-mgmt-root .lm-ent-fle svg { transform:rotate(90deg); width:22px; }
-}
-#lead-mgmt-root .lm-synth-kpi { display:grid; grid-template-columns:repeat(4,1fr); gap:12px; }
-#lead-mgmt-root .lm-synth-kpi-card { background:var(--card); border:1px solid var(--border); border-radius:8px; padding:14px 16px; display:flex; flex-direction:column; gap:4px; }
-#lead-mgmt-root .lm-synth-kpi-label { font-size:10px; color:var(--text-mut); font-weight:500; text-transform:uppercase; letter-spacing:.5px; }
-#lead-mgmt-root .lm-synth-kpi-value { font-size:26px; font-weight:600; color:var(--blue-dk); line-height:1.1; font-variant-numeric:tabular-nums; }
-#lead-mgmt-root .lm-synth-kpi-sub { font-size:10px; color:var(--text-mut); }
-#lead-mgmt-root .lm-synth-kpi-card.kpi-critique .lm-synth-kpi-value { color:var(--red-soft); }
-#lead-mgmt-root .lm-synth-kpi-card.kpi-warn     .lm-synth-kpi-value { color:#b8851a; }
-#lead-mgmt-root .lm-synth-kpi-card.kpi-good     .lm-synth-kpi-value { color:var(--green); }
-#lead-mgmt-root .lm-synth-kpi-card.kpi-na       .lm-synth-kpi-value { color:var(--grey-text); font-size:22px; }
-#lead-mgmt-root .lm-synth-2col { display:grid; grid-template-columns:1fr 1fr; gap:18px; }
-@media (max-width:900px) {
-  #lead-mgmt-root .lm-synth-kpi { grid-template-columns:repeat(2,1fr); }
-  #lead-mgmt-root .lm-synth-2col { grid-template-columns:1fr; }
-}
-
-#lead-mgmt-root .lm-ranking-list { display:flex; flex-direction:column; gap:6px; }
-#lead-mgmt-root .lm-ranking-item { display:flex; align-items:center; justify-content:space-between; padding:8px 10px; border-radius:6px; background:var(--bg); border:1px solid transparent; transition:all .12s ease; }
-/* Le vendeur sur lequel porte la synthese : encadre ET en gras, pour qu'on
-   le retrouve d'un coup d'oeil dans une liste de cinq. */
-#lead-mgmt-root .lm-ranking-item.is-highlighted { background:var(--blue-bg); border-color:var(--blue-dk); box-shadow:0 0 0 1px var(--blue-dk); }
-#lead-mgmt-root .lm-ranking-item.is-highlighted .lm-ranking-name { font-weight:700; color:var(--blue-dk); }
-#lead-mgmt-root .lm-ranking-item.is-highlighted .lm-ranking-value { font-weight:700; }
-#lead-mgmt-root .lm-ranking-item-left { display:flex; align-items:center; gap:10px; flex:1; min-width:0; }
-#lead-mgmt-root .lm-ranking-rank { display:inline-flex; align-items:center; justify-content:center; width:22px; height:22px; border-radius:50%; background:var(--blue-bg); color:var(--blue-dk); font-size:10px; font-weight:700; flex-shrink:0; }
-#lead-mgmt-root .lm-ranking-rank.rank-1 { background:var(--green); color:#fff; }
-#lead-mgmt-root .lm-ranking-rank.rank-2 { background:#7fcfbb; color:#fff; }
-#lead-mgmt-root .lm-ranking-rank.rank-3 { background:#a8ddca; color:#1d6e5f; }
-#lead-mgmt-root .lm-ranking-rank.rank-low-1 { background:var(--red-soft); color:#fff; }
-#lead-mgmt-root .lm-ranking-rank.rank-low-2 { background:#d6857b; color:#fff; }
-#lead-mgmt-root .lm-ranking-rank.rank-low-3 { background:#e3aba2; color:#fff; }
-#lead-mgmt-root .lm-ranking-name { font-size:12px; font-weight:500; color:var(--text); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-#lead-mgmt-root .lm-ranking-detail { font-size:10px; color:var(--text-mut); margin-top:1px; }
-#lead-mgmt-root .lm-ranking-value { font-size:14px; font-weight:700; color:var(--blue-dk); font-variant-numeric:tabular-nums; flex-shrink:0; padding-left:10px; }
-#lead-mgmt-root .lm-ranking-item.lm-ranking-good .lm-ranking-value { color:var(--green); }
-#lead-mgmt-root .lm-ranking-item.lm-ranking-bad  .lm-ranking-value { color:var(--red-soft); }
-#lead-mgmt-root .lm-ranking-empty { text-align:center; padding:20px; color:var(--text-mut); font-size:11px; font-style:italic; }
-
-#lead-mgmt-root .lm-alerts-list { display:flex; flex-direction:column; gap:8px; }
-#lead-mgmt-root .lm-alert { display:flex; align-items:center; justify-content:space-between; padding:10px 12px; border-radius:6px; border-left:3px solid var(--orange); background:#fff8ec; }
-#lead-mgmt-root .lm-alert.severity-info { background:var(--blue-bg); border-left-color:var(--blue-dk); }
-#lead-mgmt-root .lm-alert-text { font-size:12px; color:var(--text); }
-#lead-mgmt-root .lm-chart-placeholder { height:220px; display:flex; align-items:center; justify-content:center; background:repeating-linear-gradient(45deg, var(--bg), var(--bg) 8px, #f5f8fc 8px, #f5f8fc 16px); border-radius:6px; color:var(--text-mut); font-size:11px; font-style:italic; }
-#lead-mgmt-root .lm-chart-wrap { position:relative; height:220px; }
-#lead-mgmt-root .lm-chart-wrap canvas { max-width:100%; }
-
-#lead-mgmt-root .kpi-bar { display:grid; grid-template-columns:repeat(5,1fr); gap:12px; margin-bottom:16px; }
-#lead-mgmt-root .kpi { background:var(--card); border:1px solid var(--border); border-radius:8px; padding:12px 14px; }
-#lead-mgmt-root .kpi-label { font-size:10px; text-transform:uppercase; letter-spacing:.5px; color:var(--text-mut); font-weight:500; }
-#lead-mgmt-root .kpi-value { font-size:22px; font-weight:600; margin-top:4px; color:var(--blue-dk); }
-#lead-mgmt-root .kpi-critique .kpi-value { color:var(--red-soft); }
-#lead-mgmt-root .kpi-warn .kpi-value     { color:#b8851a; }
-#lead-mgmt-root .kpi-good .kpi-value     { color:var(--green); }
-#lead-mgmt-root .filters { display:flex; gap:8px; margin-bottom:16px; align-items:center; flex-wrap:wrap; }
-#lead-mgmt-root .filter-chip { padding:5px 10px; border-radius:14px; background:var(--card); border:1px solid var(--border); font-size:11px; color:var(--text-soft); cursor:pointer; font-weight:500; user-select:none; }
-#lead-mgmt-root .filter-chip.active { background:var(--blue-dk); color:#fff; border-color:var(--blue-dk); }
-#lead-mgmt-root .filter-chip .count { margin-left:4px; opacity:.7; font-size:10px; }
-#lead-mgmt-root .filter-search { margin-left:auto; padding:6px 10px; border:1px solid var(--border); border-radius:6px; font-size:12px; background:var(--card); color:var(--text); width:220px; outline:none; }
-#lead-mgmt-root .filter-search:focus { border-color:var(--blue-dk); }
-#lead-mgmt-root .section { margin-bottom:20px; }
-#lead-mgmt-root .section-header { display:flex; align-items:center; gap:8px; margin-bottom:10px; }
-#lead-mgmt-root .section-title { font-size:12px; font-weight:600; color:var(--text-soft); text-transform:uppercase; letter-spacing:.6px; }
-#lead-mgmt-root .section-count { background:var(--blue-bg); color:var(--blue-dk); padding:2px 8px; border-radius:10px; font-size:10px; font-weight:600; }
-#lead-mgmt-root .section-critical .section-count { background:var(--red-bg); color:var(--red-soft); }
-#lead-mgmt-root .section-warn .section-count     { background:var(--orange-bg); color:#b8851a; }
-#lead-mgmt-root .lm-empty { text-align:center; padding:40px; color:var(--text-mut); }
-#lead-mgmt-root .cards { display:grid; grid-template-columns:repeat(auto-fill,minmax(min(360px,100%),1fr)); gap:10px; }
-#lead-mgmt-root .card { background:var(--card); border:1px solid var(--border); border-radius:8px; padding:12px 14px; border-left:3px solid var(--blue-lt); transition:all .15s ease; }
-#lead-mgmt-root .card:hover { border-color:var(--blue-dk); box-shadow:0 2px 8px rgba(42,94,169,.08); }
-#lead-mgmt-root .card-clickable { cursor:pointer; }
-#lead-mgmt-root .card-clickable:hover { border-color:var(--blue-dk); box-shadow:0 4px 12px rgba(42,94,169,.12); transform:translateY(-1px); }
-#lead-mgmt-root .card-clickable:active { transform:translateY(0); }
-#lead-mgmt-root .card-client-name { font-size:13px; font-weight:600; color:var(--blue-dk); line-height:1.2; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-#lead-mgmt-root .card.sla_critique { border-left-color:var(--red-soft); }
-#lead-mgmt-root .card.sla_depasse  { border-left-color:var(--orange); }
-#lead-mgmt-root .card.a_traiter    { border-left-color:var(--blue-dk); }
-#lead-mgmt-root .card.a_relancer   { border-left-color:var(--orange); }
-#lead-mgmt-root .card.suivi_normal { border-left-color:var(--blue-lt); }
-#lead-mgmt-root .card.is-loading   { opacity:.5; pointer-events:none; }
-#lead-mgmt-root .card-row1 { display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:6px; gap:8px; }
-#lead-mgmt-root .btn-client { display:inline-flex; align-items:center; padding:6px 14px; border-radius:6px; background:var(--blue-dk); color:#fff; border:1px solid var(--blue-dk); font-family:inherit; font-size:13px; font-weight:600; cursor:pointer; transition:background .12s ease; max-width:100%; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-#lead-mgmt-root .btn-client:hover { background:#1f4a87; border-color:#1f4a87; }
-#lead-mgmt-root .card-site { font-size:10px; color:var(--text-mut); margin-top:4px; padding-left:2px; }
-#lead-mgmt-root .card-sla { font-size:10px; font-weight:600; padding:3px 7px; border-radius:4px; white-space:nowrap; font-variant-numeric:tabular-nums; align-self:flex-start; }
-#lead-mgmt-root .card.sla_critique .card-sla { background:var(--red-bg); color:var(--red-soft); }
-#lead-mgmt-root .card.sla_depasse .card-sla  { background:var(--orange-bg); color:#b8851a; }
-#lead-mgmt-root .card.a_traiter .card-sla    { background:var(--blue-bg); color:var(--blue-dk); }
-#lead-mgmt-root .card.a_relancer .card-sla   { background:var(--orange-bg); color:#b8851a; }
-#lead-mgmt-root .card.suivi_normal .card-sla { background:var(--blue-bg); color:var(--text-mut); }
-#lead-mgmt-root .card-lead-line { display:flex; align-items:center; gap:6px; padding:6px 0; border-top:1px dashed var(--border); border-bottom:1px dashed var(--border); margin:10px 0 8px; font-size:11px; color:var(--text-soft); }
-#lead-mgmt-root .source-badge { display:inline-flex; align-items:center; gap:4px; padding:2px 7px; border-radius:3px; font-size:10px; font-weight:500; background:var(--blue-bg); color:var(--blue-dk); }
-#lead-mgmt-root .source-badge.leboncoin   { background:#fde9d9; color:#b56828; }
-#lead-mgmt-root .source-badge.la_centrale { background:#dbe7f6; color:#1d4a87; }
-#lead-mgmt-root .source-badge.rpv         { background:#e1f5ee; color:#1d6e5f; }
-#lead-mgmt-root .source-badge.wa_entrant  { background:#d9f2e8; color:#1d6e5f; }
-#lead-mgmt-root .source-badge.site_web    { background:#ece4f6; color:#5e3d8b; }
-#lead-mgmt-root .source-badge.tel_traceur { background:#fdf2dd; color:#8a6014; }
-#lead-mgmt-root .source-badge.none        { background:var(--grey-bg); color:var(--grey-text); }
-#lead-mgmt-root .card-message { font-size:11px; color:var(--text-soft); line-height:1.4; overflow:hidden; text-overflow:ellipsis; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; }
-#lead-mgmt-root .card-footer { display:flex; justify-content:space-between; align-items:center; margin-top:10px; padding-top:8px; border-top:1px solid var(--border); }
-#lead-mgmt-root .card-meta { display:flex; gap:10px; font-size:10px; color:var(--text-mut); }
-#lead-mgmt-root .card-meta-item { display:flex; align-items:center; gap:3px; }
-#lead-mgmt-root .temperature { display:inline-block; width:6px; height:6px; border-radius:50%; margin-right:4px; }
-#lead-mgmt-root .temp-chaud { background:var(--red-soft); }
-#lead-mgmt-root .temp-tiede { background:var(--orange); }
-#lead-mgmt-root .temp-froid { background:var(--blue-lt); }
-#lead-mgmt-root .card-actions { display:flex; gap:4px; margin-top:8px; }
-#lead-mgmt-root .btn { flex:1; padding:6px 8px; border-radius:5px; border:1px solid var(--border); background:var(--card); color:var(--text-soft); font-size:11px; cursor:pointer; font-weight:500; }
-#lead-mgmt-root .btn:hover:not(:disabled) { background:var(--blue-bg); }
-#lead-mgmt-root .btn:disabled { opacity:.5; cursor:not-allowed; }
-#lead-mgmt-root .btn-primary { background:var(--blue-dk); color:#fff; border-color:var(--blue-dk); }
-#lead-mgmt-root .btn-primary:hover:not(:disabled) { background:#1f4a87; }
-#lead-mgmt-root .lm-kanban { display:grid; grid-template-columns:repeat(4, minmax(0, 1fr)); gap:12px; height: calc(100vh - 280px); min-height:500px; }
-#lead-mgmt-root .lm-col { background:var(--bg); border:1px solid var(--border); border-radius:8px; display:flex; flex-direction:column; overflow:hidden; min-width:0; }
-#lead-mgmt-root .lm-col-head { padding:12px 14px; background:var(--blue-dk); color:#fff; display:flex; align-items:center; justify-content:space-between; gap:8px; }
-#lead-mgmt-root .lm-col[data-statut="nouveau"]  .lm-col-head { background:var(--blue-lt); color:#1d4a87; }
-#lead-mgmt-root .lm-col[data-statut="en_cours"] .lm-col-head { background:var(--blue-dk); color:#fff; }
-#lead-mgmt-root .lm-col[data-statut="avance"]   .lm-col-head { background:var(--green); color:#fff; }
-#lead-mgmt-root .lm-col[data-statut="clos"]     .lm-col-head { background:var(--grey-text); color:#fff; }
-#lead-mgmt-root .lm-col-title { font-size:12px; font-weight:700; text-transform:uppercase; letter-spacing:.5px; }
-#lead-mgmt-root .lm-col-count { background:rgba(255,255,255,.25); color:inherit; padding:2px 9px; border-radius:10px; font-size:11px; font-weight:700; min-width:26px; text-align:center; }
-#lead-mgmt-root .lm-col[data-statut="nouveau"] .lm-col-count { background:rgba(29,74,135,.18); color:#1d4a87; }
-#lead-mgmt-root .lm-col-body { flex:1; overflow-y:auto; padding:8px; display:flex; flex-direction:column; gap:6px; }
-#lead-mgmt-root .lm-kcard { background:var(--card); border:1px solid var(--border); border-radius:6px; padding:8px 10px; cursor:pointer; transition:all .12s ease; display:flex; flex-direction:column; gap:4px; }
-#lead-mgmt-root .lm-kcard:hover { border-color:var(--blue-dk); box-shadow:0 1px 4px rgba(42,94,169,.08); transform:translateY(-1px); }
-#lead-mgmt-root .lm-kcard.is-loading { opacity:.5; pointer-events:none; }
-#lead-mgmt-root .lm-kcard-client { font-weight:600; color:var(--blue-dk); font-size:12.5px; line-height:1.2; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-#lead-mgmt-root .lm-kcard-meta { display:flex; flex-wrap:wrap; gap:4px 8px; font-size:10px; color:var(--text-mut); }
-#lead-mgmt-root .lm-kcard-meta-item { display:inline-flex; align-items:center; gap:3px; }
-#lead-mgmt-root .lm-kcard-badges { display:flex; flex-wrap:wrap; gap:4px; margin-top:2px; }
-#lead-mgmt-root .lm-kbadge { font-size:9px; font-weight:600; padding:2px 6px; border-radius:3px; background:var(--blue-bg); color:var(--blue-dk); white-space:nowrap; }
-#lead-mgmt-root .lm-kbadge.propale { background:var(--green-bg); color:#1d6e5f; }
-#lead-mgmt-root .lm-kbadge.win     { background:var(--green); color:#fff; }
-#lead-mgmt-root .lm-kbadge.abandon { background:var(--red-bg); color:var(--red-soft); }
-#lead-mgmt-root .lm-kbadge.autre   { background:var(--grey-bg); color:var(--grey-text); }
-#lead-mgmt-root .lm-kbadge.inact   { background:var(--orange-bg); color:#8a6014; }
-#lead-mgmt-root .lm-col[data-statut="clos"] .lm-kcard { background:var(--grey-bg); border-color:var(--grey-border); }
-#lead-mgmt-root .lm-col[data-statut="clos"] .lm-kcard-client { color:var(--grey-text); }
-#lead-mgmt-root .lm-col[data-statut="clos"] .lm-kcard:hover { border-color:#aab4c2; }
-#lead-mgmt-root .lm-kanban-empty { text-align:center; padding:24px 10px; color:var(--text-mut); font-size:11px; font-style:italic; }
-
-/* ============ CAMPAGNES (groupement Sollicitation MKG dans "À traiter") ============ */
-#lead-mgmt-root .lm-campagne { margin-bottom:14px; background:var(--card); border:1px solid var(--border); border-radius:8px; overflow:hidden; }
-#lead-mgmt-root .lm-campagne-header { display:flex; align-items:center; gap:10px; padding:11px 14px; background:#f5f8fc; cursor:pointer; user-select:none; transition:background .12s ease; }
-#lead-mgmt-root .lm-campagne-header:hover { background:#eef2f8; }
-#lead-mgmt-root .lm-campagne.is-open .lm-campagne-header { border-bottom:1px solid var(--border); }
-#lead-mgmt-root .lm-campagne-icon { width:18px; height:18px; border-radius:4px; background:#eaf0f9; font-size:10px; color:var(--text-mut); display:inline-flex; align-items:center; justify-content:center; flex-shrink:0; }
-#lead-mgmt-root .lm-campagne-title { font-size:12.5px; font-weight:600; color:var(--blue-dk); flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-#lead-mgmt-root .lm-campagne-stats { display:flex; gap:6px; flex-shrink:0; }
-#lead-mgmt-root .lm-campagne-stat { font-size:10px; font-weight:600; padding:3px 9px; border-radius:10px; background:var(--blue-bg); color:var(--blue-dk); white-space:nowrap; }
-#lead-mgmt-root .lm-campagne-stat.crit { background:var(--red-bg); color:var(--red-soft); }
-#lead-mgmt-root .lm-campagne-stat.warn { background:var(--orange-bg); color:#b8851a; }
-#lead-mgmt-root .lm-campagne-body { padding:12px 14px; display:none; }
-#lead-mgmt-root .lm-campagne.is-open .lm-campagne-body { display:block; }
-#lead-mgmt-root .lm-campagne-body .section { margin-bottom:14px; }
-#lead-mgmt-root .lm-campagne-body .section:last-child { margin-bottom:0; }
-
-/* ============ ONGLET CAMPAGNES (RPC get_campagnes_sollicitation) ============ */
-#lead-mgmt-root .lm-cmp-summary { display:grid; grid-template-columns:repeat(4,1fr); gap:12px; margin-bottom:18px; }
-@media (max-width:900px) { #lead-mgmt-root .lm-cmp-summary { grid-template-columns:repeat(2,1fr); } }
-#lead-mgmt-root .lm-cmp-card { background:var(--card); border:1px solid var(--border); border-radius:10px; padding:14px 16px; margin-bottom:14px; }
-#lead-mgmt-root .lm-cmp-head { display:flex; align-items:center; justify-content:space-between; gap:10px; margin-bottom:12px; }
-#lead-mgmt-root .lm-cmp-name { font-size:13.5px; font-weight:700; color:var(--blue-dk); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; min-width:0; }
-#lead-mgmt-root .lm-cmp-tags { display:flex; gap:6px; flex-shrink:0; flex-wrap:wrap; justify-content:flex-end; }
-#lead-mgmt-root .lm-cmp-tag { font-size:10px; font-weight:600; padding:3px 9px; border-radius:10px; background:var(--blue-bg); color:var(--blue-dk); white-space:nowrap; }
-#lead-mgmt-root .lm-cmp-tag.roi-good { background:var(--green-bg); color:#1d6e5f; }
-#lead-mgmt-root .lm-cmp-tag.roi-mid  { background:var(--orange-bg); color:#b8851a; }
-#lead-mgmt-root .lm-cmp-tag.roi-low  { background:var(--red-bg); color:var(--red-soft); }
-#lead-mgmt-root .lm-funnel { display:flex; align-items:stretch; gap:0; }
-#lead-mgmt-root .lm-funnel-stage { flex:1; display:flex; flex-direction:column; align-items:center; gap:4px; position:relative; padding:0 4px; }
-#lead-mgmt-root .lm-funnel-bar { width:100%; border-radius:6px; display:flex; align-items:flex-end; justify-content:center; min-height:34px; padding-bottom:4px; }
-#lead-mgmt-root .lm-funnel-val { font-size:15px; font-weight:700; color:#fff; }
-#lead-mgmt-root .lm-funnel-lbl { font-size:10px; color:var(--text-mut); font-weight:600; text-transform:uppercase; letter-spacing:.3px; text-align:center; }
-#lead-mgmt-root .lm-funnel-conv { font-size:9px; color:var(--text-soft); font-weight:600; }
-#lead-mgmt-root .lm-funnel-arrow { display:flex; align-items:center; color:var(--text-mut); font-size:13px; padding:0 2px; align-self:flex-start; margin-top:10px; }
-#lead-mgmt-root .lm-cmp-foot { display:flex; gap:14px; flex-wrap:wrap; margin-top:12px; padding-top:10px; border-top:1px dashed var(--border); font-size:11px; color:var(--text-soft); }
-#lead-mgmt-root .lm-cmp-foot b { color:var(--blue-dk); font-weight:700; }
-#lead-mgmt-root .lm-cmp-ranking { display:flex; flex-direction:column; gap:6px; }
-
-/* ============ ONGLET CRÉER UNE CAMPAGNE (creer_campagne_sollicitation) ============ */
-#lead-mgmt-root .lm-camp { display:flex; flex-direction:column; gap:18px; }
-#lead-mgmt-root .lm-camp-grid { display:grid; grid-template-columns:repeat(4,1fr); gap:12px; }
-#lead-mgmt-root .lm-camp-field { display:flex; flex-direction:column; gap:4px; }
-#lead-mgmt-root .lm-camp-full { grid-column:1 / -1; }
-#lead-mgmt-root .lm-camp-lbl { font-size:10px; font-weight:600; color:var(--text-mut); text-transform:uppercase; letter-spacing:.4px; }
-#lead-mgmt-root .lm-camp-hint { text-transform:none; font-weight:500; opacity:.8; }
-#lead-mgmt-root .lm-camp-input { border:1px solid var(--border); border-radius:6px; padding:8px 10px; font-size:12px; font-family:inherit; color:var(--text); background:#fff; outline:none; width:100%; }
-#lead-mgmt-root .lm-camp-input:focus { border-color:var(--blue-dk); }
-#lead-mgmt-root .lm-camp-checks { display:flex; flex-wrap:wrap; gap:8px 16px; margin-top:4px; }
-#lead-mgmt-root .lm-camp-chk { display:inline-flex; align-items:center; gap:6px; font-size:12px; color:var(--text-soft); cursor:pointer; }
-#lead-mgmt-root .lm-camp-actions { display:flex; gap:10px; margin-top:14px; }
-#lead-mgmt-root .lm-camp-actions .btn { flex:0 0 auto; padding:10px 20px; }
-#lead-mgmt-root .lm-camp-total { font-size:13px; color:var(--text-soft); }
-#lead-mgmt-root .lm-camp-total-num { font-size:24px; font-weight:700; color:var(--blue-dk); }
-#lead-mgmt-root .lm-camp-warn { color:#b8851a; font-weight:600; }
-#lead-mgmt-root .lm-camp-res-load { color:var(--text-mut); font-size:12px; font-style:italic; }
-#lead-mgmt-root .lm-camp-res-err { color:var(--red-soft); font-size:12px; }
-#lead-mgmt-root .lm-camp-success { color:#1d6e5f; font-weight:600; font-size:13px; background:var(--green-bg); border-left:3px solid var(--green); }
-
-/* ===== RESPONSIVE (ajout v25) ============================================== */
-@media (max-width:760px) {
-  #lead-mgmt-root .lm-team-table { min-width:520px; }
-  #lead-mgmt-root .lm-kanban { grid-template-columns:1fr; height:auto; min-height:0; }
-  #lead-mgmt-root .lm-col { min-height:0; }
-  #lead-mgmt-root .lm-col-body { max-height:55vh; }
-  #lead-mgmt-root .filter-search { margin-left:0; width:100%; }
-  #lead-mgmt-root .lm-funnel-lbl { font-size:9px; }
-}
-/* Repli .lm-narrow : déclenché par la largeur RÉELLE de #lead-mgmt-root
-   (ResizeObserver), indépendant de la media query. */
-#lead-mgmt-root.lm-narrow .lm-team-table { min-width:520px; }
-#lead-mgmt-root.lm-narrow .lm-kanban { grid-template-columns:1fr; height:auto; min-height:0; }
-#lead-mgmt-root.lm-narrow .lm-col { min-height:0; }
-#lead-mgmt-root.lm-narrow .lm-col-body { max-height:55vh; }
-#lead-mgmt-root.lm-narrow .filter-search { margin-left:0; width:100%; }
-#lead-mgmt-root.lm-narrow .lm-synth-kpi { grid-template-columns:repeat(2,1fr); }
-#lead-mgmt-root.lm-narrow .lm-synth-2col { grid-template-columns:1fr; }
-#lead-mgmt-root.lm-narrow .lm-cmp-summary { grid-template-columns:repeat(2,1fr); }
-#lead-mgmt-root.lm-narrow .lm-camp-grid { grid-template-columns:repeat(2,1fr); }
-
-${LM_SLA_CSS}
-${LM_ROLE_CSS}
-${LM_REGLES_CSS}
-${LM_V2_CSS}
-${LM_V3_CSS}
-${LM_GESTES_CSS}
-`;
-doc.head.appendChild(styleEl);
-
-// --- 4. État local ------------------------------------------
-const state = window.__leadMgmt || {};
-// Le routage passe par SECTIONS_ROLE et state.sectionIdx (socle par rôle).
-// `state.section` et `state.view` ne servent plus qu'aux vues héritées.
-if (state.sectionIdx === undefined)      state.sectionIdx = 0;
-if (state.vueCycles === undefined)       state.vueCycles = 'liste';
-if (state.drillSite === undefined)       state.drillSite = null;
-if (state.drillVendeur === undefined)    state.drillVendeur = null;
-if (state.filterSource === undefined)    state.filterSource = 'all';
-if (state.search === undefined)          state.search = '';
-if (state.expanded === undefined)        state.expanded = {};
-if (state.selectedVendeur === undefined) state.selectedVendeur = null;
-// Periode TOUJOURS reinitialisee a l'arrivee sur la page (13/08/2026).
-// L'etat vit sur window et survit donc aux navigations SPA : avec un test
-// `=== undefined`, une periode choisie suivait l'utilisateur de page en page.
-// Regle produit : par defaut, du 1er du mois courant a aujourd'hui, aucune
-// persistance.
-state.period = defaultPeriod();
-if (state.busSite === undefined)         state.busSite = null;
-if (state.busSelPending === undefined)   state.busSelPending = true;
-if (state.rankingData === undefined)     state.rankingData = null;
-if (state.rankingLoading === undefined)  state.rankingLoading = false;
-if (state.rankingError === undefined)    state.rankingError = null;
-if (state.rankingKey === undefined)      state.rankingKey = null;
-if (state.evolutionData === undefined)   state.evolutionData = null;
-if (state.sourcesData === undefined)     state.sourcesData = null;
-if (state.graphesLoading === undefined)  state.graphesLoading = false;
-if (state.graphesError === undefined)    state.graphesError = null;
-if (state.graphesKey === undefined)      state.graphesKey = null;
-if (state.cyclesLoading === undefined)   state.cyclesLoading = false;
-if (state.campagnesData === undefined)    state.campagnesData = null;
-if (state.campagnesLoading === undefined) state.campagnesLoading = false;
-if (state.campagnesError === undefined)   state.campagnesError = null;
-if (state.campagnesKey === undefined)     state.campagnesKey = null;
-// AJOUT 20/08/2026 — entonnoir de COHORTE (get_entonnoir).
-// La premiere marche « contact -> proposition » est LE sujet de cette page :
-// c'est la que se joue l'ecart entre 6 % et 30 % de transformation. Le
-// « Taux conversion » existant (win / (win + abandon)) mesure autre chose :
-// il ne parle que des cycles DEJA CLOS, et ignore ceux qui s'eteignent sans
-// que personne ne les solde.
-if (state.entData === undefined)         state.entData = null;
-if (state.entLoading === undefined)      state.entLoading = false;
-if (state.entError === undefined)        state.entError = null;
-if (state.entKey === undefined)          state.entKey = null;
-// AJOUT 20/08/2026 — synthese focalisee sur UN vendeur.
-// null = tout le perimetre du viewer. Quand le chef clique sur un vendeur
-// dans le tableau d'equipe, on reste dans la synthese et on la recalcule
-// pour lui, au lieu de basculer vers le suivi des leads : le chef veut
-// COMPRENDRE ce vendeur avant d'aller voir ses cycles un par un.
-// PORTÉE de la synthese. null = tout le perimetre du viewer.
-// { type:'reseau'|'affaire'|'site'|'vendeur', label, sites:[ids], id_user }
-// La synthese SUIT le noeud choisi dans l'arbre d'equipe, a tous les niveaux
-// — comme le tableau de bord. Reseau, affaire et site se ramenent tous a une
-// liste de sites ; seul le vendeur passe par id_user.
-if (state.syntheseScope === undefined)   state.syntheseScope = null;
-window.__leadMgmt = state;
-
-if (isVendeur && !state.selectedVendeur && userId != null) {
-  state.selectedVendeur = { id_user: userId, id_site: null, vendeur_nom: 'Mes cycles' };
-}
-
-function setVendeurCible(idUser) {
-  try {
-    return wwLib.wwVariable.updateValue(VAR_VENDEUR_CIBLE, idUser != null ? Number(idUser) : null);
-  } catch (e) {
-    console.error('[leadMgmt] updateValue vendeurCibleId', e);
-    return Promise.resolve();
-  }
-}
-
-// --- 4b. Synchronisation avec le bus de site ----------------
-function applyBusSiteLead(siteId) {
-  const id = siteId != null ? String(siteId) : null;
-  if (id == null) return;
-  const changed = state.busSite !== id;
-  state.busSite = id;
-  if (changed) state.busSelPending = true;
-  adoptBusSelectionLead();
-  if (window.__renderLeadMgmt) window.__renderLeadMgmt();
-  // Au changement de site, la descente en cours porte sur un autre
-  // périmètre : on la referme plutôt que d'afficher un détail qui ne
-  // correspond plus au site sélectionné.
-  if (changed) {
-    state.drillSite = null; state.drillVendeur = null;
-    state.mafileKey = null; state.mafileData = null;
-    equipeKey = null; dataEquipe = null;
-    chargerSection();
-  }
-}
-function adoptBusSelectionLead() {
-  if (!state.busSelPending || state.busSite == null) return;
-  const s = dataKpiSiteScope.find(r => String(r.id_site) === String(state.busSite));
-  if (!s) return;
-  state.busSelPending = false;
-  const reseau  = s.reseau  || '(Sans réseau)';
-  const affaire = s.affaire || '(Sans affaire)';
-  const rKey = 'r:' + reseau;
-  const aKey = rKey + '|a:' + affaire;
-  state.expanded[rKey] = true;
-  state.expanded[aKey] = true;
-  state.expanded['s:' + s.id_site] = true;
-}
-(function bindLeadBus(tries) {
-  tries = tries || 0;
-  const b = siteBus();
-  if (!b) { if (tries < 120) setTimeout(() => bindLeadBus(tries + 1), 250); return; }
-  if (window.__leadBusBound) {
-    const id = b.getSiteId();
-    if (id != null) applyBusSiteLead(id);
-    return;
-  }
-  window.__leadBusBound = true;
-  b.onChange(({ siteId }) => applyBusSiteLead(siteId));
-})();
-
-// --- 5. Helpers ---------------------------------------------
-function escapeHtml(s) {
-  if (s === null || s === undefined) return '';
-  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
-}
-function formatDuree(h) {
-  if (h == null) return '';
-  if (h < 1)  return Math.round(h*60) + ' min';
-  if (h < 24) return Math.round(h) + 'h';
-  return Math.round(h/24) + 'j';
-}
-function formatJours(j) {
-  if (j == null) return '';
-  const n = Math.round(j);
-  if (n <= 0) return "aujourd'hui";
-  if (n === 1) return 'hier';
-  return 'il y a ' + n + 'j';
-}
-
-const SOURCE_LABELS = {
-  rpv_sollicitation: { label:'Sollicitation MKG', cls:'rpv' },
-  leboncoin:         { label:'Leboncoin',         cls:'leboncoin' },
-  la_centrale:       { label:'La Centrale',       cls:'la_centrale' },
-  autoscout:         { label:'AutoScout',         cls:'la_centrale' },
-  site_web:          { label:'Site web',          cls:'site_web' },
-  tel_traceur:       { label:'Tel traceur',       cls:'tel_traceur' },
-  wa_entrant:        { label:'WhatsApp',          cls:'wa_entrant' }
-};
-function sourceBadge(source) {
-  if (!source) return '<span class="source-badge none">Sans lead</span>';
-  const s = SOURCE_LABELS[source] || { label:source, cls:'' };
-  return '<span class="source-badge ' + s.cls + '">' + escapeHtml(s.label) + '</span>';
-}
-
-const FILTER_CHIPS = [
-  { k:'all',               l:'Tout' },
-  { k:'rpv_sollicitation', l:'Sollicitation MKG' },
-  { k:'leboncoin',         l:'Leboncoin' },
-  { k:'la_centrale',       l:'La Centrale' },
-  { k:'site_web',          l:'Site web' },
-  { k:'tel_traceur',       l:'Tel traceur' },
-  { k:'wa_entrant',        l:'WhatsApp' },
-  { k:'__none__',          l:'Sans lead' }
-];
-
-function kpiClass(value, kind) {
-  if (!value) return 'kpi-zero';
-  if (kind === 'a_traiter') { if (value > 30) return 'kpi-critique'; if (value > 10) return 'kpi-warn'; return ''; }
-  if (kind === 'pipeline')   { if (value >= 15) return 'kpi-good'; return ''; }
-  if (kind === 'clos_recent'){ if (value >= 5)  return 'kpi-good'; return ''; }
-  return '';
-}
-
-// --- 6. Période (modèle { from, to }) -----------------------
-function ymd(d) {
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, '0');
-  const day = String(d.getDate()).padStart(2, '0');
-  return y + '-' + m + '-' + day;
-}
-function defaultPeriod() {
-  const now = new Date();
-  const from = new Date(now.getFullYear(), now.getMonth(), 1);
-  return { from: ymd(from), to: ymd(now) };
-}
-function getPeriodDates() {
-  return {
-    from: new Date(state.period.from + 'T00:00:00'),
-    to:   new Date(state.period.to   + 'T23:59:59')
-  };
-}
-function formatPeriodResume() {
-  const f = (s) => { const d = new Date(s + 'T12:00:00'); return d.toLocaleDateString('fr-FR', { day:'2-digit', month:'short' }); };
-  return f(state.period.from) + ' → ' + f(state.period.to);
-}
-function periodKey() { return state.period.from + '_' + state.period.to; }
-
-function renderPeriodBar() {
-  let html = '<div class="lm-period-bar">';
-  html += '<div class="lm-period-label">Période :</div>';
-  html += '<button type="button" class="lm-range" id="lm-range">📅 ' + formatPeriodResume() + ' <span class="lm-range-car">▾</span></button>';
-  html += '<div class="lm-period-resume">' + formatPeriodResume() + '</div>';
-  html += '</div>';
-  return html;
-}
-
-// --- 6b. Date picker (calendrier, deux clics) ---------------
-function closeRangePicker() {
-  const e = doc.getElementById('lm-dp'); if (e) e.remove();
-  if (window.__lmDpOutside) { doc.removeEventListener('mousedown', window.__lmDpOutside, true); window.__lmDpOutside = null; }
-}
-function applyPeriod(from, to) {
-  closeRangePicker();
-  if (!from || !to) return;
-  if (from === state.period.from && to === state.period.to) return;
-  state.period = { from, to };
-  // Les campagnes sont bornées par la période : on invalide leur cache.
-  campKey = null; dataCampagnes = null;
-  reacKey = null; dataReactivite = null;
-  reloadClassement();
-  reloadGraphes();
-  reloadCampagnes();
-  renderAll();
-  // 🐛 Sans cet appel, le cache était vidé mais RIEN ne relançait le
-  //    chargement : la vue Campagnes restait sur un spinner sans fin
-  //    (relevé le 27/08). Chaque vue doit aussi savoir se charger seule
-  //    — voir ensureCampagnes() appelée depuis v2Campagnes().
-  chargerSection();
-}
-function openRangePicker(anchor) {
-  closeRangePicker();
-  const pk = { month: null, start: null, end: null, hover: null };
-  const m0 = new Date(state.period.from + 'T12:00:00');
-  pk.month = new Date(m0.getFullYear(), m0.getMonth(), 1);
-
-  const pop = doc.createElement('div'); pop.id = 'lm-dp';
-  const r = anchor.getBoundingClientRect();
-  const winW = (doc.defaultView || window).innerWidth || 360;
-  const left = Math.min(Math.max(8, r.left), Math.max(8, winW - 274));   // borné à l'écran
-  pop.style.cssText = 'position:fixed;z-index:9999;top:' + (r.bottom + 6) + 'px;left:' + left + 'px';
-  injectDpStyle();
-  doc.body.appendChild(pop);
-
-  function calHtml() {
-    const y = pk.month.getFullYear(), m = pk.month.getMonth();
-    const first = new Date(y, m, 1);
-    const startIdx = (first.getDay() + 6) % 7;
-    const nbDays = new Date(y, m + 1, 0).getDate();
-    const today = ymd(new Date());
-    const selA = pk.start, selB = pk.end || pk.hover;
-    const lo = selA && selB ? (selA < selB ? selA : selB) : null;
-    const hi = selA && selB ? (selA < selB ? selB : selA) : null;
-    let h = '<div class="lm-dp-box">';
-    h += '<div class="lm-dp-head"><button type="button" data-nav="-1">‹</button>'+
-         '<span>' + escapeHtml(first.toLocaleDateString('fr-FR', { month:'long', year:'numeric' })) + '</span>'+
-         '<button type="button" data-nav="1">›</button></div>';
-    h += '<div class="lm-dp-grid">';
-    for (const d of ['L','M','M','J','V','S','D']) h += '<span class="lm-dp-dow">' + d + '</span>';
-    for (let i = 0; i < startIdx; i++) h += '<span></span>';
-    for (let d = 1; d <= nbDays; d++) {
-      const ds = y + '-' + String(m + 1).padStart(2, '0') + '-' + String(d).padStart(2, '0');
-      let cls = 'lm-dp-day';
-      if (ds === today) cls += ' today';
-      if (pk.start === ds || pk.end === ds) cls += ' sel';
-      else if (lo && hi && ds > lo && ds < hi) cls += ' inr';
-      h += '<span class="' + cls + '" data-d="' + ds + '">' + d + '</span>';
-    }
-    h += '</div>';
-    h += '<div class="lm-dp-foot">' + (pk.start ? 'Cliquez la date de fin' : 'Cliquez la date de début') + '</div>';
-    h += '</div>';
-    return h;
-  }
-  function wire() {
-    pop.querySelectorAll('[data-nav]').forEach(b => b.addEventListener('click', (e) => {
-      e.stopPropagation();
-      pk.month = new Date(pk.month.getFullYear(), pk.month.getMonth() + Number(b.getAttribute('data-nav')), 1);
-      paint();
-    }));
-    pop.querySelectorAll('.lm-dp-day').forEach(c => {
-      c.addEventListener('click', () => {
-        const ds = c.getAttribute('data-d');
-        if (!pk.start || pk.end) { pk.start = ds; pk.end = null; pk.hover = null; paint(); return; }
-        pk.end = ds;
-        let a = pk.start, b = pk.end;
-        if (b < a) { const t = a; a = b; b = t; }
-        applyPeriod(a, b);
-      });
-      c.addEventListener('mouseenter', () => {
-        if (pk.start && !pk.end && pk.hover !== c.getAttribute('data-d')) { pk.hover = c.getAttribute('data-d'); paint(); }
-      });
+  // ── La version 48, pour les autres rôles ─────────────────────────────────
+  // Elle se déclare elle aussi sous la clé « lead-mgmt » : on la charge, on
+  // garde sa définition à part, et on remet la nôtre en place.
+  var legacyPromise = null;
+  function chargerLegacy() {
+    if (legacyPromise) return legacyPromise;
+    legacyPromise = new Promise(function (resolve, reject) {
+      var mienne = OD.modules['lead-mgmt'];
+      var s = document.createElement('script');
+      s.src = LEGACY_URL; s.async = true;
+      s.onload = function () {
+        var legacy = OD.modules['lead-mgmt'];
+        OD.modules['lead-mgmt'] = mienne;
+        if (!legacy || legacy === mienne || typeof legacy.mount !== 'function') {
+          legacyPromise = null; reject(new Error('lead-mgmt v48 : définition introuvable')); return;
+        }
+        resolve(legacy);
+      };
+      s.onerror = function () { legacyPromise = null; reject(new Error('lead-mgmt v48 : chargement CDN KO')); };
+      document.head.appendChild(s);
     });
+    return legacyPromise;
   }
-  function paint() { pop.innerHTML = calHtml(); wire(); }
-  paint();
-  window.__lmDpOutside = (e) => {
-    if (!pop.contains(e.target) && e.target !== anchor && !anchor.contains(e.target)) closeRangePicker();
-  };
-  setTimeout(() => doc.addEventListener('mousedown', window.__lmDpOutside, true), 0);
-}
-function injectDpStyle() {
-  if (doc.getElementById('lm-dp-style')) return;
-  const st = doc.createElement('style'); st.id = 'lm-dp-style';
-  st.textContent = `
-#lm-dp .lm-dp-box { background:#fff; border:1px solid #eaf0f9; border-radius:10px; box-shadow:0 8px 30px rgba(42,94,169,.18); padding:12px; width:262px; font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; }
-#lm-dp .lm-dp-head { display:flex; align-items:center; justify-content:space-between; margin-bottom:8px; }
-#lm-dp .lm-dp-head span { font-size:12px; font-weight:600; color:#2a5ea9; text-transform:capitalize; }
-#lm-dp .lm-dp-head button { width:24px; height:24px; border:1px solid #eaf0f9; background:#fff; border-radius:6px; cursor:pointer; color:#2a5ea9; font-size:13px; line-height:1; padding:0; }
-#lm-dp .lm-dp-head button:hover { background:#f5f8fc; }
-#lm-dp .lm-dp-grid { display:grid; grid-template-columns:repeat(7,33px); gap:2px; }
-#lm-dp .lm-dp-dow { font-size:9px; color:#acc5e4; text-align:center; font-weight:700; padding-bottom:3px; }
-#lm-dp .lm-dp-day { height:29px; line-height:29px; text-align:center; font-size:11px; color:#2c2c2a; border-radius:6px; cursor:pointer; }
-#lm-dp .lm-dp-day:hover { background:#eaf0f9; }
-#lm-dp .lm-dp-day.today { box-shadow:inset 0 0 0 1px #acc5e4; }
-#lm-dp .lm-dp-day.sel { background:#2a5ea9; color:#fff; font-weight:700; }
-#lm-dp .lm-dp-day.inr { background:#e6f1fb; }
-#lm-dp .lm-dp-foot { margin-top:8px; text-align:center; font-size:10px; color:#7a9cc4; font-style:italic; }
-`;
-  doc.head.appendChild(st);
-}
 
-// --- 7. CALCULS KPI SYNTHÈSE --------------------------------
-// ── AJOUT : entonnoir de cohorte ────────────────────────────────────────
-// La cohorte NE SUIT PAS le selecteur de periode de la page, et c'est
-// volontaire : les contacts de cette semaine n'ont pas eu le temps de se
-// conclure, les compter ecraserait le taux. Fenetre fixe de 3 mois qui
-// s'arrete il y a 30 jours.
-function bornesCohorte() {
-  const fin = new Date(); fin.setDate(fin.getDate() - 30);
-  const deb = new Date(fin); deb.setDate(deb.getDate() - 90);
-  return { from: ymd(deb), to: ymd(fin) };
-}
-
-// Sur QUI porte l'entonnoir : le vendeur focalise, sinon le vendeur connecte
-// s'il en est un, sinon tout son perimetre.
-function entonnoirCible() {
-  const sc = state.syntheseScope;
-  if (sc && sc.type === 'vendeur')       return { id_user: Number(sc.id_user), sites: null };
-  if (sc && sc.sites && sc.sites.length) return { id_user: null, sites: sc.sites.map(Number) };
-  if (isVendeur)                         return { id_user: Number(userId), sites: null };
-  return { id_user: null, sites: null };
-}
-
-// Les sites concernes par la portee courante. Sert a TOUS les blocs de la
-// synthese, pas seulement a l'entonnoir : sans ca, changer de perimetre ne
-// mettait a jour qu'un bloc sur quatre, ce qui est pire que de ne rien
-// filtrer du tout.
-// null quand rien n'est selectionne : le RPC prend alors tout le perimetre.
-function portéeSites() {
-  const sc = state.syntheseScope;
-  return (sc && sc.sites && sc.sites.length) ? sc.sites.map(Number) : null;
-}
-function portéeCle() {
-  const p = portéeSites();
-  return p ? p.join('.') : 'perim';
-}
-
-function scopeSites() {
-  const sc = state.syntheseScope;
-  if (sc && sc.sites && sc.sites.length) return sc.sites.map(Number);
-  return userSiteIds.map(Number);
-}
-function scopeVendeurId() {
-  const sc = state.syntheseScope;
-  return (sc && sc.type === 'vendeur') ? Number(sc.id_user) : null;
-}
-
-function libellePortee() {
-  const sc = state.syntheseScope;
-  if (!sc) return isVendeur ? 'mes contacts' : 'tout mon perimetre';
-  return sc.label || 'la selection';
-}
-
-async function fetchEntonnoir() {
-  const b = bornesCohorte();
-  const c = entonnoirCible();
-  const key = b.from + '_' + b.to + '_u' + (c.id_user == null ? '-' : c.id_user) +
-              '_s' + (c.sites ? c.sites.join('.') : '-');
-  if (state.entLoading) return;
-  // ⚠️ Tester `entData !== null` NE SUFFIT PAS : apres un echec, entData
-  //    reste null, le cache ne prend JAMAIS et la RPC repart a chaque
-  //    rendu — or fetchEntonnoir se termine par renderAll(), donc chaque
-  //    rendu en declenche un autre. On memorise aussi la cle ECHOUEE.
-  if (state.entKey === key && (state.entData !== null || state.entError)) return;
-
-  state.entLoading = true;
-  state.entError = null;
-  state.entKey = key;
-
-  try {
-    const { data, error } = await ctx.sb.rpc('get_entonnoir', {
-      p_viewer_id_user: Number(userId),
-      p_date_from: b.from,
-      p_date_to: b.to,
-      p_id_user: c.id_user,
-      p_seuil_sans_suite: 90,
-      p_sites: c.sites
-    });
-    if (error) throw error;
-    state.entData = (data || []).slice().sort((x, y) => (x.rang || 0) - (y.rang || 0));
-  } catch (e) {
-    console.warn('[lead-mgmt] get_entonnoir', e);
-    state.entData = null;
-    state.entError = (e && e.message) || String(e);
-  }
-  state.entLoading = false;
-  renderAll();
-}
-
-function jolieDateCourte(s) {
-  try { return new Date(s + 'T12:00:00').toLocaleDateString('fr-FR', { day: 'numeric', month: 'short' }); }
-  catch (e) { return s; }
-}
-
-// Le bloc affiche la PREMIERE MARCHE en grand — c'est le sujet de la page —
-// et le reste de l'entonnoir en petit, pour situer.
-// Dit SUR QUOI porte l'entonnoir, et permet d'en sortir. Sans ce bandeau,
-// un chef qui a clique sur un site croirait lire tout son perimetre.
-function renderBandeauPortee() {
-  const sc = state.syntheseScope;
-  let h = '<div class="lm-portee">';
-  h += '<span class="lm-portee-l">' + (sc ? 'Synthese de' : 'Synthese de') + '</span>';
-  h += '<span class="lm-portee-v">' + escapeHtml(libellePortee()) + '</span>';
-  if (sc) {
-    h += '<button type="button" class="lm-portee-x" data-action="portee-reset">&times; tout mon perimetre</button>';
-    if (sc.type === 'vendeur') {
-      h += '<button type="button" class="lm-portee-go" data-action="portee-cycles">Voir ses cycles &rarr;</button>';
+  async function utilisateur(ctx) {
+    var u = ctx.user || (OD.getUser && OD.getUser());
+    if (!u) {
+      var FW = frontWindow();
+      try { if (typeof FW.oropraLoadUser === 'function') u = await FW.oropraLoadUser(); } catch (e) {}
     }
+    if (Array.isArray(u)) u = u[0];
+    return u || null;
   }
-  return h + '</div>';
-}
 
-function renderEntonnoirCohorte() {
-  if (state.entError) return '';
-  const b = bornesCohorte();
-
-  if (state.entData === null) {
-    return '<div class="lm-ent"><div class="lm-ent-h"><span class="lm-ent-t">Transformation reelle</span></div>' +
-           '<div class="lm-ent-sk"></div></div>';
+  function demandeApercu() {
+    var FW = frontWindow();
+    try { return /plateau/i.test(FW.location.hash || '') || /[?&]plateau=1/.test(FW.location.search || ''); }
+    catch (e) { return false; }
   }
-  const e = state.entData;
-  if (!e.length || !(e[0] && e[0].total)) return '';
 
-  const n  = function (v) { const x = parseFloat(v); return isNaN(x) ? 0 : x; };
-  const fr = function (v) { return String(Math.round(n(v))).replace(/\B(?=(\d{3})+(?!\d))/g, '\u202f'); };
-
-  const contacts = n(e[0].total);
-  const wins     = n(e[3] && e[3].total);
-  const global   = contacts > 0 ? Math.round(100 * wins / contacts) : 0;
-  const eteints  = n(e[0].perdu_sans_suite);
-  const pctEt    = contacts > 0 ? Math.round(100 * eteints / contacts) : 0;
-  const dj       = e[0].delai_median_jours;
-
-  // ── La chaine : 4 nombres, 3 taux entre eux. C'est de la que se deduit
-  //    le 7 % global (408 / 5 801), et c'est ce que l'utilisateur lit en
-  //    premier. Tout le reste est secondaire.
-  let h = '<div class="lm-ent">';
-  h += '<div class="lm-ent-h">' +
-       '<span class="lm-ent-t">Transformation reelle</span>' +
-       '<span class="lm-ent-per">' + jolieDateCourte(b.from) + ' &rarr; ' + jolieDateCourte(b.to) + '</span>' +
-       '<span class="lm-ent-s">on laisse un mois aux affaires recentes pour se conclure</span>' +
-       '</div>';
-
-  h += '<div class="lm-ent-chaine">';
-  e.forEach(function (et, i) {
-    const tot = n(et.total);
-    const der = (i === e.length - 1);
-    h += '<div class="lm-ent-pas' + (der ? ' fin' : '') + '">' +
-         '<div class="lm-ent-nb">' + fr(tot) + '</div>' +
-         '<div class="lm-ent-lb">' + (et.etape || '') + '</div>' +
-         '</div>';
-    if (!der) {
-      const tx = tot > 0 ? Math.round(100 * n(et.avance) / tot) : 0;
-      const bas = tx < 25;
-      h += '<div class="lm-ent-fle' + (bas ? ' bas' : '') + '">' +
-           '<span class="lm-ent-tx">' + tx + '\u202f%</span>' +
-           '<svg viewBox="0 0 40 8" preserveAspectRatio="none" aria-hidden="true">' +
-           '<path d="M0 4 H32 M28 1 L33 4 L28 7" fill="none" stroke="currentColor" stroke-width="1.4"/></svg>' +
-           '</div>';
+  OD.define('lead-mgmt', {
+    async mount(el, ctx) {
+      var u = await utilisateur(ctx);
+      var role = Number(u && u.ID_Role);
+      var apercu = ROLES_APERCU.indexOf(role) !== -1 && demandeApercu();
+      if (ROLES_PLATEAU.indexOf(role) !== -1 || apercu) {
+        return posteVroom(el, ctx, u, { apercu: apercu, role: role });
+      }
+      var legacy = await chargerLegacy();
+      return legacy.mount(el, ctx);
     }
   });
-  h += '</div>';
 
-  // ── Le bilan et le seul segment sur lequel on peut agir aujourd'hui.
-  h += '<div class="lm-ent-bas">' +
-       '<span class="lm-ent-glob"><b>' + global + '\u202f%</b> de transformation, du premier contact a la commande' +
-       (dj != null ? ' · <b>' + (Math.round(n(dj) * 10) / 10).toFixed(1).replace('.', ',') + ' jours</b> avant la premiere proposition' : '') +
-       '</span>';
-  if (eteints > 0) {
-    h += '<span class="lm-ent-et"><b>' + fr(eteints) + '</b> cycles eteints <i>(' + pctEt + '\u202f%)</i>' +
-         ' — plus aucun contact depuis 3 mois, et aucun cycle cloture</span>';
-  }
-  h += '</div>';
+  // ==========================================================================
+  //  LE POSTE DU PLATEAU VROOM
+  // ==========================================================================
+  async function posteVroom(el, ctx, user, opt) {
+    var doc = el.ownerDocument || document;
+    var sb = ctx.supabase;
+    var FW = frontWindow();
 
-  h += '<div class="lm-ent-note">Un contact est une action SORTANTE du vendeur : appel emis, message, ' +
-       'rapport de visite. Recevoir un lead n\'en est pas une.</div>';
+    // ── Référentiels ──────────────────────────────────────────────────────
+    var MOTIFS_ABANDON = ['Non intéressé par l\'offre', 'Non intéressé par le produit', 'Injoignable permanent',
+      'Erreur du client', 'Doublon', 'Conserve son véhicule', 'Trop tôt', 'Véhicule réservé déjà vendu',
+      'Délai de livraison trop important', 'Clôture manuelle'];
+    var SLA_SITE = 120;          // un transfert du plateau doit être pris par le site en 2 h
+    var REFRESH_MS = 60000;
 
-  return h + '</div>';
-}
-
-function computeSyntheseKpi() {
-  const { from, to } = getPeriodDates();
-  const fromMs = from.getTime();
-  const toMs   = to.getTime();
-  // MODIFIÉ 20/08/2026 — ces compteurs suivent desormais la portee choisie
-  // dans le tableau d'equipe, et non plus systematiquement tout le perimetre.
-  const sites  = scopeSites();
-  const vId    = scopeVendeurId();
-  const dansPortee = function (idSite) { return sites.indexOf(Number(idSite)) !== -1; };
-
-  // Au niveau vendeur, le compteur de cycles vient de SA ligne ; sinon c'est
-  // la somme des sites retenus.
-  const cyclesActifs = (vId != null)
-    ? (function () {
-        const v = dataKpiVend.find(function (x) { return Number(x.id_user) === vId; });
-        return v ? (v.cycles_total || 0) : 0;
-      })()
-    : dataKpiSite.filter(function (r) { return dansPortee(r.id_site); })
-                 .reduce(function (a, r) { return a + (r.cycles_total || 0); }, 0);
-  let winCount = 0, abandonCount = 0;
-  for (const c of dataClotures) {
-    if (!dansPortee(c.id_site)) continue;
-    const t = new Date(c.date_cloture).getTime();
-    if (t < fromMs || t > toMs) continue;
-    if (c.type_cloture === 'win')          winCount++;
-    else if (c.type_cloture === 'abandon') abandonCount++;
-  }
-  const tauxConv = (winCount + abandonCount > 0)
-    ? Math.round(100 * winCount / (winCount + abandonCount))
-    : null;
-  const delais = [];
-  for (const lead of dataLeads) {
-    if (!lead.id_cycle_comm) continue;
-    if (!dansPortee(lead.id_site)) continue;
-    const t = new Date(lead.date_lead).getTime();
-    if (t < fromMs || t > toMs) continue;
-    const premierContactAt = premierContactMap[lead.id_cycle_comm];
-    if (!premierContactAt) continue;
-    const ct = new Date(premierContactAt).getTime();
-    if (ct < t) continue;
-    delais.push((ct - t) / 3600000);
-  }
-  let delaiMedian = null;
-  if (delais.length > 0) {
-    delais.sort((a, b) => a - b);
-    const mid = Math.floor(delais.length / 2);
-    delaiMedian = delais.length % 2 === 0 ? (delais[mid - 1] + delais[mid]) / 2 : delais[mid];
-  }
-  return { cyclesActifs, winCount, abandonCount, tauxConv, delaiMedian, nbDelais: delais.length };
-}
-
-function formatDelaiKpi(h) {
-  if (h == null) return '—';
-  if (h < 1)  return Math.round(h * 60) + 'min';
-  if (h < 24) return h.toFixed(1) + 'h';
-  return Math.round(h / 24) + 'j';
-}
-
-// --- 8. CLASSEMENTS VENDEURS (via RPC Supabase) -------------
-async function fetchClassement() {
-  const key = periodKey();
-  if (state.rankingLoading) return;
-  if (state.rankingKey === key && state.rankingData !== null) return;
-
-  const { from, to } = getPeriodDates();
-  state.rankingLoading = true;
-  state.rankingError = null;
-  state.rankingKey = key;
-
-  try {
-    const supabase = ctx.supabase;
-    const { data, error } = await sb.rpc('get_classement_vendeur', {
-      p_viewer_id_user: Number(userId),
-      p_date_from: ymd(from),
-      p_date_to: ymd(to)
-    });
-    if (error) throw error;
-
-    state.rankingData = (data || []).map(r => ({
-      id_user: Number(r.id_user),
-      vendeur_nom: r.vendeur_nom || ('User ' + r.id_user),
-      winCount: Number(r.win_count) || 0,
-      totalClos: Number(r.total_clos) || 0,
-      taux: r.taux != null ? Number(r.taux) : (r.total_clos ? 100 * Number(r.win_count) / Number(r.total_clos) : 0)
-    }));
-  } catch (e) {
-    console.error('[leadMgmt] Erreur RPC get_classement_vendeur', e);
-    state.rankingError = (e && e.message) ? e.message : 'Erreur de chargement';
-    state.rankingData = [];
-  } finally {
-    state.rankingLoading = false;
-    if (window.__renderLeadMgmt) window.__renderLeadMgmt();
-  }
-}
-
-function reloadClassement() {
-  state.rankingData = null;
-  state.rankingKey = null;
-  
-}
-
-// --- 8b. GRAPHES (Chart.js via CDN + RPC d'agrégation) ------
-function loadChartJs() {
-  const win = doc.defaultView || window;
-  if (win.Chart) return Promise.resolve(win.Chart);
-  if (window.__chartjsPromise) return window.__chartjsPromise;
-  window.__chartjsPromise = new Promise((resolve, reject) => {
-    const s = doc.createElement('script');
-    s.src = 'https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js';
-    s.onload = () => resolve((doc.defaultView || window).Chart);
-    s.onerror = (e) => { window.__chartjsPromise = null; reject(e); };
-    doc.head.appendChild(s);
-  });
-  return window.__chartjsPromise;
-}
-
-async function fetchGraphes() {
-  let key = periodKey();
-  if (state.graphesLoading) return;
-  key = key + '|' + portéeCle();
-  if (state.graphesKey === key && state.evolutionData !== null) return;
-
-  const { from, to } = getPeriodDates();
-  state.graphesLoading = true;
-  state.graphesError = null;
-  state.graphesKey = key;
-
-  try {
-    const supabase = ctx.supabase;
-    // Les graphes suivent la portee choisie dans le tableau d'equipe, comme
-    // l'entonnoir, les compteurs et le classement (20/08/2026).
-    const params = {
-      p_viewer_id_user: Number(userId),
-      p_date_from: ymd(from),
-      p_date_to: ymd(to),
-      p_sites: portéeSites()
+    // ── État ──────────────────────────────────────────────────────────────
+    var S = {
+      tab: 'piscine', stock: false, sources: null, campagne: null, miens: false,
+      kpis: null, piscine: [], rappels: [], transferts: [], campagnes: null, stockListe: null,
+      ack: new Set(), vus: new Set(), frais: new Set(), premier: true,
+      dr: null, // { sf, fiche, sites, vendeurs, site }
+      charge: false, erreur: null
     };
-    const [evo, src] = await Promise.all([
-      sb.rpc('get_leads_par_jour', params),
-      sb.rpc('get_leads_par_source', params)
-    ]);
-    if (evo.error) throw evo.error;
-    if (src.error) throw src.error;
-    state.evolutionData = (evo.data || []).map(r => ({ jour: r.jour, nb: Number(r.nb_leads) || 0 }));
-    state.sourcesData   = (src.data || []).map(r => ({ source: r.source, nb: Number(r.nb_leads) || 0 }));
-  } catch (e) {
-    console.error('[leadMgmt] Erreur RPC graphes', e);
-    state.graphesError = (e && e.message) ? e.message : 'Erreur de chargement';
-    state.evolutionData = [];
-    state.sourcesData = [];
-  } finally {
-    state.graphesLoading = false;
-    if (window.__renderLeadMgmt) window.__renderLeadMgmt();
-  }
-}
+    try { (JSON.parse(FW.localStorage.getItem('lmtc-ack') || '[]') || []).forEach(function (x) { S.ack.add(x); }); } catch (e) {}
+    var MOI = null;
 
-function reloadGraphes() {
-  state.evolutionData = null;
-  state.sourcesData = null;
-  state.graphesKey = null;
-  
-}
-
-const SOURCE_COLORS = {
-  rpv_sollicitation: '#53bda7',
-  leboncoin:         '#fac055',
-  la_centrale:       '#2a5ea9',
-  autoscout:         '#2a5ea9',
-  site_web:          '#9d7bc7',
-  tel_traceur:       '#e0a93a',
-  wa_entrant:        '#7fcfbb',
-  inconnu:           '#acc5e4'
-};
-const SOURCE_PALETTE = ['#53bda7', '#2a5ea9', '#fac055', '#acc5e4', '#9d7bc7', '#7fcfbb', '#e0a93a', '#c4554a'];
-
-function sourceLabel(src) {
-  const s = SOURCE_LABELS[src];
-  return s ? s.label : (src || 'Inconnu');
-}
-
-let __chartEvo = null, __chartSrc = null;
-async function drawGraphes() {
-  if (state.graphesLoading || state.evolutionData === null) return;
-  let Chart;
-  try { Chart = await loadChartJs(); }
-  catch (e) { console.error('[leadMgmt] Chart.js non chargé', e); return; }
-  if (!Chart) return;
-
-  if (__chartEvo) { try { __chartEvo.destroy(); } catch(e){} __chartEvo = null; }
-  if (__chartSrc) { try { __chartSrc.destroy(); } catch(e){} __chartSrc = null; }
-
-  const cvEvo = doc.getElementById('lm-chart-evolution');
-  if (cvEvo && state.evolutionData.length > 0) {
-    const labels = state.evolutionData.map(d => {
-      const dt = new Date(d.jour + 'T00:00:00');
-      return dt.toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit' });
-    });
-    const values = state.evolutionData.map(d => d.nb);
-    __chartEvo = new Chart(cvEvo.getContext('2d'), {
-      type: 'bar',
-      data: {
-        labels,
-        datasets: [{
-          label: 'Leads',
-          data: values,
-          backgroundColor: '#2a5ea9',
-          borderRadius: 3,
-          maxBarThickness: 22
-        }]
-      },
-      options: {
-        responsive: true,
-        maintainAspectRatio: false,
-        plugins: { legend: { display: false }, tooltip: { callbacks: {
-          title: items => 'Le ' + items[0].label,
-          label: item => item.parsed.y + ' lead' + (item.parsed.y > 1 ? 's' : '')
-        } } },
-        scales: {
-          x: { grid: { display: false }, ticks: { color: '#7a9cc4', font: { size: 10 }, maxRotation: 0, autoSkip: true, maxTicksLimit: 12 } },
-          y: { beginAtZero: true, grid: { color: '#eaf0f9' }, ticks: { color: '#7a9cc4', font: { size: 10 }, precision: 0 } }
-        }
-      }
-    });
-  }
-
-  const cvSrc = doc.getElementById('lm-chart-sources');
-  if (cvSrc && state.sourcesData.length > 0) {
-    const labels = state.sourcesData.map(d => sourceLabel(d.source));
-    const values = state.sourcesData.map(d => d.nb);
-    const colors = state.sourcesData.map((d, i) => SOURCE_COLORS[d.source] || SOURCE_PALETTE[i % SOURCE_PALETTE.length]);
-    const total = values.reduce((a, b) => a + b, 0);
-
-    const centerText = {
-      id: 'lmCenterText',
-      afterDraw(chart) {
-        const { ctx, chartArea } = chart;
-        if (!chartArea) return;
-        const cx = (chartArea.left + chartArea.right) / 2;
-        const cy = (chartArea.top + chartArea.bottom) / 2;
-        ctx.save();
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'middle';
-        ctx.fillStyle = '#2a5ea9';
-        ctx.font = '700 22px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
-        ctx.fillText(String(total), cx, cy - 6);
-        ctx.fillStyle = '#7a9cc4';
-        ctx.font = '500 10px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
-        ctx.fillText('leads', cx, cy + 12);
-        ctx.restore();
-      }
-    };
-
-    __chartSrc = new Chart(cvSrc.getContext('2d'), {
-      type: 'doughnut',
-      data: { labels, datasets: [{ data: values, backgroundColor: colors, borderColor: '#fff', borderWidth: 2 }] },
-      options: {
-        responsive: true,
-        maintainAspectRatio: false,
-        cutout: '62%',
-        plugins: {
-          legend: { position: 'right', labels: { color: '#4a6a8a', font: { size: 11 }, boxWidth: 10, usePointStyle: true, padding: 10 } },
-          tooltip: { callbacks: {
-            label: item => {
-              const v = item.parsed;
-              const pct = total ? Math.round(100 * v / total) : 0;
-              return item.label + ' : ' + v + ' (' + pct + '%)';
-            }
-          } }
-        }
-      },
-      plugins: [centerText]
-    });
-  }
-}
-
-function renderRankingItem(item, rank, side) {
-  // Surligne le vendeur sur lequel porte la synthese.
-  const vSurl = scopeVendeurId();
-  const isHighlighted = (vSurl != null && Number(item.id_user) === vSurl) ||
-                        (vSurl == null && state.selectedVendeur &&
-                         state.selectedVendeur.id_user === item.id_user);
-  let rankCls = '';
-  let itemCls = '';
-  if (side === 'top') {
-    if (rank === 1) rankCls = 'rank-1';
-    else if (rank === 2) rankCls = 'rank-2';
-    else if (rank === 3) rankCls = 'rank-3';
-    itemCls = 'lm-ranking-good';
-  } else {
-    if (rank === 1) rankCls = 'rank-low-1';
-    else if (rank === 2) rankCls = 'rank-low-2';
-    else if (rank === 3) rankCls = 'rank-low-3';
-    itemCls = 'lm-ranking-bad';
-  }
-  return (
-    '<div class="lm-ranking-item ' + itemCls + (isHighlighted ? ' is-highlighted' : '') + '">' +
-      '<div class="lm-ranking-item-left">' +
-        '<div class="lm-ranking-rank ' + rankCls + '">' + rank + '</div>' +
-        '<div style="min-width:0;flex:1;">' +
-          '<div class="lm-ranking-name">' + escapeHtml(item.vendeur_nom) + '</div>' +
-          '<div class="lm-ranking-detail">' + item.winCount + ' Win / ' + item.totalClos + ' clos avec lead</div>' +
-        '</div>' +
-      '</div>' +
-      '<div class="lm-ranking-value">' + Math.round(item.taux) + '%</div>' +
-    '</div>'
-  );
-}
-
-function renderRankingBlock(side, ranking) {
-  const TOP_N = 5;
-  const title = side === 'top' ? '🏆 Top performers' : '⚠ À soutenir';
-
-  if (state.rankingLoading || state.rankingData === null) {
-    return '<div class="lm-block"><div class="lm-block-title">' + title + '</div>' +
-           '<div class="lm-ranking-empty">Chargement…</div></div>';
-  }
-  if (state.rankingError) {
-    return '<div class="lm-block"><div class="lm-block-title">' + title + '</div>' +
-           '<div class="lm-ranking-empty">Erreur de chargement du classement</div></div>';
-  }
-
-  // MODIFIÉ 20/08/2026 — le classement suit la portee. Le RPC rend tout le
-  // perimetre ; on restreint ici via la correspondance vendeur -> site que
-  // dataKpiVend fournit deja. Au niveau vendeur, on ne garde que lui.
-  // CORRIGÉ 20/08/2026 — au niveau vendeur, on garde le classement de SON
-  // SITE et on le surligne dedans. Le restreindre a lui seul le faisait
-  // sortir premier des deux classements a la fois : un classement d'une
-  // personne ne classe rien. Le surlignage et le repechage hors top 5
-  // ci-dessous s'appuient sur state.selectedVendeur, deja positionne.
-  {
-    const sites = scopeSites();
-    const siteDe = {};
-    dataKpiVend.forEach(function (v) { siteDe[Number(v.id_user)] = Number(v.id_site); });
-    ranking = ranking.filter(function (r) {
-      const sv = siteDe[Number(r.id_user)];
-      return sv == null ? false : sites.indexOf(sv) !== -1;
-    });
-  }
-
-  if (side === 'top') {
-    ranking.sort((a, b) => b.taux - a.taux || b.winCount - a.winCount);
-  } else {
-    ranking.sort((a, b) => a.taux - b.taux || b.totalClos - a.totalClos);
-  }
-  const list = ranking.slice(0, TOP_N);
-  let html = '<div class="lm-block"><div class="lm-block-title">' + title + '</div>';
-  if (list.length === 0) {
-    html += '<div class="lm-ranking-empty">Aucune donnée sur la période</div>';
-  } else {
-    html += '<div class="lm-ranking-list">';
-    list.forEach((item, idx) => { html += renderRankingItem(item, idx + 1, side); });
-    html += '</div>';
-    const vRepeche = scopeVendeurId() != null
-      ? { id_user: scopeVendeurId() }
-      : state.selectedVendeur;
-    if (vRepeche) {
-      const inTop = list.some(it => Number(it.id_user) === Number(vRepeche.id_user));
-      if (!inTop) {
-        const fullSorted = side === 'top'
-          ? [...ranking].sort((a, b) => b.taux - a.taux || b.winCount - a.winCount)
-          : [...ranking].sort((a, b) => a.taux - b.taux || b.totalClos - a.totalClos);
-        const idx = fullSorted.findIndex(it => Number(it.id_user) === Number(vRepeche.id_user));
-        if (idx >= 0) {
-          html += '<div style="margin-top:8px;padding-top:8px;border-top:1px dashed var(--border);font-size:10px;color:var(--text-mut);">';
-          html += 'Position du vendeur consulté :</div>';
-          html += '<div class="lm-ranking-list" style="margin-top:4px;">';
-          html += renderRankingItem(fullSorted[idx], idx + 1, side);
-          html += '</div>';
-        }
-      }
+    // ── Outils ────────────────────────────────────────────────────────────
+    function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); }
+    function ts(v) { return v ? new Date(v).getTime() : null; }
+    function mins(v) { return (Date.now() - ts(v)) / 60000; }
+    function duree(m) {
+      m = Math.max(0, m);
+      if (m < 1) return 'à l\'instant';
+      if (m < 60) return Math.floor(m) + ' min';
+      if (m < 1440) { var h = Math.floor(m / 60), r = Math.floor(m % 60); return h + ' h ' + String(r).padStart(2, '0'); }
+      return Math.floor(m / 1440) + ' j';
     }
-  }
-  html += '</div>';
-  return html;
-}
-
-// --- 8c. CAMPAGNES (via RPC get_campagnes_sollicitation) ----
-async function fetchCampagnes() {
-  const key = periodKey();
-  if (state.campagnesLoading) return;
-  if (state.campagnesKey === key && state.campagnesData !== null) return;
-
-  const { from, to } = getPeriodDates();
-  state.campagnesLoading = true;
-  state.campagnesError = null;
-  state.campagnesKey = key;
-
-  try {
-    const supabase = ctx.supabase;
-    const { data, error } = await sb.rpc('get_campagnes_sollicitation', {
-      p_viewer_id_user: Number(userId),
-      p_date_from: ymd(from),
-      p_date_to: ymd(to)
-    });
-    if (error) throw error;
-    state.campagnesData = (data || []).map(r => ({
-      campagne:          r.campagne || '(Sans nom de campagne)',
-      nb_sollicitations: Number(r.nb_sollicitations) || 0,
-      nb_clients:        Number(r.nb_clients)        || 0,
-      nb_cycles:         Number(r.nb_cycles)         || 0,
-      nb_propales:       Number(r.nb_propales)       || 0,
-      nb_bdc:            Number(r.nb_bdc)            || 0,
-      nb_wins:           Number(r.nb_wins)           || 0,
-      nb_abandons:       Number(r.nb_abandons)       || 0,
-      nb_vendeurs:       Number(r.nb_vendeurs)       || 0,
-      nb_sites:          Number(r.nb_sites)          || 0,
-      delai_median_h:    r.delai_median_h != null ? Number(r.delai_median_h) : null
-    }));
-  } catch (e) {
-    console.error('[leadMgmt] Erreur RPC get_campagnes_sollicitation', e);
-    state.campagnesError = (e && e.message) ? e.message : 'Erreur de chargement';
-    state.campagnesData = [];
-  } finally {
-    state.campagnesLoading = false;
-    if (window.__renderLeadMgmt) window.__renderLeadMgmt();
-  }
-}
-
-function reloadCampagnes() {
-  state.campagnesData = null;
-  state.campagnesKey = null;
-  if (sectionEst('campagnes')) fetchCampagnes();
-}
-
-function renderCampagneFunnel(c) {
-  const stages = [
-    { key:'nb_sollicitations', label:'Sollicit.', color:'#2a5ea9' },
-    { key:'nb_cycles',         label:'Cycles',    color:'#5b7fb0' },
-    { key:'nb_propales',       label:'Propales',  color:'#7fcfbb' },
-    { key:'nb_bdc',            label:'BDC',        color:'#fac055' },
-    { key:'nb_wins',           label:'Wins',       color:'#53bda7' }
-  ];
-  const max = Math.max(1, c.nb_sollicitations);
-  let html = '<div class="lm-funnel">';
-  stages.forEach((st, i) => {
-    const val = c[st.key] || 0;
-    const prev = i > 0 ? (c[stages[i - 1].key] || 0) : null;
-    const conv = (prev != null && prev > 0) ? Math.round(100 * val / prev) + '%' : null;
-    const wPct = Math.max(18, Math.round(100 * val / max));
-    if (i > 0) html += '<div class="lm-funnel-arrow">›</div>';
-    html += '<div class="lm-funnel-stage">';
-    html += '<div class="lm-funnel-bar" style="width:' + wPct + '%;background:' + st.color + '"><span class="lm-funnel-val">' + val + '</span></div>';
-    html += '<div class="lm-funnel-lbl">' + st.label + '</div>';
-    html += conv ? '<div class="lm-funnel-conv">' + conv + '</div>' : '<div class="lm-funnel-conv">&nbsp;</div>';
-    html += '</div>';
-  });
-  html += '</div>';
-  return html;
-}
-
-function renderCampagneCard(c) {
-  const roi = c.nb_sollicitations > 0 ? (100 * c.nb_wins / c.nb_sollicitations) : 0;
-  const roiCls = roi >= 10 ? 'roi-good' : roi >= 3 ? 'roi-mid' : 'roi-low';
-  let html = '<div class="lm-cmp-card">';
-  html += '<div class="lm-cmp-head">';
-  html += '<div class="lm-cmp-name" title="' + escapeHtml(c.campagne) + '">' + escapeHtml(c.campagne) + '</div>';
-  html += '<div class="lm-cmp-tags">';
-  html += '<span class="lm-cmp-tag ' + roiCls + '">ROI ' + roi.toFixed(1) + '%</span>';
-  html += '<span class="lm-cmp-tag">' + c.nb_sollicitations + ' sollicit.</span>';
-  html += '</div></div>';
-  html += renderCampagneFunnel(c);
-  html += '<div class="lm-cmp-foot">';
-  html += '<span><b>' + c.nb_clients + '</b> clients</span>';
-  html += '<span><b>' + c.nb_abandons + '</b> abandons</span>';
-  html += '<span>Délai 1er contact : <b>' + (c.delai_median_h != null ? formatDelaiKpi(c.delai_median_h) : '—') + '</b></span>';
-  html += '<span><b>' + c.nb_vendeurs + '</b> vendeur' + (c.nb_vendeurs > 1 ? 's' : '') + ' · <b>' + c.nb_sites + '</b> site' + (c.nb_sites > 1 ? 's' : '') + '</span>';
-  html += '</div>';
-  html += '</div>';
-  return html;
-}
-
-function renderViewCampagnes() {
-  if (state.campagnesData === null || state.campagnesKey !== periodKey()) {
-    fetchCampagnes();
-  }
-  let html = '';
-  html += renderPeriodBar();
-
-  if (state.campagnesLoading || state.campagnesData === null) {
-    html += '<div class="lm-empty">Chargement des campagnes…</div>';
-    return html;
-  }
-  if (state.campagnesError) {
-    html += '<div class="lm-empty">Erreur de chargement des campagnes</div>';
-    return html;
-  }
-  const data = state.campagnesData;
-  if (data.length === 0) {
-    html += '<div class="lm-empty">Aucune campagne de sollicitation sur la période</div>';
-    return html;
-  }
-
-  const totSoll = data.reduce((s, c) => s + c.nb_sollicitations, 0);
-  const totWins = data.reduce((s, c) => s + c.nb_wins, 0);
-  const totCycles = data.reduce((s, c) => s + c.nb_cycles, 0);
-  const tauxGlobal = totSoll > 0 ? Math.round(100 * totWins / totSoll) : 0;
-  html += '<div class="lm-cmp-summary">';
-  html += '<div class="lm-synth-kpi-card"><div class="lm-synth-kpi-label">Campagnes</div><div class="lm-synth-kpi-value">' + data.length + '</div><div class="lm-synth-kpi-sub">actives sur la période</div></div>';
-  html += '<div class="lm-synth-kpi-card"><div class="lm-synth-kpi-label">Sollicitations</div><div class="lm-synth-kpi-value">' + totSoll + '</div><div class="lm-synth-kpi-sub">' + totCycles + ' cycles générés</div></div>';
-  html += '<div class="lm-synth-kpi-card kpi-good"><div class="lm-synth-kpi-label">Wins issus</div><div class="lm-synth-kpi-value">' + totWins + '</div><div class="lm-synth-kpi-sub">toutes campagnes</div></div>';
-  const globCls = tauxGlobal >= 10 ? 'kpi-good' : tauxGlobal < 3 ? 'kpi-critique' : 'kpi-warn';
-  html += '<div class="lm-synth-kpi-card ' + globCls + '"><div class="lm-synth-kpi-label">ROI global</div><div class="lm-synth-kpi-value">' + tauxGlobal + '%</div><div class="lm-synth-kpi-sub">Wins / sollicitation</div></div>';
-  html += '</div>';
-
-  const sorted = [...data].sort((a, b) => b.nb_sollicitations - a.nb_sollicitations);
-  for (const c of sorted) html += renderCampagneCard(c);
-
-  return html;
-}
-
-// --- 9. Tableau d'équipe ------------------------------------
-function buildTeamTree() {
-  const byReseau = {};
-  for (const s of dataKpiSiteScope) {
-    const reseau = s.reseau || '(Sans réseau)';
-    const affaire = s.affaire || '(Sans affaire)';
-    if (!byReseau[reseau]) byReseau[reseau] = { label: reseau, affaires: {}, kpi: emptyKpi() };
-    if (!byReseau[reseau].affaires[affaire]) byReseau[reseau].affaires[affaire] = { label: affaire, sites: [], kpi: emptyKpi() };
-    const siteNode = { id_site:s.id_site, label:s.nom_site, ville:s.ville, vendeurs:[], kpi:{ cycles_total:s.cycles_total, a_traiter:s.a_traiter, pipeline:s.pipeline, clos_recent:s.clos_recent } };
-    byReseau[reseau].affaires[affaire].sites.push(siteNode);
-    aggregate(byReseau[reseau].kpi, siteNode.kpi);
-    aggregate(byReseau[reseau].affaires[affaire].kpi, siteNode.kpi);
-  }
-  const siteMap = {};
-  for (const r of Object.values(byReseau))
-    for (const a of Object.values(r.affaires))
-      for (const s of a.sites) siteMap[s.id_site] = s;
-  for (const v of dataKpiVendScope) {
-    const s = siteMap[v.id_site];
-    if (!s) continue;
-    s.vendeurs.push(v);
-  }
-  const reseauList = Object.values(byReseau);
-  for (const r of reseauList) {
-    r.affaires = Object.values(r.affaires);
-    r.affaires.sort((x,y) => (x.label||'').localeCompare(y.label||''));
-    for (const a of r.affaires) {
-      a.sites.sort((x,y) => (x.label||'').localeCompare(y.label||''));
-      for (const s of a.sites) s.vendeurs.sort((x,y) => (x.vendeur_nom||'').localeCompare(y.vendeur_nom||''));
+    function slaTxt(s) { return s < 60 ? s + ' min' : (Math.round(s / 6) / 10) + ' h'; }
+    function niv(m, sla) { return m >= sla ? 'crit' : (m >= sla * 0.6 ? 'warn' : 'ok'); }
+    function hh(v) { var d = new Date(v); return String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0'); }
+    function jour(v) { var d = new Date(v); return String(d.getDate()).padStart(2, '0') + '/' + String(d.getMonth() + 1).padStart(2, '0') + (d.getFullYear() !== new Date().getFullYear() ? '/' + String(d.getFullYear()).slice(2) : ''); }
+    function quand(v) {
+      if (!v) return '';
+      var d = new Date(v), n = new Date();
+      return d.toDateString() === n.toDateString() ? hh(v) : jour(v) + ' ' + hh(v);
     }
-  }
-  reseauList.sort((x,y) => (x.label||'').localeCompare(y.label||''));
-  return reseauList;
-}
-function emptyKpi() { return { cycles_total:0, a_traiter:0, pipeline:0, clos_recent:0 }; }
-function aggregate(target, src) {
-  target.cycles_total += src.cycles_total || 0;
-  target.a_traiter    += src.a_traiter    || 0;
-  target.pipeline     += src.pipeline     || 0;
-  target.clos_recent  += src.clos_recent  || 0;
-}
-function kpiCells(kpi) {
-  return (
-    '<td class="lm-team-kpi">' + (kpi.cycles_total || 0) + '</td>' +
-    '<td class="lm-team-kpi ' + kpiClass(kpi.a_traiter, 'a_traiter') + '">' + (kpi.a_traiter || 0) + '</td>' +
-    '<td class="lm-team-kpi ' + kpiClass(kpi.pipeline, 'pipeline') + '">' + (kpi.pipeline || 0) + '</td>' +
-    '<td class="lm-team-kpi ' + kpiClass(kpi.clos_recent, 'clos_recent') + '">' + (kpi.clos_recent || 0) + '</td>'
-  );
-}
-function expandIcon(open) { return '<span class="lm-expand-icon">' + (open ? '▼' : '▶') + '</span>'; }
-function siteRow(s, sKey) {
-  const sOpen = !!state.expanded[sKey];
-  const isBus = state.busSite != null && String(state.busSite) === String(s.id_site);
-  const villeHtml = s.ville ? ' <span style="color:var(--text-mut);font-size:10px;font-weight:400">· ' + escapeHtml(s.ville) + '</span>' : '';
-  const pin = isBus ? '<span class="lm-site-pin" title="Site global">📍</span>' : '';
-  // data-scope-* : le clic sur la ligne fixe la portee de la synthese.
-  const scSel = state.syntheseScope && state.syntheseScope.type === 'site' &&
-                String(state.syntheseScope.sites[0]) === String(s.id_site);
-  return '<tr class="row-site' + (isBus ? ' is-bus-focus' : '') + (scSel ? ' is-scope' : '') +
-         '" data-expand-key="' + escapeHtml(sKey) + '" data-site-id="' + escapeHtml(s.id_site) +
-         '" data-scope-type="site" data-scope-sites="' + escapeHtml(s.id_site) +
-         '" data-scope-label="' + escapeHtml(s.label || ('Site ' + s.id_site)) + '"><td>' + expandIcon(sOpen) + escapeHtml(s.label) + villeHtml + pin + '</td>' + kpiCells(s.kpi) + '</tr>';
-}
-function renderTeamTable() {
-  adoptBusSelectionLead();
-  let rows = '';
-  if (isChefVentes) {
-    const myVendeurs = dataKpiVendScope.filter(v => v.id_manager === userId);
-    if (myVendeurs.length === 0) {
-      rows = '<tr><td colspan="5" style="text-align:center;padding:16px;color:var(--text-mut);font-size:12px">Aucun vendeur rattaché à votre management.</td></tr>';
-    } else {
-      const bySite = {};
-      for (const v of myVendeurs) {
-        if (!bySite[v.id_site]) {
-          const siteInfo = dataKpiSiteScope.find(s => s.id_site === v.id_site) || {};
-          bySite[v.id_site] = { id_site:v.id_site, label:siteInfo.nom_site||('Site '+v.id_site), ville:siteInfo.ville||'', vendeurs:[], kpi:emptyKpi() };
-        }
-        bySite[v.id_site].vendeurs.push(v);
-        aggregate(bySite[v.id_site].kpi, {cycles_total:v.cycles_total,a_traiter:v.a_traiter,pipeline:v.pipeline,clos_recent:v.clos_recent});
-      }
-      const sitesList = Object.values(bySite).sort((x,y) => (x.label||'').localeCompare(y.label||''));
-      const monoSite = (sitesList.length === 1);
-      for (const s of sitesList) {
-        if (!monoSite) {
-          const sKey = 's:' + s.id_site;
-          rows += siteRow(s, sKey);
-          if (!state.expanded[sKey]) continue;
-        }
-        s.vendeurs.sort((a,b) => (a.vendeur_nom||'').localeCompare(b.vendeur_nom||''));
-        for (const v of s.vendeurs) {
-          const isSel = state.selectedVendeur && state.selectedVendeur.id_user === v.id_user && state.selectedVendeur.id_site === v.id_site;
-          const cls = monoSite ? 'is-direct' : '';
-          rows += '<tr class="row-vendeur ' + cls + ' ' + (isSel ? 'is-selected' : '') + '" data-vendeur-id="' + v.id_user + '" data-vendeur-site="' + v.id_site + '" data-vendeur-nom="' + escapeHtml(v.vendeur_nom||'') + '"><td>' + escapeHtml(v.vendeur_nom || 'Sans nom') + '</td>' + kpiCells({cycles_total:v.cycles_total,a_traiter:v.a_traiter,pipeline:v.pipeline,clos_recent:v.clos_recent}) + '</tr>';
-        }
-      }
+    function plural(n, s, p) { return n + ' ' + (n > 1 ? (p || s + 's') : s); }
+    // BACS écrit souvent en capitales : « MOHAMED KEITA » → « Mohamed Keita ».
+    function propre(s) {
+      s = String(s || '').trim();
+      if (!s || s !== s.toUpperCase()) return s;
+      return s.toLowerCase().replace(/(^|[\s\-'’])([a-zà-ÿ])/g, function (m, a, b) { return a + b.toUpperCase(); });
     }
-  } else {
-    const tree = buildTeamTree();
-    if (tree.length === 0)
-      return '<div class="lm-team"><div class="lm-team-header"><div class="lm-team-title">Équipe</div></div><div class="lm-empty" style="padding:20px;font-size:12px">Aucun site dans votre périmètre.</div></div>';
-    const collapseReseau = (tree.length === 1);
-    for (const r of tree) {
-      const rKey = 'r:' + r.label;
-      const rOpen = !!state.expanded[rKey] || collapseReseau;
-      if (!collapseReseau) {
-        const rSites = [];
-        r.affaires.forEach(function (aa) { aa.sites.forEach(function (ss) { rSites.push(ss.id_site); }); });
-        const rSel = state.syntheseScope && state.syntheseScope.type === 'reseau' &&
-                     state.syntheseScope.label === r.label;
-        rows += '<tr class="row-reseau' + (rSel ? ' is-scope' : '') + '" data-expand-key="' + escapeHtml(rKey) +
-                '" data-scope-type="reseau" data-scope-sites="' + escapeHtml(rSites.join(',')) +
-                '" data-scope-label="' + escapeHtml(r.label) + '"><td>' + expandIcon(rOpen) + escapeHtml(r.label) + '</td>' + kpiCells(r.kpi) + '</tr>';
-      }
-      if (!rOpen) continue;
-      const collapseAffaire = collapseReseau && r.affaires.length === 1;
-      for (const a of r.affaires) {
-        const aKey = rKey + '|a:' + a.label;
-        const aOpen = !!state.expanded[aKey] || collapseAffaire;
-        if (!collapseAffaire) {
-          const aSites = a.sites.map(function (ss) { return ss.id_site; });
-          const aSel = state.syntheseScope && state.syntheseScope.type === 'affaire' &&
-                       state.syntheseScope.label === a.label;
-          rows += '<tr class="row-affaire' + (aSel ? ' is-scope' : '') + '" data-expand-key="' + escapeHtml(aKey) +
-                  '" data-scope-type="affaire" data-scope-sites="' + escapeHtml(aSites.join(',')) +
-                  '" data-scope-label="' + escapeHtml(a.label) + '"><td>' + expandIcon(aOpen) + escapeHtml(a.label) + '</td>' + kpiCells(a.kpi) + '</tr>';
-        }
-        if (!aOpen) continue;
-        for (const s of a.sites) {
-          const sKey = aKey + '|s:' + s.id_site;
-          rows += siteRow(s, sKey);
-          if (!state.expanded[sKey]) continue;
-          if (s.vendeurs.length === 0) {
-            rows += '<tr class="row-vendeur"><td style="font-style:italic;color:var(--text-mut)">Aucun vendeur rattaché</td><td colspan="4"></td></tr>';
-          } else {
-            for (const v of s.vendeurs) {
-              const isSel = state.selectedVendeur && state.selectedVendeur.id_user === v.id_user && state.selectedVendeur.id_site === v.id_site;
-              rows += '<tr class="row-vendeur ' + (isSel ? 'is-selected' : '') + '" data-vendeur-id="' + v.id_user + '" data-vendeur-site="' + v.id_site + '" data-vendeur-nom="' + escapeHtml(v.vendeur_nom||'') + '"><td>' + escapeHtml(v.vendeur_nom || 'Sans nom') + '</td>' + kpiCells({cycles_total:v.cycles_total,a_traiter:v.a_traiter,pipeline:v.pipeline,clos_recent:v.clos_recent}) + '</tr>';
-            }
-          }
-        }
-      }
+    function siteNom(s) { return propre(String(s || '').replace(/\s+TT\d+$/i, '')); }
+    function nomLead(l) { return propre(l.nom) || 'Sans nom'; }
+    function telAff(t) {
+      var d = String(t || '').replace(/[^0-9+]/g, '');
+      if (/^\+33\d{9}$/.test(d)) d = '0' + d.slice(3);
+      return /^0\d{9}$/.test(d) ? d.replace(/(\d{2})(?=\d)/g, '$1 ') : (t || '');
     }
-  }
-  const busChip = state.busSite != null ? '<span class="lm-bus-chip">📍 site global focalisé</span>' : '';
-  return (
-    '<div class="lm-team">' +
-      '<div class="lm-team-header"><div class="lm-team-title">' + (isChefVentes ? 'Mon équipe' : 'Équipe — Périmètre') + '</div>' + busChip + '</div>' +
-      '<div class="lm-team-scroll">' +
-        '<table class="lm-team-table">' +
-          '<thead><tr><th>' + (isChefVentes ? 'Vendeur' : 'Périmètre') + '</th><th>Total</th><th>À traiter</th><th>Pipeline</th><th>Win+Ab (30j)</th></tr></thead>' +
-          '<tbody>' + rows + '</tbody>' +
-        '</table>' +
-      '</div>' +
-    '</div>'
-  );
-}
-
-// --- 10. Vue Synthèse ---------------------------------------
-// ── AJOUT : synthese d'UN vendeur ─────────────────────────────────────
-// Sert deux cas : le chef qui clique sur un vendeur, et le vendeur qui
-// consulte sa propre synthese. Meme rendu, seul l'en-tete change.
-function renderSyntheseVendeur(idUser, nom, avecRetour) {
-  fetchEntonnoir();
-
-  // v_lead_kpi_vendeur rend UNE LIGNE PAR SITE. Un .find() prenait la
-  // premiere et figeait donc la synthese sur un seul site, quel que soit
-  // le selecteur de la topnav (releve par Antoine le 27/08/2026 : chiffres
-  // identiques sur les deux sites). On agrege les lignes du vendeur, en se
-  // limitant au site courant quand il y en a un de selectionne.
-  const _siteSel = (function () {
-    try { const b = siteBus(); const id = b && b.getSiteId(); return id == null ? null : Number(id); }
-    catch (e) { return null; }
-  })();
-  const _lignes = dataKpiVend.filter(function (x) {
-    if (Number(x.id_user) !== Number(idUser)) return false;
-    return _siteSel == null || Number(x.id_site) === _siteSel;
-  });
-  const v = _lignes.reduce(function (acc, r) {
-    acc.cycles_total += (+r.cycles_total || 0);
-    acc.a_traiter    += (+r.a_traiter    || 0);
-    acc.pipeline     += (+r.pipeline     || 0);
-    acc.clos_recent  += (+r.clos_recent  || 0);
-    return acc;
-  }, { cycles_total: 0, a_traiter: 0, pipeline: 0, clos_recent: 0 });
-  const n = function (x) { const y = parseFloat(x); return isNaN(y) ? 0 : y; };
-
-  // Chaque compteur mene a la vue qui le detaille : un chiffre qui ne se
-  // creuse pas est un chiffre qu'on regarde une fois puis qu'on ignore.
-  const cartes = [
-    { n: n(v.cycles_total), l: 'cycles ouverts',  go: 'a_traiter' },
-    { n: n(v.a_traiter),    l: 'a traiter',       go: 'a_traiter', alerte: n(v.a_traiter) > 0 },
-    { n: n(v.pipeline),     l: 'en pipeline',     go: 'pipeline'  },
-    { n: n(v.clos_recent),  l: 'clos recemment',  go: 'a_traiter' }
-  ];
-
-  let html = '<div class="lm-focus">';
-  html += '<div class="lm-focus-kpi">';
-  cartes.forEach(function (c) {
-    html += '<button type="button" class="lm-focus-c' + (c.alerte ? ' alerte' : '') +
-            '" data-goto="' + c.go + '">' +
-            '<span class="lm-focus-n">' + c.n + '</span>' +
-            '<span class="lm-focus-l">' + c.l + '</span></button>';
-  });
-  html += '</div></div>';
-
-  html += renderBandeauPortee();
-  html += renderEntonnoirCohorte();
-  return html;
-}
-
-function renderViewSynthese() {
-  const kpi = computeSyntheseKpi();
-  if (state.rankingData === null || state.rankingKey !== periodKey()) {
-    fetchClassement();
-  }
-  fetchEntonnoir();   // AJOUT : entonnoir de cohorte (non bloquant)
-  const ranking = Array.isArray(state.rankingData) ? state.rankingData : [];
-  let html = '';
-  html += renderTeamTable();
-  html += renderPeriodBar();
-  html += '<div class="lm-synthese">';
-  // Le tableau d'equipe ci-dessus pilote TOUTE la synthese : entonnoir,
-  // compteurs et classement. Seuls les deux graphiques du bas restent au
-  // niveau du perimetre — leurs RPC agregent cote serveur sans detail par
-  // site, il faudra leur ajouter un filtre (note du 20/08/2026).
-  html += renderBandeauPortee();
-  html += renderEntonnoirCohorte();
-  html += '<div class="lm-synth-kpi">';
-  html += '<div class="lm-synth-kpi-card"><div class="lm-synth-kpi-label">Cycles actifs</div><div class="lm-synth-kpi-value">' + kpi.cyclesActifs + '</div><div class="lm-synth-kpi-sub">Cycles ouverts (instantané)</div></div>';
-  const winClass = kpi.winCount > 0 ? 'kpi-good' : '';
-  html += '<div class="lm-synth-kpi-card ' + winClass + '"><div class="lm-synth-kpi-label">Win sur période</div><div class="lm-synth-kpi-value">' + kpi.winCount + '</div><div class="lm-synth-kpi-sub">' + kpi.abandonCount + ' abandon' + (kpi.abandonCount !== 1 ? 's' : '') + '</div></div>';
-  let convClass = '', convValue = '—';
-  if (kpi.tauxConv !== null) {
-    convValue = kpi.tauxConv + '%';
-    if (kpi.tauxConv >= 60)      convClass = 'kpi-good';
-    else if (kpi.tauxConv < 30)  convClass = 'kpi-critique';
-    else if (kpi.tauxConv < 50)  convClass = 'kpi-warn';
-  } else { convClass = 'kpi-na'; }
-  html += '<div class="lm-synth-kpi-card ' + convClass + '"><div class="lm-synth-kpi-label">Taux conversion</div><div class="lm-synth-kpi-value">' + convValue + '</div><div class="lm-synth-kpi-sub">Win / (Win + Abandon)</div></div>';
-  let delaiClass = '', delaiValue = '—';
-  if (kpi.delaiMedian !== null) {
-    delaiValue = formatDelaiKpi(kpi.delaiMedian);
-    if (kpi.delaiMedian < 1)        delaiClass = 'kpi-good';
-    else if (kpi.delaiMedian > 24)  delaiClass = 'kpi-critique';
-    else if (kpi.delaiMedian > 4)   delaiClass = 'kpi-warn';
-  } else { delaiClass = 'kpi-na'; }
-  html += '<div class="lm-synth-kpi-card ' + delaiClass + '"><div class="lm-synth-kpi-label">Délai 1er contact</div><div class="lm-synth-kpi-value">' + delaiValue + '</div><div class="lm-synth-kpi-sub">Médiane sur ' + kpi.nbDelais + ' lead' + (kpi.nbDelais !== 1 ? 's' : '') + '</div></div>';
-  html += '</div>';
-  html += '<div class="lm-synth-2col">';
-  html +=   renderRankingBlock('top', [...ranking]);
-  html +=   renderRankingBlock('bottom', [...ranking]);
-  html += '</div>';
-  if (state.evolutionData === null || state.graphesKey !== (periodKey() + '|' + portéeCle())) {
-    fetchGraphes();
-  }
-  html += '<div class="lm-synth-2col">';
-  if (state.graphesLoading || state.evolutionData === null) {
-    html += '<div class="lm-block"><div class="lm-block-title">Évolution des leads</div><div class="lm-chart-placeholder">Chargement…</div></div>';
-    html += '<div class="lm-block"><div class="lm-block-title">Répartition par source</div><div class="lm-chart-placeholder">Chargement…</div></div>';
-  } else if (state.graphesError) {
-    html += '<div class="lm-block"><div class="lm-block-title">Évolution des leads</div><div class="lm-chart-placeholder">Erreur de chargement</div></div>';
-    html += '<div class="lm-block"><div class="lm-block-title">Répartition par source</div><div class="lm-chart-placeholder">Erreur de chargement</div></div>';
-  } else {
-    const evoEmpty = state.evolutionData.length === 0;
-    const srcEmpty = state.sourcesData.length === 0;
-    html += '<div class="lm-block"><div class="lm-block-title">Évolution des leads</div>' +
-            (evoEmpty ? '<div class="lm-chart-placeholder">Aucun lead sur la période</div>'
-                      : '<div class="lm-chart-wrap"><canvas id="lm-chart-evolution"></canvas></div>') +
-            '</div>';
-    html += '<div class="lm-block"><div class="lm-block-title">Répartition par source</div>' +
-            (srcEmpty ? '<div class="lm-chart-placeholder">Aucun lead sur la période</div>'
-                      : '<div class="lm-chart-wrap"><canvas id="lm-chart-sources"></canvas></div>') +
-            '</div>';
-  }
-  html += '</div>';
-  html += '</div>';
-  return html;
-}
-
-// --- 11. Vues À traiter / Pipeline --------------------------
-const SECTIONS = [
-  { key:'sla_critique', titre:"Urgent — Rappeler dans l'heure", cls:'section-critical' },
-  { key:'sla_depasse',  titre:'SLA dépassé',                     cls:'section-warn' },
-  { key:'a_traiter',    titre:"À traiter aujourd'hui",            cls:'' },
-  { key:'a_relancer',   titre:'Cycles à relancer',                cls:'' },
-  { key:'suivi_normal', titre:'Suivi normal',                     cls:'' }
-];
-// Filtre « cycles de CE vendeur ».
-//
-// ⚠️ Deux notions de « vendeur » coexistent dans v_cycles_actifs :
-//   id_vendeur       = le PROPRIÉTAIRE du cycle — c'est lui que compte
-//                      v_lead_kpi_vendeur, donc le tableau d'équipe.
-//   user_ids_actifs  = TOUS ceux qui ont eu une activité sur le cycle
-//                      (un appel, un message, un rapport).
-//
-// Le filtre s'appuyait sur user_ids_actifs : on affichait donc les cycles
-// où le vendeur était simplement INTERVENU. Mesuré le 26/08/2026 sur
-// Benjamin Adam (1009) : 42 cycles où il est actif, dont 18 seulement lui
-// appartiennent — et « à traiter aujourd'hui » affichait 8 quand le
-// tableau annonçait 6. Le même écran donnait deux chiffres pour le même mot.
-//
-// On s'aligne sur le TABLEAU : le détail montre les cycles du vendeur.
-// Le repli sur user_ids_actifs ne sert plus que si id_vendeur est absent
-// (cycle sans propriétaire), pour ne pas faire disparaître la ligne.
-// Filtre « cycles de CE vendeur ».
-//
-// RÈGLE MÉTIER (Antoine, 27/08/2026) : PERSONNE n'est propriétaire d'un
-// cycle. Un cycle relie un CLIENT à un SITE. Un vendeur voit le cycle s'il
-// y a fait une ACTION SORTANTE — appel émis, message, rapport de visite.
-//
-// ⚠️ NE PAS filtrer sur `c.id_vendeur` : cette colonne porte le CRÉATEUR du
-// cycle (CYCLE_COM.id_user), pas un titulaire. Le faire — comme le 26/08 —
-// masquait les cycles travaillés par le vendeur sans qu'il les ait créés,
-// et laissait 517 cycles ouverts sur 4 611 (11 %) sans aucun rattachement.
-//
-// `user_ids_actifs` porte exactement la règle depuis la migration
-// 20260827100000 : RPV + contacts sortants, sans les entrants ni les
-// propales.
-function matchVendeurFilter(c) {
-  if (!state.selectedVendeur) return true;
-  const arr = c.user_ids_actifs;
-  if (!Array.isArray(arr)) return false;
-  return arr.includes(state.selectedVendeur.id_user);
-}
-function filteredActifs() {
-  const q = state.search.trim().toLowerCase();
-  return dataActifs.filter(c => {
-    if (!matchVendeurFilter(c)) return false;
-    if (state.filterSource === '__none__') { if (c.source_dernier_lead) return false; }
-    else if (state.filterSource !== 'all') { if (c.source_dernier_lead !== state.filterSource) return false; }
-    if (!q) return true;
-    const blob = [c.client_nom, c.client_prenom, c.site_nom, c.site_ville, c.message_dernier_lead, c.client_email, c.client_tel].map(x => (x||'').toString().toLowerCase()).join(' ');
-    return blob.includes(q);
-  });
-}
-function computeKpi(rows) {
-  return {
-    sla_critique: rows.filter(r => r.etat_action === 'sla_critique').length,
-    sla_depasse:  rows.filter(r => r.etat_action === 'sla_depasse').length,
-    a_traiter:    rows.filter(r => r.etat_action === 'a_traiter').length,
-    a_relancer:   rows.filter(r => r.etat_action === 'a_relancer').length,
-    chauds:       rows.filter(r => r.temperature === 'chaud').length,
-    total:        rows.length
-  };
-}
-function countBySource(data, applyVendeurFilter) {
-  const counts = { all: 0, __none__: 0 };
-  for (const r of data) {
-    if (applyVendeurFilter && !matchVendeurFilter(r)) continue;
-    counts.all += 1;
-    if (!r.source_dernier_lead) counts.__none__ += 1;
-    else counts[r.source_dernier_lead] = (counts[r.source_dernier_lead] || 0) + 1;
-  }
-  return counts;
-}
-function renderFiltersBar(counts) {
-  let html = '<div class="filters">';
-  for (const c of FILTER_CHIPS) {
-    if ((counts[c.k] || 0) === 0 && c.k !== 'all') continue;
-    html += '<div class="filter-chip' + (state.filterSource === c.k ? ' active' : '') + '" data-source="' + c.k + '">' + escapeHtml(c.l) + '<span class="count">' + (counts[c.k] || 0) + '</span></div>';
-  }
-  html += '<input class="filter-search" id="lm-search" placeholder="Rechercher client, véhicule…" value="' + escapeHtml(state.search) + '">';
-  html += '</div>';
-  return html;
-}
-function renderActifCard(c) {
-  const cls = c.etat_action || 'suivi_normal';
-  const idClient = c.id_client || '';
-  const clientFull = ((c.client_prenom||'') + ' ' + (c.client_nom||'')).trim();
-  const siteInfo = (c.site_nom||'') + (c.site_ville ? ' · ' + c.site_ville : '');
-  const tempCls = { chaud:'temp-chaud', tiede:'temp-tiede', froid:'temp-froid' }[c.temperature] || 'temp-froid';
-  let slaLabel = '';
-  if (cls === 'sla_critique' || cls === 'sla_depasse') slaLabel = formatDuree(c.heures_depuis_activite);
-  else if (cls === 'a_traiter') slaLabel = 'À traiter';
-  else if (cls === 'a_relancer') slaLabel = 'À relancer · ' + formatDuree(c.heures_depuis_activite);
-  else slaLabel = formatDuree(c.heures_depuis_activite);
-  const clientLabel = escapeHtml(clientFull || 'Prospect non qualifié');
-  const dataClientAttr = 'data-client="' + escapeHtml(idClient) + '"';
-  return (
-    '<div class="card card-clickable ' + cls + '" data-action="open-fiche-cycle" data-cycle-id="' + c.id_cycle_com + '" ' + dataClientAttr + ' title="Ouvrir le cycle client">' +
-      '<div class="card-row1"><div style="min-width:0; flex:1;"><div class="card-client-name">' + clientLabel + '</div><div class="card-site">' + escapeHtml(siteInfo) + '</div></div><div class="card-sla">' + escapeHtml(slaLabel) + '</div></div>' +
-      '<div class="card-lead-line">' + sourceBadge(c.source_dernier_lead) + '</div>' +
-      (c.message_dernier_lead ? '<div class="card-message">' + escapeHtml(c.message_dernier_lead) + '</div>' : '') +
-      '<div class="card-footer"><div class="card-meta"><span class="card-meta-item"><span class="temperature ' + tempCls + '"></span>' + escapeHtml(c.temperature||'') + '</span><span class="card-meta-item">' + (c.nb_leads||0) + ' lead' + ((c.nb_leads||0) > 1 ? 's' : '') + '</span><span class="card-meta-item">' + (c.nb_contacts||0) + ' contact' + ((c.nb_contacts||0) > 1 ? 's' : '') + '</span></div></div>' +
-    '</div>'
-  );
-}
-
-// --- 11b. Regroupement par campagne (filtre Sollicitation MKG) ---
-function renderCampagneHeader(name, rows, isOpen, key) {
-  const nbCrit = rows.filter(r => r.etat_action === 'sla_critique').length;
-  const nbWarn = rows.filter(r => r.etat_action === 'sla_depasse').length;
-  let stats = '';
-  if (nbCrit > 0) stats += '<span class="lm-campagne-stat crit">' + nbCrit + ' urgent' + (nbCrit > 1 ? 's' : '') + '</span>';
-  if (nbWarn > 0) stats += '<span class="lm-campagne-stat warn">' + nbWarn + ' SLA</span>';
-  stats += '<span class="lm-campagne-stat">' + rows.length + ' cycle' + (rows.length > 1 ? 's' : '') + '</span>';
-  return '<div class="lm-campagne-header" data-expand-key="' + escapeHtml(key) + '">' +
-    '<span class="lm-campagne-icon">' + (isOpen ? '▼' : '▶') + '</span>' +
-    '<div class="lm-campagne-title" title="' + escapeHtml(name) + '">' + escapeHtml(name) + '</div>' +
-    '<div class="lm-campagne-stats">' + stats + '</div>' +
-  '</div>';
-}
-
-function renderActifsByCampagne(rows) {
-  const groups = new Map();
-  for (const r of rows) {
-    const k = r.message_dernier_lead || '(Sans nom de campagne)';
-    if (!groups.has(k)) groups.set(k, []);
-    groups.get(k).push(r);
-  }
-  const sortedKeys = Array.from(groups.keys()).sort((a, b) => a.localeCompare(b, 'fr', { sensitivity: 'base' }));
-  let html = '';
-  for (const name of sortedKeys) {
-    const rs = groups.get(name);
-    const key = 'campagne:' + name;
-    const isOpen = !!state.expanded[key];
-    html += '<div class="lm-campagne' + (isOpen ? ' is-open' : '') + '">';
-    html += renderCampagneHeader(name, rs, isOpen, key);
-    html += '<div class="lm-campagne-body">';
-    if (isOpen) {
-      const bySection = {};
-      for (const r of rs) {
-        const k = r.etat_action || 'suivi_normal';
-        if (!bySection[k]) bySection[k] = [];
-        bySection[k].push(r);
-      }
-      let any = false;
-      for (const sec of SECTIONS) {
-        const list = bySection[sec.key];
-        if (!list || !list.length) continue;
-        any = true;
-        html += '<div class="section ' + sec.cls + '">';
-        html += '<div class="section-header"><div class="section-title">' + sec.titre + '</div><div class="section-count">' + list.length + '</div></div>';
-        html += '<div class="cards">';
-        for (const c of list) html += renderActifCard(c);
-        html += '</div></div>';
-      }
-      if (!any) html += '<div class="lm-empty" style="padding:16px;font-size:11px">Aucun cycle dans cette campagne</div>';
+    function normTel(n) {
+      var t = String(n || '').replace(/[^0-9+]/g, '');
+      if (!t) return ''; if (t[0] === '+') return t; if (t[0] === '0') return '+33' + t.slice(1); return t;
     }
-    html += '</div></div>';
-  }
-  return html;
-}
+    function tm(v, sla, cap) {
+      var m = mins(v);
+      return '<span class="tm ' + niv(m, sla) + '"><b>' + duree(m) + '</b><small>' + esc(cap || ('SLA ' + slaTxt(sla))) + '</small></span>';
+    }
+    function libStatut(s) {
+      return ({ 'A affecter': 'À affecter', 'Injoignable temporairement': 'Injoignable', 'Projet Long Terme': 'Projet long terme',
+                'Abandonned': 'Abandonné', 'Interesse': 'Intéressé' })[s] || s || '';
+    }
+    function tagsLead(l) {
+      var h = '<span class="tag">' + esc(l.source_libelle || l.source_bacs || 'BACS') + '</span>';
+      if (l.campagne) h += '<span class="tag camp" title="' + esc(l.campagne) + '">' + esc(l.campagne.length > 46 ? l.campagne.slice(0, 44) + '…' : l.campagne) + '</span>';
+      if (l.statut_eff === 'Accepté') h += '<span class="tag warn">Accepté</span>';
+      if (l.tentatives > 0) h += '<span class="tag warn">' + plural(l.tentatives, 'tentative') + '</span>';
+      if (l.site) h += '<span class="tag">BACS : ' + esc(siteNom(l.site)) + '</span>';
+      return h;
+    }
+    function demande(l) {
+      var p = [l.type_demande, l.modele].filter(Boolean);
+      return p.length ? p.join(' · ') : (l.nature || 'Demande BACS');
+    }
+    function resumeQualif(q) {
+      if (!q) return '';
+      return [q.projet, q.modele, q.echeance ? 'échéance ' + String(q.echeance).toLowerCase() : null,
+              q.reprise ? 'reprise ' + String(q.reprise).toLowerCase() : null, q.financement].filter(Boolean).join(' · ');
+    }
+    function verrouLibre(l) { return !l.verrou_par || (l.verrou_jusqu && ts(l.verrou_jusqu) < Date.now()); }
+    function estMien(l) { return !verrouLibre(l) && Number(l.verrou_par) === Number(MOI); }
+    // null = sources suivies par le groupe (choix serveur) ; [] = aucune, qu'on
+    // ne peut pas envoyer telle quelle (le serveur la lirait comme « par défaut »).
+    function sourcesArg() { return S.sources == null ? null : (S.sources.length ? S.sources : ['__aucune__']); }
 
-// Un ecran qui dit « aucun cycle » pendant qu'il charge est deroutant :
-// il affirme une absence alors qu'il n'a pas encore la reponse (releve par
-// Antoine le 27/08). Tant que les cycles ne sont pas la, on le DIT.
-function lmAttenteCycles(quoi) {
-  return '<div class="lm-empty" style="padding:34px;font-size:12px;color:var(--text-mut)">'
-       + '<span class="lm-spin"></span>Chargement ' + (quoi || 'des cycles') + '…</div>';
-}
+    async function rpc(nom, args) {
+      var r = await sb.rpc(nom, args || {});
+      if (r.error) { var e = new Error(r.error.message || nom); e.code = r.error.code; throw e; }
+      return r.data;
+    }
+    function messageErreur(e) {
+      var m = String((e && e.message) || e || '');
+      if (/Réservé au plateau/.test(m)) return 'Votre rôle n\'a pas accès au plateau.';
+      if (/Failed to fetch|NetworkError/i.test(m)) return 'Connexion perdue. Réessayez dans un instant.';
+      return m || 'Erreur inattendue';
+    }
 
-function renderViewActifs() {
-  if (state.cyclesLoading && !dataActifs.length) return lmAttenteCycles('des cycles');
-  const rows = filteredActifs();
-  const kpi = computeKpi(rows);
-  const counts = countBySource(dataActifs, true);
-  let html = '';
-  if (isVendeur) {
-    html += '<div class="kpi-bar">';
-    html += '<div class="kpi kpi-critique"><div class="kpi-label">SLA dépassé</div><div class="kpi-value">' + (kpi.sla_critique + kpi.sla_depasse) + '</div></div>';
-    html += '<div class="kpi kpi-warn"><div class="kpi-label">À traiter</div><div class="kpi-value">' + kpi.a_traiter + '</div></div>';
-    html += '<div class="kpi"><div class="kpi-label">Relances dues</div><div class="kpi-value">' + kpi.a_relancer + '</div></div>';
-    html += '<div class="kpi kpi-good"><div class="kpi-label">Cycles chauds</div><div class="kpi-value">' + kpi.chauds + '</div></div>';
-    html += '<div class="kpi"><div class="kpi-label">Cycles ouverts</div><div class="kpi-value">' + kpi.total + '</div></div>';
-    html += '</div>';
-  }
-  html += renderFiltersBar(counts);
-
-  if (state.filterSource === 'rpv_sollicitation') {
-    if (rows.length === 0) html += '<div class="lm-empty">Aucun cycle ne correspond à ces critères</div>';
-    else                   html += renderActifsByCampagne(rows);
-    return html;
-  }
-
-  const bySection = {};
-  for (const r of rows) {
-    const k = r.etat_action || 'suivi_normal';
-    if (!bySection[k]) bySection[k] = [];
-    bySection[k].push(r);
-  }
-  for (const sec of SECTIONS) {
-    const list = bySection[sec.key];
-    if (!list || list.length === 0) continue;
-    html += '<div class="section ' + sec.cls + '">';
-    html += '<div class="section-header"><div class="section-title">' + sec.titre + '</div><div class="section-count">' + list.length + '</div></div>';
-    html += '<div class="cards">';
-    for (const c of list) html += renderActifCard(c);
-    html += '</div></div>';
-  }
-  if (rows.length === 0) html += '<div class="lm-empty">Aucun cycle ne correspond à ces critères</div>';
-  return html;
-}
-
-const KANBAN_COLS = [{ key:'nouveau',  titre:'Nouveau' },{ key:'en_cours', titre:'En cours' },{ key:'avance',   titre:'Avancé' },{ key:'clos',     titre:'Clos' }];
-function filteredKanban() {
-  const q = state.search.trim().toLowerCase();
-  return dataKanban.filter(c => {
-    if (!matchVendeurFilter(c)) return false;
-    if (state.filterSource === '__none__') { if (c.source_dernier_lead) return false; }
-    else if (state.filterSource !== 'all') { if (c.source_dernier_lead !== state.filterSource) return false; }
-    if (!q) return true;
-    const blob = [c.client_nom, c.client_prenom, c.site_nom, c.site_ville, c.client_email, c.client_tel].map(x => (x||'').toString().toLowerCase()).join(' ');
-    return blob.includes(q);
-  });
-}
-function renderKanbanCard(c) {
-  const clientFull = ((c.client_prenom||'') + ' ' + (c.client_nom||'')).trim();
-  const idClient = c.id_client || '';
-  const isClos = c.statut_kanban === 'clos';
-  let badges = '';
-  if (isClos) {
-    if (c.type_cloture === 'win') badges += '<span class="lm-kbadge win">Win</span>';
-    else if (c.type_cloture === 'abandon') badges += '<span class="lm-kbadge abandon">Abandon</span>';
-    else badges += '<span class="lm-kbadge autre">Clos</span>';
-  } else {
-    if ((c.nb_propales || 0) > 0) badges += '<span class="lm-kbadge propale">' + c.nb_propales + ' propale' + (c.nb_propales > 1 ? 's' : '') + '</span>';
-    if ((c.heures_inactivite || 0) > 168) badges += '<span class="lm-kbadge inact">Inactif ' + formatDuree(c.heures_inactivite) + '</span>';
-    if (c.source_dernier_lead) badges += sourceBadge(c.source_dernier_lead);
-  }
-  let meta = '';
-  if (isClos) meta = '<span class="lm-kcard-meta-item">Fermé ' + formatJours(c.jours_depuis_cloture) + '</span>';
-  else {
-    const nbContacts = c.nb_contacts_total || 0;
-    meta += '<span class="lm-kcard-meta-item">' + nbContacts + ' contact' + (nbContacts > 1 ? 's' : '') + '</span>';
-    if (c.last_contact_at) {
-      const heuresDepuis = (Date.now() - new Date(c.last_contact_at).getTime()) / 3600000;
-      if (heuresDepuis >= 0) meta += '<span class="lm-kcard-meta-item">· dernier ' + formatDuree(heuresDepuis) + '</span>';
-    } else if (nbContacts === 0) meta = '<span class="lm-kcard-meta-item">aucun contact</span>';
-  }
-  return '<div class="lm-kcard" data-action="open-fiche-cycle" data-client="' + escapeHtml(idClient) + '" data-cycle-id="' + c.id_cycle_com + '" title="Ouvrir le cycle client"><div class="lm-kcard-client">' + escapeHtml(clientFull || 'Prospect') + '</div><div class="lm-kcard-meta">' + meta + '</div>' + (badges ? '<div class="lm-kcard-badges">' + badges + '</div>' : '') + '</div>';
-}
-function renderViewKanban() {
-  if (state.cyclesLoading && !dataKanban.length) return lmAttenteCycles('du pipeline');
-  const rows = filteredKanban();
-  const counts = countBySource(dataKanban, true);
-  let html = '';
-  html += renderFiltersBar(counts);
-  if (rows.length === 0 && dataKanban.length === 0) {
-    html += '<div class="lm-empty">Aucun cycle pour le site sélectionné</div>';
-    return html;
-  }
-  const byCol = { nouveau:[], en_cours:[], avance:[], clos:[] };
-  for (const c of rows) {
-    const k = c.statut_kanban || 'nouveau';
-    if (byCol[k]) byCol[k].push(c);
-  }
-  for (const k of Object.keys(byCol)) {
-    byCol[k].sort((a, b) => {
-      const da = k === 'clos' ? new Date(a.cycle_maj_le || 0) : new Date(a.last_contact_at || a.cycle_ouvert_le || 0);
-      const db = k === 'clos' ? new Date(b.cycle_maj_le || 0) : new Date(b.last_contact_at || b.cycle_ouvert_le || 0);
-      return db - da;
-    });
-  }
-  html += '<div class="lm-kanban">';
-  for (const col of KANBAN_COLS) {
-    const list = byCol[col.key] || [];
-    html += '<div class="lm-col" data-statut="' + col.key + '">';
-    html +=   '<div class="lm-col-head"><div class="lm-col-title">' + col.titre + '</div><div class="lm-col-count">' + list.length + '</div></div>';
-    html +=   '<div class="lm-col-body">';
-    if (list.length === 0) html += '<div class="lm-kanban-empty">Aucun cycle</div>';
-    else for (const c of list) html += renderKanbanCard(c);
-    html +=   '</div>';
-    html += '</div>';
-  }
-  html += '</div>';
-  return html;
-}
-
-// --- 12. Section Suivi leads --------------------------------
-function renderSectionSuiviLeads() {
-  let html = '';
-  html += renderTeamTable();
-
-  if (!state.selectedVendeur) {
-    return html;
-  }
-
-  if (!isVendeur) {
-    html += '<div class="lm-consultation-banner">';
-    html += '<div class="lm-consultation-banner-text">Consultation : <strong>' + escapeHtml(state.selectedVendeur.vendeur_nom) + '</strong></div>';
-    html += '<button type="button" class="lm-consultation-close" data-action="clear-vendeur">✕ Quitter</button>';
-    html += '</div>';
-  }
-  html += '<div class="lm-subtoggle">';
-  html += '<button type="button" class="lm-subtoggle-btn' + (state.view === 'a_traiter' ? ' active' : '') + '" data-view="a_traiter">Cycles actifs</button>';
-  html += '<button type="button" class="lm-subtoggle-btn' + (state.view === 'pipeline'  ? ' active' : '') + '" data-view="pipeline">Pipeline</button>';
-  html += '</div>';
-  if (state.cyclesLoading) {
-    html += '<div class="lm-empty" style="padding:30px;font-size:12px">Chargement des cycles…</div>';
-    return html;
-  }
-  if (state.view === 'pipeline') html += renderViewKanban();
-  else                            html += renderViewActifs();
-  return html;
-}
-
-// --- 12b. ONGLET "Créer une campagne" (managers, tous sauf rôle 4) -----------
-//   Cible des CLIENT par critères, choisit une logique d'affectation, simule
-//   (RPC dry_run) puis crée les RPV 'Sollicitation' (RPC commit).
-function campState() {
-  if (!state.camp) state.camp = { result: null, loading: false, error: null, launched: 0, done: false, params: null };
-  return state.camp;
-}
-
-function siteOptionsCamp() {
-  const m = {};
-  for (const s of dataKpiSiteScope) { if (s.id_site != null) m[s.id_site] = s.nom_site || ('Site ' + s.id_site); }
-  return Object.keys(m).map(k => ({ id: Number(k), nom: m[k] })).sort((a, b) => (a.nom || '').localeCompare(b.nom || ''));
-}
-function vendeurOptionsCamp() {
-  const out = [];
-  for (const info of vendeurInfoMap.values()) out.push({ id_user: info.id_user, nom: info.vendeur_nom || ('Vendeur ' + info.id_user) });
-  return out.sort((a, b) => (a.nom || '').localeCompare(b.nom || ''));
-}
-function vendeurNomCamp(idu) {
-  const info = vendeurInfoMap.get(Number(idu));
-  return info ? (info.vendeur_nom || ('Vendeur ' + idu)) : ('Vendeur ' + idu);
-}
-
-function champText(id, label, ph) {
-  return '<div class="lm-camp-field"><label class="lm-camp-lbl" for="' + id + '">' + escapeHtml(label) + '</label>' +
-         '<input type="text" id="' + id + '" class="lm-camp-input" placeholder="' + escapeHtml(ph || '') + '" autocomplete="off"></div>';
-}
-function champNumber(id, label, ph) {
-  return '<div class="lm-camp-field"><label class="lm-camp-lbl" for="' + id + '">' + escapeHtml(label) + '</label>' +
-         '<input type="number" id="' + id + '" class="lm-camp-input" placeholder="' + escapeHtml(ph || '') + '"></div>';
-}
-function champSelect(id, label, opts) {
-  let o = '';
-  for (const pair of opts) o += '<option value="' + escapeHtml(pair[0]) + '">' + escapeHtml(pair[1]) + '</option>';
-  return '<div class="lm-camp-field"><label class="lm-camp-lbl" for="' + id + '">' + escapeHtml(label) + '</label>' +
-         '<select id="' + id + '" class="lm-camp-input">' + o + '</select></div>';
-}
-
-function renderViewCreationCampagne() {
-  campState();
-  const sites = siteOptionsCamp();
-  const vendeurs = vendeurOptionsCamp();
-  let h = '<div class="lm-camp">';
-
-  // 1 — Cible
-  h += '<div class="lm-block"><div class="lm-block-title">1 · Définir la cible</div><div class="lm-camp-grid">';
-  h += champSelect('camp-type', 'Type de client', [['', 'Tous'], ['particulier', 'Particuliers'], ['societe', 'Sociétés']]);
-  h += champText('camp-marque', 'Marque du véhicule', 'ex : TOYOTA');
-  h += champText('camp-modele', 'Modèle (contient)', 'ex : YARIS');
-  h += champNumber('camp-age', 'Véhicule de … ans et +', 'ex : 4');
-  h += champNumber('camp-kmmin', 'Km min', '');
-  h += champNumber('camp-kmmax', 'Km max', '');
-  h += champText('camp-deps', 'Départements (CP)', 'ex : 75, 92, 94');
-  h += champText('camp-csp', 'CSP', '');
-  h += '<div class="lm-camp-field lm-camp-full"><label class="lm-camp-lbl">Sites ciblés <span class="lm-camp-hint">(aucun coché = tout le périmètre)</span></label><div class="lm-camp-checks">';
-  for (const s of sites) h += '<label class="lm-camp-chk"><input type="checkbox" class="camp-site" value="' + s.id + '"> ' + escapeHtml(s.nom) + '</label>';
-  h += '</div></div>';
-  h += '<div class="lm-camp-field lm-camp-full"><label class="lm-camp-chk"><input type="checkbox" id="camp-excl" checked> Ne pas re-solliciter les clients déjà en cycle ouvert</label></div>';
-  h += '</div></div>';
-
-  // 2 — Affectation
-  h += '<div class="lm-block"><div class="lm-block-title">2 · Affecter les cibles</div><div class="lm-camp-grid">';
-  h += champSelect('camp-affect', 'Logique d\'affectation', [
-    ['equitable', 'Répartition équitable'],
-    ['habituel', 'Vendeur habituel du client'],
-    ['charge', 'Par charge absorbable'],
-    ['manuelle', 'Vendeurs choisis']
-  ]);
-  h += '</div>';
-  h += '<div class="lm-camp-field lm-camp-full" id="camp-vend-wrap" style="display:none"><label class="lm-camp-lbl">Vendeurs (mode manuel)</label><div class="lm-camp-checks">';
-  for (const v of vendeurs) h += '<label class="lm-camp-chk"><input type="checkbox" class="camp-vend" value="' + v.id_user + '"> ' + escapeHtml(v.nom) + '</label>';
-  h += '</div></div></div>';
-
-  // 3 — Lancement
-  h += '<div class="lm-block"><div class="lm-block-title">3 · Nommer et lancer</div><div class="lm-camp-grid">';
-  h += champText('camp-nom', 'Nom de la campagne', 'ex : Renouvellement Yaris 2026');
-  h += '</div><div class="lm-camp-actions">';
-  h += '<button type="button" class="btn" id="camp-simuler">Simuler le ciblage</button>';
-  h += '<button type="button" class="btn btn-primary" id="camp-lancer" disabled>Lancer la campagne</button>';
-  h += '</div></div>';
-
-  h += '<div id="camp-result">' + renderCampResult() + '</div>';
-  h += '</div>';
-  return h;
-}
-
-function renderCampResult() {
-  const cs = campState();
-  if (cs.loading) return '<div class="lm-block"><div class="lm-camp-res-load">Calcul du ciblage…</div></div>';
-  if (cs.error) return '<div class="lm-block"><div class="lm-camp-res-err">' + escapeHtml(cs.error) + '</div></div>';
-  if (cs.done) {
-    const n = cs.launched || 0;
-    const msg = n > 0
-      ? 'Campagne lancée : ' + n + ' sollicitation' + (n > 1 ? 's' : '') + ' créée' + (n > 1 ? 's' : '') + '.'
-      : 'Aucune sollicitation créée (aucune cible ne correspond).';
-    return '<div class="lm-block lm-camp-success">' + escapeHtml(msg) + '</div>';
-  }
-  if (!cs.result) return '';
-  const rows = cs.result;
-  const nonAff = rows.filter(r => r.o_id_user == null).reduce((s, r) => s + Number(r.o_nb_cibles || 0), 0);
-  const aff = rows.filter(r => r.o_id_user != null);
-  const total = rows.reduce((s, r) => s + Number(r.o_nb_cibles || 0), 0);
-  let h = '<div class="lm-block"><div class="lm-block-title">Ciblage simulé</div>';
-  h += '<div class="lm-camp-total"><span class="lm-camp-total-num">' + total + '</span> client' + (total > 1 ? 's' : '') + ' ciblé' + (total > 1 ? 's' : '');
-  if (nonAff > 0) h += ' · <span class="lm-camp-warn">' + nonAff + ' non affectable' + (nonAff > 1 ? 's' : '') + ' (site sans vendeur actif)</span>';
-  h += '</div>';
-  if (aff.length) {
-    const byVend = {};
-    for (const r of aff) { const k = r.o_id_user; if (!byVend[k]) byVend[k] = 0; byVend[k] += Number(r.o_nb_cibles || 0); }
-    const list = Object.keys(byVend).map(k => ({ id: k, n: byVend[k] })).sort((a, b) => b.n - a.n);
-    h += '<table class="lm-team-table" style="margin-top:10px"><thead><tr><th>Vendeur</th><th>Cibles affectées</th></tr></thead><tbody>';
-    for (const it of list) h += '<tr class="row-vendeur"><td>' + escapeHtml(vendeurNomCamp(it.id)) + '</td><td style="text-align:center;font-weight:700">' + it.n + '</td></tr>';
-    h += '</tbody></table>';
-  }
-  h += '</div>';
-  return h;
-}
-
-function readCampParams(dryRun) {
-  const g = (id) => { const e = doc.getElementById(id); return e ? String(e.value).trim() : ''; };
-  const sites = Array.from(doc.querySelectorAll('.camp-site:checked')).map(e => Number(e.value));
-  const vends = Array.from(doc.querySelectorAll('.camp-vend:checked')).map(e => Number(e.value));
-  const deps = g('camp-deps').split(/[\s,;]+/).map(s => s.trim()).filter(Boolean);
-  const excl = doc.getElementById('camp-excl');
-  const toNum = (v) => { if (!v) return null; const n = parseFloat(String(v).replace(',', '.')); return isNaN(n) ? null : n; };
-  const ageRaw = g('camp-age');
-  return {
-    p_viewer_id_user: Number(userId),
-    p_dry_run: !!dryRun,
-    p_site_ids: sites.length ? sites : null,
-    p_type: g('camp-type') || null,
-    p_marque: g('camp-marque') || null,
-    p_modele: g('camp-modele') || null,
-    p_vehicule_age_min: ageRaw ? parseInt(ageRaw, 10) : null,
-    p_km_min: toNum(g('camp-kmmin')),
-    p_km_max: toNum(g('camp-kmmax')),
-    p_departements: deps.length ? deps : null,
-    p_csp: g('camp-csp') || null,
-    p_exclure_cycle_ouvert: excl ? !!excl.checked : true,
-    p_affectation: g('camp-affect') || 'equitable',
-    p_vendeurs_manuels: vends.length ? vends : null,
-    p_nom_campagne: g('camp-nom') || null
-  };
-}
-
-function updateCampResult() {
-  const el = doc.getElementById('camp-result');
-  if (el) el.innerHTML = renderCampResult();
-}
-
-async function campSimuler() {
-  const cs = campState();
-  const p = readCampParams(true);
-  if (p.p_affectation === 'manuelle' && (!p.p_vendeurs_manuels || !p.p_vendeurs_manuels.length)) {
-    cs.error = 'Mode « vendeurs choisis » : sélectionne au moins un vendeur.'; cs.result = null; cs.done = false; updateCampResult(); return;
-  }
-  cs.loading = true; cs.error = null; cs.done = false; cs.result = null;
-  updateCampResult();
-  try {
-    const supabase = ctx.supabase;
-    const { data, error } = await sb.rpc('creer_campagne_sollicitation', p);
-    if (error) throw error;
-    cs.result = data || [];
-    cs.params = p;
-  } catch (e) {
-    console.error('[campagne] simulate', e);
-    cs.error = (e && e.message) ? e.message : String(e);
-  } finally {
-    cs.loading = false;
-    updateCampResult();
-    const lancer = doc.getElementById('camp-lancer');
-    if (lancer) lancer.disabled = !(cs.result && cs.result.length);
-  }
-}
-
-async function campLancer() {
-  const cs = campState();
-  const p = readCampParams(false);
-  if (!p.p_nom_campagne) { cs.error = 'Donne un nom à la campagne avant de la lancer.'; cs.done = false; updateCampResult(); return; }
-  if (p.p_affectation === 'manuelle' && (!p.p_vendeurs_manuels || !p.p_vendeurs_manuels.length)) {
-    cs.error = 'Mode « vendeurs choisis » : sélectionne au moins un vendeur.'; cs.done = false; updateCampResult(); return;
-  }
-  const aff = (cs.result || []).filter(r => r.o_id_user != null).reduce((s, r) => s + Number(r.o_nb_cibles || 0), 0);
-  const detail = aff > 0
-    ? 'Créer ' + aff + ' sollicitation' + (aff > 1 ? 's' : '') + ' pour la campagne « ' + p.p_nom_campagne + ' » ? Cette action est définitive.'
-    : 'Créer les sollicitations pour la campagne « ' + p.p_nom_campagne + ' » ? Cette action est définitive.';
-  const ok = await campConfirm('Lancer la campagne', detail, 'Lancer la campagne');
-  if (!ok) return;
-  cs.loading = true; cs.error = null; cs.done = false;
-  updateCampResult();
-  try {
-    const supabase = ctx.supabase;
-    const { data, error } = await sb.rpc('creer_campagne_sollicitation', p);
-    if (error) throw error;
-    cs.launched = (data || []).filter(r => r.o_id_user != null).reduce((s, r) => s + Number(r.o_nb_cibles || 0), 0);
-    cs.done = true; cs.result = null;
-  } catch (e) {
-    console.error('[campagne] launch', e);
-    cs.error = (e && e.message) ? e.message : String(e);
-  } finally {
-    cs.loading = false;
-    updateCampResult();
-    const lancer = doc.getElementById('camp-lancer');
-    if (lancer) lancer.disabled = true;
-  }
-}
-
-function injectCampModalStyle() {
-  if (doc.getElementById('lm-camp-modal-style')) return;
-  const st = doc.createElement('style'); st.id = 'lm-camp-modal-style';
-  st.textContent = `
-#lm-camp-modal { position:fixed; inset:0; background:rgba(28,43,69,.45); z-index:10000; display:flex; align-items:center; justify-content:center; font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; }
-#lm-camp-modal .lm-cm-box { background:#fff; border-radius:12px; padding:22px 24px; width:min(440px,92vw); box-shadow:0 16px 48px rgba(28,43,69,.3); }
-#lm-camp-modal .lm-cm-title { font-size:15px; font-weight:700; color:#2a5ea9; }
-#lm-camp-modal .lm-cm-msg { font-size:13px; color:#4a6a8a; line-height:1.5; margin:10px 0 22px; }
-#lm-camp-modal .lm-cm-actions { display:flex; gap:10px; justify-content:flex-end; }
-#lm-camp-modal .lm-cm-btn { padding:9px 18px; border-radius:6px; font-size:13px; font-weight:600; font-family:inherit; cursor:pointer; border:1px solid #eaf0f9; background:#fff; color:#4a6a8a; }
-#lm-camp-modal .lm-cm-btn:hover { background:#f5f8fc; }
-#lm-camp-modal .lm-cm-btn.primary { background:#2a5ea9; color:#fff; border-color:#2a5ea9; }
-#lm-camp-modal .lm-cm-btn.primary:hover { background:#1f4a87; }
-`;
-  doc.head.appendChild(st);
-}
-
-function campConfirm(title, message, okLabel) {
-  return new Promise((resolve) => {
-    injectCampModalStyle();
-    const prev = doc.getElementById('lm-camp-modal');
-    if (prev) prev.remove();
-    const ov = doc.createElement('div');
-    ov.id = 'lm-camp-modal';
-    ov.innerHTML =
-      '<div class="lm-cm-box" role="dialog" aria-modal="true">' +
-        '<div class="lm-cm-title">' + escapeHtml(title) + '</div>' +
-        '<div class="lm-cm-msg">' + escapeHtml(message) + '</div>' +
-        '<div class="lm-cm-actions">' +
-          '<button type="button" class="lm-cm-btn" data-cm="cancel">Annuler</button>' +
-          '<button type="button" class="lm-cm-btn primary" data-cm="ok">' + escapeHtml(okLabel || 'Confirmer') + '</button>' +
-        '</div>' +
-      '</div>';
+    // ── Cadre ─────────────────────────────────────────────────────────────
+    injecterCss(doc);
+    el.innerHTML = '';
+    var root = doc.createElement('div');
+    root.className = 'lmtc';
+    el.appendChild(root);
+    var ov = doc.createElement('div');           // panneau, fenêtres, toast : hors du flux de la page
+    ov.className = 'lmtc lmtc-ov';
+    ov.innerHTML = '<div class="scrim" hidden></div><aside class="drawer" hidden aria-label="Détail du lead"></aside><div class="toast" role="status" aria-live="polite"></div>';
     doc.body.appendChild(ov);
-    const done = (val) => { try { ov.remove(); } catch (e) {} resolve(val); };
-    ov.querySelector('[data-cm="ok"]').addEventListener('click', () => done(true));
-    ov.querySelector('[data-cm="cancel"]').addEventListener('click', () => done(false));
-    ov.addEventListener('mousedown', (e) => { if (e.target === ov) done(false); });
-  });
-}
+    var $scrim = ov.querySelector('.scrim'), $drawer = ov.querySelector('.drawer'), $toast = ov.querySelector('.toast');
 
-function bindCampagneCreation() {
-  const sim = doc.getElementById('camp-simuler');
-  if (sim) sim.addEventListener('click', campSimuler);
-  const lan = doc.getElementById('camp-lancer');
-  if (lan) lan.addEventListener('click', campLancer);
-  const aff = doc.getElementById('camp-affect');
-  const wrap = doc.getElementById('camp-vend-wrap');
-  if (aff && wrap) {
-    const sync = () => { wrap.style.display = (aff.value === 'manuelle') ? 'block' : 'none'; };
-    aff.addEventListener('change', sync);
-    sync();
-  }
-}
-
-// --- 13. Rendu principal ------------------------------------
-// ============================================================
-//  SECTIONS « MA FILE » ET « LEADS »            (ajout 27/08/2026)
-//
-//  PRINCIPE : LE TEMPS EST L'AXE, PAS LE STATUT.
-//
-//  Un lead management classique affiche une colonne « statut » et trie
-//  par date d'arrivee. C'est l'inverse du besoin : ce qui compte n'est
-//  pas QUAND le lead est arrive, mais COMBIEN DE TEMPS IL RESTE avant
-//  qu'il soit trop tard.
-//
-//  La barre de chaque carte ne mesure donc PAS un avancement de
-//  traitement : elle se remplit toute seule a mesure que le temps passe.
-//  Un vendeur qui ne fait rien voit ses barres progresser. C'est un objet
-//  qui se degrade, pas une tache qui avance.
-//
-//  Chaque source portant son propre SLA (lead_source.sla_minutes), deux
-//  leads arrives ensemble ne vieillissent pas au meme rythme : un
-//  Leboncoin brule en 15 min, le site web en 30. La barre le rend visible
-//  sans qu'on ait a lire les chiffres.
-//
-//  LA COLONNE STATUT DISPARAIT, volontairement : elle est portee par la
-//  position dans la file et la couleur du lisere. Un vendeur n'a pas a
-//  lire « attribue », il a a savoir s'il doit appeler MAINTENANT.
-// ============================================================
-
-
-
-// Combien de temps reste-t-il, en minutes ? Negatif = SLA depasse.
-function lmfReste(l) {
-  const sla = Number(l.sla_minutes) || 60;
-  if (l.premier_contact_le) return null;                 // deja traite
-  const attente = Number(l.attente_min);
-  if (isNaN(attente)) return null;
-  return sla - attente;
-}
-
-// Le NIVEAU d'urgence porte la couleur ET le tri. Une sollicitation
-// n'entre pas dans les compteurs de leads (decision 6 du 27/08) : elle
-// cohabite dans la file mais reste identifiee.
-function lmfNiveau(l) {
-  if (l.hors_lead) return 'hors';
-  const r = lmfReste(l);
-  if (r === null) return 'calme';
-  if (r < 0)  return 'retard';
-  if (r <= 5) return 'bientot';
-  return 'calme';
-}
-
-function lmfDuree(min) {
-  const m = Math.abs(Math.round(min));
-  if (m < 60) return m + ' min';
-  const h = Math.floor(m / 60), r = m % 60;
-  if (h < 24) return r ? (h + ' h ' + String(r).padStart(2, '0')) : (h + ' h');
-  return Math.floor(h / 24) + ' j';
-}
-
-// La jauge se remplit avec le TEMPS ECOULE, pas avec l'avancement.
-function lmfJauge(l) {
-  const sla = Number(l.sla_minutes) || 60;
-  const attente = Number(l.attente_min);
-  if (isNaN(attente)) return 0;
-  return Math.max(0, Math.min(100, Math.round((attente / sla) * 100)));
-}
-
-const LMF_COUL = { retard:'#a32d2d', bientot:'#b8851a', calme:'#53bda7', hors:'#b4b2a9' };
-
-function renderMaFileCard(l, avecReaff) {
-  const niv   = lmfNiveau(l);
-  const reste = lmfReste(l);
-  const pct   = lmfJauge(l);
-  let temps;
-  if (l.hors_lead)          temps = l.temps_libelle || '—';
-  else if (reste === null)  temps = 'traité';
-  else if (reste < 0)       temps = '+ ' + lmfDuree(reste);
-  else                      temps = lmfDuree(reste);
-
-  let h = '<div class="lmf-card ' + niv + '" data-lead="' + l.id_lead + '"'
-        + (l.id_client ? ' data-client="' + l.id_client + '"' : '') + '>';
-  h += '<div class="lmf-head">';
-  h += '<span class="lmf-nom">' + escapeHtml(l.nom_affiche || 'Sans nom') + '</span>';
-  h += '<span class="lmf-temps ' + niv + '">' + temps + '</span>';
-  h += '</div>';
-  h += '<div class="lmf-jauge"><span style="width:' + pct + '%;background:' + LMF_COUL[niv] + '"></span></div>';
-  h += '<div class="lmf-meta">';
-  h += '<span class="lmf-src' + (l.hors_lead ? ' hors' : '') + '">' + escapeHtml(l.source_libelle || l.source || '?') + '</span>';
-  const detail = [];
-  if (l.vehicule_interet) detail.push(escapeHtml(l.vehicule_interet));
-  if (l.hors_lead) detail.push('hors compteur lead');
-  else if (l.sla_minutes) detail.push('SLA ' + l.sla_minutes + ' min');
-  if (detail.length) h += '<span>' + detail.join(' · ') + '</span>';
-  if (avecReaff && !l.hors_lead) {
-    h += '<button type="button" class="lmf-reaff" data-reaff="' + l.id_lead + '">Réaffecter</button>';
-  }
-  h += '</div></div>';
-  return h;
-}
-
-// --- Chargement ---------------------------------------------
-// Une section ne charge qu'a sa premiere ouverture, et la cle de cache
-// inclut le SITE et la CIBLE : c'est le patron deja en place pour le
-// classement et les graphiques.
-async function fetchMaFile() {
-  // ⚠️ `|| userId` ECRASAIT le null volontaire pose pour voir TOUT le
-  //    perimetre (section « Leads » du chef) : il ne voyait que SES
-  //    leads, d'ou des onglets vides alors que la base rendait 20 leads
-  //    dont 10 en retard sous son identite. `undefined` = « moi »,
-  //    `null` = « tout le perimetre ».
-  const cible = (state.mafileCible === null) ? null
-              : (state.mafileCible === undefined ? userId : state.mafileCible);
-  // ⚠️ Le filtre de source fait partie de la CLÉ : sans lui, basculer une
-  //    puce laisserait la file en cache et l'écran mentirait en silence.
-  const key   = [cible, state.busSite || 'tous',
-                 (state.v3 ? v3SrcSignature() : '*')].join('|');
-  // ⚠️ Tester `mafileData` NE SUFFIT PAS : au montage, le bus de site se
-  // lie juste apres et rappelle fetchMaFile alors que la premiere requete
-  // est ENCORE EN VOL — d'ou deux appels reseau identiques (releve par
-  // Antoine le 27/08). On garde donc aussi la cle EN COURS.
-  if (state.mafileKey === key && (state.mafileData || state.mafileLoading)) return;
-  state.mafileKey = key;
-  state.mafileLoading = true;
-  if (window.__renderLeadMgmt) window.__renderLeadMgmt();
-  try {
-    let q = sb.from('v_lead_sla')
-      .select('id_lead,source,source_libelle,id_site,id_client,id_cycle_comm,statut,'
-            + 'recu_le,attribue_le,premier_contact_le,sla_minutes,attente_min,'
-            + 'delai_reponse_min,sla_tenu,id_user_attribue,attribution_regle')
-      .in('statut', ['recu', 'resolu', 'attribue'])
-      .order('attente_min', { ascending: false })
-      .limit(500);
-    // ⚠️ RELEVÉ LE 18/09 : la file était coupée à 300 lignes triées de la
-    //    PLUS ANCIENNE à la plus récente. Avec des dossiers de 900 jours en
-    //    tête, les demandes du jour — les seules encore gagnables — tombaient
-    //    hors de la limite. L'arriéré (> 30 jours) est donc écarté par
-    //    défaut et compté à part ; le vendeur peut l'afficher d'un clic.
-    if (!state.voirArriere) q = q.lte('attente_min', LM_ARRIERE_MIN);
-    if (cible) q = q.eq('id_user_attribue', cible);
-    if (state.busSite) q = q.eq('id_site', Number(state.busSite));
-    // Les sources que le groupe ne suit pas en interne (trafic atelier) sont
-    // hors file par défaut : elles y fabriquaient un compteur faux — 105
-    // dossiers annoncés dont l'immense majorité n'était pas à traiter. Le
-    // filtre permet de les rappeler explicitement.
-    const srcChoix = state.v3 ? v3SrcParam() : null;
-    if (srcChoix) q = q.in('source', srcChoix);
-    else         q = q.eq('suivi_interne', true);
-    const { data, error } = await q;
-    if (error) throw error;
-
-    // Combien de dossiers dorment au-delà de 30 jours : on ne les montre
-    // pas, mais on ne les cache pas non plus.
-    try {
-      let qa = sb.from('v_lead_sla').select('id_lead', { count: 'exact', head: true })
-        .in('statut', ['recu', 'resolu', 'attribue'])
-        .gt('attente_min', LM_ARRIERE_MIN);
-      if (cible) qa = qa.eq('id_user_attribue', cible);
-      if (state.busSite) qa = qa.eq('id_site', Number(state.busSite));
-      // Le décompte de l'arriéré doit suivre le MÊME filtre que la file,
-      // sinon le bandeau annonce des dossiers cachés que le filtre exclut.
-      if (srcChoix) qa = qa.in('source', srcChoix);
-      else          qa = qa.eq('suivi_interne', true);
-      const ra = await qa;
-      state.mafileArriere = ra.count || 0;
-    } catch (e) { state.mafileArriere = null; }
-    state.mafileData = (data || []).map(r => ({
-      id_lead:            r.id_lead,
-      source:             r.source,
-      source_libelle:     r.source_libelle,
-      id_site:            r.id_site,
-      id_client:          r.id_client,
-      id_cycle_comm:      r.id_cycle_comm,
-      statut:             r.statut,
-      sla_minutes:        Number(r.sla_minutes) || 60,
-      attente_min:        r.attente_min != null ? Number(r.attente_min) : null,
-      premier_contact_le: r.premier_contact_le,
-      id_user_attribue:   r.id_user_attribue,
-      nom_affiche:        r.nom_affiche || null,
-      hors_lead:          false
-    }));
-    await enrichirMaFile();
-  } catch (e) {
-    console.error('[leadMgmt] Erreur v_lead_sla', e);
-    state.mafileError = (e && e.message) ? e.message : 'Erreur de chargement';
-    state.mafileData = [];
-  } finally {
-    state.mafileLoading = false;
-    if (window.__renderLeadMgmt) window.__renderLeadMgmt();
-  }
-}
-
-// Le nom du prospect vient de LEADS_EXTERNES : v_lead_sla ne l'expose pas
-// (elle porte les delais, pas l'identite).
-async function enrichirMaFile() {
-  const rows = state.mafileData || [];
-  if (!rows.length) return;
-  const ids = rows.map(r => r.id_lead);
-  try {
-    const { data } = await sb.from('LEADS_EXTERNES')
-      .select('id_lead,nom,prenom,vehicule_interet,telephone,email,joignable')
-      .in('id_lead', ids);
-    const idx = {};
-    (data || []).forEach(r => { idx[r.id_lead] = r; });
-    rows.forEach(r => {
-      const s = idx[r.id_lead];
-      if (!s) return;
-      r.nom_affiche      = [s.prenom, s.nom].filter(Boolean).join(' ').trim() || null;
-      r.nom = s.nom; r.prenom = s.prenom;
-      r.vehicule_interet = s.vehicule_interet || null;
-      // Nécessaires pour savoir QUELS GESTES sont possibles.
-      r.telephone = s.telephone || null;
-      r.email     = s.email || null;
-      r.joignable = s.joignable;
-    });
-  } catch (e) { /* le nom est un confort, pas un bloquant */ }
-}
-
-function renderViewMaFile() {
-  if (state.mafileLoading && !state.mafileData) {
-    return '<div class="lm-empty" style="padding:30px;font-size:12px">Chargement de la file…</div>';
-  }
-  if (state.mafileError) {
-    return '<div class="lm-empty" style="padding:30px;font-size:12px">' + escapeHtml(state.mafileError) + '</div>';
-  }
-  const rows = (state.mafileData || []).slice();
-  const avecReaff = isManager;
-
-  // Tri par URGENCE : ce qui brule d'abord. Le temps restant, pas la date.
-  rows.sort(function (a, b) {
-    const ra = lmfReste(a), rb = lmfReste(b);
-    if (ra === null && rb === null) return 0;
-    if (ra === null) return 1;
-    if (rb === null) return -1;
-    return ra - rb;
-  });
-
-  const g = { retard: [], bientot: [], calme: [], hors: [] };
-  rows.forEach(r => { g[lmfNiveau(r)].push(r); });
-
-  let h = '';
-  h += '<div class="lmf-bandeau">';
-  if (g.retard.length) {
-    h += '<span class="lmf-bandeau-n retard">' + g.retard.length + '</span>';
-    h += '<span class="lmf-bandeau-txt">en retard · <span style="color:#b8851a">'
-       + g.bientot.length + ' à traiter</span> · ' + g.calme.length + ' en cours</span>';
-  } else {
-    h += '<span class="lmf-bandeau-n ok">' + rows.length + '</span>';
-    h += '<span class="lmf-bandeau-txt">' + (rows.length ? 'lead' + (rows.length > 1 ? 's' : '') + ' en cours, aucun en retard' : 'rien en attente') + '</span>';
-  }
-  h += '</div>';
-
-  if (!rows.length) {
-    h += '<div class="lm-empty" style="padding:30px;font-size:12px">Aucun lead en attente sur ce périmètre.</div>';
-    return h;
-  }
-
-  const blocs = [
-    { k:'retard',  t:'SLA dépassé' },
-    { k:'bientot', t:'Il reste du temps' },
-    { k:'calme',   t:'En cours' },
-    { k:'hors',    t:'Sollicitations' }
-  ];
-  blocs.forEach(function (b) {
-    if (!g[b.k].length) return;
-    h += '<div class="lmf-groupe ' + b.k + '">' + b.t + ' <span style="opacity:.6">' + g[b.k].length + '</span></div>';
-    g[b.k].forEach(function (l) { h += renderMaFileCard(l, avecReaff); });
-  });
-
-  h += '<div class="lmf-note">La barre se remplit à mesure que le temps passe. '
-     + 'Rouge = le SLA de la source est dépassé.</div>';
-  return h;
-}
-
-// --- Section « Leads » : la vue du chef ----------------------
-function renderViewLeads() {
-  // Le regroupement par vendeur lit dataKpiVend pour les noms.
-  ensureKpis();
-  if (state.mafileLoading && !state.mafileData) {
-    return '<div class="lm-empty" style="padding:30px;font-size:12px">Chargement…</div>';
-  }
-  const rows = (state.mafileData || []).slice();
-
-  let h = '<div class="lm-subtoggle">';
-  h += '<button type="button" class="lm-subtoggle-btn' + (state.viewLeads === 'sans_suite' || !state.viewLeads ? ' active' : '') + '" data-vleads="sans_suite">Sans suite</button>';
-  h += '<button type="button" class="lm-subtoggle-btn' + (state.viewLeads === 'a_attribuer' ? ' active' : '') + '" data-vleads="a_attribuer">À attribuer</button>';
-  h += '<button type="button" class="lm-subtoggle-btn' + (state.viewLeads === 'par_source' ? ' active' : '') + '" data-vleads="par_source">Par source</button>';
-  h += '</div>';
-
-  const vue = state.viewLeads || 'sans_suite';
-
-  if (vue === 'a_attribuer') {
-    const sans = rows.filter(r => !r.id_user_attribue);
-    if (!sans.length) return h + '<div class="lm-empty" style="padding:30px;font-size:12px">Tous les leads sont attribués.</div>';
-    sans.forEach(function (l) { h += renderMaFileCard(l, true); });
-    return h;
-  }
-
-  if (vue === 'par_source') {
-    const par = {};
-    rows.forEach(function (r) {
-      const k = r.source_libelle || r.source || '?';
-      if (!par[k]) par[k] = { n:0, retard:0, sla:r.sla_minutes };
-      par[k].n++;
-      if (lmfNiveau(r) === 'retard') par[k].retard++;
-    });
-    const cles = Object.keys(par).sort((a, b) => par[b].n - par[a].n);
-    if (!cles.length) return h + '<div class="lm-empty" style="padding:30px;font-size:12px">Aucun lead en cours.</div>';
-    cles.forEach(function (k) {
-      const p = par[k];
-      h += '<div class="lmf-vend">';
-      h += '<div><div style="font-size:13px;font-weight:600">' + escapeHtml(k) + '</div>';
-      h += '<div style="font-size:11px;color:var(--text-mut)">SLA ' + p.sla + ' min</div></div>';
-      h += '<div style="text-align:right">';
-      h += '<span class="lmf-vend-n"' + (p.retard ? ' style="color:var(--red-soft)"' : '') + '>' + p.retard + '</span>';
-      h += '<div style="font-size:11px;color:var(--text-mut)">en retard sur ' + p.n + '</div>';
-      h += '</div></div>';
-    });
-    return h;
-  }
-
-  // Sans suite : le lead attribue qui n'a jamais ete contacte, groupe par
-  // vendeur. C'est l'ecran qui manque le plus au chef des ventes.
-  const sansSuite = rows.filter(r => r.statut === 'attribue' && !r.premier_contact_le && lmfReste(r) !== null && lmfReste(r) < 0);
-  if (!sansSuite.length) {
-    return h + '<div class="lm-empty" style="padding:30px;font-size:12px">Aucun lead en dépassement. Toute l\'équipe est à jour.</div>';
-  }
-  const parV = {};
-  sansSuite.forEach(function (r) {
-    const k = r.id_user_attribue || 0;
-    if (!parV[k]) parV[k] = [];
-    parV[k].push(r);
-  });
-  Object.keys(parV).sort((a, b) => parV[b].length - parV[a].length).forEach(function (k) {
-    const lst = parV[k];
-    const nom = (dataKpiVend.find(v => Number(v.id_user) === Number(k)) || {}).vendeur_nom || ('Vendeur ' + k);
-    h += '<div class="lmf-groupe retard">' + escapeHtml(nom) + ' <span style="opacity:.6">' + lst.length + '</span></div>';
-    lst.forEach(function (l) { h += renderMaFileCard(l, true); });
-  });
-  return h;
-}
-
-// --- Réaffectation par un manager ---------------------------
-// La RPC refuse deja un appelant sans droit (42501) : le front n'est pas
-// le garde-fou, il ne fait qu'eviter un aller-retour inutile.
-async function ouvrirReaffectation(idLead) {
-  let cibles = [];
-  try {
-    const { data, error } = await sb.rpc('lead_vendeurs_cibles', { p_id_lead: Number(idLead) });
-    if (error) throw error;
-    cibles = data || [];
-  } catch (e) {
-    lmToast('Impossible de charger les vendeurs : ' + ((e && e.message) || 'erreur'), 'erreur');
-    return;
-  }
-  if (!cibles.length) {
-    lmToast('Aucun vendeur disponible sur ce site, ou vous n\'avez pas le droit de réaffecter ce lead.', 'erreur');
-    return;
-  }
-  const lignes = cibles.map(function (c, i) {
-    return (i + 1) + '. ' + c.nom + ' — ' + c.charge + ' en cours' + (c.habituel ? ' (suit déjà ce client)' : '');
-  }).join('\n');
-  const rep = prompt('Réaffecter ce lead à :\n\n' + lignes + '\n\nNuméro du vendeur :');
-  if (!rep) return;
-  const idx = parseInt(rep, 10) - 1;
-  if (isNaN(idx) || idx < 0 || idx >= cibles.length) { lmToast('Choix invalide.', 'erreur'); return; }
-  const motif = prompt('Motif de la réaffectation (facultatif) :') || null;
-  try {
-    const { error } = await sb.rpc('lead_reaffecter', {
-      p_id_lead: Number(idLead), p_id_user: Number(cibles[idx].id_user), p_motif: motif
-    });
-    if (error) throw error;
-    state.mafileKey = null;
-    state.mafileData = null;
-    fetchMaFile();
-  } catch (e) {
-    // 42501 = la RPC a refuse : l'appelant n'encadre pas ce site.
-    lmToast('Réaffectation refusée : ' + ((e && e.message) || 'droits insuffisants'), 'erreur');
-  }
-}
-
-// ============================================================
-//  ÉCRANS MANAGER : « Mon équipe » et « Mes sites »
-//                                        (refonte du 27/08/2026)
-//
-//  LA DESCENTE VA JUSQU'AU DOSSIER (arbitrage d'Antoine) :
-//    site -> équipe du site -> file du vendeur -> carte du lead.
-//  Quatre niveaux, un seul chemin, aucun raccourci par un onglet. Un
-//  directeur qui voit un site décrocher doit pouvoir savoir QUEL dossier
-//  décroche : s'arrêter à l'agrégat produit un constat sans moyen d'agir.
-// ============================================================
-
-
-
-/* Une valeur mesurée face à son objectif. La barre EST la donnée ;
-   le chiffre la précise. */
-function lmrTaux(fait, obj) {
-  if (obj == null || obj === 0) return null;
-  return Math.round((Number(fait) || 0) / Number(obj) * 100);
-}
-function lmrCls(pct) {
-  if (pct == null) return '';
-  return pct >= 100 ? 'ok' : pct >= 80 ? 'warn' : 'ko';
-}
-function lmrCellObj(fait, obj, suffixe) {
-  if (obj == null) {
-    return '<span class="lmr-sous">objectif non saisi</span>';
-  }
-  const pct = lmrTaux(fait, obj), c = lmrCls(pct);
-  return '<span class="lmr-' + c + '">' + (fait == null ? '—' : fait) + '</span>'
-       + '<span class="lmr-sous"> / ' + obj + (suffixe || '') + '</span>'
-       + '<div class="lmr-bar lmr-b-' + c + '"><i style="width:'
-       + Math.min(100, pct || 0) + '%"></i></div>';
-}
-function lmrDelai(min) {
-  if (min == null) return '<span class="lmr-sous">pas encore</span>';
-  const m = Math.round(Number(min));
-  const c = m > 60 ? 'ko' : m > 25 ? 'warn' : 'ok';
-  return '<span class="lmr-' + c + '">' + lmfDuree(m) + '</span>';
-}
-
-// --- Chargement des deux vues -------------------------------
-let dataEquipe = null, dataSites = null;
-let equipeKey = null, sitesCharge = false;
-let equipeEnCours = null, sitesEnCours = null;
-
-function ensureEquipe(idSite) {
-  const key = String(idSite || 'tous');
-  if (equipeKey === key && dataEquipe) return Promise.resolve();
-  if (equipeEnCours) return equipeEnCours;
-  equipeKey = key;
-  equipeEnCours = (async function () {
-    try {
-      let q = sb.from('v_lead_equipe').select('*');
-      if (idSite) q = q.eq('id_site', Number(idSite));
-      const { data, error } = await q;
-      if (error) throw error;
-      dataEquipe = data || [];
-    } catch (e) {
-      console.error('[leadMgmt] v_lead_equipe', e);
-      dataEquipe = [];
-    } finally {
-      equipeEnCours = null;
-      if (window.__renderLeadMgmt) window.__renderLeadMgmt();
+    function toast(msg, err) {
+      $toast.textContent = msg; $toast.classList.toggle('err', !!err); $toast.classList.add('on');
+      clearTimeout(toast._t); toast._t = setTimeout(function () { $toast.classList.remove('on'); }, err ? 5200 : 3200);
     }
-  })();
-  return equipeEnCours;
-}
 
-function ensureSites() {
-  if (sitesCharge) return Promise.resolve();
-  if (sitesEnCours) return sitesEnCours;
-  sitesEnCours = (async function () {
-    try {
-      const { data, error } = await sb.from('v_lead_sites').select('*');
-      if (error) throw error;
-      // ⚠️ La vue rend les sites où l'appelant a des vendeurs visibles,
-      //    ce qui n'est PAS son périmètre. Mesuré le 27/08 :
-      //    v_lead_kpi_site rend 34 sites à une directrice qui en gère 3.
-      //    On croise donc avec le périmètre réel, déjà chargé au montage.
-      const perim = new Set(userSiteIds.map(Number));
-      dataSites = (data || []).filter(r => perim.has(Number(r.id_site)));
-      // ⚠️ Le référentiel dérive de dataSites : le laisser en cache après
-      //    un chargement le figerait sur l'état précédent (vide au
-      //    montage), et le mur n'afficherait AUCUNE ligne.
-      v2Ref = null;
-      sitesCharge = true;
-    } catch (e) {
-      console.error('[leadMgmt] v_lead_sites', e);
-      dataSites = [];
-    } finally {
-      sitesEnCours = null;
-      if (window.__renderLeadMgmt) window.__renderLeadMgmt();
-    }
-  })();
-  return sitesEnCours;
-}
+    root.innerHTML = '<section class="situ"><p class="situ-l"><span class="vr">Plateau VROOM</span></p><p class="situ-t">Chargement de la piscine BACS…</p></section>';
 
-// --- Fil d'Ariane : il matérialise la descente ---------------
-// Sans lui, un dossier atteint depuis trois niveaux plus haut n'a plus
-// de contexte et aucun retour possible.
-function renderFilAriane() {
-  const p = [];
-  if (state.drillSite || state.drillVendeur) {
-    p.push({ t: LIB_SECTION[SECTIONS_ROLE[state.sectionIdx || 0]] || 'Retour', a: 'racine' });
-  }
-  if (state.drillSite) {
-    const s = (dataSites || []).find(x => Number(x.id_site) === Number(state.drillSite));
-    p.push({ t: (s && s.nom_site) || ('Site ' + state.drillSite),
-             a: state.drillVendeur ? 'site' : null });
-  }
-  if (state.drillVendeur) {
-    const v = (dataEquipe || []).find(x => Number(x.id_user) === Number(state.drillVendeur));
-    p.push({ t: (v && v.vendeur_nom) || ('Vendeur ' + state.drillVendeur), a: null });
-  }
-  if (!p.length) return '';
-  return '<div class="lmr-fil">' + p.map(function (x) {
-    return x.a ? '<button type="button" data-fil="' + x.a + '">' + escapeHtml(x.t) + '</button>'
-               : '<span class="ici">' + escapeHtml(x.t) + '</span>';
-  }).join(' <span>›</span> ') + '</div>';
-}
-
-// --- « MON ÉQUIPE » : une ligne par VENDEUR ------------------
-function renderVueEquipe(idSite) {
-  ensureEquipe(idSite);
-  if (!dataEquipe) {
-    return '<div class="lm-empty" style="padding:34px;font-size:12px">'
-         + '<span class="lm-spin"></span>Chargement de l\'équipe…</div>';
-  }
-  const rows = dataEquipe.slice().sort(function (a, b) {
-    const r = (b.leads_en_retard || 0) - (a.leads_en_retard || 0);
-    if (r) return r;   // ce qui brûle remonte
-    return (a.contacts_par_jour_ouvre || 0) - (b.contacts_par_jour_ouvre || 0);
-  });
-  if (!rows.length) {
-    return renderFilAriane() + '<div class="lm-empty" style="padding:34px;font-size:12px">'
-      + 'Aucun vendeur sur ce périmètre.</div>';
-  }
-
-  const retard = rows.reduce((a, r) => a + (r.leads_en_retard || 0), 0);
-  let h = renderFilAriane();
-  h += '<div class="lmf-bandeau"><span class="lmf-bandeau-n ' + (retard ? 'retard' : 'ok') + '">'
-     + retard + '</span><span class="lmf-bandeau-txt">'
-     + (retard ? 'lead' + (retard > 1 ? 's' : '') + ' en retard sur ' + rows.length + ' vendeurs'
-               : 'lead en retard — l\'équipe est à jour')
-     + '</span></div>';
-
-  h += '<table class="lmr-tbl"><thead><tr>'
-     + '<th>Vendeur</th>'
-     + '<th class="lmr-num">Contacts / jour</th>'
-     + '<th class="lmr-num">En retard</th>'
-     + '<th class="lmr-num">Délai 1<sup>er</sup> contact</th>'
-     + '<th class="lmr-num">Commandes</th>'
-     + '</tr></thead><tbody>';
-
-  rows.forEach(function (v) {
-    h += '<tr class="lmr-clic" data-vendeur="' + v.id_user + '">'
-      + '<td><div class="lmr-nom">' + escapeHtml(v.vendeur_nom || ('Vendeur ' + v.id_user)) + '</div>'
-      +     '<div class="lmr-sous">' + escapeHtml(v.vn_vo || '—') + '</div></td>'
-      + '<td class="lmr-num">' + lmrCellObj(v.contacts_par_jour_ouvre, v.objectif_contacts_jour) + '</td>'
-      + '<td class="lmr-num">' + (v.leads_en_retard
-            ? '<span class="lmr-ko">' + v.leads_en_retard + '</span>'
-            : '<span class="lmr-sous">—</span>')
-      +     (v.leads_en_file ? '<div class="lmr-sous">' + v.leads_en_file + ' en file</div>' : '')
-      + '</td>'
-      + '<td class="lmr-num">' + lmrDelai(v.delai_moyen_min) + '</td>'
-      + '<td class="lmr-num">' + lmrCellObj(v.commandes_realisees, v.objectif_commandes) + '</td>'
-      + '</tr>';
-  });
-  h += '</tbody></table>';
-
-  h += '<div class="lmf-note">Trié par leads en retard : ce qui brûle remonte. '
-     + '<b>Contacts par jour</b> compte les actions SORTANTES du mois divisées par les jours '
-     + 'ouvrés — comparable à l\'objectif, contrairement au compteur de contacts global qui '
-     + 'inclut les entrants. Cliquez une ligne pour ouvrir la file du vendeur.</div>';
-  return h;
-}
-
-// --- « MES SITES » : une ligne par SITE ----------------------
-function renderVueSites() {
-  ensureSites();
-  if (!dataSites) {
-    return '<div class="lm-empty" style="padding:34px;font-size:12px">'
-         + '<span class="lm-spin"></span>Chargement des sites…</div>';
-  }
-  const rows = dataSites.slice().sort(function (a, b) {
-    return (b.leads_en_retard || 0) - (a.leads_en_retard || 0);
-  });
-  if (!rows.length) {
-    return '<div class="lm-empty" style="padding:34px;font-size:12px">'
-      + 'Aucun site dans votre périmètre.</div>';
-  }
-
-  const fait = rows.reduce((a, r) => a + (Number(r.commandes_realisees) || 0), 0);
-  const obj  = rows.reduce((a, r) => a + (Number(r.objectif_commandes) || 0), 0);
-  const pct  = lmrTaux(fait, obj);
-
-  let h = '<div class="lmf-bandeau"><span class="lmf-bandeau-n ' + (pct >= 100 ? 'ok' : '') + '">'
-        + fait + '</span><span class="lmf-bandeau-txt">commandes sur un objectif de ' + obj
-        + ' · ' + rows.length + ' site' + (rows.length > 1 ? 's' : '') + '</span></div>';
-
-  h += '<table class="lmr-tbl"><thead><tr>'
-     + '<th>Site</th>'
-     + '<th class="lmr-num">Commandes</th>'
-     + '<th class="lmr-num">Objectifs saisis</th>'
-     + '<th class="lmr-num">Leads en retard</th>'
-     + '<th class="lmr-num">Délai 1<sup>er</sup> contact</th>'
-     + '<th class="lmr-num">Contacts / jour</th>'
-     + '</tr></thead><tbody>';
-
-  let incomplets = 0;
-  rows.forEach(function (s) {
-    if (s.objectifs_incomplets) incomplets++;
-    h += '<tr class="lmr-clic" data-site="' + s.id_site + '">'
-      + '<td><div class="lmr-nom">' + escapeHtml(s.nom_site || ('Site ' + s.id_site)) + '</div>'
-      +     '<div class="lmr-sous">' + (s.cycles_ouverts || 0) + ' cycles ouverts</div></td>'
-      + '<td class="lmr-num">' + lmrCellObj(s.commandes_realisees, s.objectif_commandes) + '</td>'
-      + '<td class="lmr-num">' + (s.objectifs_incomplets
-            ? '<span class="lmr-ko">' + s.vendeurs_avec_objectif + ' / ' + s.vendeurs + '</span>'
-            : '<span class="lmr-sous">' + s.vendeurs_avec_objectif + ' / ' + s.vendeurs + '</span>')
-      + '</td>'
-      + '<td class="lmr-num">' + (s.leads_en_retard
-            ? '<span class="lmr-' + (s.leads_en_retard > 5 ? 'ko' : 'warn') + '">' + s.leads_en_retard + '</span>'
-            : '<span class="lmr-sous">—</span>') + '</td>'
-      + '<td class="lmr-num">' + lmrDelai(s.delai_moyen_min) + '</td>'
-      + '<td class="lmr-num">' + (s.contacts_par_jour_ouvre != null
-            ? s.contacts_par_jour_ouvre : '<span class="lmr-sous">—</span>') + '</td>'
-      + '</tr>';
-  });
-  h += '</tbody></table>';
-
-  // Un objectif de site est une SOMME d'objectifs vendeurs : un site
-  // incomplètement paramétré paraît moins ambitieux qu'il ne l'est.
-  if (incomplets) {
-    h += '<div class="lmr-alerte">' + incomplets + ' site' + (incomplets > 1 ? 's ont' : ' a')
-      + ' des objectifs incomplets : tous leurs vendeurs n\'ont pas d\'objectif saisi. '
-      + 'Leur objectif est donc une somme partielle — comparez-les avec cette réserve.</div>';
-  }
-  h += '<div class="lmf-note">Cliquez un site pour voir son équipe, puis un vendeur pour sa file, '
-     + 'puis un lead pour le dossier.</div>';
-  return h;
-}
-
-// ============================================================
-//  REFONTE PAR RÔLE — le mur du temps, le fil de périmètre,
-//  la bascule et l'écran campagnes.        (27/08/2026)
-//
-//  UNE SEULE SURFACE, PAS D'ONGLETS DE PREMIER NIVEAU.
-//  Le périmètre est un FIL — marque › affaire › site › vendeur — repris
-//  de performances.js. Il ne filtre pas seulement : il change CE QUE LES
-//  LIGNES REPRÉSENTENT. Un directeur voit des marques, un chef des
-//  vendeurs, un vendeur ses sources. Même objet, plusieurs échelles.
-//
-//  Trois lectures d'un même périmètre, en bascule :
-//    « Où ça coince »      -> le mur du temps
-//    « Ce que ça produit » -> le rapport croisé
-//    « Campagnes »         -> avancement, résultat, classement
-//  Libellés IDENTIQUES pour tous les rôles : ce sont les mêmes trois
-//  questions, à des échelles différentes.
-// ============================================================
-
-
-
-// --- Tranches d'âge : l'axe du mur --------------------------
-// Le premier seuil est le SLA le plus court (15 min) ; au-delà de 4 h,
-// un lead de portail est mort.
-const V2_TRANCHES = [
-  { k:'t0', l:'< 15 min', max:15 },
-  { k:'t1', l:'15 – 30',  max:30 },
-  { k:'t2', l:'30 – 60',  max:60 },
-  { k:'t3', l:'1 – 4 h',  max:240 },
-  { k:'t4', l:'+ de 4 h', max:1e9 }
-];
-function v2Tranche(l) {
-  const a = Number(l.attente_min) || 0;
-  for (const t of V2_TRANCHES) if (a < t.max) return t.k;
-  return 't4';
-}
-
-/* La couleur dit l'URGENCE, jamais le volume — celui-ci est porté par le
-   diamètre. Un aplat saturé écrase la lecture : teinte claire, anneau fin. */
-function v2Couleur(lst) {
-  if (!lst.length) return null;
-  const ko = lst.filter(l => lmfNiveau(l) === 'retard').length / lst.length;
-  const wa = lst.filter(l => lmfNiveau(l) === 'bientot').length / lst.length;
-  if (ko > .5)          return { bg:'#f7dcdc', fg:'#8f2222', ring:'#e0a3a3' };
-  if (ko > 0 || wa > .3) return { bg:'#fbeecd', fg:'#8a6412', ring:'#e0c98a' };
-  return { bg:'#daf0e9', fg:'#14614f', ring:'#9ed6c7' };
-}
-
-// --- Périmètre : l'état de navigation -----------------------
-// v2.niveau : groupe | marque | affaire | site | vendeur
-function v2Init() {
-  if (state.v2) return;
-  const p = PROFIL;
-  state.v2 = { vue:'mur', niveau:'groupe', cle:'', sel:null, lead:null };
-  if (p === 'vendeur')      { state.v2.niveau = 'vendeur'; state.v2.cle = userId; }
-  else if (p === 'chef')    {
-    const s = userSiteIds[0];
-    if (s != null) { state.v2.niveau = 'site'; state.v2.cle = Number(s); }
-  }
-}
-
-// Le référentiel des entités, construit depuis le périmètre réel.
-let v2Ref = null;
-function v2Referentiel() {
-  if (v2Ref) return v2Ref;
-  const sites = (dataSites || []).map(s => ({
-    id: Number(s.id_site), l: s.nom_site,
-    marque: s.reseau || '(Sans marque)', affaire: s.affaire || '(Sans affaire)',
-    vendeurs: s.vendeurs, obj: Number(s.objectif_commandes) || 0,
-    fait: Number(s.commandes_realisees) || 0, cycles: Number(s.cycles_ouverts) || 0,
-    incomplet: !!s.objectifs_incomplets, retard: Number(s.leads_en_retard) || 0,
-    delai: s.delai_moyen_min == null ? null : Number(s.delai_moyen_min),
-    cj: s.contacts_par_jour_ouvre == null ? null : Number(s.contacts_par_jour_ouvre)
-  }));
-  const marques = [], affaires = [];
-  sites.forEach(s => {
-    if (!marques.some(m => m.k === s.marque)) marques.push({ k:s.marque, l:s.marque });
-    if (!affaires.some(a => a.k === s.affaire)) affaires.push({ k:s.affaire, l:s.affaire, marque:s.marque });
-  });
-  v2Ref = { sites, marques, affaires };
-  return v2Ref;
-}
-
-function v2Sites() {
-  const R = v2Referentiel(), v = state.v2;
-  if (v.niveau === 'vendeur') {
-    const e = (dataEquipe || []).find(x => Number(x.id_user) === Number(v.cle));
-    return R.sites.filter(s => e && Number(s.id) === Number(e.id_site));
-  }
-  if (v.niveau === 'site')    return R.sites.filter(s => s.id === Number(v.cle));
-  if (v.niveau === 'affaire') return R.sites.filter(s => s.affaire === v.cle);
-  if (v.niveau === 'marque')  return R.sites.filter(s => s.marque === v.cle);
-  return R.sites;
-}
-
-function v2Leads() {
-  const v = state.v2, rows = state.mafileData || [];
-  if (v.niveau === 'vendeur') return rows.filter(l => Number(l.id_user_attribue) === Number(v.cle));
-  const ids = new Set(v2Sites().map(s => s.id));
-  return rows.filter(l => ids.has(Number(l.id_site)));
-}
-
-/* Les LIGNES du mur suivent la hiérarchie : chaque niveau montre ses
-   ENFANTS. Seul le vendeur, qui n'en a pas, montre ses SOURCES. */
-function v2Lignes() {
-  const R = v2Referentiel(), v = state.v2;
-  if (v.niveau === 'groupe') return R.marques.map(m => ({
-    k:m.k, l:m.l, type:'marque',
-    sous: R.sites.filter(s => s.marque === m.k).length + ' sites' }));
-  if (v.niveau === 'marque') return R.affaires.filter(a => a.marque === v.cle).map(a => ({
-    k:a.k, l:a.l, type:'affaire',
-    sous: R.sites.filter(s => s.affaire === a.k).length + ' sites' }));
-  if (v.niveau === 'affaire') return R.sites.filter(s => s.affaire === v.cle).map(s => ({
-    k:s.id, l:s.l, type:'site', sous:(s.vendeurs || 0) + ' vendeurs' }));
-  if (v.niveau === 'site') return (dataEquipe || [])
-    .filter(e => Number(e.id_site) === Number(v.cle))
-    .map(e => ({ k:Number(e.id_user), l:e.vendeur_nom, type:'vendeur',
-      sous:(e.vn_vo || '—') + ' · ' + (e.contacts_par_jour_ouvre != null
-        ? e.contacts_par_jour_ouvre + '/' + (e.objectif_contacts_jour || '?') + ' contacts/j' : '') }));
-  const par = {};
-  v2Leads().forEach(l => { const s = l.source_libelle || l.source || '?';
-    par[s] = (par[s] || 0) + 1; });
-  return Object.keys(par).map(s => ({ k:s, l:s, type:'source', sous:par[s] + ' leads' }));
-}
-
-function v2LeadsDe(ln) {
-  const base = v2Leads(), R = v2Referentiel();
-  if (ln.type === 'marque') {
-    const i = new Set(R.sites.filter(s => s.marque === ln.k).map(s => s.id));
-    return base.filter(l => i.has(Number(l.id_site)));
-  }
-  if (ln.type === 'affaire') {
-    const i = new Set(R.sites.filter(s => s.affaire === ln.k).map(s => s.id));
-    return base.filter(l => i.has(Number(l.id_site)));
-  }
-  if (ln.type === 'site')    return base.filter(l => Number(l.id_site) === Number(ln.k));
-  if (ln.type === 'vendeur') return base.filter(l => Number(l.id_user_attribue) === Number(ln.k));
-  return base.filter(l => (l.source_libelle || l.source) === ln.k);
-}
-
-// --- Le fil de périmètre ------------------------------------
-function v2Fil() {
-  const R = v2Referentiel(), v = state.v2, p = [];
-  let site = null;
-  if (v.niveau === 'site')    site = R.sites.find(s => s.id === Number(v.cle));
-  if (v.niveau === 'vendeur') {
-    const e = (dataEquipe || []).find(x => Number(x.id_user) === Number(v.cle));
-    if (e) site = R.sites.find(s => s.id === Number(e.id_site));
-  }
-  const aff = site ? R.affaires.find(a => a.k === site.affaire)
-            : v.niveau === 'affaire' ? R.affaires.find(a => a.k === v.cle) : null;
-  const mq  = aff ? R.marques.find(m => m.k === aff.marque)
-            : v.niveau === 'marque' ? R.marques.find(m => m.k === v.cle) : null;
-
-  p.push({ l:'Tout mon périmètre', n:'groupe', k:'', a:v.niveau !== 'groupe' });
-  if (mq)   p.push({ l:mq.l,   n:'marque',  k:mq.k,   a:v.niveau !== 'marque' });
-  if (aff)  p.push({ l:aff.l,  n:'affaire', k:aff.k,  a:v.niveau !== 'affaire' });
-  if (site) p.push({ l:site.l, n:'site',    k:site.id, a:v.niveau !== 'site' });
-  if (v.niveau === 'vendeur') {
-    const e = (dataEquipe || []).find(x => Number(x.id_user) === Number(v.cle));
-    p.push({ l:(e && e.vendeur_nom) || ('Vendeur ' + v.cle), n:'vendeur', k:v.cle, a:false });
-  }
-
-  let h = '<div class="v2-fil"><span class="v2-fil-l">Périmètre</span>';
-  h += p.map(x => x.a
-    ? '<button type="button" data-v2niv="' + x.n + '" data-v2cle="' + escapeHtml(String(x.k)) + '">'
-      + escapeHtml(x.l) + '</button>'
-    : '<span class="v2-ici">' + escapeHtml(x.l) + '</span>').join('<span class="v2-sep">›</span>');
-  // Le sélecteur de dates est CELUI DU MODULE (state.period, calendrier
-  // deux clics) : une seule mécanique de période dans toute la page.
-  h += '<span class="v2-per">' + renderPeriodBar() + '</span>';
-  // Le parametrage vit LA, dans la barre de perimetre : le chef regle les
-  // regles a l endroit meme ou il en constate les effets, et le perimetre
-  // courant repond deja a « pour quel site ? ».
-  if (PEUT_PARAMETRER) {
-    h += '<button type="button" class="v2-regles-b" data-rgouvrir="1">'
-      + 'Règles d\'attribution</button>';
-  }
-  h += '</div>';
-  return h;
-}
-
-
-// --- REGLES D'ATTRIBUTION -----------------------------------
-// Le tour de role n'est plus une regle du code : le management la pose,
-// pour SON perimetre. La modale montre en direct le classement des
-// vendeurs, pour que le chef voie EXACTEMENT ce que la machine deciderait.
-const PEUT_PARAMETRER = [ROLE_ADMIN, ROLE_DIRECTEUR, ROLE_CHEF_VENTES,
-  ROLE_DIR_PLAQUE, ROLE_DIR_MARQUE, ROLE_DIR_GROUPE].indexOf(userRole) >= 0;
-// La regle par defaut du groupe releve de la direction : un chef des ventes
-// regle SON site, pas celui des autres.
-const PEUT_PARAMETRER_DEFAUT = [ROLE_ADMIN, ROLE_DIRECTEUR,
-  ROLE_DIR_PLAQUE, ROLE_DIR_MARQUE, ROLE_DIR_GROUPE].indexOf(userRole) >= 0;
-
-const RG_REPARTITION = [
-  { k:'charge', l:'Au moins chargé',
-    d:'Le vendeur qui a le moins de leads en cours. Répartition la plus égale.' },
-  { k:'sequentiel', l:'Tour de rôle séquentiel',
-    d:'Chacun son tour, dans l\u2019ordre : le dernier servi repasse en queue.' },
-  { k:'conversion', l:'Au meilleur taux de conversion',
-    d:'La charge reste le premier critère : à charge égale, le lead part à celui qui transforme le mieux.' }
-];
-
-// Quel SITE la modale parametre-t-elle ? Le fil d Ariane repond deja :
-// au niveau site on prend ce site, au niveau vendeur celui de son site,
-// au-dessus il n y a pas de site unique -> regle par defaut du groupe.
-function reglesSiteCourant() {
-  const v = state.v2 || {};
-  if (v.niveau === 'site') return Number(v.cle);
-  if (v.niveau === 'vendeur') {
-    const e = (dataEquipe || []).find(x => Number(x.id_user) === Number(v.cle));
-    if (e && e.id_site != null) return Number(e.id_site);
-  }
-  return null;
-}
-
-let rgEtat = null;   // { idSite, regles, vendeurs, msg, enCours, charge }
-
-function rgNomSite(idSite) {
-  if (idSite == null) return 'Tous les sites (règle par défaut)';
-  const s = (dataSites || []).find(x => Number(x.id_site) === Number(idSite));
-  return (s && s.nom_site) || ('Site ' + idSite);
-}
-
-async function ouvrirRegles(idSiteForce) {
-  const idSite = (idSiteForce !== undefined) ? idSiteForce : reglesSiteCourant();
-  if (idSite == null && !PEUT_PARAMETRER_DEFAUT) {
-    // Un chef des ventes au-dessus de son site : on ne le laisse pas croire
-    // qu il va regler le groupe. On le renvoie a SON site.
-    rgEtat = { idSite:null, regles:null, vendeurs:[], charge:false, refus:true };
-    renderAll();
-    return;
-  }
-  rgEtat = { idSite, regles:null, vendeurs:[], msg:'', enCours:false, charge:true };
-  renderAll();
-  try {
-    const { data, error } = await sb.rpc('lead_regles', { p_id_site: idSite });
-    if (error) throw error;
-    rgEtat.regles = Array.isArray(data) ? data[0] : data;
-    if (idSite != null) {
-      const r2 = await sb.rpc('lead_classement_vendeurs', { p_id_site: idSite, p_vn_vo: null });
-      if (!r2.error) rgEtat.vendeurs = r2.data || [];
-    }
-  } catch (e) {
-    rgEtat.msg = 'Lecture impossible : ' + (e.message || e);
-  }
-  rgEtat.charge = false;
-  renderAll();
-}
-
-function fermerRegles() { rgEtat = null; renderAll(); }
-
-async function enregistrerRegles() {
-  if (!rgEtat || !rgEtat.regles) return;
-  rgEtat.enCours = true; rgEtat.msg = 'Enregistrement…'; renderAll();
-  const r = rgEtat.regles;
-  try {
-    const { error } = await sb.rpc('lead_regles_enregistrer', {
-      p_regles: {
-        id_site: rgEtat.idSite,
-        mode: r.mode,
-        priorite_cycle: !!r.priorite_cycle,
-        vendeur_habituel: !!r.vendeur_habituel,
-        vendeur_habituel_mois: Number(r.vendeur_habituel_mois) || 12,
-        repartition: r.repartition,
-        conversion_mois: Number(r.conversion_mois) || 6,
-        conversion_min_leads: Number(r.conversion_min_leads) || 20,
-        filtre_vn_vo: !!r.filtre_vn_vo
-      }
-    });
-    if (error) throw error;
-    rgEtat.msg = 'Règles enregistrées.';
-    // Le classement change avec la regle : on le relit pour que l ecran
-    // montre la nouvelle decision, pas l ancienne.
-    if (rgEtat.idSite != null) {
-      const r2 = await sb.rpc('lead_classement_vendeurs',
-        { p_id_site: rgEtat.idSite, p_vn_vo: null });
-      if (!r2.error) rgEtat.vendeurs = r2.data || [];
-    }
-  } catch (e) {
-    rgEtat.msg = 'Refus : ' + (e.message || e);
-  }
-  rgEtat.enCours = false; renderAll();
-}
-
-async function basculerExclusion(idUser, exclu) {
-  if (!rgEtat || rgEtat.idSite == null) return;
-  rgEtat.enCours = true; renderAll();
-  try {
-    const { error } = await sb.rpc('lead_exclusion_poser', {
-      p_id_site: rgEtat.idSite, p_id_user: Number(idUser),
-      p_motif: exclu ? null : 'Écarté depuis le lead management',
-      p_du: null, p_au: null, p_retirer: !!exclu
-    });
-    if (error) throw error;
-    const r2 = await sb.rpc('lead_classement_vendeurs',
-      { p_id_site: rgEtat.idSite, p_vn_vo: null });
-    if (!r2.error) rgEtat.vendeurs = r2.data || [];
-    rgEtat.msg = '';
-  } catch (e) {
-    rgEtat.msg = 'Refus : ' + (e.message || e);
-  }
-  rgEtat.enCours = false; renderAll();
-}
-
-function rgOpt(champ, valeur, libelle, desc, type) {
-  const r = rgEtat.regles, coche = (type === 'radio') ? (r[champ] === valeur) : !!r[champ];
-  return '<label class="rg-opt' + (coche ? ' on' : '') + '">'
-    + '<input type="' + (type || 'checkbox') + '"' + (coche ? ' checked' : '')
-    + ' data-rgc="' + champ + '" data-rgv="' + escapeHtml(String(valeur)) + '"'
-    + (type === 'radio' ? ' name="rg-' + champ + '"' : '') + '>'
-    + '<span><b>' + escapeHtml(libelle) + '</b>'
-    + (desc ? '<span class="d">' + escapeHtml(desc) + '</span>' : '') + '</span></label>';
-}
-
-function rgNum(champ, libelle, min, max, unite) {
-  return '<div class="rg-num"><span>' + escapeHtml(libelle) + '</span>'
-    + '<input type="number" min="' + min + '" max="' + max + '" value="'
-    + (rgEtat.regles[champ] == null ? '' : rgEtat.regles[champ])
-    + '" data-rgn="' + champ + '">'
-    + (unite ? '<span>' + escapeHtml(unite) + '</span>' : '') + '</div>';
-}
-
-function renderRegles() {
-  if (!rgEtat) return '';
-  let h = '<div class="rg-ovl" data-rgfermer="1"></div><div class="rg-mod">';
-
-  if (rgEtat.refus) {
-    return h + '<div class="rg-h"><div><b>Regles d attribution</b>'
-      + '<div class="n">Descendez jusqu\u2019à un site pour régler ses règles. '
-      + 'La règle valable pour tout le groupe relève de la direction.</div></div>'
-      + '<button type="button" class="rg-x" data-rgfermer="1">&times;</button></div>'
-      + '<div class="rg-f"><span class="msg"></span>'
-      + '<button type="button" data-rgfermer="1">Fermer</button></div></div>';
-  }
-
-  // Le badge de la topnav (site de rattachement) et le fil d'Ariane (perimetre
-  // explore) sont DEUX choses differentes. Suivre l'un en silence, c'est
-  // promettre a un chef qu'il regle un site et en regler un autre : on affiche
-  // donc le site vise, et on le rend choisissable.
-  h += '<div class="rg-h"><div style="flex:1"><b>Règles d\u2019attribution</b>'
-    + '<div class="rg-site"><span>Pour&nbsp;:</span><select data-rgsite>'
-    + (PEUT_PARAMETRER_DEFAUT
-        ? '<option value=""' + (rgEtat.idSite == null ? ' selected' : '')
-          + '>Tous les sites (règle par défaut)</option>' : '')
-    + (dataSites || []).map(s =>
-        '<option value="' + s.id_site + '"'
-        + (Number(s.id_site) === Number(rgEtat.idSite) ? ' selected' : '') + '>'
-        + escapeHtml(s.nom_site || ('Site ' + s.id_site)) + '</option>').join('')
-    + '</select></div>'
-    + '<div class="n">Ces règles décident à quel vendeur part un lead entrant. '
-    + 'Elles ne touchent pas aux leads déjà attribués.</div></div>'
-    + '<button type="button" class="rg-x" data-rgfermer="1">&times;</button></div>'
-    + '<div class="rg-b">';
-
-  if (rgEtat.charge || !rgEtat.regles) {
-    h += '<div class="lm-empty" style="padding:30px;font-size:12px">'
-      + '<span class="lm-spin"></span>Lecture des règles…</div>';
-    return h + '</div><div class="rg-f"><span class="msg">'
-      + escapeHtml(rgEtat.msg || '') + '</span>'
-      + '<button type="button" data-rgfermer="1">Fermer</button></div></div>';
-  }
-
-  h += '<div class="rg-sec"><div class="t">Comment les leads sont attribués</div>'
-    + rgOpt('mode', 'auto', 'Automatiquement',
-        'Chaque lead part vers un vendeur dès son arrivée.', 'radio')
-    + rgOpt('mode', 'manuel', 'À la main',
-        'Les leads arrivent dans « À attribuer » et vous les répartissez vous-même.', 'radio')
-    + '</div>';
-
-  h += '<div class="rg-sec"><div class="t">À qui en priorité</div>'
-    + rgOpt('priorite_cycle', true, 'Au vendeur qui suit déjà le client',
-        'Si un dossier est ouvert pour ce client sur ce site, le lead revient à celui qui le suit.')
-    + rgOpt('vendeur_habituel', true, 'A son vendeur habituel',
-        'Celui qui a eu un contact sortant avec ce client sur la période ci-dessous.')
-    + rgNum('vendeur_habituel_mois', 'Sur les', 1, 60, 'derniers mois') + '</div>';
-
-  h += '<div class="rg-sec"><div class="t">Sinon, comment répartir</div>'
-    + RG_REPARTITION.map(o => rgOpt('repartition', o.k, o.l, o.d, 'radio')).join('');
-  if (rgEtat.regles.repartition === 'conversion') {
-    h += rgNum('conversion_mois', 'Conversion mesurée sur les', 1, 36, 'derniers mois')
-      + rgNum('conversion_min_leads', 'À partir de', 1, 500, 'leads sur la période')
-      + '<div class="rg-note">Sous ce nombre de leads, le taux d\u2019un vendeur n\u2019est pas '
-      + 'calculé : un vendeur à 2 leads dont 2 vendus afficherait 100 %. La charge '
-      + 'reste le premier critère — la conversion ne fait que départager les '
-      + 'vendeurs à égalité, pour qu\u2019un seul ne sature pas.</div>';
-  }
-  h += rgOpt('filtre_vn_vo', true, 'Respecter la spécialité VN / VO',
-        'Un lead sur un véhicule d\u2019occasion ne part qu\u2019à un vendeur VO.')
-    + '</div>';
-
-  if (rgEtat.idSite != null) {
-    h += '<div class="rg-sec"><div class="t">Qui recevrait le prochain lead</div>';
-    if (!rgEtat.vendeurs.length) {
-      h += '<div class="lm-empty" style="padding:18px;font-size:12px">Aucun vendeur '
-        + 'rattaché à ce site. Les leads resteront visibles, sans destinataire.</div>';
-    } else {
-      h += '<table class="rg-tab"><tr><th>Vendeur</th><th>Leads en cours</th>'
-        + '<th>Conversion</th><th></th></tr>';
-      let premier = true;
-      rgEtat.vendeurs.forEach(v => {
-        const ex = !!v.exclu, suiv = !ex && premier;
-        if (!ex) premier = false;
-        h += '<tr class="' + (ex ? 'exclu' : (suiv ? 'suiv' : '')) + '">'
-          + '<td>' + escapeHtml(v.nom || ('Vendeur ' + v.id_user))
-          + (suiv ? ' &larr; le suivant' : '') + '</td>'
-          + '<td>' + (v.charge == null ? '—' : v.charge) + '</td>'
-          + '<td>' + (v.conversion == null
-              ? '<span style="color:var(--text-mut)">pas assez de leads</span>'
-              : v.conversion + ' %') + '</td>'
-          + '<td style="text-align:right"><button type="button" class="rg-ex" '
-          + 'data-rgex="' + v.id_user + '" data-rgexo="' + (ex ? '1' : '0') + '">'
-          + (ex ? 'Réintégrer' : 'Écarter') + '</button></td></tr>';
-      });
-      h += '</table><div class="rg-note">Un vendeur écarté ne reçoit plus de nouveau '
-        + 'lead, mais conserve ceux qu\u2019il a déjà. À utiliser pour un congé ou une '
-        + 'formation.</div>';
-    }
-    h += '</div>';
-  }
-
-  // Quelles sources alimentent le travail des équipes. Ce réglage vaut pour
-  // TOUT le groupe, donc il est réservé à la direction — un chef des ventes
-  // règle son site, pas celui des autres.
-  if (PEUT_PARAMETRER_DEFAUT) {
-    const L = (state.v3 && state.v3.srcListe) || [];
-    h += '<div class="rg-sec"><div class="t">Quelles sources sont suivies en interne</div>';
-    if (!L.length) {
-      h += '<div class="rg-note">Aucune source relev\u00e9e sur la p\u00e9riode affich\u00e9e. '
-        + 'Ouvrez le mur ou la file pour que la liste se charge.</div>';
-    } else {
-      h += '<table class="rg-tab"><tr><th>Source</th><th>Re\u00e7us</th>'
-        + '<th>\u00c0 traiter</th><th></th></tr>';
-      L.forEach(s => {
-        h += '<tr class="' + (s.suivi ? '' : 'exclu') + '">'
-          + '<td>' + escapeHtml(s.libelle) + '</td>'
-          + '<td>' + s.n + '</td><td>' + s.aTraiter + '</td>'
-          + '<td style="text-align:right"><button type="button" class="rg-ex" '
-          + 'data-rgsrc="' + escapeHtml(s.code) + '" data-rgsrcv="'
-          + (s.suivi ? '0' : '1') + '">'
-          + (s.suivi ? '\u00c9carter' : 'Suivre') + '</button></td></tr>';
-      });
-      h += '</table><div class="rg-note">Une source \u00e9cart\u00e9e reste collect\u00e9e et '
-        + 'consultable, mais ses leads sortent de la file, du mur et des d\u00e9lais : '
-        + 'ils y fabriquaient du retard que personne n\u2019avait \u00e0 traiter. '
-        + 'Le trafic atelier en est l\u2019exemple. Chacun peut les rappeler d\u2019un clic '
-        + 'depuis le filtre du mur ou de la file. Ce r\u00e9glage prend effet '
-        + 'imm\u00e9diatement, pour tout le groupe.</div></div>';
-    }
-  }
-
-  h += '<div class="rg-sec"><div class="t">Non modifiable</div>'
-    + '<div class="rg-note">Quand un même client redépose une demande sur le même site '
-    + 'en moins de 24 heures, elle repart au vendeur qui a déjà la première. Ce n\u2019est '
-    + 'pas une politique commerciale mais une protection : sans elle, deux vendeurs de '
-    + 'la même concession rappellent le même client.</div></div>';
-
-  h += '</div><div class="rg-f"><span class="msg">' + escapeHtml(rgEtat.msg || '') + '</span>'
-    + '<button type="button" data-rgfermer="1">Fermer</button>'
-    + '<button type="button" class="ok" data-rgok="1"'
-    + (rgEtat.enCours ? ' disabled' : '') + '>Enregistrer</button></div></div>';
-  return h;
-}
-
-// --- Le bandeau : une phrase, pas quatre cartes -------------
-function v2Bandeau() {
-  const L = v2Leads();
-  const ko = L.filter(l => lmfNiveau(l) === 'retard').length;
-  const wa = L.filter(l => lmfNiveau(l) === 'bientot').length;
-  if (!L.length) return '<div class="v2-tete"><span class="q">Aucun lead en attente '
-    + 'sur ce périmètre.</span></div>';
-  if (!ko) return '<div class="v2-tete"><b class="ok">' + L.length + '</b> '
-    + '<span class="q">leads en cours, aucun hors délai. Le périmètre est à jour.</span></div>';
-  const pire = Math.max.apply(null, L.map(l => Number(l.attente_min) || 0));
-  return '<div class="v2-tete"><b class="ko">' + ko + '</b> <span class="q">leads ont dépassé '
-    + 'leur délai de réponse' + (wa ? ', ' + wa + ' sont sur le fil' : '')
-    + '. Le plus ancien attend depuis <b class="ko" style="font-size:16px">' + lmfDuree(pire)
-    + '</b>.</span></div>';
-}
-
-// --- LE MUR DU TEMPS ----------------------------------------
-function v2Mur() {
-  const lignes = v2Lignes();
-  if (!lignes.length) return '<div class="lm-empty" style="padding:34px;font-size:12px">'
-    + 'Aucune entité sur ce périmètre.</div>';
-  // Un mur sans une seule pastille n'est pas un écran cassé : c'est un
-  // périmètre sans lead en attente. Il doit le DIRE — un vide muet passe
-  // pour un bug, et c'est exactement ce qui vient d'arriver.
-  if (!v2Leads().length) {
-    const n = (dataSites || []).length;
-    return '<div class="lm-empty" style="padding:34px 26px;font-size:13px;line-height:1.6">'
-      + '<b style="display:block;color:var(--text);margin-bottom:6px">Aucun lead en attente '
-      + 'sur ce périmètre</b>'
-      + '<span style="font-size:12px;color:var(--text-mut)">'
-      + n + ' site' + (n > 1 ? 's' : '') + ' dans votre périmètre, mais aucun lead reçu et non '
-      + 'encore contacté. Les leads déjà traités ne figurent pas ici — voyez '
-      + '« Ce que ça produit » pour les volumes de la période.</span></div>';
-  }
-  const libCol = { groupe:'Marque', marque:'Affaire', affaire:'Site', site:'Vendeur' }[state.v2.niveau]
-              || 'Source';
-  const g = 'grid-template-columns:minmax(150px,1.5fr) repeat(' + V2_TRANCHES.length + ',1fr)';
-  let h = '<div class="v2-mur"><div class="v2-mur-h" style="' + g + '"><div>' + libCol + '</div>'
-        + V2_TRANCHES.map(t => '<div>' + t.l + '</div>').join('') + '</div>';
-  lignes.forEach(ln => {
-    const L = v2LeadsDe(ln);
-    h += '<div class="v2-mur-r" style="' + g + '">';
-    h += '<div class="v2-mur-n" data-v2ligne="' + escapeHtml(String(ln.k)) + '" '
-       + 'data-v2type="' + ln.type + '"><b>' + escapeHtml(ln.l || '—') + '</b>'
-       + '<i>' + escapeHtml(ln.sous || '') + '</i></div>';
-    V2_TRANCHES.forEach(t => {
-      const lst = L.filter(l => v2Tranche(l) === t.k);
-      if (!lst.length) { h += '<div class="v2-cell vide"></div>'; return; }
-      const c = v2Couleur(lst);
-      // Diamètre : RACINE du volume. L'œil compare des surfaces, donc
-      // 9 leads ne doivent pas faire neuf fois la taille de 1.
-      const d = Math.round(20 + Math.sqrt(lst.length) * 7);
-      h += '<div class="v2-cell" data-v2cell="' + escapeHtml(String(ln.k)) + '|' + t.k + '">'
-        + '<span class="v2-pas" style="width:' + d + 'px;height:' + d + 'px;background:' + c.bg
-        + ';color:' + c.fg + ';box-shadow:inset 0 0 0 1.5px ' + c.ring + '">' + lst.length
-        + '</span></div>';
-    });
-    h += '</div>';
-  });
-  h += '</div>';
-  h += '<div class="v2-leg">'
-    + '<span><i style="background:#daf0e9;box-shadow:inset 0 0 0 1.5px #9ed6c7"></i>dans les temps</span>'
-    + '<span><i style="background:#fbeecd;box-shadow:inset 0 0 0 1.5px #e0c98a"></i>sur le fil</span>'
-    + '<span><i style="background:#f7dcdc;box-shadow:inset 0 0 0 1.5px #e0a3a3"></i>délai dépassé</span>'
-    + '<span style="margin-left:auto;color:#c3cfdd">Chaque colonne est un ÂGE, pas un statut. '
-    + 'Le diamètre porte le volume, la teinte l\'urgence.</span></div>';
-  return h;
-}
-
-// --- CE QUI FAIT PRODUIRE : réactivité et conversion --------
-//
-// Le tableau croisé dit QUI produit quoi. Ce bloc dit QU'EST-CE QUI
-// FAIT produire. C'est la même question à deux profondeurs — d'où un
-// enrichissement du même onglet plutôt qu'un quatrième, qui obligerait
-// à l'aller-retour pour comprendre.
-//
-// ⚠️ La mesure porte sur les SOLLICITATIONS, pas sur les leads :
-//    `premier_contact_le` est vide sur tous les leads (aucun n'a encore
-//    été contacté depuis le modèle du 27/08). La mécanique est
-//    identique, seule la source change — elle basculera d'elle-même.
-
-let dataReactivite = null, dataDelaiSource = null;
-let reacKey = null, reacEnCours = null;
-
-function ensureReactivite() {
-  const ids = v2Sites().map(s => s.id).sort();
-  const V = state.v2 || {};
-  // La clé porte le NIVEAU : descendre sur un vendeur doit recharger.
-  const key = [state.period.from, state.period.to, ids.join(','),
-               V.niveau, V.cle].join('|');
-  if (reacKey === key && dataReactivite) return Promise.resolve();
-  if (reacEnCours) return reacEnCours;
-  reacKey = key;
-  reacEnCours = (async function () {
-    try {
-      const [r, s] = await Promise.all([
-        sb.rpc('get_lead_reactivite', {
-          p_viewer_id_user: Number(userId),
-          p_date_from: state.period.from, p_date_to: state.period.to,
-          p_site_ids: ids.length ? ids : null }),
-        sb.rpc('get_lead_delai_par_source', {
-          p_viewer_id_user: Number(userId),
-          p_date_from: state.period.from, p_date_to: state.period.to,
-          p_site_ids: ids.length ? ids : null,
-          // ⚠️ Sans ce paramètre, l'écran d'un vendeur affichait les
-          //    leads de toute l'équipe à côté d'un tableau filtré sur
-          //    lui : 16 contre 9 sur La Centrale.
-          p_id_user: (state.v2 && state.v2.niveau === 'vendeur')
-            ? Number(state.v2.cle) : null })
+    // ── Chargement ────────────────────────────────────────────────────────
+    async function charger() {
+      var args = { p_sources: sourcesArg(), p_campagne: S.campagne };
+      var res = await Promise.all([
+        rpc('plateau_kpis'),
+        rpc('plateau_file', Object.assign({ p_vue: 'piscine' }, args)),
+        rpc('plateau_file', { p_vue: 'rappels', p_campagne: S.campagne }),
+        rpc('plateau_file', { p_vue: 'transferts', p_campagne: S.campagne }),
+        S.stock ? rpc('plateau_file', { p_vue: 'stock', p_campagne: S.campagne }) : Promise.resolve(S.stockListe),
+        S.tab === 'campagnes' ? rpc('plateau_campagnes', { p_jours: 90 }) : Promise.resolve(S.campagnes)
       ]);
-      if (r.error) throw r.error;
-      dataReactivite  = r.data || [];
-      dataDelaiSource = (s && !s.error) ? (s.data || []) : [];
-    } catch (e) {
-      console.error('[leadMgmt] réactivité', e);
-      dataReactivite = []; dataDelaiSource = [];
-    } finally {
-      reacEnCours = null;
-      if (window.__renderLeadMgmt) window.__renderLeadMgmt();
+      S.kpis = res[0] || {}; MOI = S.kpis.moi;
+      S.piscine = res[1] || []; S.rappels = res[2] || []; S.transferts = res[3] || [];
+      S.stockListe = res[4] || null; S.campagnes = res[5] || null;
+      S.erreur = null; S.charge = true;
     }
-  })();
-  return reacEnCours;
-}
-
-function v2Reactivite() {
-  if (!dataReactivite) return '<div class="v2-flux" style="margin-bottom:14px">'
-    + '<div class="lm-empty" style="padding:18px;font-size:12px">'
-    + '<span class="lm-spin"></span>Analyse des délais…</div></div>';
-  const R = dataReactivite;
-  if (!R.length) return '';
-  const n = x => Number(x) || 0;
-
-  const tot = R.reduce((a, x) => a + n(x.nb_dossiers), 0);
-  const maxT = Math.max.apply(null, R.map(x => n(x.taux_conversion)));
-
-  // Le manque à gagner : un directeur agit sur des voitures, pas sur
-  // des points de pourcentage.
-  const lent = R[R.length - 1];
-  const rapide = R.filter(x => n(x.ordre) <= 2);
-  const nRap = rapide.reduce((a, x) => a + n(x.nb_dossiers), 0);
-  const cRap = rapide.reduce((a, x) => a + n(x.nb_commandes), 0);
-  const txRap = nRap ? (cRap / nRap * 100) : null;
-  const txLent = lent ? n(lent.taux_conversion) : null;
-  const ecart = (txRap != null && txLent != null) ? (txRap - txLent) : null;
-  const manque = (ecart != null && ecart > 0)
-    ? Math.round(n(lent.nb_dossiers) * ecart / 100) : 0;
-  const partRap = tot ? Math.round(nRap / tot * 100) : 0;
-
-  // UN ESCALIER, pas quatre barres empilées : chaque palier est une
-  // colonne, la hauteur porte le taux. On voit la marche descendre —
-  // c'est exactement le propos, et quatre barres horizontales le
-  // noyaient (« touffu », 27/08).
-  let h = '<div class="v2-esc-w"><div class="v2-flux-t">'
-    + '<h3>Ce qui fait produire · délai avant premier contact</h3>'
-    + '<div style="font-size:11px;color:var(--text-mut)">' + tot + ' dossiers</div></div>';
-  h += '<div class="v2-esc">';
-  R.forEach(x => {
-    const t2 = n(x.taux_conversion), d2 = n(x.nb_dossiers);
-    const hh = maxT ? Math.max(8, Math.round(t2 / maxT * 100)) : 8;
-    const best = t2 >= maxT - 0.01;
-    h += '<div class="v2-esc-c">'
-      + '<div class="v2-esc-v' + (best ? ' best' : '') + '">' + t2 + ' %</div>'
-      + '<div class="v2-esc-b"><i class="' + (best ? 'best' : '')
-        + '" style="height:' + hh + '%"></i></div>'
-      + '<div class="v2-esc-l">' + escapeHtml(x.palier) + '</div>'
-      + '<div class="v2-esc-n">' + d2 + ' dossiers · ' + n(x.part_dossiers) + ' %</div>'
-      + '</div>';
-  });
-  h += '</div>';
-
-  if (ecart != null && ecart > 1) {
-    h += '<div class="v2-esc-note"><b>Les dossiers repris rapidement convertissent '
-      + Math.round(ecart) + ' points de plus.</b> '
-      + (manque ? 'Sur les ' + n(lent.nb_dossiers) + ' repris au-delà de 48 h, l\'écart '
-          + 'représente environ <b class="v2-ko">' + manque + ' commandes</b>. ' : '')
-      + 'Aujourd\'hui <b>' + partRap + ' %</b> sont repris en moins de 12 h.'
-      // Sans cette réserve, l'écran promet une causalité que la donnée
-      // ne démontre pas.
-      + '<div class="v2-esc-res">Corrélation, pas causalité : un dossier repris vite peut aussi '
-      + 'être un dossier plus chaud au départ. La tendance est nette, la promesse « rappelez plus '
-      + 'vite et vous gagnerez ' + Math.round(ecart) + ' points » ne le serait pas.</div></div>';
-  }
-  h += '</div>';
-
-  // L'attente par source, en tableau court : le canal ou l'équipe ?
-  const S = (dataDelaiSource || []).filter(x => n(x.nb_en_attente) > 0);
-  if (S.length) {
-    h += '<div class="v2-rep" style="margin-bottom:14px"><table><thead><tr>'
-      + '<th>Source</th><th>En attente</th><th>En retard</th><th>SLA</th>'
-      + '<th>Attente médiane</th></tr></thead><tbody>';
-    const TS = { a:0, r:0 };
-    S.forEach(x => {
-      const att = n(x.attente_med_min), sla = n(x.sla_minutes);
-      const ko = sla && att > sla;
-      TS.a += n(x.nb_en_attente); TS.r += n(x.nb_en_retard);
-      // Les chiffres de leads sont CLIQUABLES : ils ouvrent la liste,
-      // comme une pastille du mur. Un compteur qu'on ne peut pas ouvrir
-      // désigne un problème sans donner prise dessus.
-      h += '<tr><td><b>' + escapeHtml(x.source_libelle || x.source) + '</b></td>'
-        + '<td><button type="button" class="v2-lien" data-v2src="' + escapeHtml(x.source)
-          + '" data-v2filtre="attente">' + n(x.nb_en_attente) + '</button></td>'
-        + '<td>' + (n(x.nb_en_retard)
-            ? '<button type="button" class="v2-lien v2-ko" data-v2src="' + escapeHtml(x.source)
-              + '" data-v2filtre="retard">' + x.nb_en_retard + '</button>'
-            : '<span class="v2-sous">—</span>') + '</td>'
-        + '<td class="v2-sous">' + (sla ? sla + ' min' : '—') + '</td>'
-        + '<td><span class="' + (ko ? 'v2-ko' : 'v2-ok') + '">' + lmfDuree(att) + '</span></td>'
-        + '</tr>';
-    });
-    h += '</tbody><tfoot><tr><td>Total · ' + S.length + ' sources</td>'
-      + '<td>' + TS.a + '</td>'
-      + '<td' + (TS.r ? ' class="v2-ko"' : '') + '>' + TS.r + '</td>'
-      + '<td>—</td><td>—</td></tr></tfoot></table></div>'
-      + '<div class="lmf-note" style="margin:-6px 0 14px">Deux sources au même SLA avec des '
-      + 'attentes très différentes désignent l\'organisation, pas l\'apporteur.</div>';
-  }
-  return h;
-}
-
-// --- Le détail au clic, SANS quitter la vue d'ensemble ------
-//
-// Une cellule du mur était cliquable en apparence mais n'écoutait rien :
-// le panneau n'avait pas été porté (relevé par Antoine le 27/08). Sans
-// lui, le mur montre où ça coince sans jamais dire QUI — il désigne un
-// problème sans donner prise dessus.
-
-// ============================================================
-//  LES GESTES SUR UN LEAD, ET LE CANAL BACS      (17/09/2026)
-//
-//  PRINCIPE : le vendeur voit les MÊMES boutons quelle que soit la
-//  source. Un lead LeBonCoin et un lead Toyota se traitent pareil.
-//  La source ne décide que de deux choses — le délai attendu, et OÙ le
-//  geste sera écrit.
-//
-//  Les leads BACS passent par la file `bacs_sortant` : One Data ne peut
-//  pas écrire dans Salesforce, il faut une session vivante dans un
-//  navigateur. Les autres écrivent directement dans One Data.
-// ============================================================
-
-
-
-// Ce que chaque source permet, et où le geste s'écrit.
-// `distant: 'bacs'` => le geste part dans la file sortante.
-const LM_SOURCES = {
-  bacs_constructeur:{ l:'Toyota.fr',        cls:'bacs',     distant:'bacs' },
-  bacs_campagne:    { l:'Campagne BACS',    cls:'bacs',     distant:'bacs' },
-  bacs_atelier:     { l:'Trafic atelier',   cls:'bacs',     distant:'bacs' },
-  bacs_showroom:    { l:'Showroom',         cls:'bacs',     distant:'bacs' },
-  bacs_autre:       { l:'Autre BACS',       cls:'bacs',     distant:'bacs' },
-  leboncoin:        { l:'LeBonCoin',        cls:'lbc',      distant:null },
-  la_centrale:      { l:'La Centrale',      cls:'centrale', distant:null },
-  stockspark:       { l:'StockSpark',       cls:'stock',    distant:null },
-  autoscout:        { l:'AutoScout24',      cls:'stock',    distant:null },
-  site_web:         { l:'Site du groupe',   cls:'web',      distant:null },
-  wa_entrant:       { l:'WhatsApp',         cls:'web',      distant:null },
-  tel_traceur:      { l:'Tél. traceur',     cls:'web',      distant:null },
-  transfert_plateau:{ l:'Transféré',        cls:'web',      distant:null }
-};
-// ⚠️ Toyota anonymise les clients au titre du droit à l'effacement :
-//    le nom devient un jeton (« 3Rgia YIyXdZH6 »). L'afficher tel quel
-//    laisse croire à un vrai nom mal orthographié. On le DIT.
-function lmEstAnonymise(l) {
-  const n = String(l.nom || '') + ' ' + String(l.prenom || '');
-  if (/anonymized|\.rtbf/i.test(String(l.email || ''))) return true;
-  // Un jeton mêle chiffres et casse au milieu d'un mot : « YIyXdZH6 ».
-  return /[A-Za-z][0-9][A-Za-z]|[0-9][A-Za-z][0-9]/.test(n) && !/\s[A-ZÉÈÀ]{2,}/.test(n);
-}
-function lmNomLisible(l) {
-  if (lmEstAnonymise(l)) return 'Client anonymisé';
-  return l.nom_affiche || [l.prenom, l.nom].filter(Boolean).join(' ') || 'Sans nom';
-}
-
-function lmSource(code) {
-  return LM_SOURCES[code] || { l: code || 'Source inconnue', cls:'', distant:null };
-}
-
-// --- Le canal BACS : joignable ou non ------------------------
-let bacsJoignable = null;   // null = pas encore su
-let bacsDernierTest = 0;
-
-// ⚠️ RELEVÉ LE 28/09 : le bandeau annonçait « BACS n'est pas ouvert »
-//    alors que BACS était ouvert à l'écran, et invitait à le rouvrir —
-//    le seul geste sans effet. Ce qu'on mesure n'est pas BACS : c'est le
-//    battement du PONT (l'extension dans l'onglet Salesforce), qui écrit
-//    dans `bacs_presence`. Mesure du jour : dernier battement 204 min plus
-//    tôt, sous un AUTRE compte One Data que celui qui regardait.
-//    Un booléen ne peut pas porter cette nuance : on lit désormais
-//    `bacs_canal_etat()`, qui dit aussi POURQUOI c'est muet.
-let bacsEtat = null;        // le détail renvoyé par la base
-
-async function ensureBacsJoignable() {
-  // ⚠️ RELEVÉ LE 18/09 : le bandeau restait VERT plusieurs minutes après
-  //    la fermeture de BACS. Deux délais s'additionnaient — ce cache, et
-  //    la fenêtre de 3 min de `bacs_est_joignable`. Un bandeau qui ment
-  //    est pire qu'absent : le vendeur agit et perd son geste.
-  //    On interroge donc toutes les 10 s, et la base a resserré sa
-  //    fenêtre à 90 s.
-  if (Date.now() - bacsDernierTest < 10000 && bacsJoignable !== null) return;
-  bacsDernierTest = Date.now();
-  try {
-    const { data, error } = await sb.rpc('bacs_canal_etat');
-    if (error) throw error;
-    const avant = JSON.stringify(bacsEtat);
-    bacsEtat = (data && typeof data === 'object') ? data : {};
-    // `bacsJoignable` reste la porte des gestes : ne pas le débrancher.
-    bacsJoignable = bacsEtat.joignable === true;
-    if (avant !== JSON.stringify(bacsEtat) && window.__renderLeadMgmt) window.__renderLeadMgmt();
-  } catch (e) {
-    // Une base injoignable n'est pas un pont fermé. On le distingue, sinon
-    // le bandeau accuse encore le mauvais maillon.
-    bacsEtat = { joignable: false, panne_lecture: true };
-    bacsJoignable = false;
-  }
-}
-
-// Délai en clair, depuis des secondes. Le bandeau doit dire « il y a 3 h »,
-// pas « il y a 12388 s » : c'est ce chiffre qui dit si le pont vient de
-// tomber ou s'il dort depuis ce matin.
-function bacsDepuis(s) {
-  const v = Math.round(Number(s) || 0);
-  if (v < 90)    return 'il y a moins d\u2019une minute';
-  if (v < 5400)  return 'il y a ' + Math.round(v / 60) + ' min';
-  if (v < 86400) return 'il y a ' + Math.round(v / 3600) + ' h';
-  return 'il y a ' + Math.round(v / 86400) + ' j';
-}
-
-
-function lmArriereHtml() {
-  const n = state.mafileArriere;
-  if (!n) return '';
-  return '<div style="display:flex;align-items:center;gap:10px;padding:8px 14px;'
-    + 'margin-bottom:12px;border-radius:8px;background:var(--blue-pale,#f5f8fc);'
-    + 'border:1px solid var(--border);font-size:12.5px;color:var(--text-soft)">'
-    + (state.voirArriere
-        ? '<span>L\'arriéré est affiché : <b>' + n + '</b> dossier' + (n > 1 ? 's' : '')
-          + ' de plus de 30 jours.</span>'
-        : '<span><b>' + n + '</b> dossier' + (n > 1 ? 's' : '') + ' de plus de 30 jours '
-          + (n > 1 ? 'sont masqués' : 'est masqué') + ' pour laisser voir les demandes récentes.</span>')
-    + '<button type="button" data-arriere="1" style="margin-left:auto;background:none;'
-    + 'border:1px solid var(--border);border-radius:5px;padding:4px 11px;font-size:12px;'
-    + 'font-family:inherit;color:var(--blue-dk);cursor:pointer;white-space:nowrap">'
-    + (state.voirArriere ? 'Masquer l\'arriéré' : 'Afficher l\'arriéré') + '</button></div>';
-}
-
-// ⚠️ Sans horloge, l'état ne serait relu qu'au prochain rendu — donc
-//    jamais si le vendeur laisse l'écran ouvert. C'est exactement ce qui
-//    s'est produit le 18/09.
-let bacsHorloge = null;
-function lmDemarrerHorlogeBacs() {
-  if (bacsHorloge) return;
-  bacsHorloge = setInterval(() => {
-    if (!document.getElementById('lead-mgmt-root')) {
-      clearInterval(bacsHorloge); bacsHorloge = null; return;
-    }
-    ensureBacsJoignable();
-  }, 12000);
-}
-
-// Le bandeau. ⚠️ Pas de croix quand BACS est fermé : seule la connexion
-// le referme. Un bandeau qu'on peut faire taire ne protège de rien —
-// le vendeur le fermerait et perdrait ses gestes sans le savoir.
-function lmBandeauBacs() {
-  ensureBacsJoignable();
-  lmDemarrerHorlogeBacs();
-  if (bacsJoignable === null) return '';
-  const e = bacsEtat || {};
-
-  if (bacsJoignable) {
-    // Le pont peut tourner chez quelqu'un d'autre : une session vivante
-    // suffit à exécuter. Le dire évite qu'un vendeur croie tenir le canal
-    // et ferme son onglet.
-    return '<div class="g-bandeau on"><span class="g-pastille"></span>'
-      + 'Canal BACS ouvert'
-      + (e.par_moi === false && e.par
-           ? ' via ' + escapeHtml(String(e.par)) : '')
-      + ' — rendez-vous, relances et transferts partent directement.</div>';
-  }
-
-  // Le corps du message nomme le maillon qui manque. Trois causes, trois
-  // gestes différents : sans cette distinction on envoie le vendeur rouvrir
-  // un BACS déjà ouvert.
-  let corps, bouton = '';
-  if (e.panne_lecture) {
-    corps = '<b>État du canal BACS inconnu.</b> One Data n\'a pas pu lire l\'état du '
-          + 'pont. Les gestes BACS sont suspendus le temps que la lecture revienne.';
-  } else if (e.aucun_pont) {
-    corps = '<b>Le pont BACS n\'est installé sur aucun poste.</b> Les leads Toyota restent '
-          + 'consultables, mais aucun rendez-vous, relance ni transfert ne peut partir '
-          + 'vers BACS. L\'extension One Data doit être installée sur au moins un poste '
-          + 'qui garde BACS ouvert.';
-  } else if (e.moi_session_ok === false) {
-    corps = '<b>BACS refuse la session du pont.</b> L\'onglet est ouvert, mais Salesforce '
-          + 'n\'y reconnaît plus de session valide. Reconnectez-vous à BACS dans cet '
-          + 'onglet — ce message disparaîtra seul.';
-    bouton = '<button type="button" class="g-act" data-bacs-ouvrir="1">Ouvrir BACS</button>';
-  } else if (e.moi_jamais) {
-    corps = '<b>Le pont BACS n\'a jamais répondu sous ce compte.</b> Les leads Toyota '
-          + 'restent consultables, mais aucun rendez-vous, relance ni transfert ne peut '
-          + 'partir. Ouvrez BACS dans un onglet de ce navigateur, avec l\'extension '
-          + 'One Data active — ce message disparaîtra seul.';
-    bouton = '<button type="button" class="g-act" data-bacs-ouvrir="1">Ouvrir BACS</button>';
-  } else {
-    corps = '<b>Le pont BACS ne répond plus</b> (dernier signe de vie '
-          + bacsDepuis(e.moi_il_y_a_s) + '). BACS peut être ouvert à l\'écran sans que '
-          + 'l\'extension One Data y tourne encore : rechargez l\'onglet BACS. Les '
-          + 'gestes restent suspendus tant que le pont est muet.';
-    bouton = '<button type="button" class="g-act" data-bacs-ouvrir="1">Ouvrir BACS</button>';
-  }
-
-  return '<div class="g-bandeau off"><span class="g-pastille"></span>'
-    + '<span>' + corps + '</span>' + bouton + '</div>';
-}
-
-// --- Les gestes ---------------------------------------------
-const LM_GESTES = [
-  { k:'appel',     l:'Appeler',                 d:'Ouvre le composeur',     local:true },
-  { k:'rdv',       l:'Prendre rendez-vous',     d:'Agenda du vendeur' },
-  { k:'relance',   l:'Programmer une relance',  d:'Rappel daté' },
-  { k:'rpv',       l:'Saisir un compte rendu',  d:'Rapport vendeur',        local:true },
-  { k:'transfert', l:'Transférer à un site',    d:'Change de concession',   manager:true },
-  { k:'perdre',    l:'Classer sans suite',      d:'Avec un motif' }
-];
-
-// Même règle que `lead_tel_exploitable` côté base : Toyota remplace les
-// numéros anonymisés par 00.00.00.00.00 — un champ rempli n'est pas un
-// numéro.
-function lmTelExploitable(tel) {
-  const n = String(tel || '').replace(/[^0-9]/g, '');
-  if (n.length < 6) return false;
-  if (/^(.)\1+$/.test(n)) return false;
-  if (/^0?123456789/.test(n)) return false;
-  return true;
-}
-
-// ⚠️ RELEVÉ LE 18/09 : les gestes étaient proposés sans regarder la
-//    donnée. « Appeler » s'affichait sur un lead sans numéro, « Compte
-//    rendu » sur un lead sans fiche client. Un bouton qui ne peut pas
-//    aboutir ne doit pas être proposé — ou doit dire POURQUOI.
-//    Rend { ok, raison } : la raison s'affiche sous le bouton grisé.
-function lmGesteDispo(lead, g) {
-  const s = lmSource(lead.source);
-  const bacs = (s.distant === 'bacs');
-  if (g.manager && PROFIL === 'vendeur') return { ok: false, cache: true };
-
-  if (g.k === 'appel') {
-    return lmTelExploitable(lead.telephone)
-      ? { ok: true } : { ok: false, raison: 'Aucun numéro exploitable' };
-  }
-  if (g.k === 'rpv') {
-    return lead.id_client
-      ? { ok: true } : { ok: false, raison: 'Aucune fiche client' };
-  }
-  // Le rendez-vous s'inscrit d'abord dans l'agenda One Data : il ne
-  // dépend que d'une fiche client. Pour un lead BACS, la poussée vers
-  // Salesforce attend en file si l'onglet est fermé — rien ne se perd.
-  if (g.k === 'rdv') {
-    return lead.id_client
-      ? { ok: true } : { ok: false, raison: 'Aucune fiche client' };
-  }
-  if (g.k === 'relance') {
-    if (bacs) {
-      return bacsJoignable === false
-        ? { ok: false, raison: 'Pont BACS muet' } : { ok: true };
-    }
-    // Hors BACS, rendez-vous et relance se posent dans l'agenda de la
-    // fiche client : sans fiche, il n'y a nulle part où les écrire.
-    return lead.id_client
-      ? { ok: true } : { ok: false, raison: 'Aucune fiche client' };
-  }
-  if (g.k === 'transfert') {
-    return (bacs && bacsJoignable === false)
-      ? { ok: false, raison: 'Pont BACS muet' } : { ok: true };
-  }
-  return { ok: true };   // classer sans suite : toujours possible
-}
-
-function lmGestesHtml(lead) {
-  const s = lmSource(lead.source);
-  let h = '<div class="g-grille">';
-  LM_GESTES.forEach(g => {
-    const d = lmGesteDispo(lead, g);
-    if (d.cache) return;   // un geste réservé au manager n'est pas montré au vendeur
-    // Où le geste s'écrit. « Classer sans suite » reste LOCAL : la
-    // clôture n'est pas encore poussée vers BACS (geste non reconnu).
-    const versBacs = (s.distant === 'bacs') && !g.local && g.k !== 'perdre';
-    const ou = g.local ? '' :
-      (versBacs ? '<span class="g-ou bacs">BACS</span>' : '<span class="g-ou od">One Data</span>');
-    h += '<button type="button" class="g-btn" ' + (d.ok ? '' : 'disabled')
-      + ' data-geste="' + g.k + '" data-lead="' + lead.id_lead + '">'
-      + '<b>' + g.l + ou + '</b>'
-      + '<i>' + escapeHtml(d.ok ? g.d : (d.raison || 'Indisponible')) + '</i></button>';
-  });
-  h += '</div>';
-  return h;
-}
-
-// --- Les modales --------------------------------------------
-let lmModale = null;   // { type, lead }
-let lmLeadSel = null;  // le lead choisi dans le volet
-
-async function lmSitesCibles() {
-  try {
-    const { data, error } = await sb.from('v_lead_sites').select('*');
-    if (error) throw error;
-    return (data || []).filter(s => userSiteIds.map(Number).indexOf(Number(s.id_site)) >= 0);
-  } catch (e) { return []; }
-}
-
-// Les 8 prochains jours, puis une date libre. Les heures par demi-heure,
-// de 8 h à 19 h 30 — les horaires d'une concession.
-const LM_JOURS_COURTS = ['Dim', 'Lun', 'Mar', 'Mer', 'Jeu', 'Ven', 'Sam'];
-function lmIsoJour(d) {
-  return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
-}
-function lmCreneauHtml(avecDuree) {
-  const auj = new Date(); auj.setHours(0, 0, 0, 0);
-  let h = '<div class="g-lab">Jour</div><div class="g-chips">';
-  for (let i = 0; i < 8; i++) {
-    const d = new Date(auj.getTime() + i * 86400000);
-    const titre = i === 0 ? 'Aujourd\'hui' : i === 1 ? 'Demain' : LM_JOURS_COURTS[d.getDay()];
-    h += '<button type="button" class="g-chip' + (i === 1 ? ' on' : '') + '" data-gjour="' + lmIsoJour(d) + '">'
-      + titre + '<small>' + d.getDate() + '/' + String(d.getMonth() + 1).padStart(2, '0') + '</small></button>';
-  }
-  h += '<label class="g-chip" style="display:inline-flex;align-items:center;gap:6px">Autre'
-    + '<input type="date" id="g-date-libre" style="border:none;font:inherit;color:inherit;background:none;'
-    + 'padding:0;width:122px"></label></div>';
-
-  h += '<div class="g-lab">Heure</div><div class="g-heures">';
-  for (let m = 8 * 60; m <= 19 * 60 + 30; m += 30) {
-    const hh = String(Math.floor(m / 60)).padStart(2, '0') + ':' + String(m % 60).padStart(2, '0');
-    h += '<button type="button" class="g-chip' + (hh === '10:00' ? ' on' : '') + '" data-gheure="' + hh + '">'
-      + hh.replace(':', ' h ') + '</button>';
-  }
-  h += '</div>';
-
-  if (avecDuree) {
-    h += '<div class="g-lab">Durée</div><div class="g-chips">';
-    [[30, '30 min'], [60, '1 h'], [90, '1 h 30'], [120, '2 h']].forEach(([v, l]) => {
-      h += '<button type="button" class="g-chip' + (v === 60 ? ' on' : '') + '" data-gduree="' + v + '">' + l + '</button>';
-    });
-    h += '</div>';
-  }
-  h += '<div class="g-recap" id="g-recap"></div>';
-  return h;
-}
-
-// Lit le créneau choisi. Rend { debut, fin } en Date, ou null.
-function lmCreneauLu() {
-  const libre = root.querySelector('#g-date-libre');
-  const jourChip = root.querySelector('[data-gjour].on');
-  const jour = (libre && libre.value) ? libre.value : (jourChip ? jourChip.getAttribute('data-gjour') : null);
-  const heureChip = root.querySelector('[data-gheure].on');
-  const dureeChip = root.querySelector('[data-gduree].on');
-  if (!jour || !heureChip) return null;
-  const debut = new Date(jour + 'T' + heureChip.getAttribute('data-gheure') + ':00');
-  if (isNaN(debut.getTime())) return null;
-  const duree = dureeChip ? Number(dureeChip.getAttribute('data-gduree')) : 0;
-  return { debut: debut, fin: new Date(debut.getTime() + duree * 60000), duree: duree };
-}
-
-// Met à jour le récapitulatif et grise les heures déjà passées.
-function lmCreneauMaj() {
-  const libre = root.querySelector('#g-date-libre');
-  const jourChip = root.querySelector('[data-gjour].on');
-  const jour = (libre && libre.value) ? libre.value : (jourChip ? jourChip.getAttribute('data-gjour') : null);
-  const estAuj = jour === lmIsoJour(new Date());
-  const seuil = Date.now() + 15 * 60000;
-  root.querySelectorAll('[data-gheure]').forEach(b => {
-    const passe = estAuj && new Date(jour + 'T' + b.getAttribute('data-gheure') + ':00').getTime() < seuil;
-    b.disabled = passe;
-    if (passe) b.classList.remove('on');
-  });
-  const c = lmCreneauLu();
-  const rec = root.querySelector('#g-recap');
-  const ok = root.querySelector('[data-gvalider]');
-  if (rec) {
-    if (!c) { rec.textContent = 'Choisissez un jour et une heure.'; }
-    else {
-      const f = c.debut.toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long' });
-      const hd = c.debut.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
-      const hf = c.duree ? ' – ' + c.fin.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' }) : '';
-      rec.textContent = f.charAt(0).toUpperCase() + f.slice(1) + ', ' + hd + hf;
-    }
-  }
-  if (ok) ok.disabled = !c;
-}
-
-function lmModaleHtml() {
-  if (!lmModale) return '';
-  const l = lmModale.lead, s = lmSource(l.source);
-  let corps = '', titre = '', valider = 'Valider';
-
-  if (lmModale.type === 'transfert') {
-    titre = 'Transférer vers une concession';
-    valider = 'Transférer';
-    corps = '<div class="g-note">Le délai ne repart PAS à zéro : il court depuis la réception '
-      + 'de la demande. Transférer ne rend pas un lead neuf.</div>';
-    (lmModale.sites || []).forEach((st, i) => {
-      corps += '<label class="g-site' + (i === 0 ? ' on' : '') + '">'
-        + '<input type="radio" name="g-site" value="' + st.id_site + '"' + (i === 0 ? ' checked' : '') + '>'
-        + '<span><b>' + escapeHtml(st.nom_site || ('Site ' + st.id_site)) + '</b>'
-        + '<i>' + (st.vendeurs || 0) + ' vendeurs</i></span>'
-        + '<span class="g-charge">' + (st.leads_en_file || 0) + ' leads en cours</span></label>';
-    });
-    if (!(lmModale.sites || []).length) {
-      corps += '<div style="color:var(--text-mut);font-size:12px">Aucun autre site dans votre '
-        + 'périmètre.</div>';
-    }
-    corps += '<div class="g-champ"><label>Qualification (transmise au vendeur)</label>'
-      + '<textarea id="g-qualif" rows="3" placeholder="Client joint, souhaite un essai samedi. '
-      + 'Budget 32 000 €, reprise Clio 2019."></textarea></div>';
-    if (s.distant === 'bacs') {
-      corps += '<div style="margin-top:12px;font-size:11.5px;color:var(--text-soft)">'
-        + 'Le site et le propriétaire seront aussi mis à jour dans BACS.</div>';
+    async function rafraichir(silencieux) {
+      try { await charger(); }
+      catch (e) { S.erreur = messageErreur(e); if (!silencieux) toast(S.erreur, true); }
+      render();
     }
 
-  } else if (lmModale.type === 'rdv') {
-    titre = 'Prendre rendez-vous';
-    valider = 'Créer le rendez-vous';
-    corps = '<div class="g-champ" style="margin-top:0"><label>Objet</label>'
-      // Le nom du client est déjà le TITRE du rendez-vous dans l'agenda :
-      // le répéter dans l'objet ne fait que l'allonger.
-      + '<input id="g-sujet" value="Rendez-vous"></div>'
-      + lmCreneauHtml(true);
-    if (s.distant === 'bacs') {
-      corps += '<div style="margin-top:12px;font-size:11.5px;color:var(--text-soft)">'
-        + 'Le rendez-vous sera inscrit dans l\'agenda One Data et dans BACS, au nom du vendeur attribué.</div>';
-    }
-
-  } else if (lmModale.type === 'relance') {
-    titre = 'Programmer une relance';
-    valider = 'Programmer';
-    corps = lmCreneauHtml(false);
-
-  } else if (lmModale.type === 'perdre') {
-    titre = 'Classer sans suite';
-    valider = 'Classer';
-    corps = '<div class="g-champ"><label>Motif</label><select id="g-motif">'
-      + '<option value="injoignable">Injoignable</option>'
-      + '<option value="pas_interesse">Plus intéressé</option>'
-      + '<option value="concurrent">Parti à la concurrence</option>'
-      + '<option value="hors_perimetre">Hors périmètre</option>'
-      + '<option value="doublon">Doublon</option>'
-      + '</select></div>'
-      + '<div class="g-champ"><label>Précision (facultatif)</label>'
-      + '<textarea id="g-detail" rows="2"></textarea></div>';
-  }
-
-  return '<div class="g-modal" data-gfermer="1"><div class="g-modal-c" data-stop="1">'
-    + '<div class="g-modal-h"><b>' + titre + '</b><p>'
-    + escapeHtml(l.nom_affiche || 'Lead ' + l.id_lead)
-    + (l.vehicule_interet ? ' — ' + escapeHtml(l.vehicule_interet) : '') + '</p></div>'
-    + '<div class="g-modal-b">' + corps + '</div>'
-    + '<div class="g-modal-f">'
-    + '<button type="button" class="g-act" data-gfermer="1">Annuler</button>'
-    + '<button type="button" class="g-act p" data-gvalider="1">' + valider + '</button>'
-    + '</div></div></div>';
-}
-
-// --- L'exécution --------------------------------------------
-// Notification intégrée, à la place des boîtes d'alerte du navigateur.
-// ⚠️ Accrochée au DOCUMENT et non à #lead-mgmt-root : chaque rendu
-//    réécrit l'écran, et une notification qui y vivrait disparaîtrait
-//    au premier rafraîchissement.
-function lmToast(message, genre) {
-  try {
-    const d = (typeof doc !== 'undefined' && doc) ? doc : document;
-    let zone = d.getElementById('lm-toasts');
-    if (!zone) {
-      zone = d.createElement('div');
-      zone.id = 'lm-toasts';
-      zone.style.cssText = 'position:fixed;top:18px;left:50%;transform:translateX(-50%);z-index:100000;'
-        + 'display:flex;flex-direction:column;gap:8px;align-items:center;pointer-events:none;'
-        + 'font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;';
-      d.body.appendChild(zone);
-    }
-    const couleurs = {
-      ok:     ['#e1f5ee', '#1d6e5f', '#53bda7', '✓'],
-      attente:['#eaf0f9', '#1f4a87', '#acc5e4', '↗'],
-      erreur: ['#fcebeb', '#a32d2d', '#e3a6a0', '!']
-    }[genre || 'ok'];
-    const el = d.createElement('div');
-    el.style.cssText = 'pointer-events:auto;display:flex;align-items:center;gap:10px;max-width:460px;'
-      + 'padding:11px 16px;border-radius:10px;font-size:13px;line-height:1.4;'
-      + 'box-shadow:0 8px 24px rgba(28,43,61,.18);transition:opacity .25s,transform .25s;'
-      + 'opacity:0;transform:translateY(-6px);'
-      + 'background:' + couleurs[0] + ';color:' + couleurs[1] + ';border:1px solid ' + couleurs[2] + ';';
-    el.innerHTML = '<span style="width:20px;height:20px;border-radius:50%;flex-shrink:0;display:flex;'
-      + 'align-items:center;justify-content:center;font-weight:700;font-size:12px;background:'
-      + couleurs[1] + ';color:#fff">' + couleurs[3] + '</span><span>' + escapeHtml(message) + '</span>';
-    zone.appendChild(el);
-    requestAnimationFrame(() => { el.style.opacity = '1'; el.style.transform = 'none'; });
-    const duree = genre === 'erreur' ? 7000 : 4000;
-    setTimeout(() => {
-      el.style.opacity = '0'; el.style.transform = 'translateY(-6px)';
-      setTimeout(() => el.remove(), 300);
-    }, duree);
-    el.addEventListener('click', () => el.remove());
-  } catch (e) {
-    try { alert(message); } catch (e2) {}
-  }
-}
-
-function lmChampVal(id) {
-  const el = root.querySelector('#' + id);
-  return el ? el.value : null;
-}
-
-async function lmExecuterGeste() {
-  if (!lmModale) return;
-  const l = lmModale.lead, type = lmModale.type;
-  const s = lmSource(l.source);
-  try {
-    if (type === 'transfert') {
-      const r = root.querySelector('input[name="g-site"]:checked');
-      if (!r) { lmToast('Choisissez une concession.', 'erreur'); return; }
-      const { data, error } = await sb.rpc('lead_transferer_site', {
-        p_id_lead: Number(l.id_lead),
-        p_id_site: Number(r.value),
-        p_qualification: lmChampVal('g-qualif') || null,
-        p_id_user_cible: null
+    // ── Signaux ───────────────────────────────────────────────────────────
+    function signaux() {
+      var out = [], k = S.kpis || {};
+      // 1. Fraîcheur de la copie BACS : tout le reste en dépend.
+      if (k.derniere_synchro) {
+        var age = mins(k.derniere_synchro);
+        if (age > 120) out.push({ id: 'sync-' + jour(k.derniere_synchro), niv: age > 1440 ? 'crit' : 'warn', k: 'Copie BACS', t: k.derniere_synchro,
+          titre: 'BACS n\'a pas été relu depuis ' + duree(age),
+          d: 'Les leads arrivés depuis le ' + quand(k.derniere_synchro) + ' ne sont pas encore ici. Ouvrez BACS avec l\'extension One Data pour relancer la synchronisation.', a: [] });
+      }
+      // 2. Nouveaux leads libres.
+      var libres = S.piscine.filter(function (l) { return verrouLibre(l) && (l.statut_eff === 'A affecter' || l.statut_eff === 'Nouveau'); });
+      libres.filter(function (l) { return mins(l.recu_le) < 15; }).forEach(function (l) {
+        out.push({ id: 'new-' + l.sf_lead_id, niv: 'new', k: 'Nouveau lead', t: l.recu_le, titre: nomLead(l) + ' · ' + (l.source_libelle || l.source_bacs || 'BACS'),
+          d: demande(l) + (l.site ? ' · ' + siteNom(l.site) : ''), a: [['Prendre', 'prendre', l.sf_lead_id]] });
       });
-      if (error) throw error;
-      lmModale = null;
-      // Le transfert change le périmètre du lead : on recharge la file.
-      state.mafileKey = null; state.mafileData = null;
-      fetchMaFile();
-      if (data && data.ok) lmToast('Lead transféré.' + (data.pousse_vers_bacs ? ' La mise à jour BACS suivra.' : ''), 'ok');
-      else lmToast('Transfert impossible : ' + ((data && data.motif) || 'raison inconnue'), 'erreur');
-      return;
+      // 3. Hors délai dans la piscine.
+      var hd = libres.filter(function (l) { return mins(l.recu_le) >= (l.sla_min || 120); })
+        .sort(function (a, b) { return ts(a.recu_le) - ts(b.recu_le); });
+      if (hd.length) out.push({ id: 'hd-' + hd.length + '-' + hd[0].sf_lead_id, niv: 'crit', k: 'Hors délai', t: hd[0].recu_le,
+        titre: plural(hd.length, 'lead hors délai', 'leads hors délai') + ' dans la piscine',
+        d: 'Le plus ancien : ' + nomLead(hd[0]) + ', ' + duree(mins(hd[0].recu_le)) + ' (' + (hd[0].source_libelle || 'BACS') + ', SLA ' + slaTxt(hd[0].sla_min || 120) + ').',
+        a: [['Prendre le plus ancien', 'prendre', hd[0].sf_lead_id]] });
+      // 4. Rappels : ceux de l'heure, un par un ; le retard, en un seul signal.
+      var dus = S.rappels.filter(function (l) { return l.rappel_le && ts(l.rappel_le) <= Date.now() + 10 * 60000; });
+      dus.filter(function (l) { return Math.abs(ts(l.rappel_le) - Date.now()) < 30 * 60000 && verrouLibre(l); }).slice(0, 4).forEach(function (l) {
+        out.push({ id: 'rap-' + l.sf_lead_id + '-' + l.rappel_le, niv: 'warn', k: 'Rappel', t: l.rappel_le, titre: 'Rappeler ' + nomLead(l),
+          d: libStatut(l.statut_eff) + (l.tentatives ? ' · ' + plural(l.tentatives, 'tentative') : '') + ' · ' + demande(l), a: [['Appeler', 'prendre', l.sf_lead_id]] });
+      });
+      var retard = dus.filter(function (l) { return ts(l.rappel_le) < Date.now() - 30 * 60000; });
+      if (retard.length) {
+        var r0 = retard.slice().sort(function (a, b) { return ts(a.rappel_le) - ts(b.rappel_le); })[0];
+        out.push({ id: 'retard-' + retard.length, niv: 'warn', k: 'Rappels en retard', t: r0.rappel_le,
+          titre: plural(retard.length, 'rappel dépassé', 'rappels dépassés'),
+          d: 'Le plus ancien : ' + nomLead(r0) + ', prévu le ' + quand(r0.rappel_le) + '. Rappelez, reprogrammez ou abandonnez.',
+          a: [['Voir les rappels', 'tab', 'rappels']] });
+      }
+      // 5. Relais bloqué : transferts non pris par le site au-delà de 2 h.
+      var bloques = S.transferts.filter(function (l) {
+        var depuis = l.transfere_le || l.derniere_action_le;
+        return l.id_lead && !l.od_contact_le && ['recu', 'resolu', 'attribue'].indexOf(l.od_statut) !== -1
+          && depuis && mins(depuis) >= SLA_SITE && l.derniere_action !== 'relance_site';
+      });
+      var parSite = {};
+      bloques.forEach(function (l) { var s = l.site || 'Site inconnu'; (parSite[s] = parSite[s] || []).push(l); });
+      Object.keys(parSite).forEach(function (s) {
+        var ls = parSite[s];
+        out.push({ id: 'bloque-' + s + '-' + ls.length, niv: 'vr', k: 'Relais bloqué', t: ls[0].transfere_le || ls[0].derniere_action_le,
+          titre: siteNom(s) + ' n\'a pas pris ' + (ls.length > 1 ? ls.length + ' transferts' : 'un transfert'),
+          d: ls.slice(0, 4).map(function (l) { return nomLead(l) + ' (' + duree(mins(l.transfere_le || l.derniere_action_le)) + ')'; }).join(', ') + '. SLA du site : 2 h.',
+          a: [['Relancer le chef', 'relancer', ls.map(function (l) { return l.sf_lead_id; }).join(',')]] });
+      });
+      // 6. Les collègues au travail.
+      S.piscine.concat(S.rappels).filter(function (l) { return !verrouLibre(l) && !estMien(l); }).slice(0, 3).forEach(function (l) {
+        out.push({ id: 'resa-' + l.sf_lead_id + '-' + l.verrou_jusqu, niv: 'info', k: 'Plateau', t: l.verrou_jusqu,
+          titre: propre(l.verrou_nom || 'Un collègue') + ' traite ' + nomLead(l), d: 'Réservé jusqu\'à ' + hh(l.verrou_jusqu) + ', puis libéré automatiquement.', a: [] });
+      });
+      // 7. Ce qui n'est dans aucune file par défaut.
+      if (k.stock_acceptes_anciens > 0) out.push({ id: 'stock-' + k.stock_acceptes_anciens, niv: 'info', k: 'Stock', t: null,
+        titre: plural(k.stock_acceptes_anciens, 'lead accepté', 'leads acceptés') + ' sans suite depuis plus de 14 j',
+        d: 'Acceptés dans BACS par le plateau, jamais qualifiés ni abandonnés. Rappelez-les ou abandonnez-les avec un motif.',
+        a: [['Voir le stock', 'stock', '1']] });
+      var atelierCache = (k.atelier_en_file || 0) > 0 && !(S.sources || []).some(function (c) { return c === 'bacs_atelier'; });
+      if (atelierCache) out.push({ id: 'atelier-' + k.atelier_en_file, niv: 'info', k: 'Trafic atelier', t: null,
+        titre: plural(k.atelier_en_file, 'lead atelier attend', 'leads atelier attendent') + ' dans BACS',
+        d: 'Le trafic atelier n\'est pas affiché dans la piscine par défaut.', a: [['Les afficher', 'source', 'bacs_atelier']] });
+      return out.filter(function (s) { return !S.ack.has(s.id); });
     }
 
-    if (type === 'rdv' || type === 'relance') {
-      const cr = lmCreneauLu();
-      if (!cr) { lmToast('Choisissez un jour et une heure.', 'erreur'); return; }
-      const debut = cr.debut;
+    function renderSignaux(list) {
+      var h = '<div class="zh"><h2>Signaux <span class="cnt">' + list.length + '</span></h2><p>Ce qui vous arrive. Chaque signal porte son action.</p></div>';
+      if (!list.length) return h + '<div class="sig-empty">Aucun signal en attente. Les nouveaux leads, les rappels dus et les transferts non pris apparaîtront ici.</div>';
+      list.forEach(function (s) {
+        h += '<div class="sg ' + s.niv + (S.frais.has(s.id) ? ' fresh' : '') + '"><span class="sg-m"></span><div>'
+          + '<div class="sg-top"><span class="sg-k">' + esc(s.k) + '</span><span class="sg-h">' + (s.t ? esc(quand(s.t)) : '') + '</span></div>'
+          + '<p class="sg-t">' + esc(s.titre) + '</p><p class="sg-d">' + esc(s.d) + '</p>'
+          + '<div class="sg-a">' + s.a.map(function (a, i) { return '<button type="button" class="btn sm' + (i === 0 ? (s.niv === 'vr' ? ' vr' : ' pri') : '') + '" data-a="' + a[1] + '" data-id="' + esc(a[2]) + '">' + esc(a[0]) + '</button>'; }).join('')
+          + '<button type="button" class="btn sm ghost" data-a="ack" data-id="' + esc(s.id) + '">Vu</button></div></div></div>';
+      });
+      return h;
+    }
 
-      // ⚠️ RELEVÉ LE 21/09 : les rendez-vous pris ici arrivaient dans BACS
-      //    mais PAS dans l'agenda One Data — où le vendeur travaille. Ils
-      //    passent désormais par `lead_rdv_creer`, qui les inscrit dans
-      //    l'agenda (même logique que le module agenda) et, pour un lead
-      //    BACS, dépose en plus le geste vers Salesforce, lié.
-      //    Heures LOCALES, au format de l'agenda.
-      if (type === 'rdv') {
-        const loc = (d) => d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-'
-          + String(d.getDate()).padStart(2, '0') + ' ' + String(d.getHours()).padStart(2, '0') + ':'
-          + String(d.getMinutes()).padStart(2, '0') + ':00';
-        const { data, error } = await sb.rpc('lead_rdv_creer', {
-          p_id_lead: Number(l.id_lead), p_start: loc(debut), p_end: loc(cr.fin),
-          p_sujet: lmChampVal('g-sujet') || 'Rendez-vous' });
-        if (error) throw error;
-        lmModale = null;
-        renderAll();
-        lmToast(data && data.vers_bacs
-          ? 'Rendez-vous inscrit dans l\'agenda. Il partira aussi dans BACS dès que l\'onglet répondra.'
-          : 'Rendez-vous inscrit dans l\'agenda.', data && data.vers_bacs ? 'attente' : 'ok');
+    // ── Situation ─────────────────────────────────────────────────────────
+    function renderSituation() {
+      var k = S.kpis || {};
+      var libres = S.piscine.filter(verrouLibre);
+      var hd = libres.filter(function (l) { return (l.statut_eff === 'A affecter' || l.statut_eff === 'Nouveau') && mins(l.recu_le) >= (l.sla_min || 120); });
+      var old = libres.length ? libres.reduce(function (a, b) { return ts(a.recu_le) < ts(b.recu_le) ? a : b; }) : null;
+      var nom = propre([user && user.prenom, user && user.nom].filter(Boolean).join(' ')) || (user && user.nomComplet) || '';
+      var l = '<span class="vr">Plateau VROOM</span>' + (nom ? ' · ' + esc(nom) : '')
+        + (opt.apercu ? ' · aperçu <button type="button" class="lien" data-a="quitter-apercu">revenir à la vue habituelle</button>' : '');
+      var t = libres.length
+        ? (hd.length ? '<b class="t-crit">' + plural(hd.length, 'lead hors délai', 'leads hors délai') + '</b> sur ' : '')
+          + '<b>' + plural(libres.length, 'lead libre', 'leads libres') + '</b> dans la piscine BACS. Le plus ancien attend depuis <b class="' + (hd.length ? 't-crit' : 't-acc') + '">' + duree(mins(old.recu_le)) + '</b>.'
+        : 'La piscine BACS est vide.';
+      if (k.n_rappels_dus) t += ' <b class="t-warn">' + plural(k.n_rappels_dus, 'rappel est dû', 'rappels sont dus') + '</b>.';
+      if (k.n_transferts_sans_contact) t += ' <b class="t-vr">' + plural(k.n_transferts_sans_contact, 'transfert n\'est pas pris', 'transferts ne sont pas pris') + '</b> par les sites.';
+      var syncAge = k.derniere_synchro ? mins(k.derniere_synchro) : null;
+      var kp = [['Pris aujourd\'hui', k.pris || 0], ['Qualifiés', k.qualifies || 0], ['Rappels programmés', k.rappels || 0],
+                ['Abandonnés', k.abandonnes || 0], ['Acceptés dans BACS', k.bacs_acceptes || 0],
+                ['Copie BACS', syncAge == null ? '—' : '<span class="txt ' + (syncAge > 1440 ? 't-crit' : syncAge > 120 ? 't-warn' : '') + '">' + (syncAge < 1 ? 'à l\'instant' : 'il y a ' + duree(syncAge)) + '</span>']];
+      if (k.ecrire_bacs === false) kp.push(['Report dans BACS', '<span class="txt t-mut">désactivé</span>']);
+      return '<section class="situ"><p class="situ-l">' + l + '</p><p class="situ-t">' + t + '</p><div class="kpis">'
+        + kp.map(function (x) { return '<div class="k"><span>' + x[0] + '</span><b>' + x[1] + '</b></div>'; }).join('') + '</div></section>';
+    }
+
+    // ── Onglets ───────────────────────────────────────────────────────────
+    function onglets() {
+      var k = S.kpis || {};
+      var libres = S.piscine.filter(verrouLibre);
+      var hd = libres.some(function (l) { return (l.statut_eff === 'A affecter' || l.statut_eff === 'Nouveau') && mins(l.recu_le) >= (l.sla_min || 120); });
+      return [['piscine', 'La piscine BACS', libres.length, hd],
+              ['rappels', 'Rappels', S.rappels.length, (k.n_rappels_dus || 0) > 0],
+              ['transferts', 'Transferts', S.transferts.length, (k.n_transferts_sans_contact || 0) > 0],
+              ['campagnes', 'Campagnes', null]];
+    }
+    function renderTabs() {
+      return '<div class="tabs" role="tablist">' + onglets().map(function (o) {
+        var on = o[0] === S.tab;
+        return '<button type="button" role="tab" aria-selected="' + on + '" class="' + (on ? 'on' : '') + '" data-a="tab" data-id="' + o[0] + '">' + esc(o[1])
+          + (o[2] != null ? ' <span class="cnt ' + (o[2] === 0 ? 'z' : (o[3] ? 'c' : '')) + '">' + o[2] + '</span>' : '') + '</button>';
+      }).join('') + '</div>';
+    }
+    function filtreCampagne() {
+      return S.campagne ? '<div class="ph-r"><span class="tag camp">' + esc(S.campagne) + '</span><button type="button" class="btn sm ghost" data-a="campagne" data-id="">Retirer le filtre</button></div>' : '';
+    }
+
+    // ── Vues ──────────────────────────────────────────────────────────────
+    function actionLigne(l, verbe) {
+      if (estMien(l)) return '<button type="button" class="btn pri" data-a="open" data-id="' + esc(l.sf_lead_id) + '">Reprendre</button>';
+      if (!verrouLibre(l)) return '<span class="resa-l">Réservé par ' + esc(propre(l.verrou_nom || 'un collègue')) + '<br>jusqu\'à ' + hh(l.verrou_jusqu) + '</span>';
+      return '<button type="button" class="btn pri" data-a="prendre" data-id="' + esc(l.sf_lead_id) + '">' + esc(verbe || 'Prendre') + '</button>';
+    }
+    function ligneLead(l, gauche, verbe) {
+      return '<div class="lr' + (!verrouLibre(l) && !estMien(l) ? ' resa' : '') + '" data-a="open" data-id="' + esc(l.sf_lead_id) + '" tabindex="0">'
+        + '<div>' + gauche + '</div>'
+        + '<div><span class="lr-n">' + esc(nomLead(l)) + '</span> <span class="lr-v">' + esc(l.ville || '') + '</span><p class="lr-d">' + esc(demande(l)) + '</p><div class="tags">' + tagsLead(l) + '</div></div>'
+        + '<div class="lr-a">' + actionLigne(l, verbe) + '</div></div>';
+    }
+    function chipsSources() {
+      var k = S.kpis || {}, src = k.sources || [];
+      if (!src.length) return '';
+      var actives = S.sources || src.filter(function (s) { return s.suivi; }).map(function (s) { return s.code; });
+      return '<div class="chips filtres" aria-label="Sources">' + src.map(function (s) {
+        var on = actives.indexOf(s.code) !== -1;
+        return '<button type="button" class="fchip' + (on ? ' on' : '') + '" data-a="source" data-id="' + esc(s.code) + '" aria-pressed="' + on + '">' + esc(s.libelle) + ' <span class="num">' + s.n + '</span></button>';
+      }).join('') + '</div>';
+    }
+    function vuePiscine() {
+      var k = S.kpis || {};
+      var h = '<div class="ph"><div><h2>La piscine BACS</h2><p>' + (S.stock
+          ? 'Les leads acceptés par le plateau il y a plus de 14 jours, sans suite. Rappelez-les, qualifiez-les ou abandonnez-les.'
+          : 'Ce qui attend d\'être pris, du plus ancien au plus récent, et ce que le plateau a accepté ces 14 derniers jours. Prendre réserve le lead à votre nom ' + (k.verrou_minutes || 5) + ' min.') + '</p></div>'
+        + filtreCampagne() + '</div>'
+        + '<div class="barre"><div class="seg"><button type="button" class="' + (!S.stock ? 'on' : '') + '" data-a="stock" data-id="">À traiter <span class="num">' + S.piscine.length + '</span></button>'
+        + '<button type="button" class="' + (S.stock ? 'on' : '') + '" data-a="stock" data-id="1">Stock accepté <span class="num">' + (k.stock_acceptes_anciens || 0) + '</span></button></div>'
+        + (!S.stock ? chipsSources() : '') + '</div><div class="list">';
+      var ls = S.stock ? (S.stockListe || []) : S.piscine;
+      if (S.stock && !S.stockListe) h += '<div class="empty">Chargement du stock…</div>';
+      else if (!ls.length) h += '<div class="empty">' + (S.campagne ? 'Aucun lead de cette campagne à traiter.' : S.stock ? 'Aucun lead en stock.' : 'Rien à prendre : la piscine BACS est vide pour les sources sélectionnées.') + '</div>';
+      ls.forEach(function (l) {
+        var gauche = S.stock
+          ? '<span class="tm crit"><b>' + duree(mins(l.recu_le)) + '</b><small>reçu le ' + jour(l.recu_le) + '</small></span>'
+          : tm(l.recu_le, l.sla_min || 120);
+        h += ligneLead(l, gauche, S.stock || l.statut_eff === 'Accepté' ? 'Rappeler' : 'Prendre');
+      });
+      return h + '</div>';
+    }
+    function vueRappels() {
+      var ls = S.rappels.filter(function (l) { return !S.miens || Number(l.derniere_action_par) === Number(MOI); });
+      var h = '<div class="ph"><div><h2>Rappels</h2><p>Les clients injoignables et les projets à long terme, du rappel le plus en retard au plus lointain (30 jours en arrière, 7 jours en avant).</p></div>'
+        + '<div class="ph-r">' + filtreCampagne() + '<div class="seg"><button type="button" class="' + (!S.miens ? 'on' : '') + '" data-a="miens" data-id="">Tout le plateau</button><button type="button" class="' + (S.miens ? 'on' : '') + '" data-a="miens" data-id="1">Les miens</button></div></div></div><div class="list">';
+      if (!ls.length) h += '<div class="empty">Aucun rappel programmé.</div>';
+      ls.forEach(function (l) {
+        var due = ts(l.rappel_le) - Date.now();
+        var cls = due <= 0 ? 'crit' : (due < 15 * 60000 ? 'warn' : 'ok');
+        var b = due <= 0 ? (due > -15 * 60000 ? 'Maintenant' : 'retard ' + duree(-due / 60000)) : 'dans ' + duree(due / 60000);
+        var gauche = '<span class="tm ' + cls + '"><b>' + b + '</b><small>prévu ' + (quand(l.rappel_le).length > 5 ? 'le ' : 'à ') + esc(quand(l.rappel_le)) + '</small></span>';
+        h += ligneLead(l, gauche, 'Appeler').replace('<div class="tags">', '<div class="tags"><span class="tag ' + (l.statut_eff === 'Projet Long Terme' ? 'vr' : 'warn') + '">' + esc(libStatut(l.statut_eff)) + '</span>');
+      });
+      return h + '</div>';
+    }
+    function etatTransfert(l) {
+      var depuis = l.transfere_le || l.derniere_action_le;
+      if (l.od_contact_le) return '<span class="tag ok">Contacté' + (l.od_vendeur ? ' par ' + esc(propre(l.od_vendeur)) : '') + (depuis && ts(l.od_contact_le) > ts(depuis) ? ' en ' + duree((ts(l.od_contact_le) - ts(depuis)) / 60000) : '') + '</span>';
+      if (l.od_statut === 'converti') return '<span class="tag ok">Converti</span>';
+      if (l.od_statut === 'perdu' || l.od_statut === 'rejete') return '<span class="tag">Clos par le site</span>';
+      if (!l.id_lead) return '<span class="tag">Suivi dans BACS</span>';
+      if (l.derniere_action === 'relance_site') return '<span class="tag vr">Chef relancé</span>';
+      if (depuis && mins(depuis) >= SLA_SITE) return '<button type="button" class="btn sm vr" data-a="relancer" data-id="' + esc(l.sf_lead_id) + '">Relancer le chef</button>';
+      return '<span class="tag">En attente' + (l.od_vendeur ? ' chez ' + esc(propre(l.od_vendeur)) : ' sur le site') + '</span>';
+    }
+    function vueTransferts() {
+      var ls = S.transferts.filter(function (l) { return !S.miens || Number(l.derniere_action_par) === Number(MOI); });
+      var h = '<div class="ph"><div><h2>Transferts</h2><p>Ce que deviennent les leads qualifiés par le plateau ces 30 derniers jours. Le site a 2 h pour les prendre ; au-delà, relancez le chef des ventes.</p></div>'
+        + '<div class="ph-r">' + filtreCampagne() + '<div class="seg"><button type="button" class="' + (!S.miens ? 'on' : '') + '" data-a="miens" data-id="">Tout le plateau</button><button type="button" class="' + (S.miens ? 'on' : '') + '" data-a="miens" data-id="1">Les miens</button></div></div></div><div class="list">';
+      if (!ls.length) h += '<div class="empty">Aucun transfert sur la période.</div>';
+      ls.forEach(function (l) {
+        var depuis = l.transfere_le || l.derniere_action_le;
+        var attente = l.id_lead && !l.od_contact_le && ['recu', 'resolu', 'attribue'].indexOf(l.od_statut) !== -1 && depuis;
+        var gauche = attente ? tm(depuis, SLA_SITE, 'sur le site · SLA 2 h')
+          : '<span class="tm neutre"><b>' + esc(depuis ? jour(depuis) : jour(l.recu_le)) + '</b><small>' + (depuis ? 'transféré' : 'reçu') + '</small></span>';
+        var q = resumeQualif(l.qualification);
+        h += '<div class="lr" data-a="open" data-id="' + esc(l.sf_lead_id) + '" tabindex="0"><div>' + gauche + '</div>'
+          + '<div><span class="lr-n">' + esc(nomLead(l)) + '</span> <span class="lr-v">→ ' + esc(siteNom(l.site) || 'site non renseigné') + '</span><p class="lr-d">' + esc(q || demande(l)) + '</p><div class="tags">' + tagsLead(l).replace(/<span class="tag">BACS : [^<]*<\/span>/, '') + '</div></div>'
+          + '<div class="lr-a">' + etatTransfert(l) + '</div></div>';
+      });
+      return h + '</div>';
+    }
+    function vueCampagnes() {
+      var h = '<div class="ph"><div><h2>Campagnes BACS</h2><p>Les leads des 90 derniers jours par campagne, hors trafic atelier. Filtrez les files sur une campagne pour la solder.</p></div></div>';
+      if (!S.campagnes) return h + '<div class="empty">Chargement des campagnes…</div>';
+      if (!S.campagnes.length) return h + '<div class="empty">Aucune campagne sur la période.</div>';
+      h += '<div class="scroll"><table class="camp-t"><thead><tr><th>Campagne</th><th>Reçus</th><th>À prendre</th><th>Acceptés</th><th>En rappel</th><th>Qualifiés</th><th>Abandonnés</th><th>Qualification</th><th></th></tr></thead><tbody>';
+      S.campagnes.forEach(function (c) {
+        var taux = c.recus ? Math.round(100 * c.qualifies / c.recus) : 0;
+        var ouverts = Number(c.a_prendre) + Number(c.acceptes) + Number(c.rappels);
+        var sans = c.campagne === '(sans nom de campagne)';
+        h += '<tr><td class="l">' + esc(c.campagne) + '<small>dernier lead le ' + esc(jour(c.dernier)) + '</small></td>'
+          + '<td class="num">' + c.recus + '</td><td class="num">' + (c.a_prendre || '<span class="na">0</span>') + '</td>'
+          + '<td class="num">' + (c.acceptes || '<span class="na">0</span>') + '</td><td class="num">' + (c.rappels || '<span class="na">0</span>') + '</td>'
+          + '<td class="num">' + (c.qualifies || '<span class="na">0</span>') + '</td><td class="num">' + (c.abandonnes || '<span class="na">0</span>') + '</td>'
+          + '<td><span class="prog"><span class="num">' + taux + ' %</span><span class="bar' + (taux < 10 ? ' low' : '') + '"><i style="width:' + Math.min(100, taux) + '%"></i></span></span></td>'
+          + '<td>' + (ouverts && !sans ? '<button type="button" class="btn sm" data-a="campagne" data-id="' + esc(c.campagne) + '">Filtrer les files</button>' : '') + '</td></tr>';
+      });
+      return h + '</tbody></table></div><p class="foot">Un lead est compté dans la colonne de son statut actuel : statut BACS, ou celui du dernier geste One Data s\'il est plus récent que la copie BACS.</p>';
+    }
+    function renderPanel() {
+      if (S.tab === 'rappels') return vueRappels();
+      if (S.tab === 'transferts') return vueTransferts();
+      if (S.tab === 'campagnes') return vueCampagnes();
+      return vuePiscine();
+    }
+
+    function render() {
+      if (!el.isConnected) return;
+      if (!S.charge) {
+        root.innerHTML = '<section class="situ"><p class="situ-l"><span class="vr">Plateau VROOM</span></p><p class="situ-t">' + esc(S.erreur || 'Chargement…') + '</p>'
+          + (S.erreur ? '<div><button type="button" class="btn pri" data-a="reessayer">Réessayer</button></div>' : '') + '</section>';
         return;
       }
+      var list = signaux();
+      list.forEach(function (s) { if (!S.vus.has(s.id)) { S.vus.add(s.id); if (!S.premier) S.frais.add(s.id); } });
+      S.premier = false;
+      var y = (FW.scrollY || 0);
+      root.innerHTML = renderSituation()
+        + (S.erreur ? '<p class="alerte">' + esc(S.erreur) + ' Les données affichées datent du dernier chargement réussi.</p>' : '')
+        + '<div class="poste"><aside class="sig" aria-label="Signaux">' + renderSignaux(list) + '</aside>'
+        + '<section class="act" aria-label="Actions">' + renderTabs() + '<div class="panel">' + renderPanel() + '</div></section></div>';
+      try { if (FW.scrollY !== y) FW.scrollTo(0, y); } catch (e) {}
+      setTimeout(function () { S.frais.clear(); }, 7000);
+    }
 
-      if (s.distant === 'bacs') {
-        const charge = { date: debut.toISOString() };
-        const { error } = await sb.rpc('bacs_sortant_deposer', {
-          p_geste: type, p_id_lead: Number(l.id_lead), p_charge: charge });
-        if (error) throw error;
-        lmModale = null;
-        renderAll();
-        // ⚠️ On annonce une MISE EN FILE, pas une réussite : le geste
-        //    part dans BACS quand l'onglet répond, pas à l'instant du clic.
-        lmToast('Relance transmise à BACS.', 'attente');
-        return;
+    // ── Panneau latéral : la fiche du lead ────────────────────────────────
+    function itemConnu(sf) {
+      return S.piscine.concat(S.rappels, S.transferts, S.stockListe || []).find(function (x) { return x.sf_lead_id === sf; }) || null;
+    }
+    function chipGroup(name, opts, val) {
+      return '<div class="chips">' + opts.map(function (o, i) {
+        return '<label class="chip"><input type="radio" name="' + name + '" value="' + esc(o) + '"' + (o === val ? ' checked' : '') + '><span>' + esc(o) + '</span></label>';
+      }).join('') + '</div>';
+    }
+    function parcours(f) {
+      var ev = [];
+      (f.historique_bacs || []).forEach(function (e) {
+        var a = String(e.action || '');
+        var txt = a === 'created' ? 'Reçu dans BACS' : a.replace(/^Statut\s*:?\s*/i, 'Statut : ').replace(/^Owner\s*:?\s*/i, 'Propriétaire : ');
+        ev.push(['', e.le, txt + (e.par ? ' · ' + propre(e.par) : ''), /VROOM/i.test(e.par || '') ? 'v' : '']);
+      });
+      var LIB = { prendre: 'Pris dans One Data', qualifie: 'Qualifié et orienté', injoignable: 'Injoignable, rappel programmé',
+                  long_terme: 'Projet long terme, rappel programmé', abandonne: 'Abandonné', relance_site: 'Chef des ventes relancé' };
+      (f.actions_od || []).forEach(function (a) {
+        var d = a.detail || {};
+        var plus = a.action === 'abandonne' && d.motif ? ' · ' + d.motif
+          : (a.action === 'injoignable' || a.action === 'long_terme') && d.rappel_le ? ' le ' + quand(d.rappel_le)
+          : a.action === 'relance_site' && d.chefs_prevenus != null ? ' (' + plural(d.chefs_prevenus, 'chef prévenu', 'chefs prévenus') + ')' : '';
+        ev.push(['', a.le, (LIB[a.action] || a.action) + plus + (a.par ? ' · ' + propre(a.par) : ''), 'v']);
+      });
+      if (!ev.length) return '<p class="hint">Aucun historique synchronisé pour ce lead.</p>';
+      ev.sort(function (a, b) { return ts(a[1]) - ts(b[1]); });
+      return '<ol class="tl">' + ev.map(function (e) { return '<li class="' + e[3] + '"><b>' + esc(quand(e[1])) + '</b><span>' + esc(e[2]) + '</span></li>'; }).join('') + '</ol>';
+    }
+    function dateLocale(d) {
+      var p = function (n) { return String(n).padStart(2, '0'); };
+      return d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate()) + 'T' + p(d.getHours()) + ':' + p(d.getMinutes());
+    }
+    function demainA(h, j) { var d = new Date(); d.setDate(d.getDate() + (j || 1)); d.setHours(h, 0, 0, 0); return d; }
+
+    function renderDrawer() {
+      var D = S.dr; if (!D) return;
+      var f = D.fiche;
+      if (!f) { $drawer.innerHTML = '<header class="dr-h"><div><h2>Chargement…</h2></div><button type="button" class="x" data-a="close" aria-label="Fermer">×</button></header>'; return; }
+      var it = itemConnu(D.sf) || {};
+      var l = Object.assign({}, it, f);
+      l.source_libelle = it.source_libelle || f.source_bacs; l.sla_min = it.sla_min || 120;
+      var mien = estMien(l), libre = verrouLibre(l);
+      var actif = ['A affecter', 'Nouveau', 'Accepté', 'Injoignable temporairement', 'Projet Long Terme', 'Interesse', 'Intéressé'].indexOf(l.statut_eff) !== -1;
+      var fb = f.fiche_bacs || {};
+      var h = '<header class="dr-h"><div><div class="tags" style="margin:0 0 6px">' + tagsLead(l).replace(/<span class="tag">BACS : [^<]*<\/span>/, '')
+        + '<span class="tag ' + (l.statut_eff === 'Qualifié' ? 'ok' : l.statut_eff === 'Abandonned' ? 'crit' : '') + '">' + esc(libStatut(l.statut_eff)) + '</span></div>'
+        + '<h2>' + esc(nomLead(l)) + '</h2><p class="dr-s">' + esc([l.ville, l.site ? 'site BACS : ' + siteNom(l.site) : null].filter(Boolean).join(' · ')) + '</p></div>'
+        + '<button type="button" class="x" data-a="close" aria-label="Fermer">×</button></header><div class="dr-b">';
+      // Délais
+      h += '<section><h3>Délai</h3><div class="delais"><div><span>Depuis la réception BACS</span>' + (actif && l.statut_eff !== 'Accepté' && !l.rappel_le ? tm(l.recu_le, l.sla_min) : '<span class="tm neutre"><b>' + duree(mins(l.recu_le)) + '</b><small>reçu le ' + esc(quand(l.recu_le)) + '</small></span>') + '</div>';
+      if (l.rappel_le && actif) { var due = ts(l.rappel_le) - Date.now(); h += '<div><span>Rappel prévu</span><span class="tm ' + (due <= 0 ? 'crit' : 'ok') + '"><b>' + esc(quand(l.rappel_le)) + '</b><small>' + (due <= 0 ? 'retard ' + duree(-due / 60000) : 'dans ' + duree(due / 60000)) + '</small></span></div>'; }
+      if (l.transfere_le) h += '<div><span>Sur le site</span>' + (l.od_contact_le ? '<span class="tm ok"><b>' + duree((ts(l.od_contact_le) - ts(l.transfere_le)) / 60000) + '</b><small>avant contact</small></span>' : tm(l.transfere_le, SLA_SITE, 'sans contact · SLA 2 h')) + '</div>';
+      if (mien) h += '<div><span>Réservé à votre nom</span><span class="tm ok"><b>jusqu\'à ' + hh(l.verrou_jusqu) + '</b><small>prolongé tant que la fiche est ouverte</small></span></div>';
+      h += '</div></section>';
+      // Contact
+      h += '<section><h3>Contact</h3>' + (l.telephone ? '<div class="tel"><b>' + esc(telAff(l.telephone)) + '</b><button type="button" class="btn sm" data-a="copier" data-id="' + esc(telAff(l.telephone)) + '">Copier</button></div>' : '<p class="hint">Aucun numéro dans BACS.</p>')
+        + (l.email ? '<p class="mail">' + esc(l.email) + '</p>' : '')
+        + '<div class="canaux">' + [['Appeler', 'appel'], ['SMS', 'sms'], ['WhatsApp', 'wa'], ['Email', 'mail']].map(function (c) { return '<button type="button" class="btn" data-a="canal" data-id="' + c[1] + '"' + ((c[1] === 'mail' ? !l.email : !l.telephone) ? ' disabled' : '') + '>' + c[0] + '</button>'; }).join('') + '</div></section>';
+      // Demande
+      var oui = function (v) { return v === 'true' || v === true ? 'Oui' : v === 'false' || v === false ? 'Non' : v; };
+      var dl = [['Type', fb.type_demande], ['Modèle', fb.modele], ['Marque', fb.marque], ['Échéance', fb.echeance], ['Reprise', oui(fb.reprise)],
+                ['Financement', fb.financement], ['Budget', fb.budget], ['Canal préféré', fb.canal_prefere],
+                ['À accepter avant', fb.limite_acceptation ? quand(fb.limite_acceptation) : null]].filter(function (x) { return x[1]; });
+      h += '<section><h3>Demande</h3>' + (dl.length ? '<dl class="dl">' + dl.map(function (x) { return '<dt>' + x[0] + '</dt><dd>' + esc(x[1]) + '</dd>'; }).join('') + '</dl>' : '<p style="font-weight:700">' + esc(demande(l)) + '</p>')
+        + (l.commentaire ? '<p class="quote">« ' + esc(l.commentaire) + ' »</p>' : '')
+        + (fb.campagne_description ? '<p class="hint">' + esc(fb.campagne_description) + '</p>' : '') + '</section>';
+      // Qualification et orientation (lead réservé à mon nom)
+      if (mien && actif) {
+        var q = l.qualification || {};
+        h += '<section><h3>Qualification</h3><div class="qf">'
+          + '<div class="q"><span>Projet</span>' + chipGroup('q-projet', ['Achat VN', 'Achat VO', 'Atelier', 'Simple information'], q.projet || (/VO|occasion/i.test(fb.type_demande || l.campagne || '') ? 'Achat VO' : 'Achat VN')) + '</div>'
+          + '<div class="q"><span>Modèle visé</span><input type="text" id="q-modele" value="' + esc(q.modele || fb.modele || l.modele || '') + '"></div>'
+          + '<div class="q"><span>Échéance</span>' + chipGroup('q-echeance', ['Moins d\'un mois', '1 à 3 mois', '3 mois et plus'], q.echeance || '') + '</div>'
+          + '<div class="q"><span>Reprise</span>' + chipGroup('q-reprise', ['Oui', 'Non', 'Ne sait pas'], q.reprise || '') + '</div>'
+          + '<div class="q"><span>Financement</span>' + chipGroup('q-fin', ['Comptant', 'Crédit', 'LOA', 'LLD', 'Ne sait pas'], q.financement || '') + '</div>'
+          + '<div class="q"><span>Note pour le vendeur</span><textarea id="q-note" rows="2" placeholder="Ce que le vendeur doit savoir avant d\'appeler">' + esc(q.note || '') + '</textarea></div></div></section>';
+        h += '<section><h3>Orienter vers</h3>';
+        if (!D.sites) h += '<p class="hint">Chargement des sites…</p>';
+        else if (!D.sites.length) h += '<p class="hint">Aucun site de vente trouvé pour cette marque.</p>';
+        else {
+          var montrer = D.tousSites ? D.sites : D.sites.filter(function (s, i) { return s.rang < 3 || i < 3 || Number(s.id_site) === Number(D.site); });
+          h += '<div class="sites">' + montrer.map(function (s) {
+            return '<label class="site-o"><input type="radio" name="q-site" value="' + s.id_site + '"' + (Number(D.site) === Number(s.id_site) ? ' checked' : '') + '><span><b>' + esc(siteNom(s.site)) + '</b><small>' + esc(s.raison) + '</small></span><em>' + plural(Number(s.en_attente) || 0, 'lead', 'leads') + ' en attente</em></label>';
+          }).join('') + '</div>' + (!D.tousSites && montrer.length < D.sites.length ? '<button type="button" class="btn sm ghost" data-a="tous-sites">Voir les ' + D.sites.length + ' sites</button>' : '');
+          h += '<label class="q vend"><span>Vendeur</span><select id="q-vendeur"><option value="">Tour de rôle du site</option>'
+            + (D.vendeurs || []).map(function (v) { return '<option value="' + v.id_user + '">' + esc(propre(v.nom)) + (Number(v.en_attente) ? ' · ' + v.en_attente + ' en attente' : '') + '</option>'; }).join('')
+            + '</select></label>';
+        }
+        h += '</section>';
+      } else if (l.qualification && Object.keys(l.qualification).length) {
+        var qq = l.qualification;
+        h += '<section><h3>Qualification du plateau</h3><dl class="dl">' + [['Projet', qq.projet], ['Modèle', qq.modele], ['Échéance', qq.echeance], ['Reprise', qq.reprise], ['Financement', qq.financement], ['Note', qq.note]]
+          .filter(function (x) { return x[1]; }).map(function (x) { return '<dt>' + x[0] + '</dt><dd>' + esc(x[1]) + '</dd>'; }).join('') + '</dl></section>';
       }
-      // Source sans système distant : on écrit dans One Data.
-      lmModale = null;
-      renderAll();
-      lmToast('Cette source n\'a pas de système distant : le rendez-vous se prend dans l\'agenda One Data.', 'attente');
-      return;
-    }
+      if (l.id_lead && (l.od_statut || l.od_vendeur)) {
+        h += '<section><h3>Sur le site</h3><dl class="dl"><dt>Statut One Data</dt><dd>' + esc(({ recu: 'Reçu', resolu: 'En attente', attribue: 'Attribué', contacte: 'Contacté', converti: 'Converti', perdu: 'Perdu', rejete: 'Rejeté' })[l.od_statut] || l.od_statut || '—') + '</dd>'
+          + (l.od_vendeur ? '<dt>Vendeur</dt><dd>' + esc(propre(l.od_vendeur)) + '</dd>' : '')
+          + (l.od_contact_le ? '<dt>Premier contact</dt><dd>' + esc(quand(l.od_contact_le)) + '</dd>' : '') + '</dl></section>';
+      }
+      h += '<section><h3>Parcours</h3>' + parcours(f) + '</section></div>';
 
-    if (type === 'perdre') {
-      const { error } = await sb.from('LEADS_EXTERNES')
-        .update({ statut: 'perdu', motif_fin: lmChampVal('g-motif'),
-                  clos_le: new Date().toISOString() })
-        .eq('id_lead', Number(l.id_lead));
-      if (error) throw error;
-      lmModale = null;
-      state.mafileKey = null; state.mafileData = null;
-      fetchMaFile();
-      return;
-    }
-  } catch (e) {
-    console.error('[leadMgmt] geste', e);
-    lmToast('Le geste n\'a pas pu être enregistré : ' + ((e && e.message) || e), 'erreur');
-  }
-}
-
-function v2Panneau() {
-  const V = state.v2;
-  if (!V || !V.sel) return '';
-  // L'overlay ferme au clic : il fait partie du volet, pas de la page.
-  return '<div class="v2-ovl" data-v2fermer="1"></div>' + v2PanneauCorps();
-}
-
-function v2PanneauCorps() {
-  const V = state.v2;
-
-  // Le panneau sert DEUX natures : des leads (mur, rapport) et des
-  // sollicitations de campagne. Même contenant, contenus différents.
-  if (V.sel.type === 'campagne') return v2PanneauCampagne();
-
-  const L = V.sel.leads || [];
-  let h = '<div class="v2-pan"><div class="v2-pan-h"><div><b>'
-    + escapeHtml(V.sel.titre) + '</b><div class="v2-pan-n">' + L.length + ' dossier'
-    + (L.length > 1 ? 's' : '') + '</div></div>'
-    + '<button type="button" class="v2-x" data-v2fermer="1">×</button></div>'
-    + '<div class="v2-pan-b">';
-  if (!L.length) {
-    h += '<div style="padding:20px;text-align:center;color:var(--text-mut);font-size:12px">'
-      + 'Aucun dossier dans cette tranche.</div>';
-  }
-  L.forEach(l => {
-    const n = lmfNiveau(l);
-    const r = lmfReste(l);
-    const cls = n === 'retard' ? 'ko' : n === 'bientot' ? 'warn' : 'ok';
-    const tps = (r == null) ? 'traité' : (r < 0 ? '+ ' + lmfDuree(-r) : lmfDuree(r));
-    // ⚠️ Le clic SÉLECTIONNE le lead et montre ses gestes. Il n'ouvre
-    //    PLUS la fiche client : un vendeur qui clique veut agir, et la
-    //    navigation lui faisait perdre l'écran (relevé le 18/09).
-    //    La fiche reste accessible par un bouton dédié.
-    const choisi = (lmLeadSel != null && Number(lmLeadSel) === Number(l.id_lead));
-    h += '<div class="v2-lead ' + cls + (choisi ? ' v2-lead-on' : '') + '"'
-      + ' data-v2lead="' + l.id_lead + '">'
-      + '<div class="v2-lead-h"><b>' + escapeHtml(lmNomLisible(l)) + '</b>'
-      + '<em class="' + cls + '">' + tps + '</em></div>'
-      + '<div class="v2-lead-m"><span class="v2-tag">'
-      + escapeHtml(l.source_libelle || l.source || '?') + '</span> '
-      + escapeHtml(l.vehicule_interet || '') + '</div>';
-    // Les gestes s'ouvrent SOUS le lead choisi : le vendeur garde sa
-    // liste sous les yeux au lieu de changer d'écran.
-    if (choisi) {
-      h += '<div class="v2-lead-g">' + lmGestesHtml(l);
-      if (l.id_client) {
-        h += '<button type="button" class="g-btn" style="margin-top:8px" '
-          + 'data-v2client="' + l.id_client + '"><b>Ouvrir la fiche client</b>'
-          + '<i>Historique, véhicules, contacts</i></button>';
+      // Pied : les gestes
+      h += '<footer class="dr-f">';
+      if (!actif) {
+        h += '<p class="hint">' + (l.statut_eff === 'Qualifié' ? 'Transféré : le site a la main.' : 'Lead clos (' + esc(libStatut(l.statut_eff)) + ').') + '</p>';
+        if (l.statut_eff === 'Qualifié' && l.id_lead && !l.od_contact_le && ['recu', 'resolu', 'attribue'].indexOf(l.od_statut) !== -1)
+          h += '<div class="row"><button type="button" class="btn vr" data-a="relancer" data-id="' + esc(l.sf_lead_id) + '">Relancer le chef des ventes</button></div>';
+      } else if (!libre && !mien) {
+        h += '<p class="hint">' + esc(propre(l.verrou_nom || 'Un collègue')) + ' traite ce lead. Il redevient libre à ' + hh(l.verrou_jusqu) + ' sans action.</p>';
+      } else if (!mien) {
+        h += '<div class="row"><button type="button" class="btn pri" data-a="prendre" data-id="' + esc(l.sf_lead_id) + '">Prendre ce lead</button><span class="hint">Il sera réservé à votre nom ' + ((S.kpis || {}).verrou_minutes || 5) + ' min.</span></div>';
       } else {
-        // ⚠️ Sans fiche client, la navigation échouait et faisait
-        //    clignoter l'écran. On le DIT au lieu de laisser essayer.
-        h += '<div style="margin-top:8px;font-size:11.5px;color:var(--text-mut);'
-          + 'padding:8px 10px;background:var(--blue-pale,#f5f8fc);border-radius:6px">'
-          + 'Aucune fiche client rattachée à ce lead.</div>';
-      }
-      h += '</div>';
-    }
-    if (PEUT_REAFFECTER) {
-      h += '<button type="button" class="v2-reaff" data-v2reaff="' + l.id_lead + '">'
-        + 'Réaffecter</button>';
-    }
-    h += '</div>';
-  });
-  h += '</div>';
-  h += '<div class="v2-pan-f">Cliquez un dossier pour voir ce que vous pouvez en faire. '
-    + 'Échap ou le fond pour refermer.</div></div>';
-  return h;
-}
-
-// Le détail d'une campagne : qui, depuis quand, et le cycle où sauter.
-function v2PanneauCampagne() {
-  const V = state.v2, S = V.sel;
-  let h = '<div class="v2-pan"><div class="v2-pan-h"><div><b>'
-    + escapeHtml(S.titre) + '</b><div class="v2-pan-n">'
-    + (S.rows ? S.rows.length + ' sollicitation' + (S.rows.length > 1 ? 's' : '') : '…')
-    + '</div></div><button type="button" class="v2-x" data-v2fermer="1">×</button></div>'
-    + '<div class="v2-pan-b">';
-  if (!S.rows) {
-    h += '<div style="padding:20px;text-align:center;color:var(--text-mut);font-size:12px">'
-      + '<span class="lm-spin"></span>Chargement…</div>';
-  } else if (!S.rows.length) {
-    h += '<div style="padding:20px;text-align:center;color:var(--text-mut);font-size:12px">'
-      + 'Aucune sollicitation dans cette sélection.</div>';
-  } else {
-    S.rows.forEach(r => {
-      // L'ancienneté colore : au-delà de 14 jours sans traitement, une
-      // sollicitation de campagne n'a plus grand sens.
-      const j = Number(r.anciennete_j) || 0;
-      const cls = r.traitee ? 'ok' : (j > 14 ? 'ko' : j > 7 ? 'warn' : '');
-      h += '<div class="v2-lead ' + cls + '"'
-        + (r.id_client ? ' data-v2client="' + r.id_client + '"' : '') + '>'
-        + '<div class="v2-lead-h"><b>' + escapeHtml(r.client_nom || 'Sans nom') + '</b>'
-        + '<em class="' + cls + '">' + (r.traitee ? 'traitée' : j + ' j') + '</em></div>'
-        + '<div class="v2-lead-m"><span class="v2-tag">'
-        + escapeHtml(r.campagne || '') + '</span> '
-        + escapeHtml(r.vendeur_nom || '') + ' · ' + escapeHtml(r.nom_site || '') + '</div>'
-        + '</div>';
-    });
-  }
-  h += '</div>';
-  h += '<div class="v2-pan-f">Triées des plus anciennes. Cliquez un client pour ouvrir '
-    + 'sa fiche et relancer.</div></div>';
-  return h;
-}
-
-// --- LE RAPPORT CROISÉ --------------------------------------
-// Le mur montre OÙ ça coince maintenant ; le rapport montre CE QUE ça
-// produit. Même périmètre, d'où une bascule et non un onglet.
-function v2Rapport() {
-  ensureReactivite();
-  const lignes = v2Lignes();
-  if (!lignes.length) return '<div class="lm-empty" style="padding:34px 26px;font-size:13px">'
-    + '<b style="display:block;color:var(--text);margin-bottom:6px">Rien à croiser</b>'
-    + '<span style="font-size:12px;color:var(--text-mut)">Aucune entité sous ce niveau. '
-    + 'Remontez dans le fil de périmètre.</span></div>';
-  const R = v2Referentiel();
-  const libCol = { groupe:'Marque', marque:'Affaire', affaire:'Site', site:'Vendeur' }[state.v2.niveau]
-              || 'Source';
-  const camp = dataCampagnes || [];
-
-  // Les enseignements D'ABORD : quatre barres qui expliquent, puis le
-  // tableau qui détaille. L'inverse obligerait à lire 12 lignes avant de
-  // comprendre ce qui compte.
-  // 🐛 REDONDANCE CORRIGÉE (27/08) : au niveau vendeur, ce tableau
-  //    affichait exactement les mêmes lignes que celui des sources —
-  //    mêmes sources, mêmes chiffres. Le tableau des sources porte en
-  //    plus le SLA et l'attente MÉDIANE : il est strictement plus
-  //    informatif. On ne garde donc que lui à ce niveau.
-  if (state.v2.niveau === 'vendeur') return v2Reactivite();
-
-  const parSource = false;
-  let h = v2Reactivite();
-  h += '<div class="v2-rep"><table><thead><tr>'
-    + '<th>' + libCol + '</th><th>Leads reçus</th><th>En retard</th><th>Attente moyenne</th>'
-    + (parSource ? ''
-       : '<th>Sollicitations</th><th>À relancer</th><th>Commandes</th><th>Conversion</th>')
-    + '</tr></thead><tbody>';
-  const T = { l:0, r:0, s:0, ar:0, c:0, o:0 };
-
-  lignes.forEach(ln => {
-    const L = v2LeadsDe(ln);
-    const r = L.filter(x => lmfNiveau(x) === 'retard').length;
-    const dl = L.length
-      ? Math.round(L.reduce((a, x) => a + (Number(x.attente_min) || 0), 0) / L.length) : null;
-
-    let ss = [];
-    if (ln.type === 'marque')       ss = R.sites.filter(s => s.marque === ln.k);
-    else if (ln.type === 'affaire') ss = R.sites.filter(s => s.affaire === ln.k);
-    else if (ln.type === 'site')    ss = R.sites.filter(s => s.id === Number(ln.k));
-
-    // Au niveau SOURCE (vue vendeur), il n'existe ni objectif ni
-    // sollicitation rattachés : on laisse les colonnes vides plutôt que
-    // d'afficher des zéros qui passeraient pour des résultats.
-    if (ln.type === 'source') {
-      // ⚠️ Les colonnes sollicitations / à relancer / commandes /
-      //    conversion n'existent PAS au niveau source : une campagne se
-      //    rattache à un vendeur, pas à un apporteur. Elles étaient
-      //    remplies de tirets — le tableau est donc RÉDUIT à ce qui a
-      //    du sens (voir l'en-tête, qui s'adapte).
-      h += '<tr><td><b>' + escapeHtml(ln.l) + '</b><div class="v2-sous">'
-        + escapeHtml(ln.sous) + '</div></td>'
-        + '<td>' + (L.length
-            ? '<button type="button" class="v2-lien" data-v2src="' + escapeHtml(String(ln.k))
-              + '" data-v2filtre="attente">' + L.length + '</button>'
-            : '<span class="v2-sous">—</span>') + '</td>'
-        + '<td>' + (r
-            ? '<button type="button" class="v2-lien v2-ko" data-v2src="' + escapeHtml(String(ln.k))
-              + '" data-v2filtre="retard">' + r + '</button>'
-            : '<span class="v2-sous">—</span>') + '</td>'
-        + '<td>' + (dl == null ? '<span class="v2-sous">—</span>'
-            : '<span class="v2-' + (dl > 60 ? 'ko' : dl > 25 ? 'warn' : 'ok') + '">'
-              + lmfDuree(dl) + '</span>') + '</td></tr>';
-      T.l += L.length; T.r += r;
-      return;
-    }
-
-    const ids = ss.map(s => s.id);
-    let so = 0, tr = 0;
-    (dataCampParVendeur || []).forEach(v => {
-      if (ln.type === 'vendeur' ? Number(v.id_user) === Number(ln.k)
-                                : ids.indexOf(Number(v.id_site)) >= 0) {
-        so += Number(v.nb_cibles) || 0; tr += Number(v.nb_traitees) || 0;
-      }
-    });
-    const ar = so - tr;
-
-    let cmd = 0, obj = 0;
-    if (ln.type === 'vendeur') {
-      const e = (dataEquipe || []).find(x => Number(x.id_user) === Number(ln.k)) || {};
-      cmd = Number(e.commandes_realisees) || 0; obj = Number(e.objectif_commandes) || 0;
-    } else {
-      ss.forEach(s => { cmd += s.fait; obj += s.obj; });
-    }
-    // La conversion rapporte les commandes à TOUT ce qui a été mis
-    // devant le vendeur — leads ET sollicitations. C'est le seul
-    // dénominateur qui ne flatte personne.
-    const cv = (L.length + so) ? Math.round(cmd / (L.length + so) * 100) : null;
-    T.l += L.length; T.r += r; T.s += so; T.ar += ar; T.c += cmd; T.o += obj;
-
-    h += '<tr data-v2ligne="' + escapeHtml(String(ln.k)) + '" data-v2type="' + ln.type + '">'
-      + '<td><b>' + escapeHtml(ln.l || '—') + '</b><div class="v2-sous">'
-        + escapeHtml(ln.sous || '') + '</div></td>'
-      + '<td>' + (L.length || '<span class="v2-sous">—</span>') + '</td>'
-      + '<td>' + (r ? '<span class="v2-ko">' + r + '</span>' : '<span class="v2-sous">—</span>') + '</td>'
-      + '<td>' + (dl == null ? '<span class="v2-sous">—</span>'
-          : '<span class="v2-' + (dl > 60 ? 'ko' : dl > 25 ? 'warn' : 'ok') + '">'
-            + lmfDuree(dl) + '</span>') + '</td>'
-      + '<td>' + (so || '<span class="v2-sous">—</span>') + '</td>'
-      + '<td>' + (ar ? '<span class="v2-' + (ar > 20 ? 'ko' : 'warn') + '">' + ar + '</span>'
-          : '<span class="v2-sous">—</span>') + '</td>'
-      + '<td>' + cmd + '<span class="v2-sous"> / ' + obj + '</span></td>'
-      + '<td>' + (cv == null ? '<span class="v2-sous">—</span>'
-          : '<span class="v2-' + (cv >= 40 ? 'ok' : cv >= 25 ? 'warn' : 'ko') + '">'
-            + cv + ' %</span>') + '</td></tr>';
-  });
-
-  const cvT = (T.l + T.s) ? Math.round(T.c / (T.l + T.s) * 100) : 0;
-  h += '</tbody><tfoot><tr><td>Total</td><td>' + T.l + '</td>'
-    + '<td' + (T.r ? ' class="v2-ko"' : '') + '>' + T.r + '</td><td>—</td>'
-    + (parSource ? ''
-       : '<td>' + T.s + '</td><td' + (T.ar ? ' class="v2-ko"' : '') + '>' + T.ar + '</td>'
-         + '<td>' + T.c + '<span class="v2-sous"> / ' + T.o + '</span></td>'
-         + '<td>' + cvT + ' %</td>')
-    + '</tr></tfoot></table></div>';
-  h += '<div class="lmf-note">La <b>conversion</b> rapporte les commandes à TOUT ce qui a été mis '
-    + 'devant le vendeur — leads entrants ET sollicitations sortantes. C\'est le seul dénominateur '
-    + 'qui ne flatte personne : traiter peu de sollicitations remonte artificiellement un taux '
-    + 'calculé sur les seuls leads. Cliquez une ligne pour descendre.</div>';
-  return h;
-}
-
-// --- LES CAMPAGNES : deux tableaux par ligne ----------------
-function v2Campagnes() {
-  ensureCampagnes();
-  if (!dataCampagnes) return '<div class="lm-empty" style="padding:34px;font-size:12px">'
-    + '<span class="lm-spin"></span>Chargement des campagnes…</div>';
-  const camp = dataCampagnes || [];
-  if (!camp.length) return '<div class="lm-empty" style="padding:34px 26px;font-size:13px">'
-    + '<b style="display:block;color:var(--text);margin-bottom:6px">Aucune campagne</b>'
-    + '<span style="font-size:12px;color:var(--text-mut)">Rien sur ce périmètre et cette '
-    + 'période. Élargissez le fil ou la période.</span></div>';
-
-  const ids = v2Sites().map(s => s.id);
-  const parV = (dataCampParVendeur || []).filter(v => ids.indexOf(Number(v.id_site)) >= 0);
-  const n = x => Number(x) || 0;
-  const pc = (a, b) => b ? Math.round(a / b * 100) : 0;
-  const cls = p => p >= 90 ? 'v2-ok' : p >= 70 ? 'v2-warn' : 'v2-ko';
-
-  // UN TABLEAU, pas une pile de barres empilées : dix campagnes en
-  // barres font une page illisible (« touffu », 27/08). Un tableau
-  // aligne les colonnes, l'œil descend au lieu de chercher.
-  // La seule barre conservée est une MICRO-JAUGE dans la colonne
-  // « traitées » — la seule où la proportion se lit mieux qu'un chiffre.
-  let h = '<div class="v2-rep"><table><thead><tr>'
-    + '<th>Campagne</th><th>Sollicitations</th><th>Traitées</th><th>À traiter</th>'
-    + '<th>Propales</th><th>BDC</th><th>Commandes</th><th>Conversion</th>'
-    + '<th>1<sup>er</sup> contact</th></tr></thead><tbody>';
-
-  const T = { s:0, t:0, a:0, p:0, b:0, w:0 };
-  camp.forEach(c => {
-    const s = n(c.nb_sollicitations), tr = n(c.nb_traitees), at = n(c.nb_a_traiter);
-    const cy = n(c.nb_cycles) || 1;
-    const pr = n(c.nb_propales), bd = n(c.nb_bdc), wi = n(c.nb_wins);
-    const pt = pc(tr, s), cv = pc(wi, cy);
-    T.s += s; T.t += tr; T.a += at; T.p += pr; T.b += bd; T.w += wi;
-    // Chaque compteur ouvre SA liste : sollicitations, traitées, ou
-    // celles qui restent. Sans cela « 71 à traiter » ne dit pas QUI.
-    h += '<tr><td><b>' + escapeHtml(c.campagne) + '</b></td>'
-      + '<td><button type="button" class="v2-lien" data-v2camp="' + escapeHtml(c.campagne)
-        + '" data-v2cf="tout">' + s + '</button></td>'
-      + '<td><button type="button" class="v2-lien ' + cls(pt) + '" data-v2camp="'
-        + escapeHtml(c.campagne) + '" data-v2cf="traitees">' + pt + ' %</button>'
-      + '<div class="v2-mini"><i class="' + cls(pt) + '" style="width:' + pt + '%"></i></div></td>'
-      + '<td>' + (at
-          ? '<button type="button" class="v2-lien v2-ko" data-v2camp="' + escapeHtml(c.campagne)
-            + '" data-v2cf="a_traiter">' + at + '</button>'
-          : '<span class="v2-sous">—</span>') + '</td>'
-      + '<td>' + (pr || '<span class="v2-sous">—</span>') + '</td>'
-      + '<td>' + (bd || '<span class="v2-sous">—</span>') + '</td>'
-      + '<td>' + (wi || '<span class="v2-sous">—</span>') + '</td>'
-      + '<td><span class="' + (cv >= 40 ? 'v2-ok' : cv >= 25 ? 'v2-warn' : 'v2-ko') + '">'
-        + cv + ' %</span></td>'
-      + '<td>' + (c.delai_median_h != null
-          ? '<span class="v2-sous">' + Math.round(c.delai_median_h) + ' h</span>'
-          : '<span class="v2-sous">—</span>') + '</td></tr>';
-  });
-  const ptT = pc(T.t, T.s), cvT = pc(T.w, T.s);
-  h += '</tbody><tfoot><tr><td>Total · ' + camp.length + ' campagnes</td>'
-    + '<td>' + T.s + '</td>'
-    + '<td><span class="' + cls(ptT) + '">' + ptT + ' %</span></td>'
-    + '<td' + (T.a ? ' class="v2-ko"' : '') + '>' + T.a + '</td>'
-    + '<td>' + T.p + '</td><td>' + T.b + '</td><td>' + T.w + '</td>'
-    + '<td>' + cvT + ' %</td><td>—</td></tr></tfoot></table></div>';
-
-  // Le classement des vendeurs, même forme : un tableau court, trié.
-  if (parV.length) {
-    const sv = parV.slice().sort((a, b) => n(b.taux_traite) - n(a.taux_traite)
-                                        || n(b.nb_cibles) - n(a.nb_cibles));
-    h += '<div style="margin-top:14px" class="v2-rep"><table><thead><tr>'
-      + '<th>Vendeur</th><th>Site</th><th>Sollicitations</th><th>Traitées</th>'
-      + '<th>À relancer</th></tr></thead><tbody>';
-    sv.forEach((v, i) => {
-      const ci = n(v.nb_cibles), tr = n(v.nb_traitees), ar = n(v.nb_a_traiter);
-      const pt = pc(tr, ci);
-      h += '<tr data-v2vend="' + v.id_user + '">'
-        + '<td><b>' + (i + 1) + '. ' + escapeHtml(v.vendeur_nom || '—') + '</b></td>'
-        + '<td class="v2-sous" style="text-align:left">' + escapeHtml(v.nom_site || '') + '</td>'
-        + '<td>' + ci + '</td>'
-        + '<td><span class="' + cls(pt) + '">' + pt + ' %</span>'
-        + '<div class="v2-mini"><i class="' + cls(pt) + '" style="width:' + pt + '%"></i></div></td>'
-        + '<td>' + (ar
-            ? '<button type="button" class="v2-lien v2-ko" data-v2camp="" data-v2cf="a_traiter" '
-              + 'data-v2cvend="' + v.id_user + '">' + ar + '</button>'
-            : '<span class="v2-sous">—</span>') + '</td></tr>';
-    });
-    h += '</tbody></table></div>';
-  }
-
-  h += '<div class="lmf-note">L\'avancement précède le résultat : une campagne dont 40 % des '
-    + 'cibles ne sont pas traitées n\'a pas un mauvais taux de conversion, elle a un <b>retard '
-    + 'de traitement</b>. Les étapes sont cumulées — un dossier gagné est passé par la propale '
-    + 'et le bon de commande. Cliquez un vendeur pour ouvrir sa file.</div>';
-  return h;
-}
-
-// Charge le détail derrière un chiffre de campagne. Le panneau s'ouvre
-// tout de suite (avec son spinner) : l'utilisateur voit que son clic a
-// été pris en compte, plutôt qu'un écran qui ne bouge pas.
-async function ouvrirDetailCampagne(campagne, filtre, idVend) {
-  const ids = v2Sites().map(s => s.id);
-  const V = state.v2;
-  const lib = { a_traiter:'à traiter', traitees:'traitées', tout:'sollicitations' }[filtre] || '';
-  V.sel = { type:'campagne', titre: (campagne || 'Toutes campagnes') + ' · ' + lib, rows: null };
-  renderAll();
-  try {
-    const { data, error } = await sb.rpc('get_campagne_detail', {
-      p_viewer_id_user: Number(userId),
-      p_date_from: state.period.from, p_date_to: state.period.to,
-      p_campagne: campagne || null,
-      p_filtre: filtre,
-      p_site_ids: ids.length ? ids : null,
-      p_id_user: idVend ? Number(idVend)
-                 : (V.niveau === 'vendeur' ? Number(V.cle) : null),
-      p_limit: 300
-    });
-    if (error) throw error;
-    if (state.v2.sel && state.v2.sel.type === 'campagne') {
-      state.v2.sel.rows = data || [];
-      renderAll();
-    }
-  } catch (e) {
-    console.error('[leadMgmt] detail campagne', e);
-    if (state.v2.sel && state.v2.sel.type === 'campagne') {
-      state.v2.sel.rows = [];
-      renderAll();
-    }
-  }
-}
-
-// --- Chargement des campagnes -------------------------------
-let dataCampagnes = null, dataCampParVendeur = null;
-let campKey = null, campEnCours = null;
-
-function ensureCampagnes() {
-  // La clé porte le PÉRIMÈTRE autant que la période : descendre dans le
-  // fil doit recharger des totaux bornés à la sélection, pas afficher
-  // ceux de tout le périmètre du viewer.
-  const ids = v2Sites().map(s => s.id).sort();
-  const V = state.v2 || {};
-  const key = [state.period.from, state.period.to, ids.join(','), V.niveau, V.cle].join('|');
-  if (campKey === key && dataCampagnes) return Promise.resolve();
-  if (campEnCours) return campEnCours;
-  campKey = key;
-  campEnCours = (async function () {
-    try {
-      const [c, v] = await Promise.all([
-        sb.rpc('get_campagnes_sollicitation', {
-          p_viewer_id_user: Number(userId),
-          p_date_from: state.period.from, p_date_to: state.period.to,
-          p_site_ids: ids.length ? ids : null,
-          // ⚠️ INDISPENSABLE à la cohérence : sans lui, le tableau d'un
-          //    vendeur comptait les sollicitations de toute l'équipe et
-          //    le détail derrière le clic n'en trouvait aucune.
-          p_id_user: (state.v2 && state.v2.niveau === 'vendeur')
-            ? Number(state.v2.cle) : null }),
-        sb.rpc('get_campagnes_par_vendeur', {
-          p_viewer_id_user: Number(userId),
-          p_date_from: state.period.from, p_date_to: state.period.to,
-          p_campagne: null, p_site_ids: ids.length ? ids : null })
-      ]);
-      if (c.error) throw c.error;
-      if (v.error) throw v.error;
-      dataCampagnes = c.data || [];
-      dataCampParVendeur = v.data || [];
-    } catch (e) {
-      console.error('[leadMgmt] campagnes', e);
-      dataCampagnes = []; dataCampParVendeur = [];
-    } finally {
-      campEnCours = null;
-      if (window.__renderLeadMgmt) window.__renderLeadMgmt();
-    }
-  })();
-  return campEnCours;
-}
-
-// File d'un vendeur atteint par la descente. Le manager la lit, et peut
-// réaffecter depuis chaque carte.
-function renderFileDe(idVendeur) {
-  if (state.mafileCible !== idVendeur) {
-    state.mafileCible = idVendeur;
-    state.mafileKey = null;
-    state.mafileData = null;
-    fetchMaFile();
-  }
-  return renderViewMaFile();
-}
-
-// Les cycles : liste ou kanban. Le pipeline n'est PAS un ensemble
-// distinct — ce sont les mêmes cycles rangés par avancement.
-function renderSectionCycles() {
-  ensureCycles(cibleCourante());
-  const vue = state.vueCycles || 'liste';
-  let h = '<div class="lm-subtoggle">'
-    + '<button type="button" class="lm-subtoggle-btn' + (vue === 'liste' ? ' active' : '')
-    + '" data-cyc="liste">Liste</button>'
-    + '<button type="button" class="lm-subtoggle-btn' + (vue === 'kanban' ? ' active' : '')
-    + '" data-cyc="kanban">Kanban</button></div>';
-  if (state.cyclesLoading && !dataActifs.length) return h + lmAttenteCycles('des cycles');
-  h += (vue === 'kanban') ? renderViewKanban() : renderViewActifs();
-  return h;
-}
-
-function lmAttenteKpi() {
-  return '<div class="lm-empty" style="padding:34px;font-size:12px;color:var(--text-mut)">'
-       + 'Chargement des indicateurs…</div>';
-}
-
-// Chaque section ne charge QUE ce qu'elle lit. Un onglet ne doit jamais
-// payer pour les autres (acquis du 27/08).
-// Nom de la section courante, dans le vocabulaire du socle par rôle.
-// Les anciennes comparaisons `state.section === 'synthese'` visaient des
-// sections qui N'EXISTENT PLUS : elles doivent passer par ici.
-function sectionEst(nom) {
-  return SECTIONS_ROLE[state.sectionIdx || 0] === nom;
-}
-
-// Chaque vue ne charge QUE ce qu'elle lit. Le périmètre et l'équipe
-// servent au mur comme au rapport ; les campagnes ont leurs propres RPC,
-// bornées par state.period.
-/* ══════════════════════════════════════════════════════════════════════════
-   V3 — « LE RELAIS »  (23/09/2026)
-   ══════════════════════════════════════════════════════════════════════════
-   Remplace les trois lectures v2 (mur / rapport / campagnes) par trois écrans
-   qui suivent le PARCOURS RÉEL d'un lead chez Team Colin :
-
-     Le prochain · Le mur · Le relais          (le relais TOUJOURS en dernier :
-                                                c'est une lecture d'analyse,
-                                                pas un écran de travail)
-
-   TROIS PARTIS PRIS, chacun né d'un constat sur les données réelles :
-
-   1. LE GESTE AVANT LA LISTE. Pour celui qui agit, un seul dossier plein
-      cadre. Un vendeur qui a quatre minutes entre deux clients ne doit pas
-      commencer par choisir lequel traiter.
-
-   2. LE DOUBLE LIBRE-SERVICE. Chez Team Colin personne n'attribue :
-      l'opérateur VROOM PREND un lead dans la piscine BACS, le pousse vers un
-      site, où il retombe dans une piscine — premier arrivé, premier servi.
-      D'où le mode `libre` des règles, et d'où la RÉSERVATION : sans elle,
-      deux personnes appellent le même client.
-
-   3. L'ATTENTE QUE PERSONNE NE S'IMPUTE. Mesuré sur 414 leads réels :
-      le plateau traite en 20 à 50 minutes, mais le lead a attendu 10 h en
-      piscine avant qu'il le prenne — 93 à 99 % du délai total. Le relais
-      montre donc les segments SANS PROPRIÉTAIRE à part, en gris.
-
-   📌 Piège de la TDZ, quatrième fois : `LM_V3_CSS` est déclarée AVANT le bloc
-      « --- 3. Style » qui l'interpole. Déclarée après, elle lève une
-      ReferenceError et l'écran reste ENTIÈREMENT vide.
-   ══════════════════════════════════════════════════════════════════════════ */
-
-const V3_TRANCHES = ['< 15 min', '15-30 min', '30-60 min', '1-4 h', '+ 4 h'];
-const V3_SEUIL_PISCINE = 20, V3_SEUIL_VROOM = 15, V3_SEUIL_VENDEUR = 30;
-
-/* Les canaux de la fiche client, repris de `fiche-shell.js` : mêmes classes,
-   mêmes couleurs, mêmes tracés. Un vendeur qui retrouve EXACTEMENT ses
-   boutons n'a rien à réapprendre — argument d'adoption, pas d'esthétique. */
-const V3_SVG = p => '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor"'
-  + ' stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">' + p + '</svg>';
-const V3_IC = {
-  tel : V3_SVG('<path d="M22 16.9v3a2 2 0 0 1-2.2 2 19.8 19.8 0 0 1-8.6-3.1 19.5 19.5 0 0 1-6-6 19.8 19.8 0 0 1-3.1-8.7A2 2 0 0 1 4.1 2h3a2 2 0 0 1 2 1.7c.1 1 .4 1.9.7 2.8a2 2 0 0 1-.5 2.1L8.1 9.9a16 16 0 0 0 6 6l1.3-1.2a2 2 0 0 1 2.1-.5c.9.3 1.8.6 2.8.7a2 2 0 0 1 1.7 2z"/>'),
-  wa  : V3_SVG('<path d="M12 3a9 9 0 0 0-7.7 13.6L3 21l4.5-1.3A9 9 0 1 0 12 3z"/><path d="M8.5 8.8c.2-.5.4-.5.6-.5h.5c.2 0 .4 0 .6.4l.7 1.6c0 .2.1.3 0 .5l-.4.5c-.1.2-.2.3 0 .5.6 1 1.4 1.6 2.3 2 .2.1.4.1.5 0l.5-.6c.1-.2.3-.2.5-.1l1.5.7c.2.1.3.2.3.4 0 .5-.7 1.3-1.2 1.4-1.3.2-2.9-.7-4-1.7-.8-.8-1.6-1.9-1.7-3 0-.4 0-.8.2-1z" fill="currentColor" stroke="none"/>'),
-  mail: V3_SVG('<rect x="2.5" y="4.5" width="19" height="15" rx="2"/><path d="m3 6 9 6.5L21 6"/>'),
-  sms : V3_SVG('<path d="M4 4.5h16a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1H8l-4 3.5v-3.5H4a1 1 0 0 1-1-1v-9a1 1 0 0 1 1-1z"/>'),
-  rpv : V3_SVG('<path d="M10 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8z"/><path d="M2.5 21a7.5 7.5 0 0 1 13-5.1"/><path d="M17.5 15v6M20.5 18h-6"/>'),
-  user: V3_SVG('<path d="M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8z"/><path d="M4 21a8 8 0 0 1 16 0"/>')
-};
-const V3_CANAUX = [
-  { act:'appel', cls:'call', ic:'tel',  lib:'Appeler',  titre:'Appel Twilio' },
-  { act:'wa',    cls:'wa',   ic:'wa',   lib:'WhatsApp', titre:'Ouvrir la conversation WhatsApp' },
-  { act:'mail',  cls:'mail', ic:'mail', lib:'Email',    titre:'Écrire un e-mail' },
-  { act:'sms',   cls:'sms',  ic:'sms',  lib:'SMS',      titre:'Envoyer un SMS' },
-  { act:'rpv',   cls:'rpv',  ic:'rpv',  lib:'RPV',      titre:'Saisir un rapport de visite' }
-];
-
-/* ── État ────────────────────────────────────────────────────────────────
-   `ouvert` est indexé par CHEMIN (`m:Toyota|a:Team Toy 75`) et non par index
-   de ligne : il survit à un changement de période ou de périmètre. */
-function v3Init() {
-  if (state.v3) return;
-  state.v3 = {
-    vue: (PROFIL === 'vendeur' || PROFIL === 'chef') ? 'prochain' : 'mur',
-    depuis: 'site',          // 'site' | 'vroom' : depuis quelle arrivée on compte
-    ouvert: {},              // chemins dépliés de l'arbre
-    cellule: null,           // { chemin, tranche } ouverte dans le panneau
-    alerteSur: null,         // index de ligne dont on choisit le destinataire
-    message: null,           // retour d'un geste qui n'a pas abouti
-    curseur: 0,              // position dans la file « Le prochain »
-    mur: null, murKey: null, murLoading: false,
-    parcours: null, parcoursKey: null,
-    cell: null, cellLoading: false,
-    // Le filtre de source. `null` = le défaut de la base : les sources que
-    // le groupe suit en interne. Un tableau = ces codes exactement, y
-    // compris une source écartée qu'on veut rappeler.
-    src: null,
-    srcListe: null, srcKey: null, srcLoading: false,
-    mode: null               // 'libre' | 'auto' | 'manuel', lu en base
-  };
-}
-
-const V3_VUES = [['prochain', 'Le prochain'], ['mur', 'Le mur'], ['relais', 'Le relais']];
-function v3VuesDuRole() {
-  // Les directions pilotent, elles ne décrochent pas : pas de file.
-  if (PROFIL === 'directeur' || PROFIL === 'marketing')
-    return V3_VUES.filter(v => v[0] !== 'prochain');
-  return V3_VUES;
-}
-
-/* ── Chargements ─────────────────────────────────────────────────────── */
-function v3Cle() {
-  const V = state.v3;
-  // ⚠️ Sans le filtre dans la clé, changer de source ne rechargerait RIEN :
-  //    le cache rendrait l'ancien mur et l'écran mentirait en silence.
-  return [state.period.from, state.period.to, V.depuis, v3SrcSignature()].join('|');
-}
-
-/* La signature du filtre, stable quel que soit l'ordre des clics. */
-function v3SrcSignature() {
-  const s = state.v3.src;
-  return (s && s.length) ? s.slice().sort().join(',') : '*';
-}
-
-/* Y a-t-il des leads écartés par le défaut ? Sert aux messages de vide :
-   « aucun lead » n'a pas le même sens selon qu'on écarte 89 dossiers ou zéro. */
-function v3AEcartes() {
-  const V = state.v3;
-  if (V.src) return false;              // sélection explicite : rien n'est « écarté »
-  return (V.srcListe || []).some(s => !s.suivi && s.aTraiter > 0);
-}
-
-/* Ce qu'on passe aux RPC : `null` laisse la base appliquer son défaut. */
-function v3SrcParam() {
-  const s = state.v3.src;
-  return (s && s.length) ? s.slice() : null;
-}
-
-/* Les sources réellement présentes dans le périmètre et la période. On ne
-   devine aucune liste : une source absente ne s'affiche pas, et une source
-   écartée s'affiche AVEC son volume, pour qu'on sache ce qu'on rappelle. */
-async function v3EnsureSources() {
-  const V = state.v3;
-  const k = [state.period.from, state.period.to].join('|');
-  if (V.srcKey === k || V.srcLoading) return;
-  V.srcLoading = true;
-  try {
-    const { data, error } = await sb.rpc('lead_sources_file', {
-      p_de: state.period.from + 'T00:00:00',
-      p_a:  state.period.to   + 'T23:59:59'
-    });
-    if (error) throw error;
-    V.srcListe = (data || []).map(r => ({
-      code: r.code, libelle: r.libelle || r.code,
-      suivi: r.suivi_interne !== false,
-      n: Number(r.n) || 0, aTraiter: Number(r.n_a_traiter) || 0
-    }));
-    V.srcKey = k;
-  } catch (e) {
-    console.error('[lead-mgmt] lead_sources_file', e);
-    // Sans la liste, on n'affiche pas de filtre : mieux vaut pas de filtre
-    // qu'un filtre qui prétend connaître les sources.
-    V.srcListe = []; V.srcKey = k;
-  } finally {
-    V.srcLoading = false; renderAll();
-  }
-}
-
-/* La hauteur occupée par la topnav, mesurée et non devinée. Rend 0 quand la
-   barre a défilé hors de l'écran : le panneau reprend alors toute la hauteur. */
-function v3PoserHautPanneau() {
-  const root = document.getElementById('lead-mgmt-root');
-  if (!root) return;
-  let h = 0;
-  try {
-    // `#nav-root` est l'ancre du module topnav. Si elle manque (page sans
-    // nav, ou nom changé), on retombe sur 0 : le panneau s'ouvre en pleine
-    // hauteur comme avant, jamais cassé.
-    const n = document.getElementById('nav-root');
-    if (n) h = Math.max(0, Math.round(n.getBoundingClientRect().bottom));
-  } catch (e) { h = 0; }
-  root.style.setProperty('--v3-haut', h + 'px');
-}
-
-/* La bande de filtre pour les vues qui n'ont pas de barre de réglages
-   (« Le prochain », « Le relais »). Rien quand il n'y a rien à filtrer. */
-function v3BandeFiltre() {
-  const h = v3FiltreHtml();
-  if (!h) return '';
-  return '<section class="v3-bloc"><div class="v3-reglages">' + h + '</div></section>';
-}
-
-/* La barre de filtre. Rendue au-dessus de la file comme du mur, pour que le
-   même geste vaille partout. */
-function v3FiltreHtml() {
-  const V = state.v3;
-  v3EnsureSources();
-  const L = V.srcListe;
-  if (!L || L.length < 2) return '';   // une seule source : rien à filtrer
-
-  const choisies = V.src || null;
-  const parDefaut = !choisies;
-  const horsSuivi = L.filter(s => !s.suivi);
-
-  let h = '<div class="v3-champ" style="flex:1 1 320px">'
-    + '<label>Sources affichées</label><div class="v3-src">'
-    + '<button type="button" data-v3src="*" class="' + (parDefaut ? 'on' : '') + '">'
-    + 'Suivies en interne</button>';
-  L.forEach(s => {
-    // ⚠️ En mode défaut, les sources suivies sont AFFICHÉES : elles doivent
-    //    donc paraître allumées. Sinon l'écran montre des leads dont aucune
-    //    puce ne rend compte, et le clic ne se lit plus comme une bascule.
-    const on = choisies ? choisies.indexOf(s.code) >= 0 : s.suivi;
-    h += '<button type="button" data-v3src="' + escapeHtml(s.code) + '"'
-       + ' class="' + (s.suivi ? '' : 'hors ') + (on ? 'on' : '') + '"'
-       + ' title="' + escapeHtml(s.libelle)
-       + (s.suivi ? '' : ' — source non suivie en interne')
-       + ' : ' + s.aTraiter + ' à traiter sur ' + s.n + ' reçus">'
-       + escapeHtml(s.libelle) + '<i>' + s.aTraiter + '</i></button>';
-  });
-  h += '</div>';
-
-  // ⚠️ Ne JAMAIS écarter en silence : c'est l'angle mort qu'on vient de
-  //    fermer sur le bandeau BACS. On dit toujours ce qu'on ne montre pas.
-  if (parDefaut && horsSuivi.length) {
-    const n = horsSuivi.reduce((t, s) => t + s.aTraiter, 0);
-    h += '<p class="v3-ecarte"><b>' + n + '</b> lead' + (n > 1 ? 's' : '')
-       + ' écarté' + (n > 1 ? 's' : '') + ' : '
-       + horsSuivi.map(s => escapeHtml(s.libelle)).join(', ')
-       + ' — source' + (horsSuivi.length > 1 ? 's' : '')
-       + ' que le groupe ne suit pas en interne. Cliquez-la'
-       + (horsSuivi.length > 1 ? 'es' : '') + ' pour '
-       + (horsSuivi.length > 1 ? 'les' : 'la') + ' voir.</p>';
-  }
-  return h + '</div>';
-}
-
-async function v3EnsureMur() {
-  const V = state.v3, k = v3Cle();
-  if (V.murKey === k || V.murLoading) return;
-  V.murLoading = true;
-  try {
-    const { data, error } = await sb.rpc('lead_mur', {
-      p_depuis: V.depuis,
-      p_de: state.period.from + 'T00:00:00',
-      p_a:  state.period.to   + 'T23:59:59',
-      p_sources: v3SrcParam()
-    });
-    if (error) throw error;
-    V.mur = (data || []).map(r => ({
-      id: Number(r.id_site), nom: r.site || ('Site ' + r.id_site),
-      affaire: r.affaire || '(Sans affaire)', marque: r.marque || '(Sans marque)',
-      c: [Number(r.t0)||0, Number(r.t1)||0, Number(r.t2)||0, Number(r.t3)||0, Number(r.t4)||0]
-    }));
-    V.murKey = k;
-  } catch (e) {
-    console.error('[lead-mgmt] lead_mur', e);
-    V.mur = []; V.murKey = k;
-  } finally {
-    V.murLoading = false; renderAll();
-  }
-}
-
-async function v3EnsureParcours() {
-  const V = state.v3, k = v3Cle();
-  if (V.parcoursKey === k) return;
-  V.parcoursKey = k;
-  try {
-    const { data, error } = await sb.rpc('lead_parcours', {
-      p_de: state.period.from + 'T00:00:00',
-      p_a:  state.period.to   + 'T23:59:59',
-      p_sources: v3SrcParam()
-    });
-    if (error) throw error;
-    V.parcours = (data || []).map(r => ({
-      id: Number(r.id_site), nom: r.site, affaire: r.affaire, marque: r.marque,
-      n: Number(r.n) || 0,
-      att_bacs: r.att_bacs_min == null ? null : Number(r.att_bacs_min),
-      vroom:    r.vroom_min    == null ? null : Number(r.vroom_min),
-      // ⚠️ NULL et non zéro : ces deux segments ne sont PAS mesurables depuis
-      //    BACS (le temps côté concession se joue dans UpYourLeads). L'écran
-      //    doit afficher « non mesuré », jamais un zéro qui passerait pour un
-      //    résultat.
-      att_site: r.att_site_min == null ? null : Number(r.att_site_min),
-      vendeur:  r.vendeur_min  == null ? null : Number(r.vendeur_min),
-      total: Number(r.total_min) || 0,
-      part: r.part_attente == null ? null : Number(r.part_attente)
-    }));
-  } catch (e) {
-    console.error('[lead-mgmt] lead_parcours', e);
-    V.parcours = [];
-  }
-  renderAll();
-}
-
-/* ── L'ARBRE, repris de `performances.js` ────────────────────────────────
-   Marque › affaire › site › vendeur, avec la règle d'escamotage :
-   UN NIVEAU À UN SEUL ENFANT N'EST PAS AFFICHÉ. Faire cliquer un directeur
-   de marque sur « Toyota » pour atteindre ses affaires lui coûterait un geste
-   pour une information qu'il a déjà.
-   Les agrégats sont des SOMMES des feuilles, jamais des valeurs stockées. */
-function v3Arbre(lignesSite) {
-  const vide = () => [0, 0, 0, 0, 0];
-  const som = (a, b) => a.map((x, i) => x + b[i]);
-  const parM = {};
-  (lignesSite || []).forEach(s => {
-    const M = parM[s.marque] || (parM[s.marque] =
-      { niveau:'marque', cle:s.marque, nom:s.marque, c:vide(), sites:[], enf:{} });
-    M.c = som(M.c, s.c); M.sites.push(s.id);
-    const A = M.enf[s.affaire] || (M.enf[s.affaire] =
-      { niveau:'affaire', cle:s.affaire, nom:s.affaire, c:vide(), sites:[], enf:{} });
-    A.c = som(A.c, s.c); A.sites.push(s.id);
-    A.enf[s.id] = { niveau:'site', cle:s.id, nom:s.nom, sous:s.affaire,
-                    c:s.c.slice(), sites:[s.id] };
-  });
-  const tri = o => Object.keys(o).map(k => o[k])
-    .sort((a, b) => String(a.nom).localeCompare(String(b.nom)));
-  const M = tri(parM);
-  M.forEach(m => { m.enf = tri(m.enf); m.enf.forEach(a => { a.enf = tri(a.enf); }); });
-  return M;
-}
-
-function v3Lignes() {
-  const V = state.v3, out = [];
-  const marques = v3Arbre(V.mur || []);
-  const uneMarque = marques.length === 1;
-  marques.forEach(M => {
-    if (!uneMarque) {
-      out.push({ n:M, chemin:'m:' + M.cle, prof:0, pliable:true });
-      if (!V.ouvert['m:' + M.cle]) return;
-    }
-    const uneAffaire = M.enf.length === 1;
-    M.enf.forEach(A => {
-      const cA = 'm:' + M.cle + '|a:' + A.cle;
-      if (!uneAffaire) {
-        out.push({ n:A, chemin:cA, prof:uneMarque ? 0 : 1, pliable:true });
-        if (!V.ouvert[cA]) return;
-      }
-      const unSite = A.enf.length === 1;
-      A.enf.forEach(S => {
-        // Périmètre d'un seul site : ne pas afficher une ligne « Arcueil » à
-        // quelqu'un qui ne voit qu'Arcueil.
-        if (unSite && uneAffaire && uneMarque) return;
-        out.push({ n:S, chemin:cA + '|s:' + S.cle,
-                   prof:(uneMarque ? 0 : 1) + (uneAffaire ? 0 : 1), pliable:false });
-      });
-    });
-  });
-
-  // 🐛 GARDE-FOU : sans lui, un périmètre MONO-SITE — un vendeur, un chef,
-  //    c'est-à-dire la grande majorité des comptes — voyait un mur
-  //    entièrement vide. L'escamotage doit alléger l'écran, jamais le vider.
-  if (!out.length) {
-    v3Arbre(state.v3.mur || []).forEach(M => M.enf.forEach(A => A.enf.forEach(S => {
-      out.push({ n:S, chemin:'m:' + M.cle + '|a:' + A.cle + '|s:' + S.cle,
-                 prof:0, pliable:false });
-    })));
-  }
-  return out;
-}
-
-function v3NiveauLibelle() {
-  const l = v3Lignes();
-  if (!l.length) return (state.v3.mur || []).length === 1 ? 'site' : 'périmètre';
-  return { marque:'marques', affaire:'affaires', site:'sites' }[l[0].n.niveau] || 'sites';
-}
-
-/* ── Le fil : il dit ce qu'on COMPARE, pas seulement où l'on est ──────── */
-function v3Fil() {
-  // On réutilise le fil v2 (sélecteur de périmètre + période, déjà éprouvé)
-  // et on lui ajoute UNE information : ce que les lignes comparent. Sans
-  // elle, l'escamotage d'un niveau surprend au lieu de se lire.
-  const h = v2Fil();
-  const i = h.lastIndexOf('</div>');
-  if (i < 0) return h;
-  return h.slice(0, i)
-    + '<span class="v3-niv">comparaison par ' + escapeHtml(v3NiveauLibelle()) + '</span>'
-    + h.slice(i);
-}
-
-/* ── Vue : le mur ────────────────────────────────────────────────────── */
-function v3Mur() {
-  const V = state.v3;
-  if (V.mur == null) { v3EnsureMur();
-    return '<div class="lm-empty"><span class="lm-spin"></span>Chargement du mur…</div>'; }
-
-  const lignes = v3Lignes();
-  if (!lignes.length && !(V.mur || []).length) {
-    // Règle d'écran : jamais de vide muet. Un écran sans données dit POURQUOI.
-    return '<div class="v3-bloc"><div class="v3-vide"><b>Aucun lead en attente.</b>'
-      + 'Sur cette période, tous les leads de votre périmètre ont reçu un premier '
-      + 'contact. Le mur ne montre que ce qui attend.</div></div>';
-  }
-
-  let max = 0;
-  lignes.forEach(l => l.n.c.forEach(n => { if (n > max) max = n; }));
-  const titre = { marque:'Marque', affaire:'Affaire', site:'Site' }[lignes[0].n.niveau] || 'Site';
-  const expli = V.depuis === 'vroom'
-    ? 'Ancienneté comptée depuis l\'<b>arrivée du lead chez VROOM</b> : c\'est le délai '
-      + 'vécu par le client, plateau compris. Un site peut paraître en retard alors que '
-      + 'le temps a été consommé avant lui.'
-    : 'Ancienneté comptée depuis l\'<b>arrivée du lead sur le site</b> : c\'est le délai '
-      + 'dont la concession répond. Le temps passé au plateau n\'y figure pas.';
-
-  return '<section class="v3-bloc">'
-    + '<div class="v3-reglages"><div class="v3-champ">'
-    + '<label>Ancienneté comptée depuis</label><div class="v3-seg">'
-    + '<button type="button" data-v3depuis="vroom" class="' + (V.depuis === 'vroom' ? 'on' : '')
-      + '">Arrivée VROOM</button>'
-    + '<button type="button" data-v3depuis="site" class="' + (V.depuis === 'site' ? 'on' : '')
-      + '">Arrivée site</button></div></div>'
-    + v3FiltreHtml()
-    + '<p class="v3-expli">' + expli + '</p></div>'
-    + '<div class="v3-tab"><table><thead><tr><th>' + escapeHtml(titre) + '</th>'
-    + V3_TRANCHES.map(t => '<th>' + escapeHtml(t) + '</th>').join('')
-    + '</tr></thead><tbody>'
-    + lignes.map(l => {
-        const n = l.n, plie = l.pliable && !V.ouvert[l.chemin];
-        return '<tr class="v3-lv-' + n.niveau + '">'
-          + '<td style="padding-left:' + (16 + l.prof * 20) + 'px">'
-          + (l.pliable
-              ? '<button type="button" class="v3-exp" data-v3exp="' + escapeHtml(l.chemin) + '">'
-                + (plie ? '▸' : '▾') + '</button>'
-              : '<span class="v3-exp vide"></span>')
-          + escapeHtml(n.nom)
-          + (n.sous ? '<small>' + escapeHtml(n.sous) + '</small>'
-                    : (n.sites.length > 1 ? '<small>' + n.sites.length + ' sites</small>' : ''))
-          + '</td>'
-          + n.c.map((v, i) => {
-              if (!v) return '<td><span class="v3-pas vide">·</span></td>';
-              // 📌 Un compteur qu'on ne peut pas ouvrir désigne un problème
-              //    sans donner prise dessus. Chaque pastille est un bouton.
-              const c = v3Couleur(i), t = 26 + Math.round(Math.sqrt(v / max) * 16);
-              return '<td><button type="button" class="v3-pas"'
-                + ' data-v3cell="' + escapeHtml(l.chemin) + '~' + i + '"'
-                + ' title="Voir les ' + v + ' leads"'
-                + ' style="width:' + t + 'px;height:' + t + 'px;border-color:' + c.t
-                + ';background:' + c.f + ';color:' + c.t + '">' + v + '</button></td>';
-            }).join('')
-          + '</tr>';
-      }).join('')
-    + '</tbody></table></div></section>';
-}
-
-/* Une SEULE fonction décide de la couleur, et elle ne regarde QUE le temps.
-   Si le rouge pouvait dire autre chose qu'un retard, il ne dirait plus rien. */
-function v3Couleur(iTranche) {
-  const p = [
-    { t:'var(--ok-dk,#0f9b6c)',      f:'var(--ok-bg,#e6f6f0)' },
-    { t:'var(--warn-dk,#b8851a)',    f:'var(--warn-bg,#fdf5e4)' },
-    { t:'var(--warn-dk,#d4532a)',    f:'#fdeee8' },
-    { t:'var(--red-dk,#c02626)',     f:'var(--red-bg,#fdeaea)' },
-    { t:'var(--red-dk,#c02626)',     f:'var(--red-bg,#fdeaea)' }
-  ];
-  return p[Math.min(iTranche, p.length - 1)];
-}
-
-/* ── Vue : le relais ─────────────────────────────────────────────────── */
-function v3Relais() {
-  const V = state.v3;
-  if (V.parcours == null) { v3EnsureParcours();
-    return '<div class="lm-empty"><span class="lm-spin"></span>Chargement du parcours…</div>'; }
-  const bande = v3BandeFiltre();
-  if (!V.parcours.length) {
-    return bande + '<div class="v3-bloc"><div class="v3-vide"><b>Aucun parcours mesurable.</b>'
-      + 'Le parcours se reconstruit depuis l\'historique BACS : il faut qu\'un opérateur '
-      + 'VROOM ait pris des leads sur la période. Élargissez la période, ou attendez que '
-      + 'One Data porte lui-même la piscine du site.</div></div>';
-  }
-
-  // Le relais suit le même niveau que le mur : on agrège par nœud.
-  const parSite = {}; V.parcours.forEach(p => { parSite[p.id] = p; });
-  const lignes = v3Lignes();
-  const noeuds = lignes.length ? lignes : V.parcours.map(p => ({
-    n:{ niveau:'site', nom:p.nom, sites:[p.id] }, prof:0 }));
-
-  return bande + '<section class="v3-bloc">'
-    + '<div class="v3-entete"><h3>Le parcours d\'un lead</h3>'
-    + '<p>Chez Team Colin, personne n\'attribue : le lead attend dans la piscine BACS '
-    + 'qu\'un opérateur VROOM le prenne, puis dans la piscine du site qu\'un vendeur le '
-    + 'prenne. <b>Les segments d\'attente n\'appartiennent à personne</b> — ce sont ceux '
-    + 'où les leads pourrissent, et les seuls que personne ne se voit reprocher. Ils sont '
-    + 'en gris hachuré : la couleur du temps désigne une responsabilité.</p></div>'
-    + noeuds.map(l => {
-        let n = 0, sa = 0, sv = 0, mesurables = 0;
-        (l.n.sites || []).forEach(id => {
-          const p = parSite[id]; if (!p) return;
-          n += p.n;
-          // Moyennes PONDÉRÉES par le volume : un site qui traite 9 leads ne
-          // pèse pas autant qu'un site qui en traite 150.
-          if (p.att_bacs != null) { sa += p.att_bacs * p.n; mesurables += p.n; }
-          if (p.vroom != null) sv += p.vroom * p.n;
-        });
-        if (!n || !mesurables) return '';
-        const att = Math.round(sa / mesurables), vr = Math.round(sv / mesurables);
-        const tot = att + vr, part = Math.round(100 * att / (tot || 1));
-        const lg = Math.max(8, Math.round(att / tot * 100));
-        const cv = vr > V3_SEUIL_VROOM ? 'var(--red-dk,#c02626)' : 'var(--ok-dk,#0f9b6c)';
-        return '<div class="v3-piste" style="padding-left:' + (16 + l.prof * 20) + 'px">'
-          + '<div class="v3-p1"><b>' + escapeHtml(l.n.nom) + '</b>'
-          + '<span class="v3-n">' + n + ' leads pris par VROOM'
-          + ((l.n.sites || []).length > 1 ? ' · ' + l.n.sites.length + ' sites' : '') + '</span>'
-          + '<span class="v3-part' + (part >= 80 ? ' fort' : '') + '">'
-          + part + ' % du délai en attente</span></div>'
-          + '<div class="v3-baton">'
-          + '<div class="v3-sg sans" style="flex:0 0 ' + lg + '%" title="Attente en piscine BACS">'
-          + v3Duree(att) + '</div>'
-          + '<div class="v3-sg" style="background:' + cv + ';flex:1 1 auto" title="Traitement VROOM">'
-          + v3Duree(vr) + '</div></div>'
-          + '<div class="v3-leg">'
-          + '<span><i class="hach"></i>Attente piscine BACS · ' + v3Duree(att)
-          + ' <em>sans propriétaire</em></span>'
-          + '<span><i style="background:' + cv + '"></i>Traitement VROOM · ' + v3Duree(vr) + '</span>'
-          + '<span class="v3-nm">Piscine du site et traitement vendeur : <b>non mesurés</b></span>'
-          + '</div></div>';
-      }).join('')
-    // ⚠️ Cette réserve n'est pas décorative : sans elle, un chef croira que la
-    //    concession ne compte pas dans le délai.
-    + '<p class="v3-reserve">Les deux segments côté concession ne sont pas mesurables '
-    + 'depuis BACS : <code>premier_contact_le</code> y vaut l\'appel de VROOM lui-même, '
-    + 'et le temps du vendeur se joue dans UpYourLeads. Ils apparaîtront quand One Data '
-    + 'portera la piscine du site.</p>'
-    + '</section>';
-}
-
-/* 🐛 Les durées venaient de la base en minutes DÉCIMALES : l'écran affichait
-   « 107661.03061945 min », qui débordait de sa pastille et ne se lisait pas.
-   Un délai de soixante-quinze jours ne se dit pas en minutes. */
-function v3Duree(mn) {
-  if (mn == null) return '—';
-  const m = Math.round(Number(mn));
-  if (!isFinite(m)) return '—';
-  if (m < 60) return m + ' min';
-  if (m < 1440) { const h = m / 60; return (h < 10 ? h.toFixed(1).replace('.0', '') : Math.round(h)) + ' h'; }
-  const j = Math.round(m / 1440);
-  return j + ' j';
-}
-
-/* Version COMPACTE pour la pastille du minuteur : deux ou trois caractères,
-   l'unité en dessous. « 75 j » tient, « 107661 min » non. */
-function v3DureeCourte(mn) {
-  const m = Math.round(Number(mn) || 0);
-  if (m < 60)   return { v: String(m), u: 'min' };
-  if (m < 1440) return { v: String(Math.round(m / 60)), u: 'h' };
-  return { v: String(Math.round(m / 1440)), u: 'j' };
-}
-
-/* ══════════════════════════════════════════════════════════════════════════
-   V3 · « LE PROCHAIN » — l'écran de celui qui agit
-   ══════════════════════════════════════════════════════════════════════════
-   Un SEUL dossier, plein cadre. Un vendeur qui dispose de quatre minutes
-   entre deux clients ne doit pas commencer par choisir lequel traiter : la
-   file est déjà ordonnée par ce qui brûle, et le choix lui coûterait plus
-   cher que l'appel lui-même.
-
-   🔑 DEUX MODES, parce que Team Colin fonctionne en PISCINE :
-      · libre  — premier arrivé, premier servi. Les canaux restent INERTES
-                 tant que le lead n'est pas pris : sinon deux vendeurs
-                 composent le même numéro.
-      · auto   — One Data attribue ; le dossier est réservé nominativement.
-      Le mode est lu en base (`lead_mode_site`), il n'est pas deviné.
-
-   🔑 LA RÉSERVATION EST POSÉE EN BASE, PAS DANS LE NAVIGATEUR. Un verrou côté
-      client bloquerait un dossier sur un onglet laissé ouvert. `lead_reserver`
-      pose une expiration ; un verrou périmé se reprend.
-   ══════════════════════════════════════════════════════════════════════════ */
-
-/* Le mode du périmètre courant. Lu une fois, puis mémorisé : c'est un réglage,
-   pas une donnée qui bouge à la minute. */
-async function v3EnsureMode() {
-  const V = state.v3;
-  if (V.mode !== null) return;
-  V.mode = 'auto';
-  try {
-    const site = state.busSite ? Number(state.busSite)
-               : (userSiteIds && userSiteIds.length === 1 ? Number(userSiteIds[0]) : null);
-    const { data, error } = await sb.rpc('lead_mode_site', { p_id_site: site });
-    if (error) throw error;
-    if (data) V.mode = String(data);
-  } catch (e) {
-    console.warn('[lead-mgmt] lead_mode_site indisponible, repli sur auto', e);
-  }
-  renderAll();
-}
-
-/* La file de CE rôle : ce qui attend un premier contact sur son périmètre.
-   En mode libre, on montre TOUT ce qui est disponible — y compris ce qui
-   n'est attribué à personne, puisque c'est justement le principe. */
-function v3File() {
-  const rows = state.mafileData || [];
-  return rows.filter(r => !r.premier_contact_le)
-             .sort((a, b) => (b.attente_min || 0) - (a.attente_min || 0));
-}
-
-/* Le dossier présenté. On saute ceux qu'un collègue tient : les voir sans
-   pouvoir les traiter n'apporte rien, et les lui prendre serait pire. */
-function v3Courant() {
-  const f = v3File().filter(r => !r.verrou_par || Number(r.verrou_par) === Number(userId));
-  return f[Math.min(state.v3.curseur, Math.max(0, f.length - 1))] || null;
-}
-
-async function v3Reserver(idLead) {
-  try {
-    const { data, error } = await sb.rpc('lead_reserver', { p_id_lead: Number(idLead) });
-    if (error) throw error;
-    const r = data || {};
-    const l = (state.mafileData || []).find(x => Number(x.id_lead) === Number(idLead));
-    if (l) {
-      if (r.action === 'reserve') { l.verrou_par = Number(userId); l.verrou_jusqu = r.jusqu; }
-      // « occupe » : quelqu'un a été plus rapide. On le dit et on passe au
-      // suivant plutôt que de laisser l'utilisateur appeler dans le vide.
-      else if (r.action === 'occupe') { l.verrou_par = r.par; state.v3.curseur++; }
-    }
-    // « clos » : le dossier est classé sans suite. Le laisser dans la liste
-    // en silence enverrait l'utilisateur recliquer sans fin — on le retire
-    // de la cellule ouverte et on le dit.
-    if (r.action === 'clos') {
-      if (state.v3.cell)
-        state.v3.cell = state.v3.cell.filter(x => Number(x.id_lead) !== Number(idLead));
-      state.v3.message = 'Ce dossier est clos : il a été classé sans suite et '
-                       + 'ne peut plus être pris.';
-    } else {
-      state.v3.message = (r.action === 'occupe')
-        ? 'Un collègue vient de prendre ce dossier.' : null;
-    }
-    return r.action;
-  } catch (e) {
-    console.error('[lead-mgmt] lead_reserver', e);
-    return 'erreur';
-  } finally { renderAll(); }
-}
-
-async function v3Liberer(idLead) {
-  try { await sb.rpc('lead_liberer', { p_id_lead: Number(idLead) }); }
-  catch (e) { console.error('[lead-mgmt] lead_liberer', e); }
-  const l = (state.mafileData || []).find(x => Number(x.id_lead) === Number(idLead));
-  if (l) { l.verrou_par = null; l.verrou_jusqu = null; }
-  state.v3.curseur++; renderAll();
-}
-
-async function v3Alerter(idLead, idUser) {
-  try {
-    const { error } = await sb.rpc('lead_alerter',
-      { p_id_lead: Number(idLead), p_id_user: Number(idUser), p_motif: null });
-    if (error) throw error;
-    state.v3.alerteSur = null;
-    if (state.v3.cell) {
-      const l = state.v3.cell.find(x => Number(x.id_lead) === Number(idLead));
-      const v = (dataEquipe || []).find(x => Number(x.id_user) === Number(idUser));
-      if (l) l.alerte_user = v ? (v.nom_complet || v.vendeur_nom || ('User ' + idUser)) : ('User ' + idUser);
-    }
-  } catch (e) {
-    console.error('[lead-mgmt] lead_alerter', e);
-    alert('Alerte impossible : ' + ((e && e.message) || 'erreur'));
-  }
-  renderAll();
-}
-
-/* Les canaux, à l'identique de `fiche-shell.js`. On ne réimplémente RIEN :
-   on ouvre les modules déjà en place avec le client du lead. */
-function v3BarreCanaux(lead, actifs) {
-  return '<div class="v3-canaux' + (actifs ? '' : ' inerte') + '">'
-    + V3_CANAUX.map(k =>
-        '<button type="button" class="v3-cm ' + k.cls + '" data-v3act="' + k.act + '"'
-        + ' data-v3lead="' + lead.id_lead + '" title="' + escapeHtml(k.titre) + '"'
-        + (actifs ? '' : ' disabled') + '>'
-        + V3_IC[k.ic] + escapeHtml(k.lib)
-        + (k.act === 'appel' && lead.telephone
-            ? '<span class="num">' + escapeHtml(lead.telephone) + '</span>' : '')
-        + '</button>').join('')
-    + '</div>';
-}
-
-// ---- Telephonie : pilote 3CX (module phone3cx) s'il est present ------------
-//  Tenant equipe d'un PBX 3CX : le PBX fait sonner le poste du vendeur, puis
-//  le client. Sinon on retombe sur Twilio, puis sur un lien tel:.
-function lmPick3cx() {
-  const cands = [];
-  try { cands.push(window.wwLib && wwLib.getFrontWindow && wwLib.getFrontWindow()); } catch (e) {}
-  try { cands.push(typeof globalThis !== 'undefined' ? globalThis : null); } catch (e) {}
-  cands.push(window);
-  try { cands.push(window.parent); } catch (e) {}
-  try { cands.push(window.top); } catch (e) {}
-  for (let i = 0; i < cands.length; i++) {
-    try { if (cands[i] && cands[i].OD3CX && typeof cands[i].OD3CX.appeler === 'function') return cands[i].OD3CX; } catch (e) {}
-  }
-  return null;
-}
-function lmNormTel(n) {
-  const t = String(n || '').replace(/[^0-9+]/g, '');
-  if (!t) return '';
-  if (t[0] === '+') return t;
-  if (t[0] === '0') return '+33' + t.slice(1);
-  return t;
-}
-
-function v3OuvrirCanal(act, lead) {
-  // Le client attendu par les modules : ils lisent IDVu, TEl_MOB, EMAIL.
-  const c = { IDVu: lead.id_client, TEl_MOB: lead.telephone, EMAIL: lead.email,
-              nom: lead.nom, prenom: lead.prenom };
-  try {
-    if (act === 'appel') {
-      const cx = lmPick3cx();
-      const num = lmNormTel(lead.telephone);
-      if (cx && num) { cx.appeler(num, { nom: ((lead.prenom || '') + ' ' + (lead.nom || '')).trim(), idvu: lead.id_client }); return; }
-      const w = (window.parent && window.parent.__VOIP_UI__) || window.__VOIP_UI__;
-      if (w && w.call) w.call(lead.telephone, c);
-      else if (window.__ONE_DATA__ && window.__ONE_DATA__.device && lead.telephone)
-        window.__ONE_DATA__.device.connect({ params: { To: lead.telephone } });
-      else window.open('tel:' + String(lead.telephone || '').replace(/\s/g, ''), '_self');
-    }
-    else if (act === 'sms')  { (window.__SMS_UI__   || {}).open?.({ client: c }); }
-    else if (act === 'wa')   { (window.__WA_UI__    || {}).open?.({ client: c }); }
-    else if (act === 'mail') { (window.__EMAIL_UI__ || {}).open?.({ mode: 'new', client: c }); }
-    else if (act === 'rpv')  {
-      if (typeof window.rpvBoot === 'function') window.rpvBoot({ client: c, idCycle: lead.id_cycle_comm });
-      else console.warn('[lead-mgmt] module RPV absent');
-    }
-  } catch (e) { console.error('[lead-mgmt] ouverture du canal ' + act, e); }
-}
-
-/* `v_lead_sla` ne porte ni téléphone, ni message, ni véhicule : elle sert au
-   pilotage, pas à l'action. On lit donc le détail du SEUL dossier affiché —
-   une ligne, pas trois cents — et on le met en cache sur le lead. */
-async function v3EnsureDetail(idLead) {
-  const V = state.v3;
-  if (V.detailEnCours === idLead) return;
-  V.detailEnCours = idLead;
-  try {
-    const { data, error } = await sb.from('LEADS_EXTERNES')
-      .select('id_lead,nom,prenom,email,telephone,message,vehicule_interet,id_client,'
-            + 'id_cycle_comm,verrou_par,verrou_jusqu')
-      .eq('id_lead', idLead).maybeSingle();
-    if (error) throw error;
-    const l = (state.mafileData || []).find(x => Number(x.id_lead) === Number(idLead));
-    if (l && data) Object.assign(l, data, { detail: true });
-  } catch (e) {
-    console.error('[lead-mgmt] detail du lead', e);
-    const l = (state.mafileData || []).find(x => Number(x.id_lead) === Number(idLead));
-    if (l) l.detail = true;   // on n'insiste pas : la carte restera sobre
-  } finally {
-    V.detailEnCours = null; renderAll();
-  }
-}
-
-/* ── La vue ──────────────────────────────────────────────────────────── */
-function v3Prochain() {
-  const V = state.v3;
-  if (V.mode === null) { v3EnsureMode(); }
-  if (state.mafileLoading && !state.mafileData)
-    return '<div class="lm-empty"><span class="lm-spin"></span>Chargement de la file…</div>';
-
-  const bande = v3BandeFiltre();
-  const f = v3File();
-  const d = v3Courant();
-  const libre = (V.mode === 'libre');
-
-  if (!d) {
-    // Règle d'écran : jamais de vide muet. On distingue « rien à faire » de
-    // « tout est pris par quelqu'un d'autre » — ce n'est pas la même chose.
-    const pris = f.length;
-    return bande + '<div class="v3-bloc"><div class="v3-vide">'
-      + (pris
-          ? '<b>Rien à traiter pour l\'instant.</b>Les ' + pris + ' dossiers de votre '
-            + 'périmètre sont ouverts par un collègue. Ils reviendront dans la file si '
-            + 'personne ne les traite.'
-          // ⚠️ « Aucun lead » est vrai pour les sources SUIVIES. Sans cette
-          //    nuance, un vendeur croirait sa piscine vide alors que le
-          //    filtre écarte des dossiers — et la bande au-dessus les
-          //    annonce juste au-dessus, ce qui paraîtrait contradictoire.
-          : '<b>Aucun lead en attente.</b>Tout ce qui est arrivé sur votre périmètre a '
-            + 'reçu un premier contact'
-            + (v3AEcartes() ? ', hors les sources que le groupe ne suit pas.' : '.'))
-      + '</div></div>';
-  }
-
-  // Le détail se charge à la demande, pour le dossier présenté seulement.
-  if (!d.detail) v3EnsureDetail(d.id_lead);
-
-  const aMoi = d.verrou_par && Number(d.verrou_par) === Number(userId);
-  const actifs = libre ? !!aMoi : true;
-  const sla = Number(d.sla_minutes) || 60;
-  const att = Number(d.attente_min) || 0;
-  const reste = sla - att;
-  const nom = [d.prenom, d.nom].filter(Boolean).join(' ') || d.nom_affiche || ('Lead ' + d.id_lead);
-
-  return bande + '<div class="v3-scene"><article class="v3-dossier">'
-    // Le bandeau : la PREMIÈRE chose que lit celui qui ouvre l'écran.
-    + (libre
-        ? '<div class="v3-verrou ' + (aMoi ? 'pris' : 'piscine') + '">'
-          + (aMoi ? 'Vous avez pris ce dossier<span>· il est à vous</span>'
-                  : 'Dans la piscine<span>· premier arrivé, premier servi — personne ne vous l\'a attribué</span>')
-          + '</div>'
-        : '<div class="v3-verrou">Réservé pour vous'
-          + '<span>· libéré automatiquement si vous ne faites rien</span></div>')
-
-    + '<div class="v3-haut">'
-    + '<div class="v3-min"><div class="v3-min-v ' + (reste > 0 ? '' : 'ko') + '">'
-    + v3DureeCourte(att).v + '<span>' + v3DureeCourte(att).u + '</span></div></div>'
-    + '<div class="v3-qui"><h3>' + escapeHtml(nom) + '</h3><div class="v3-meta">'
-    + (d.telephone ? '<span>' + V3_IC.tel + escapeHtml(d.telephone) + '</span>' : '')
-    + (d.email ? '<span>' + V3_IC.mail + escapeHtml(d.email) + '</span>' : '')
-    + '<span>' + V3_IC.user + 'Lead n° ' + d.id_lead + '</span></div>'
-    + '<div class="v3-pi">'
-    + '<span class="v3-p src">' + escapeHtml(d.source_libelle || d.source || 'Source inconnue') + '</span>'
-    + (d.site_nom ? '<span class="v3-p">' + escapeHtml(d.site_nom) + '</span>' : '')
-    + '</div></div></div>'
-
-    + (d.message ? '<div class="v3-corps"><div class="v3-dem">' + escapeHtml(d.message) + '</div>'
-        + (d.vehicule_interet
-            ? '<div class="v3-veh"><b>' + escapeHtml(d.vehicule_interet) + '</b></div>' : '')
-        + '</div>' : '')
-
-    + '<div class="v3-gestes">'
-    + (libre && !aMoi
-        ? '<button type="button" class="v3-flux p" data-v3prendre="' + d.id_lead + '">'
-          + 'Prendre ce lead</button>'
-        : '')
-    + v3BarreCanaux(d, actifs)
-    + '<button type="button" class="v3-flux" data-v3rendre="' + d.id_lead + '">'
-    + (libre && aMoi ? 'Rendre à la piscine' : 'Passer')
-    + '</button></div>'
-
-    + '<div class="v3-rappel">Délai attendu : ' + v3Duree(sla) + '. '
-    + (reste > 0 ? 'Il reste <b>' + v3Duree(reste) + '</b>.'
-                 : 'Dépassé de <b>' + v3Duree(-reste) + '</b>.')
-    + '</div></article>'
-
-    + '<aside class="v3-file"><h4>' + (libre ? 'La piscine' : 'Votre file')
-    + ' (' + f.length + ')</h4><ul>'
-    + (f.filter(x => x !== d).slice(0, 20).map(x => {
-        const occupe = x.verrou_par && Number(x.verrou_par) !== Number(userId);
-        const n = [x.prenom, x.nom].filter(Boolean).join(' ') || ('Lead ' + x.id_lead);
-        return '<li class="' + (occupe ? 'occ' : '') + '">'
-          + '<div><b>' + escapeHtml(n) + '</b><small>'
-          + escapeHtml(x.source_libelle || x.source || '') + '</small></div>'
-          + '<span class="t">' + (occupe ? 'pris' : v3Duree(x.attente_min)) + '</span></li>';
-      }).join('') || '<li class="v3-rien">Plus rien après celui-ci.</li>')
-    + '</ul><div class="v3-pied">'
-    + (libre
-        ? 'Ouverte à tous. Les dossiers grisés viennent d\'être pris par un collègue.'
-        : 'Ordonnée par ce qui brûle, pas par ordre d\'arrivée.')
-    + '</div></aside></div>';
-}
-
-/* ── Le panneau d'une cellule du mur ─────────────────────────────────── */
-async function v3EnsureCellule() {
-  const V = state.v3;
-  if (!V.cellule || V.cellLoading) return;
-  const l = v3Lignes().find(x => x.chemin === V.cellule.chemin);
-  if (!l) return;
-  V.cellLoading = true;
-  try {
-    const { data, error } = await sb.rpc('lead_cellule', {
-      p_site_ids: l.n.sites, p_tranche: V.cellule.tranche, p_depuis: V.depuis,
-      p_de: state.period.from + 'T00:00:00', p_a: state.period.to + 'T23:59:59',
-      p_limite: 100,
-      // ⚠️ Le MEME filtre que le mur : sans lui, ouvrir une pastille de 12
-      //    rendrait 97 lignes. Une liste qui contredit le compteur qui l'a
-      //    ouverte fait douter des deux.
-      p_sources: v3SrcParam()
-    });
-    if (error) throw error;
-    V.cell = data || [];
-  } catch (e) {
-    console.error('[lead-mgmt] lead_cellule', e); V.cell = [];
-  } finally { V.cellLoading = false; renderAll(); }
-}
-
-function v3Panneau() {
-  const V = state.v3;
-  if (!V.cellule) return '';
-  const l = v3Lignes().find(x => x.chemin === V.cellule.chemin);
-  if (!l) return '';
-  if (V.cell === null) { v3EnsureCellule();
-    return '<div class="v3-voile" data-v3fermer="1"></div><aside class="v3-pan">'
-      + '<div class="v3-pan-h"><b>' + escapeHtml(l.n.nom) + '</b>'
-      + '<button type="button" class="x" data-v3fermer="1">&times;</button></div>'
-      + '<div class="v3-pan-b"><span class="lm-spin"></span>Chargement…</div></aside>'; }
-
-  const unSite = (l.n.sites || []).length === 1;
-  const idSite = unSite ? l.n.sites[0] : null;
-  // On ne confie un dossier à quelqu'un qu'une fois descendu sur UN site :
-  // au niveau marque, on ne saurait pas à quelle équipe il appartient.
-  const peutAlerter = unSite && PEUT_REAFFECTER;
-  const peutPrendre = (PROFIL === 'vendeur' || PROFIL === 'chef');
-  const vendeurs = (dataEquipe || []).filter(v => !idSite || Number(v.id_site) === Number(idSite));
-  const libres = V.cell.filter(x => !x.verrou_par);
-
-  return '<div class="v3-voile" data-v3fermer="1"></div><aside class="v3-pan">'
-    + '<div class="v3-pan-h"><div><b>' + escapeHtml(l.n.nom) + ' · '
-    + escapeHtml(V3_TRANCHES[V.cellule.tranche]) + '</b>'
-    + '<small>' + V.cell.length + ' lead' + (V.cell.length > 1 ? 's' : '')
-    + ' · ancienneté depuis ' + (V.depuis === 'vroom' ? 'l\'arrivée VROOM' : 'l\'arrivée sur le site')
-    + '</small></div>'
-    + '<button type="button" class="x" data-v3fermer="1">&times;</button></div>'
-    + '<div class="v3-pan-b">'
-    + V.cell.map((x, i) => {
-        const n = [x.prenom, x.nom].filter(Boolean).join(' ') || ('Lead ' + x.id_lead);
-        const premier = !x.verrou_par && x === libres[0];
-        return '<div class="v3-ld' + (premier ? ' prem' : '') + '">'
-          + '<div class="q"><b>' + escapeHtml(n) + '</b><small>' + escapeHtml(x.source || '')
-          + (premier ? ' · <em>le plus ancien</em>' : '') + '</small></div>'
-          + '<span class="a">' + v3Duree(x.age_min) + '</span>'
-          + (x.alerte_user ? '<span class="occ">alerté · ' + escapeHtml(x.alerte_user) + '</span>'
-             : x.verrou_nom ? '<span class="occ">chez ' + escapeHtml(x.verrou_nom) + '</span>'
-             : (peutAlerter ? '<button type="button" class="al" data-v3alerte="' + i + '">Alerter</button>' : '')
-               + (peutPrendre ? '<button type="button" class="pr" data-v3prendre="' + x.id_lead + '">Prendre</button>' : ''))
-          + '</div>'
-          + (V.alerteSur === i
-              ? '<div class="v3-choix"><span>Alerter qui ?</span>'
-                + vendeurs.map(v => '<button type="button" data-v3vend="' + v.id_user + '"'
-                    + ' data-v3lead="' + x.id_lead + '">'
-                    + escapeHtml(v.nom_complet || v.vendeur_nom || ('User ' + v.id_user)) + '</button>').join('')
-                + '<button type="button" class="ann" data-v3alerte="-1">Annuler</button></div>'
-              : '');
-      }).join('')
-    // Le retour d'un geste qui n'a pas abouti. Sans lui, un clic sur
-    // « Prendre » qui échoue ne produit RIEN à l'écran, et l'utilisateur
-    // recommence sans savoir pourquoi.
-    + (V.message
-        ? '<p class="v3-pan-note" style="background:#fdf6e6;border-color:#b8851a;'
-          + 'color:#7a5a12">' + escapeHtml(V.message) + '</p>' : '')
-    + (peutAlerter && libres.length > 1
-        ? '<p class="v3-pan-note">Prendre un dossier plus récent que le plus ancien reste '
-          + 'possible, mais l\'écart apparaîtra dans la vue du chef des ventes. L\'ordre '
-          + 'n\'est pas imposé, il est rendu visible.</p>' : '')
-    + '</div><div class="v3-pan-f">'
-    + (peutAlerter
-        ? 'Alerter prévient le vendeur sans lui retirer le choix.'
-        : peutPrendre ? 'Prendre réserve le dossier à votre nom et l\'ouvre.'
-        : 'Vous pilotez ce périmètre sans y traiter les leads.')
-    + '</div></aside>';
-}
-
-function chargerSection() {
-  ensureSites();
-  // V3 : chaque vue sait ce dont elle a besoin. Une vue qui ne se charge pas
-  // elle-même finit par afficher un spinner sans fin (bug du 27/08).
-  v3Init();
-  const W = state.v3;
-  if (W.vue === 'prochain') v3EnsureMode();
-  if (W.vue === 'mur')      v3EnsureMur();
-  if (W.vue === 'relais')   { v3EnsureParcours(); return; }
-  const V = state.v2 || {};
-  if (V.vue === 'campagnes') { ensureCampagnes(); return; }
-  if (V.vue === 'rapport') ensureReactivite();
-  // ⚠️ Le mur et le rapport lisent les leads de TOUT le périmètre : un
-  //    manager doit voir ceux de ses vendeurs, pas seulement les siens.
-  state.mafileCible = (PROFIL === 'vendeur') ? userId : null;
-  fetchMaFile();
-  ensureEquipe(V.niveau === 'site' ? Number(V.cle) : null);
-}
-
-function renderAll() {
-  const __tDebutRender = performance.now();
-  let html = '';
-
-  // ⚠️ La secrétaire commerciale n'a pas de lead management (27/08).
-  if (!SECTIONS_ROLE.length) {
-    root.innerHTML = '<div class="lm-empty" style="padding:40px;font-size:13px">'
-      + 'Le lead management n\'est pas ouvert à votre profil.</div>';
-    return;
-  }
-
-  v2Init();
-  const V = state.v2;
-
-  // Le périmètre s'appuie sur les sites : sans eux, rien à afficher.
-  if (!dataSites) {
-    ensureSites();
-    root.innerHTML = '<div class="lm-empty" style="padding:40px;font-size:12px">'
-      + '<span class="lm-spin"></span>Chargement du périmètre…</div>';
-    return;
-  }
-
-  html += v2Fil();
-  // Le canal BACS conditionne une partie des gestes : on le dit AVANT
-  // que le vendeur n'essaie, pas après.
-  html += lmBandeauBacs();
-  html += lmArriereHtml();
-
-  // Trois lectures d'un même périmètre. Libellés IDENTIQUES pour tous
-  // les rôles : ce sont les mêmes questions, à des échelles différentes.
-  // ── V3 : trois lectures du parcours réel. Le RELAIS EST TOUJOURS EN
-  //    DERNIER, quel que soit le rôle : c'est une lecture d'analyse, pas un
-  //    écran de travail. Ce qui ouvre, c'est ce qu'on fait maintenant.
-  v3Init();
-  // 🐛 Le fil se figeait sur le premier site du périmètre et ignorait le site
-  //    choisi en topnav : un chef positionné sur Arcueil voyait « L'Haÿ » dans
-  //    son fil. Le bus de site fait autorité — c'est lui que l'utilisateur
-  //    manipule.
-  if (state.busSite && state.v2
-      && (state.v2.niveau === 'site' || state.v2.niveau === 'groupe')
-      && Number(state.v2.cle) !== Number(state.busSite)) {
-    state.v2.niveau = 'site';
-    state.v2.cle = Number(state.busSite);
-    v2Ref = null;
-  }
-  const W = state.v3;
-  const vues = v3VuesDuRole();
-  if (!vues.some(x => x[0] === W.vue)) W.vue = vues[0][0];
-
-  html += '<div class="v2-vues">'
-    + vues.map(x => '<button type="button" data-v3vue="' + x[0] + '" class="'
-        + (W.vue === x[0] ? 'on' : '') + '">' + escapeHtml(x[1]) + '</button>').join('')
-    + '</div>';
-
-  // ⚠️ `v2Bandeau` décrit la FILE de l'utilisateur, pas le mur : affiché
-  //    au-dessus du mur, il annonçait « Aucun lead en attente » juste avant
-  //    d'en montrer deux cents. Deux mesures différentes ne peuvent pas se
-  //    superposer sans se contredire.
-  if (W.vue === 'mur')         html += v3Mur() + v3Panneau();
-  else if (W.vue === 'relais') html += v3Relais();
-  else                         html += v3Prochain();
-  html += renderRegles();
-
-  html += lmModaleHtml();
-
-  root.innerHTML = html;
-  const __tBind = performance.now();
-  bindEvents();
-  const __tFin = performance.now();
-
-  // Instrumentation : le reseau etant desormais propre (une requete par
-  // onglet, rien de rejoue), toute lenteur restante vient du RENDU. On la
-  // mesure au lieu de la deviner. Silencieux sous 150 ms.
-  const __total = __tFin - __tDebutRender;
-  if (__total > 150) {
-    console.warn('[leadMgmt] rendu lent : ' + Math.round(__total) + ' ms'
-      + ' — html ' + Math.round(__tInject - __tDebutRender) + ' ms'
-      + ', innerHTML ' + Math.round(__tBind - __tInject) + ' ms'
-      + ', bindEvents ' + Math.round(__tFin - __tBind) + ' ms'
-      + ' | vue=' + (isManager ? state.section : state.view)
-      + ', ' + html.length + ' caracteres');
-  }
-
-  // Les graphes n'existent que dans la synthese d'equipe : ne pas les
-  // dessiner en mode focalise, leur canvas n'est pas rendu.
-  if (state.section === 'synthese') {
-    setTimeout(() => { drawGraphes(); }, 0);
-  }
-}
-
-// --- 14. Navigation fiche client ----------------------------
-// Ouverture de la fiche client — patron aligné sur client-search :
-//  1) on écrit le client sélectionné dans SA variable (fiche-shell lit l'IDVu et
-//     recharge le client lui-même) -> plus de workflow WeWeb WF_GET_FICHE ;
-//  2) l'onglet voulu passe par un global à usage unique lu par fiche-shell ;
-//  3) navigation ÉDITEUR par UID / PROD par CHEMIN (un UID en prod s'inscrit tel
-//     quel dans l'URL -> route inexistante -> page blanche).
-const PATH_FICHE_CLIENT   = '/fr/fiche-client';
-function lmInEditor() {
-  try { return (window.self !== window.top) || /-editor\.weweb\.io|weweb\.io/i.test(location.hostname); }
-  catch (e) { return true; }
-}
-async function openClientFiche(idClient, tabIndex, cardEl) {
-  if (!idClient) { console.warn('[leadMgmt] Pas d\'id_client'); return; }
-  if (cardEl) cardEl.classList.add('is-loading');
-  try {
-    try { wwLib.wwVariable.updateValue('55490583-c88b-4748-916e-4d203db07742', { IDVu: Number(idClient) }); } catch (e) {}
-    const targetTab = (tabIndex !== null && tabIndex !== undefined) ? tabIndex : TAB_DEFAULT;
-    try { const w = (wwLib.getFrontWindow && wwLib.getFrontWindow()) || window; w.__odFicheTab = targetTab; } catch (e) {}
-    if (lmInEditor()) { try { wwLib.wwApp.goTo(PAGE_FICHE_ID); return; } catch (e) {} }
-    try { wwLib.goTo(PATH_FICHE_CLIENT); return; } catch (e) {}
-    try { const w = (wwLib.getFrontWindow && wwLib.getFrontWindow()) || window; w.location.href = PATH_FICHE_CLIENT; } catch (e) {}
-  } catch (e) {
-    console.error('[leadMgmt] Erreur ouverture fiche client', e);
-    if (cardEl) cardEl.classList.remove('is-loading');
-  }
-}
-
-// Charge les cycles pour la vue « Suivi leads » si pas déjà chargés pour cette
-// cible. cible = idUser (vendeur ciblé) ou null (tout le périmètre du manager).
-async function ensureCycles(cible) {
-  const c = (cible != null ? Number(cible) : null);
-  if (state.cyclesLoading) return;
-  if (cyclesLoadedFor === c) return;   // déjà chargés pour cette cible
-  state.cyclesLoading = true;
-  if (window.__renderLeadMgmt) window.__renderLeadMgmt();
-  try {
-    const cy = await fetchCyclesData(c);
-    dataActifs = cy.actifs;
-    dataKanban = cy.kanban;
-    cyclesLoadedFor = c;
-  } catch (e) {
-    console.error('[leadMgmt] ensureCycles', e);
-  } finally {
-    state.cyclesLoading = false;
-    if (window.__renderLeadMgmt) window.__renderLeadMgmt();
-  }
-}
-function cibleCourante() {
-  return state.selectedVendeur ? state.selectedVendeur.id_user : __initialVendeurCible;
-}
-
-async function selectVendeurCible(idUser) {
-  state.cyclesLoading = true;
-  renderAll();
-  try {
-    await setVendeurCible(idUser);          // garde la variable WeWeb en phase (inoffensif)
-    const cy = await fetchCyclesData(idUser);   // FOLD : refetch direct au lieu de fetchCollection
-    dataActifs = cy.actifs;
-    dataKanban = cy.kanban;
-    cyclesLoadedFor = (idUser != null ? Number(idUser) : null);
-  } catch (e) {
-    console.error('[leadMgmt] Erreur refetch cycles', e);
-  } finally {
-    state.cyclesLoading = false;
-    if (window.__renderLeadMgmt) window.__renderLeadMgmt();
-  }
-}
-
-// --- 15. Bindings -------------------------------------------
-function bindEvents() {
-  // --- V3 : bascule des trois vues, dépliage de l'arbre, cellules ------
-  root.querySelectorAll('.v2-vues button[data-v3vue]').forEach(el => {
-    el.addEventListener('click', () => {
-      state.v3.vue = el.getAttribute('data-v3vue');
-      // On referme le panneau : il portait sur une cellule de l'ancienne vue.
-      state.v3.cellule = null; state.v3.alerteSur = null;
-      renderAll(); chargerSection();
-    });
-  });
-  root.querySelectorAll('[data-v3depuis]').forEach(el => {
-    el.addEventListener('click', () => {
-      // Changer l'origine du décompte change les CHIFFRES, pas le stock :
-      // il faut donc relire le mur, pas seulement le redessiner.
-      state.v3.depuis = el.getAttribute('data-v3depuis');
-      state.v3.murKey = null; state.v3.cellule = null;
-      renderAll(); chargerSection();
-    });
-  });
-  // La topnav peut changer de hauteur (passage mobile, bandeau d'arbitrage
-  // qui apparaît) : on remesure à chaque rendu plutôt qu'une seule fois.
-  v3PoserHautPanneau();
-  root.querySelectorAll('[data-v3src]').forEach(el => {
-    el.addEventListener('click', () => {
-      const code = el.getAttribute('data-v3src');
-      const V = state.v3;
-      if (code === '*') V.src = null;                 // retour au défaut
-      else {
-        // ⚠️ Le premier clic doit BASCULER ce qu'on voit, pas repartir de
-        //    zéro. On matérialise donc d'abord l'état courant — en mode
-        //    défaut, l'ensemble des sources suivies — puis on bascule la
-        //    source cliquée. Cliquer une puce allumée l'éteint, cliquer une
-        //    puce éteinte l'allume : rien d'autre ne bouge.
-        const l = V.src ? V.src.slice()
-                        : (V.srcListe || []).filter(x => x.suivi).map(x => x.code);
-        const i = l.indexOf(code);
-        if (i >= 0) l.splice(i, 1); else l.push(code);
-        // Tout décoché : on revient au défaut plutôt que de vider l'écran.
-        // Et si la sélection redevient exactement l'ensemble des sources
-        // suivies, c'est le défaut : on y revient pour de bon, sinon
-        // l'écran afficherait la même chose avec la puce « Suivies en
-        // interne » éteinte, et une clé de cache différente pour rien.
-        const suivies = (V.srcListe || []).filter(x => x.suivi).map(x => x.code);
-        const memeQueDefaut = l.length === suivies.length
-                           && suivies.every(c => l.indexOf(c) >= 0);
-        V.src = (!l.length || memeQueDefaut) ? null : l;
-      }
-      // Changer de source change le STOCK, pas seulement les chiffres : il
-      // faut relire la file, le mur, le parcours et refermer le panneau,
-      // qui portait sur une cellule de l'ancien filtre.
-      V.murKey = null; V.parcoursKey = null; V.cellule = null; V.cell = null;
-      V.curseur = 0;
-      state.mafileKey = null; state.mafileData = null;
-      renderAll(); chargerSection();
-    });
-  });
-  root.querySelectorAll('[data-v3exp]').forEach(el => {
-    el.addEventListener('click', () => {
-      // Le dépliage est indexé par CHEMIN : il survit à un changement de
-      // période ou de périmètre, contrairement à un index de ligne.
-      const k = el.getAttribute('data-v3exp');
-      state.v3.ouvert[k] = !state.v3.ouvert[k];
-      renderAll();
-    });
-  });
-  root.querySelectorAll('[data-v3fermer]').forEach(el => {
-    el.addEventListener('click', () => {
-      state.v3.cellule = null; state.v3.cell = null; state.v3.alerteSur = null;
-      state.v3.message = null;
-      renderAll();
-    });
-  });
-  root.querySelectorAll('[data-v3prendre]').forEach(el => {
-    el.addEventListener('click', async () => {
-      const id = Number(el.getAttribute('data-v3prendre'));
-      el.disabled = true;
-      const r = await v3Reserver(id);
-      el.disabled = false;
-      // Depuis le panneau, prendre OUVRE le dossier : un dossier « pris » qui
-      // resterait dans une liste serait un dossier oublié.
-      if (r === 'reserve' && state.v3.cellule) {
-        state.v3.cellule = null; state.v3.cell = null;
-        state.v3.vue = 'prochain'; state.v3.curseur = 0;
-        // \u26a0\ufe0f RELEV\u00c9 LE 28/09 : sans ces deux lignes, « rien ne se passait ».
-        //    `fetchMaFile` rend la main tout de suite quand la CL\u00c9 n'a pas
-        //    chang\u00e9 — or prendre un lead ne change ni le p\u00e9rim\u00e8tre ni le
-        //    filtre. La file restait donc servie depuis son cache, SANS le
-        //    dossier qu'on venait de s'attribuer.
-        state.mafileKey = null; state.mafileData = null;
-        renderAll(); chargerSection();
-      }
-    });
-  });
-  root.querySelectorAll('[data-v3rendre]').forEach(el => {
-    el.addEventListener('click', () => v3Liberer(Number(el.getAttribute('data-v3rendre'))));
-  });
-  root.querySelectorAll('[data-v3alerte]').forEach(el => {
-    el.addEventListener('click', () => {
-      const i = Number(el.getAttribute('data-v3alerte'));
-      state.v3.alerteSur = (i < 0 || state.v3.alerteSur === i) ? null : i;
-      renderAll();
-    });
-  });
-  root.querySelectorAll('[data-v3vend]').forEach(el => {
-    el.addEventListener('click', () => v3Alerter(
-      Number(el.getAttribute('data-v3lead')), Number(el.getAttribute('data-v3vend'))));
-  });
-  root.querySelectorAll('[data-v3act]').forEach(el => {
-    el.addEventListener('click', () => {
-      const id = Number(el.getAttribute('data-v3lead'));
-      const l = (state.mafileData || []).find(x => Number(x.id_lead) === id);
-      if (l) v3OuvrirCanal(el.getAttribute('data-v3act'), l);
-    });
-  });
-  root.querySelectorAll('[data-v3cell]').forEach(el => {
-    el.addEventListener('click', () => {
-      const p = String(el.getAttribute('data-v3cell')).split('~');
-      state.v3.cellule = { chemin: p[0], tranche: Number(p[1]) };
-      state.v3.alerteSur = null;
-      renderAll();
-    });
-  });
-
-  // --- Regles d attribution : ouverture, saisie, enregistrement --
-  root.querySelectorAll('[data-rgouvrir]').forEach(el => {
-    el.addEventListener('click', ev => { ev.stopPropagation(); ouvrirRegles(); });
-  });
-  root.querySelectorAll('[data-rgfermer]').forEach(el => {
-    el.addEventListener('click', () => fermerRegles());
-  });
-  // La saisie ne part PAS en base a chaque frappe : elle alimente l etat
-  // local, et « Enregistrer » fait le seul appel. Sinon un clic sur une
-  // option enverrait une regle a moitie choisie.
-  root.querySelectorAll('[data-rgsrc]').forEach(el => {
-    el.addEventListener('click', async () => {
-      const code = el.getAttribute('data-rgsrc');
-      const vers = el.getAttribute('data-rgsrcv') === '1';
-      el.disabled = true;
-      try {
-        const { data, error } = await sb.rpc('lead_source_suivi',
-          { p_code: code, p_suivi: vers });
-        if (error) throw error;
-        if (!data || data.ok !== true) {
-          // La base refuse : on le DIT. Un bouton qui retombe en silence
-          // laisse croire que le r\u00e9glage est pass\u00e9.
-          rgEtat.msg = 'Refus\u00e9 : ' + ((data && data.motif) || 'raison inconnue');
+        var issue = D.issue || 'qualifier';
+        var ISSUES = [['qualifier', 'Qualifié'], ['injoignable', 'Injoignable'], ['long_terme', 'Projet long terme'], ['abandon', 'Abandonner']];
+        h += '<div class="issues" role="radiogroup" aria-label="Issue de l\'appel">' + ISSUES.map(function (x) {
+          return '<button type="button" role="radio" aria-checked="' + (x[0] === issue) + '" class="' + (x[0] === issue ? 'on ' + x[0] : '') + '" data-a="issue" data-id="' + x[0] + '">' + x[1] + '</button>';
+        }).join('') + '</div><div class="row">';
+        if (issue === 'qualifier') {
+          var cible = (D.sites || []).find(function (s) { return Number(s.id_site) === Number(D.site); });
+          h += cible ? '<button type="button" class="btn vr" data-a="qualifier">Transférer à ' + esc(siteNom(cible.site)) + '</button><span class="hint">avec la qualification ci-dessus</span>'
+                     : '<button type="button" class="btn vr" disabled>Transférer</button><span class="hint">Choisissez d\'abord le site, plus haut.</span>';
+        } else if (issue === 'injoignable') {
+          h += '<select id="r-quand" aria-label="Quand rappeler"><option value="2h">Dans 2 h</option><option value="demain">Demain 9 h</option><option value="apres">Après-demain 9 h</option><option value="autre">Autre date…</option></select>'
+            + '<input type="datetime-local" id="r-date" value="' + dateLocale(new Date(Date.now() + 2 * 3600000)) + '" hidden>'
+            + '<button type="button" class="btn pri" data-a="injoignable">Programmer le rappel</button>';
+        } else if (issue === 'long_terme') {
+          h += '<label class="hint" for="lt-date">Rappeler le</label><input type="date" id="lt-date" value="' + dateLocale(demainA(9, 30)).slice(0, 10) + '">'
+            + '<button type="button" class="btn pri" data-a="long-terme">Programmer</button>';
         } else {
-          rgEtat.msg = '';
-          // Le drapeau a chang\u00e9 en base : tout ce qui en d\u00e9pend est p\u00e9rim\u00e9.
-          const V = state.v3;
-          if (V) {
-            V.srcKey = null; V.srcListe = null; V.src = null;
-            V.murKey = null; V.parcoursKey = null;
-            V.cellule = null; V.cell = null; V.curseur = 0;
-          }
-          state.mafileKey = null; state.mafileData = null;
+          h += '<select id="a-motif" aria-label="Motif d\'abandon BACS">' + MOTIFS_ABANDON.map(function (m) { return '<option>' + esc(m) + '</option>'; }).join('') + '</select>'
+            + '<button type="button" class="btn dang" data-a="abandonner">Abandonner</button>';
         }
-      } catch (e) {
-        console.error('[lead-mgmt] lead_source_suivi', e);
-        rgEtat.msg = 'Erreur : ' + ((e && e.message) || 'r\u00e9glage non enregistr\u00e9');
-      } finally {
-        el.disabled = false;
-        renderAll(); chargerSection();
+        h += '</div><div class="row pied"><span class="hint">' + ((S.kpis || {}).ecrire_bacs ? 'Le geste est aussi reporté dans BACS.' : 'Reportez aussi le statut dans BACS : l\'écriture automatique n\'est pas encore activée.') + '</span>'
+          + '<button type="button" class="btn sm ghost" data-a="liberer">Libérer</button></div>';
       }
-    });
-  });
-  root.querySelectorAll('[data-rgc]').forEach(el => {
-    el.addEventListener('change', () => {
-      if (!rgEtat || !rgEtat.regles) return;
-      const c = el.getAttribute('data-rgc'), v = el.getAttribute('data-rgv');
-      rgEtat.regles[c] = (el.type === 'radio') ? v : el.checked;
-      rgEtat.msg = ''; renderAll();
-    });
-  });
-  root.querySelectorAll('[data-rgn]').forEach(el => {
-    el.addEventListener('change', () => {
-      if (!rgEtat || !rgEtat.regles) return;
-      rgEtat.regles[el.getAttribute('data-rgn')] = Number(el.value);
-      rgEtat.msg = '';
-    });
-  });
-  root.querySelectorAll('[data-rgex]').forEach(el => {
-    el.addEventListener('click', () => basculerExclusion(
-      el.getAttribute('data-rgex'), el.getAttribute('data-rgexo') === '1'));
-  });
-  root.querySelectorAll('[data-rgsite]').forEach(el => {
-    el.addEventListener('change', () => ouvrirRegles(el.value ? Number(el.value) : null));
-  });
-  root.querySelectorAll('[data-rgok]').forEach(el => {
-    el.addEventListener('click', () => enregistrerRegles());
-  });
-
-  // --- Refonte v2 : fil de périmètre, bascule, descente ---------
-  root.querySelectorAll('.v2-vues button[data-v2vue]').forEach(el => {
-    el.addEventListener('click', () => {
-      state.v2.vue = el.getAttribute('data-v2vue');
-      renderAll(); chargerSection();
-    });
-  });
-  root.querySelectorAll('.v2-fil button[data-v2niv]').forEach(el => {
-    el.addEventListener('click', () => {
-      const k = el.getAttribute('data-v2cle');
-      state.v2.niveau = el.getAttribute('data-v2niv');
-      state.v2.cle = (k !== '' && !isNaN(Number(k))) ? Number(k) : k;
-      renderAll(); chargerSection();
-    });
-  });
-  // Une ligne EST le niveau du dessous : cliquer descend d'un cran.
-  root.querySelectorAll('[data-v2ligne]').forEach(el => {
-    el.addEventListener('click', () => {
-      const ty = el.getAttribute('data-v2type');
-      if (ty === 'source') return;   // une source n'a pas d'enfant
-      const k = el.getAttribute('data-v2ligne');
-      state.v2.niveau = ty;
-      state.v2.cle = isNaN(Number(k)) ? k : Number(k);
-      renderAll(); chargerSection();
-    });
-  });
-  // 🐛 Le handler des cellules MANQUAIT : le mur était cliquable en
-  //    apparence et ne faisait rien. Sans lui, il désigne un problème
-  //    sans donner prise dessus.
-  root.querySelectorAll('[data-v2cell]').forEach(el => {
-    el.addEventListener('click', () => {
-      const parts = el.getAttribute('data-v2cell').split('|');
-      const k = parts[0], tk = parts[1];
-      const ln = v2Lignes().find(x => String(x.k) === String(k));
-      const tr = V2_TRANCHES.find(x => x.k === tk);
-      if (!ln || !tr) return;
-      state.v2.sel = {
-        titre: ln.l + ' · ' + tr.l,
-        leads: v2LeadsDe(ln).filter(l => v2Tranche(l) === tk)
-      };
-      renderAll();
-    });
-  });
-  // Les chiffres de leads du rapport ouvrent la MÊME liste que les
-  // pastilles du mur : un compteur doit toujours pouvoir s'ouvrir.
-  root.querySelectorAll('[data-v2src]').forEach(el => {
-    el.addEventListener('click', () => {
-      const src = el.getAttribute('data-v2src');
-      const filtre = el.getAttribute('data-v2filtre');
-      let lst = v2Leads().filter(l =>
-        String(l.source) === String(src) || String(l.source_libelle) === String(src));
-      if (filtre === 'retard') lst = lst.filter(l => lmfNiveau(l) === 'retard');
-      const lib = (lst[0] && lst[0].source_libelle) || src;
-      state.v2.sel = {
-        titre: lib + (filtre === 'retard' ? ' · en retard' : ' · en attente'),
-        leads: lst
-      };
-      renderAll();
-      // Le panneau s'ouvre en bas de page : on l'amène sous les yeux.
-      const pan = root.querySelector('.v2-pan');
-      if (pan && pan.scrollIntoView) pan.scrollIntoView({ behavior:'smooth', block:'nearest' });
-    });
-  });
-  root.querySelectorAll('[data-v2camp]').forEach(el => {
-    el.addEventListener('click', () => {
-      ouvrirDetailCampagne(el.getAttribute('data-v2camp'),
-                           el.getAttribute('data-v2cf'),
-                           el.getAttribute('data-v2cvend'));
-    });
-  });
-  // --- Les gestes sur un lead ----------------------------------
-  root.querySelectorAll('[data-arriere]').forEach(el => {
-    el.addEventListener('click', () => {
-      state.voirArriere = !state.voirArriere;
-      state.mafileKey = null; state.mafileData = null;
-      fetchMaFile();
-    });
-  });
-
-  root.querySelectorAll('[data-v2lead]').forEach(el => {
-    el.addEventListener('click', (ev) => {
-      if (ev.target.closest('[data-geste]') || ev.target.closest('[data-v2client]')
-          || ev.target.closest('[data-v2reaff]')) return;
-      const id = Number(el.getAttribute('data-v2lead'));
-      lmLeadSel = (lmLeadSel === id) ? null : id;   // un second clic referme
-      renderAll();
-    });
-  });
-
-  root.querySelectorAll('[data-geste]').forEach(el => {
-    el.addEventListener('click', async (ev) => {
-      ev.stopPropagation();
-      if (el.disabled) return;
-      const k = el.getAttribute('data-geste');
-      const idl = Number(el.getAttribute('data-lead'));
-      const lead = (state.mafileData || []).find(x => Number(x.id_lead) === idl);
-      if (!lead) return;
-
-      if (k === 'appel') {
-        // ⚠️ J'avais inventé `window.__oropraAppeler`, qui n'existe pas.
-        //    Le module compose DÉJÀ par un lien `tel:` ailleurs dans ce
-        //    fichier : on reprend ce qui marche.
-        const tel = lead.telephone || lead.mobile || '';
-        if (!tel) { lmToast('Ce lead ne porte aucun numéro.', 'erreur'); return; }
-        const cx3 = lmPick3cx();
-        if (cx3) {
-          cx3.appeler(lmNormTel(tel), { nom: ((lead.prenom || '') + ' ' + (lead.nom || '')).trim(), idvu: lead.id_client });
-          return;
-        }
-        try {
-          const w = (window.wwLib && wwLib.getFrontWindow && wwLib.getFrontWindow()) || window;
-          w.open('tel:' + String(tel).replace(/[^0-9+]/g, ''), '_self');
-        } catch (e) {
-          window.open('tel:' + String(tel).replace(/[^0-9+]/g, ''), '_self');
-        }
-        return;
-      }
-      if (k === 'rpv') {
-        // Le compte rendu vit dans la fiche client : le RPV est un
-        // module monté là-bas, pas une fonction appelable d'ici. On
-        // emmène le vendeur au bon endroit plutôt que de lui afficher
-        // une erreur.
-        if (!lead.id_client) {
-          lmToast('Ce lead n\'est rattaché à aucune fiche client : le compte rendu ne peut pas être saisi.', 'erreur');
-          return;
-        }
-        openClientFiche(lead.id_client, TAB_DEFAULT, null);
-        return;
-      }
-      // Hors BACS, le rendez-vous et la relance vivent dans l'agenda de
-      // la fiche client : on y emmène le vendeur plutôt que de lui
-      // afficher un message qui l'y renvoie.
-      if (k === 'relance' && lmSource(lead.source).distant !== 'bacs') {
-        if (lead.id_client) openClientFiche(lead.id_client, TAB_DEFAULT, null);
-        return;
-      }
-      lmModale = { type: k, lead: lead };
-      if (k === 'transfert') lmModale.sites = await lmSitesCibles();
-      renderAll();
-    });
-  });
-  root.querySelectorAll('[data-gvalider]').forEach(el => {
-    el.addEventListener('click', (ev) => { ev.stopPropagation(); lmExecuterGeste(); });
-  });
-  root.querySelectorAll('[data-gfermer]').forEach(el => {
-    el.addEventListener('click', (ev) => {
-      // Le clic DANS la boîte ne doit pas la fermer.
-      if (ev.target.closest('[data-stop]') && !el.hasAttribute('data-gfermer')) return;
-      if (ev.target !== el && !ev.target.closest('.g-modal-f')) return;
-      lmModale = null; renderAll();
-    });
-  });
-  // Créneaux : un seul choix par groupe ; la date libre remplace les jours.
-  [['data-gjour'], ['data-gheure'], ['data-gduree']].forEach(([attr]) => {
-    root.querySelectorAll('[' + attr + ']').forEach(el => {
-      el.addEventListener('click', (ev) => {
-        ev.stopPropagation();
-        if (el.disabled) return;
-        root.querySelectorAll('[' + attr + ']').forEach(x => x.classList.remove('on'));
-        el.classList.add('on');
-        if (attr === 'data-gjour') { const lib = root.querySelector('#g-date-libre'); if (lib) lib.value = ''; }
-        lmCreneauMaj();
-      });
-    });
-  });
-  const lib = root.querySelector('#g-date-libre');
-  if (lib) lib.addEventListener('change', () => {
-    if (lib.value) root.querySelectorAll('[data-gjour]').forEach(x => x.classList.remove('on'));
-    lmCreneauMaj();
-  });
-  if (root.querySelector('#g-recap')) lmCreneauMaj();
-
-  root.querySelectorAll('.g-site').forEach(el => {
-    el.addEventListener('click', () => {
-      root.querySelectorAll('.g-site').forEach(x => x.classList.remove('on'));
-      el.classList.add('on');
-    });
-  });
-  root.querySelectorAll('[data-bacs-ouvrir]').forEach(el => {
-    el.addEventListener('click', () => {
-      // On ne connaît pas l'URL du tenant BACS : on ouvre la page connue
-      // et l'utilisateur atterrit sur sa session.
-      window.open('https://toyota-france.my.site.com/bacs2/s/', '_blank');
-    });
-  });
-
-  root.querySelectorAll('[data-v2fermer]').forEach(el => {
-    el.addEventListener('click', () => { state.v2.sel = null; renderAll(); });
-  });
-  // Échap referme le volet. L'écouteur est posé UNE fois pour toutes :
-  // bindEvents rejoue à chaque rendu, un ajout par rendu empilerait les
-  // écouteurs jusqu'à saturer la page.
-  if (!window.__v2EscBound) {
-    window.__v2EscBound = true;
-    (doc.defaultView || window).addEventListener('keydown', (ev) => {
-      if (ev.key !== 'Escape') return;
-      if (state.v2 && state.v2.sel) { state.v2.sel = null; renderAll(); }
-    });
-  }
-  root.querySelectorAll('[data-v2client]').forEach(el => {
-    el.addEventListener('click', (ev) => {
-      if (ev.target.closest('[data-v2reaff]')) return;   // le bouton d'abord
-      openClientFiche(el.getAttribute('data-v2client'), TAB_DEFAULT, el);
-    });
-  });
-  root.querySelectorAll('[data-v2reaff]').forEach(el => {
-    el.addEventListener('click', (ev) => {
-      ev.stopPropagation();
-      ouvrirReaffectation(el.getAttribute('data-v2reaff'));
-    });
-  });
-
-  root.querySelectorAll('[data-v2vend]').forEach(el => {
-    el.addEventListener('click', () => {
-      state.v2.niveau = 'vendeur';
-      state.v2.cle = Number(el.getAttribute('data-v2vend'));
-      state.v2.vue = 'mur';
-      renderAll(); chargerSection();
-    });
-  });
-
-  root.querySelectorAll('.lm-toggle-btn[data-sec]').forEach(el => {
-    el.addEventListener('click', () => {
-      state.sectionIdx = +el.getAttribute('data-sec');
-      state.drillSite = null; state.drillVendeur = null;
-      state.mafileCible = undefined;
-      state.mafileKey = null; state.mafileData = null;
-      renderAll();
-      chargerSection();
-    });
-  });
-  root.querySelectorAll('[data-site]').forEach(el => {
-    el.addEventListener('click', () => {
-      state.drillSite = +el.getAttribute('data-site');
-      state.drillVendeur = null;
-      equipeKey = null; dataEquipe = null;   // l'équipe change de site
-      renderAll();
-    });
-  });
-  root.querySelectorAll('[data-vendeur]').forEach(el => {
-    el.addEventListener('click', () => {
-      state.drillVendeur = +el.getAttribute('data-vendeur');
-      renderAll();
-    });
-  });
-  root.querySelectorAll('.lmr-fil button[data-fil]').forEach(el => {
-    el.addEventListener('click', () => {
-      const q = el.getAttribute('data-fil');
-      if (q === 'racine') { state.drillSite = null; state.drillVendeur = null; }
-      if (q === 'site')   { state.drillVendeur = null; }
-      state.mafileCible = undefined; state.mafileKey = null; state.mafileData = null;
-      renderAll();
-      chargerSection();
-    });
-  });
-  root.querySelectorAll('.lm-subtoggle-btn[data-cyc]').forEach(el => {
-    el.addEventListener('click', () => {
-      state.vueCycles = el.getAttribute('data-cyc'); renderAll();
-    });
-  });
-
-  root.querySelectorAll('.lm-toggle-btn[data-section]').forEach(el => {
-    el.addEventListener('click', () => {
-      const newSection = el.getAttribute('data-section');
-      if (newSection === 'synthese' || newSection === 'campagnes' || newSection === 'creation') {
-        state.selectedVendeur = null;
-      }
-      state.section = newSection;
-      renderAll();
-      // Toutes les sections SAUF « Ma file » lisent les vues KPI : on les
-      // charge a l'entree, pas au montage.
-      if (newSection !== 'ma_file') ensureKpis();
-      if (newSection === 'suivi_leads') ensureCycles(cibleCourante());   // chargement à la demande
-      // « Ma file » et « Leads » lisent la MEME source (v_lead_sla) : un
-      // seul chargement sert les deux. La cle de cache porte le site.
-      if (newSection === 'ma_file') { state.mafileCible = userId; fetchMaFile(); }
-      if (newSection === 'leads')   { state.mafileCible = null;   fetchMaFile(); }
-    });
-  });
-  root.querySelectorAll('.lm-toggle-btn[data-view], .lm-subtoggle-btn[data-view]').forEach(el => {
-    el.addEventListener('click', () => {
-      state.view = el.getAttribute('data-view');
-      renderAll();
-      if (state.view === 'ma_file') { state.mafileCible = userId; fetchMaFile(); }
-      // ⚠️ « Cycles actifs » et « Pipeline » lisent dataActifs/dataKanban,
-      //    charges par ensureCycles. Au montage ils l'etaient parce que la
-      //    section par defaut du vendeur etait « suivi_leads ». Depuis que
-      //    « Ma file » est le defaut, plus personne ne declenchait le
-      //    chargement : les deux onglets restaient VIDES (releve le 27/08).
-      //    Ils n'ont en revanche besoin d'AUCUNE vue KPI.
-      else if (state.view === 'a_traiter' || state.view === 'pipeline') {
-        ensureCycles(cibleCourante());
-      }
-      else if (state.view === 'synthese') ensureKpiVendeur();
-    });
-  });
-  root.querySelectorAll('.lm-subtoggle-btn[data-vleads]').forEach(el => {
-    el.addEventListener('click', () => { state.viewLeads = el.getAttribute('data-vleads'); renderAll(); });
-  });
-  // Reaffectation : le bouton ne doit PAS ouvrir la fiche client sous lui.
-  root.querySelectorAll('.lmf-reaff').forEach(el => {
-    el.addEventListener('click', (ev) => {
-      ev.stopPropagation();
-      ouvrirReaffectation(el.getAttribute('data-reaff'));
-    });
-  });
-  root.querySelectorAll('.lmf-card[data-client]').forEach(el => {
-    el.addEventListener('click', () => {
-      openClientFiche(el.getAttribute('data-client'), TAB_DEFAULT, el);
-    });
-  });
-
-  const rangeBtn = root.querySelector('#lm-range');
-  if (rangeBtn) rangeBtn.addEventListener('click', () => openRangePicker(rangeBtn));
-
-  root.querySelectorAll('.filter-chip').forEach(el => {
-    el.addEventListener('click', () => { state.filterSource = el.getAttribute('data-source'); renderAll(); });
-  });
-
-  const searchInput = root.querySelector('#lm-search');
-  if (searchInput) {
-    let t;
-    searchInput.addEventListener('input', (e) => {
-      clearTimeout(t);
-      const val = e.target.value;
-      t = setTimeout(() => {
-        state.search = val;
-        renderAll();
-        const inp = root.querySelector('#lm-search');
-        if (inp) { inp.focus(); inp.setSelectionRange(val.length, val.length); }
-      }, 200);
-    });
-  }
-
-  root.querySelectorAll('[data-expand-key]').forEach(el => {
-    el.addEventListener('click', (e) => {
-      e.stopPropagation();
-      const key = el.getAttribute('data-expand-key');
-      state.expanded[key] = !state.expanded[key];
-
-      // La synthese suit le noeud clique. Recliquer le meme noeud la remet
-      // sur tout le perimetre — c'est le comportement d'un filtre, pas d'un
-      // interrupteur a sens unique.
-      const scType = el.getAttribute('data-scope-type');
-      if (scType && state.section === 'synthese') {
-        const label = el.getAttribute('data-scope-label') || '';
-        const sites = (el.getAttribute('data-scope-sites') || '')
-                        .split(',').filter(function (x) { return x !== ''; }).map(Number);
-        const deja = state.syntheseScope && state.syntheseScope.type === scType &&
-                     state.syntheseScope.label === label;
-        state.syntheseScope = deja ? null : { type: scType, label: label, sites: sites, id_user: null };
-      }
-
-      const siteId = el.getAttribute('data-site-id');
-      if (siteId) {
-        state.busSite = String(siteId);
-        try { const b = siteBus(); if (b) b.setSiteId(Number(siteId)); } catch (x) {}
-      }
-      renderAll();
-    });
-  });
-
-  root.querySelectorAll('tr.row-vendeur[data-vendeur-id]').forEach(el => {
-    el.addEventListener('click', (e) => {
-      e.stopPropagation();
-      const idUser = Number(el.getAttribute('data-vendeur-id'));
-      const idSiteAttr = el.getAttribute('data-vendeur-site');
-      const idSite = idSiteAttr ? Number(idSiteAttr) : null;
-      const nom = el.getAttribute('data-vendeur-nom') || '';
-
-      if (state.section === 'synthese') {
-        // MODIFIÉ 20/08/2026 — on ne bascule plus vers le suivi des leads.
-        // Le chef reste dans la synthese : elle se recalcule pour ce vendeur,
-        // le tableau d'equipe reste visible au-dessus, et un bouton explicite
-        // l'emmene vers les cycles s'il veut aller plus loin.
-        const dejaLui = state.syntheseScope && state.syntheseScope.type === 'vendeur' &&
-                        Number(state.syntheseScope.id_user) === idUser;
-        state.selectedVendeur = { id_user: idUser, id_site: idSite, vendeur_nom: nom };
-        // On garde AUSSI son site : l'entonnoir suit le vendeur, mais les
-        // blocs qui ne savent pas se decouper par vendeur (cycles actifs,
-        // win sur periode, graphes) suivent au moins son site.
-        state.syntheseScope   = dejaLui ? null
-          : { type: 'vendeur', label: nom || 'Ce vendeur',
-              sites: (idSite != null ? [Number(idSite)] : null), id_user: idUser };
-        renderAll();
-        return;
-      }
-
-      const sameSelection = state.selectedVendeur && state.selectedVendeur.id_user === idUser;
-      if (sameSelection) {
-        state.selectedVendeur = null;
-        selectVendeurCible(null);
-      } else {
-        state.selectedVendeur = { id_user: idUser, id_site: idSite, vendeur_nom: nom };
-        selectVendeurCible(idUser);
-      }
-    });
-  });
-
-  root.querySelectorAll('[data-action="portee-reset"]').forEach(el => {
-    el.addEventListener('click', (e) => {
-      e.stopPropagation();
-      state.syntheseScope = null;
-      state.selectedVendeur = null;
-      renderAll();
-    });
-  });
-
-  root.querySelectorAll('[data-action="portee-cycles"]').forEach(el => {
-    el.addEventListener('click', (e) => {
-      e.stopPropagation();
-      const sc = state.syntheseScope;
-      state.section = 'suivi_leads';
-      if (sc && sc.id_user) selectVendeurCible(sc.id_user); else renderAll();
-    });
-  });
-
-  // Vendeur : ses quatre compteurs mènent à la vue correspondante.
-  root.querySelectorAll('[data-goto]').forEach(el => {
-    el.addEventListener('click', (e) => {
-      e.stopPropagation();
-      state.view = el.getAttribute('data-goto');
-      renderAll();
-    });
-  });
-
-  root.querySelectorAll('[data-action="clear-vendeur"]').forEach(el => {
-    el.addEventListener('click', () => {
-      state.selectedVendeur = null;
-      selectVendeurCible(null);
-    });
-  });
-
-  root.querySelectorAll('[data-action]').forEach(btn => {
-    const a = btn.getAttribute('data-action');
-    if (['clear-vendeur'].includes(a)) return;
-    btn.addEventListener('click', (e) => {
-      e.stopPropagation();
-      const action = btn.getAttribute('data-action');
-      const clientId = btn.getAttribute('data-client');
-      const cardEl = btn.closest('.card, .lm-kcard');
-      if (!clientId) return;
-      if (action === 'call') {
-        const tel = btn.getAttribute('data-tel');
-        if (tel) window.open('tel:' + tel.replace(/[^0-9+]/g, ''), '_blank');
-        openClientFiche(clientId, TAB_CALL, cardEl);
-      } else if (action === 'open-fiche') openClientFiche(clientId, TAB_DEFAULT, cardEl);
-      else if (action === 'wa')           openClientFiche(clientId, TAB_WHATSAPP, cardEl);
-      else if (action === 'cycle')        openClientFiche(clientId, TAB_CYCLE, cardEl);
-      else if (action === 'open-fiche-cycle') openClientFiche(clientId, TAB_CYCLE, cardEl);
-    });
-  });
-
-  if (state.section === 'creation') bindCampagneCreation();
-}
-
-// --- 16. Go -------------------------------------------------
-window.__renderLeadMgmt = renderAll;
-
-renderAll();
-
-// Chargement initial des cycles UNIQUEMENT si on arrive sur « Suivi leads »
-// (vendeur par défaut, ou manager pré-filtré depuis le dashboard). Un manager
-// sur « Synthèse » (défaut) n'en charge aucun -> premier affichage rapide.
-// Au montage, un seul point de décision : la section par défaut du RÔLE.
-// Avant la refonte, le montage câblait en dur deux rôles — d'où des
-// onglets qui ne chargeaient rien pour les autres.
-if (SECTIONS_ROLE.length) {
-  v2Init();
-  chargerSection();
-}
-
-// Bascule .lm-narrow d'après la largeur RÉELLE de #lead-mgmt-root (repli des @media).
-(function bindLeadNarrow() {
-  const W = doc.defaultView || window;
-  function apply() {
-    if (!root) return;
-    let w = 0;
-    try { w = root.getBoundingClientRect().width || root.clientWidth || 0; } catch (e) {}
-    if (!w) return;
-    if (w <= 760) root.classList.add('lm-narrow');
-    else root.classList.remove('lm-narrow');
-  }
-  apply();
-  [120, 400, 900, 1800, 3200].forEach(function (d) { setTimeout(apply, d); });
-  try {
-    if (root && 'ResizeObserver' in W) {
-      if (window.__leadRO) { try { window.__leadRO.disconnect(); } catch (e) {} }
-      window.__leadRO = new W.ResizeObserver(apply);
-      window.__leadRO.observe(root);
-    } else {
-      if (window.__leadResize) W.removeEventListener('resize', window.__leadResize);
-      window.__leadResize = apply;
-      W.addEventListener('resize', window.__leadResize);
+      h += '</footer>';
+      var sc = $drawer.querySelector('.dr-b'); var top = sc ? sc.scrollTop : 0;
+      $drawer.innerHTML = h;
+      var sc2 = $drawer.querySelector('.dr-b'); if (sc2) sc2.scrollTop = top;
     }
-  } catch (e) {}
-})();
+
+    async function chargerSites() {
+      var D = S.dr; if (!D) return;
+      try {
+        D.sites = await rpc('plateau_sites', { p_sf_lead_id: D.sf }) || [];
+        if (D.site == null && D.sites.length && D.sites[0].rang < 3) D.site = D.sites[0].id_site;
+        await chargerVendeurs();
+      } catch (e) { D.sites = []; toast(messageErreur(e), true); }
+      renderDrawer();
+    }
+    async function chargerVendeurs() {
+      var D = S.dr; if (!D || D.site == null) return;
+      var site = D.site;
+      try { var v = await rpc('plateau_vendeurs', { p_id_site: site }); if (S.dr && S.dr.site === site) S.dr.vendeurs = v || []; }
+      catch (e) { if (S.dr) S.dr.vendeurs = []; }
+    }
+
+    var renouvellement = null;
+    async function ouvrir(sf) {
+      fermerDrawer(true);
+      S.dr = { sf: sf, fiche: null, sites: null, vendeurs: null, site: null };
+      $scrim.hidden = false; $drawer.hidden = false;
+      renderDrawer();
+      try {
+        S.dr.fiche = await rpc('plateau_fiche', { p_sf_lead_id: sf });
+        if (!S.dr.fiche) { toast('Lead introuvable dans la copie BACS.', true); fermerDrawer(); return; }
+      } catch (e) { toast(messageErreur(e), true); fermerDrawer(); return; }
+      renderDrawer();
+      if (estMien(S.dr.fiche)) { chargerSites(); armerRenouvellement(); }
+    }
+    function armerRenouvellement() {
+      clearInterval(renouvellement);
+      var min = ((S.kpis || {}).verrou_minutes || 5);
+      renouvellement = setInterval(async function () {
+        if (!S.dr || !S.dr.fiche || !estMien(S.dr.fiche) || !el.isConnected) { clearInterval(renouvellement); return; }
+        try {
+          var r = await rpc('plateau_prendre', { p_sf_lead_id: S.dr.sf });
+          if (r && r.action === 'reserve') { S.dr.fiche.verrou_jusqu = r.jusqu; renderDrawerPreserve(); }
+        } catch (e) {}
+      }, Math.max(60000, (min - 1) * 60000));
+    }
+    // Re-rendu du panneau sans perdre la saisie en cours.
+    function lireForm() {
+      var g = function (s) { var x = $drawer.querySelector(s); return x ? x.value : null; };
+      var r = function (n) { var x = $drawer.querySelector('input[name="' + n + '"]:checked'); return x ? x.value : null; };
+      return { projet: r('q-projet'), modele: g('#q-modele'), echeance: r('q-echeance'), reprise: r('q-reprise'),
+               financement: r('q-fin'), note: g('#q-note'), site: r('q-site'), vendeur: g('#q-vendeur') };
+    }
+    function renderDrawerPreserve() {
+      var D = S.dr; if (!D || !D.fiche) return;
+      var v = lireForm();
+      if (v.projet || v.modele != null) {
+        D.fiche.qualification = Object.assign({}, D.fiche.qualification || {}, {
+          projet: v.projet, modele: v.modele, echeance: v.echeance, reprise: v.reprise, financement: v.financement, note: v.note });
+      }
+      if (v.site) D.site = Number(v.site);
+      var vend = v.vendeur;
+      renderDrawer();
+      var sel = $drawer.querySelector('#q-vendeur'); if (sel && vend) sel.value = vend;
+    }
+    async function fermerDrawer(silencieux) {
+      clearInterval(renouvellement);
+      var D = S.dr; S.dr = null;
+      $scrim.hidden = true; $drawer.hidden = true; $drawer.innerHTML = '';
+      // Fermer sans geste rend le lead aux collègues tout de suite.
+      if (D && D.fiche && estMien(D.fiche) && !silencieux) {
+        try { await rpc('plateau_liberer', { p_sf_lead_id: D.sf }); } catch (e) {}
+        rafraichir(true);
+      }
+    }
+
+    // ── Gestes ────────────────────────────────────────────────────────────
+    var occupe = false;
+    async function geste(fn) {
+      if (occupe) return; occupe = true;
+      ov.classList.add('busy'); root.classList.add('busy');
+      try { await fn(); }
+      catch (e) { toast(messageErreur(e), true); }
+      finally { occupe = false; ov.classList.remove('busy'); root.classList.remove('busy'); }
+    }
+    function prendre(sf) {
+      return geste(async function () {
+        var r = await rpc('plateau_prendre', { p_sf_lead_id: sf });
+        if (r && r.action === 'reserve') { await ouvrir(sf); rafraichir(true); return; }
+        if (r && r.action === 'occupe') { toast('Déjà pris par ' + propre(r.par_nom || 'un collègue') + '.', true); }
+        else if (r && r.action === 'clos') toast('Ce lead est déjà traité (' + libStatut(r.statut) + ').', true);
+        else toast('Lead introuvable dans la copie BACS.', true);
+        rafraichir(true);
+      });
+    }
+    function apresGeste(msg) { toast(msg); fermerDrawer(true); rafraichir(true); }
+    function qualifier() {
+      var D = S.dr; if (!D) return;
+      var v = lireForm();
+      if (!v.site) { toast('Choisissez le site vers lequel orienter le lead.', true); return; }
+      var qualif = {};
+      ['projet', 'modele', 'echeance', 'reprise', 'financement', 'note'].forEach(function (k) { if (v[k] && String(v[k]).trim()) qualif[k] = String(v[k]).trim(); });
+      return geste(async function () {
+        var r = await rpc('plateau_qualifier', { p_sf_lead_id: D.sf, p_id_site: Number(v.site), p_qualif: qualif, p_id_user_cible: v.vendeur ? Number(v.vendeur) : null });
+        var site = (D.sites || []).find(function (s) { return Number(s.id_site) === Number(v.site); });
+        if (r && r.ok === false) { toast('Qualifié, mais le transfert a échoué : ' + (r.motif || r.erreur || 'raison inconnue') + '.', true); fermerDrawer(true); rafraichir(true); return; }
+        var vend = v.vendeur ? (D.vendeurs || []).find(function (x) { return String(x.id_user) === String(v.vendeur); }) : null;
+        apresGeste('Transféré à ' + siteNom(site ? site.site : 'site') + (vend ? ' · ' + propre(vend.nom) : (r && r.id_user_attribue ? ' · tour de rôle' : '')));
+      });
+    }
+    function rappel(type) {
+      var D = S.dr; if (!D) return;
+      var quandR;
+      if (type === 'injoignable') {
+        var choix = ($drawer.querySelector('#r-quand') || {}).value;
+        quandR = choix === 'demain' ? demainA(9, 1) : choix === 'apres' ? demainA(9, 2)
+          : choix === 'autre' ? new Date(($drawer.querySelector('#r-date') || {}).value) : new Date(Date.now() + 2 * 3600000);
+      } else {
+        var d = ($drawer.querySelector('#lt-date') || {}).value;
+        quandR = d ? new Date(d + 'T09:00') : demainA(9, 30);
+      }
+      if (!quandR || isNaN(quandR.getTime()) || quandR.getTime() < Date.now() - 60000) { toast('Choisissez une date de rappel dans le futur.', true); return; }
+      var note = (($drawer.querySelector('#q-note') || {}).value || '').trim() || null;
+      return geste(async function () {
+        await rpc('plateau_rappel', { p_sf_lead_id: D.sf, p_type: type, p_rappel_le: quandR.toISOString(), p_note: note });
+        apresGeste((type === 'injoignable' ? 'Rappel programmé ' : 'Projet long terme, rappel ') + (quand(quandR).length > 5 ? 'le ' : 'à ') + quand(quandR));
+      });
+    }
+    function abandonner() {
+      var D = S.dr; if (!D) return;
+      var motif = ($drawer.querySelector('#a-motif') || {}).value;
+      var note = (($drawer.querySelector('#q-note') || {}).value || '').trim() || null;
+      return geste(async function () {
+        await rpc('plateau_abandonner', { p_sf_lead_id: D.sf, p_motif: motif, p_note: note });
+        apresGeste('Lead abandonné · ' + motif);
+      });
+    }
+    function relancer(ids) {
+      var liste = String(ids || '').split(',').filter(Boolean);
+      return geste(async function () {
+        var n = 0, ok = 0;
+        for (var i = 0; i < liste.length; i++) {
+          var r = await rpc('plateau_relancer_site', { p_sf_lead_id: liste[i] });
+          if (r && r.ok) ok++; n += (r && r.chefs_prevenus) || 0;
+        }
+        toast(ok ? 'Chef des ventes prévenu' + (n > 1 ? ' (' + n + ' alertes)' : '') : 'Aucun chef des ventes rattaché à ce site.', !ok);
+        if (S.dr) { fermerDrawer(true); }
+        rafraichir(true);
+      });
+    }
+    function pick3cx() {
+      var c = [FW, window]; try { c.push(window.parent); } catch (e) {} try { c.push(window.top); } catch (e) {}
+      for (var i = 0; i < c.length; i++) { try { if (c[i] && c[i].OD3CX && typeof c[i].OD3CX.appeler === 'function') return c[i].OD3CX; } catch (e) {} }
+      return null;
+    }
+    function canal(act) {
+      var D = S.dr; if (!D || !D.fiche) return;
+      var f = D.fiche;
+      var nom = propre(f.nom || '');
+      var client = { IDVu: f.id_client, TEl_MOB: f.telephone, EMAIL: f.email, nom: nom, prenom: '' };
+      try {
+        if (act === 'appel') {
+          var cx = pick3cx(), num = normTel(f.telephone);
+          if (cx && num) { cx.appeler(num, { nom: nom, idvu: f.id_client }); return; }
+          var w = (window.parent && window.parent.__VOIP_UI__) || window.__VOIP_UI__ || FW.__VOIP_UI__;
+          if (w && w.call) { w.call(f.telephone, client); return; }
+          FW.open('tel:' + String(f.telephone || '').replace(/[^0-9+]/g, ''), '_self');
+        } else if (act === 'sms') { var s = FW.__SMS_UI__ || window.__SMS_UI__; if (s && s.open) s.open({ client: client }); else toast('Module SMS indisponible.', true); }
+        else if (act === 'wa') { var wa = FW.__WA_UI__ || window.__WA_UI__; if (wa && wa.open) wa.open({ client: client }); else toast('Module WhatsApp indisponible.', true); }
+        else if (act === 'mail') { var m = FW.__EMAIL_UI__ || window.__EMAIL_UI__; if (m && m.open) m.open({ mode: 'new', client: client }); else FW.open('mailto:' + f.email, '_blank'); }
+      } catch (e) { toast('Canal indisponible : ' + messageErreur(e), true); }
+    }
+
+    // ── Événements ────────────────────────────────────────────────────────
+    function memoAck() { try { FW.localStorage.setItem('lmtc-ack', JSON.stringify(Array.from(S.ack).slice(-200))); } catch (e) {} }
+    async function action(a, id, ev) {
+      switch (a) {
+        case 'tab':
+          S.tab = id;
+          if (id === 'campagnes' && !S.campagnes) { render(); try { S.campagnes = await rpc('plateau_campagnes', { p_jours: 90 }); } catch (e) { toast(messageErreur(e), true); S.campagnes = []; } }
+          render(); return;
+        case 'ack': S.ack.add(id); memoAck(); render(); return;
+        case 'prendre': return prendre(id);
+        case 'open': return ouvrir(id);
+        case 'relancer': return relancer(id);
+        case 'stock':
+          S.tab = 'piscine'; S.stock = !!id; render();
+          if (S.stock && !S.stockListe) { try { S.stockListe = await rpc('plateau_file', { p_vue: 'stock', p_campagne: S.campagne }); } catch (e) { toast(messageErreur(e), true); S.stockListe = []; } render(); }
+          return;
+        case 'source': {
+          var src = (S.kpis && S.kpis.sources) || [];
+          var actives = S.sources || src.filter(function (x) { return x.suivi; }).map(function (x) { return x.code; });
+          S.sources = actives.indexOf(id) !== -1 ? actives.filter(function (c) { return c !== id; }) : actives.concat([id]);
+          S.tab = 'piscine'; S.stock = false;
+          return geste(async function () {
+            S.piscine = await rpc('plateau_file', { p_vue: 'piscine', p_sources: sourcesArg(), p_campagne: S.campagne }) || [];
+            render();
+          });
+        }
+        case 'campagne':
+          S.campagne = id || null; S.stockListe = null;
+          if (S.campagne) {
+            var c = (S.campagnes || []).find(function (x) { return x.campagne === S.campagne; }) || {};
+            S.stock = false;
+            S.tab = (Number(c.a_prendre) + Number(c.acceptes)) > 0 ? 'piscine' : Number(c.rappels) > 0 ? 'rappels' : 'transferts';
+          }
+          return geste(async function () { await charger(); render(); });
+        case 'miens': S.miens = !!id; render(); return;
+        case 'quitter-apercu':
+          try { FW.history.replaceState(null, '', FW.location.pathname + FW.location.search.replace(/([?&])plateau=1&?/, '$1').replace(/[?&]$/, '')); } catch (e) { try { FW.location.hash = ''; } catch (e2) {} }
+          detruire();
+          var legacy = await chargerLegacy();
+          return legacy.mount(el, ctx);
+        case 'reessayer': S.erreur = null; render(); return rafraichir();
+        // Panneau
+        case 'close': return fermerDrawer();
+        case 'copier': try { await (FW.navigator || navigator).clipboard.writeText(id); toast('Numéro copié'); } catch (e) { toast(id); } return;
+        case 'canal': return canal(id);
+        case 'tous-sites': if (S.dr) { S.dr.tousSites = true; renderDrawerPreserve(); } return;
+        case 'issue': if (S.dr) { S.dr.issue = id; renderDrawerPreserve(); } return;
+        case 'qualifier': return qualifier();
+        case 'injoignable': return rappel('injoignable');
+        case 'long-terme': return rappel('long_terme');
+        case 'abandonner': return abandonner();
+        case 'liberer':
+          return geste(async function () { var D = S.dr; await rpc('plateau_liberer', { p_sf_lead_id: D.sf }); apresGeste('Lead libéré'); });
+      }
+    }
+    function surClic(ev) {
+      var t = ev.target.closest('[data-a]');
+      if (!t || t.disabled) return;
+      var a = t.getAttribute('data-a');
+      if (t.classList.contains('lr') && ev.target.closest('button,select,input,a')) return;
+      ev.preventDefault(); ev.stopPropagation();
+      action(a, t.getAttribute('data-id') || '', ev);
+    }
+    root.addEventListener('click', surClic);
+    ov.addEventListener('click', surClic);
+    $scrim.addEventListener('click', function () { fermerDrawer(); });
+    root.addEventListener('keydown', function (ev) {
+      if ((ev.key === 'Enter' || ev.key === ' ') && ev.target.classList && ev.target.classList.contains('lr')) { ev.preventDefault(); ouvrir(ev.target.getAttribute('data-id')); }
+    });
+    ov.addEventListener('change', async function (ev) {
+      var t = ev.target;
+      if (t.name === 'q-site' && S.dr) {
+        S.dr.site = Number(t.value); S.dr.vendeurs = null;
+        renderDrawerPreserve();
+        await chargerVendeurs(); renderDrawerPreserve();
+      } else if (t.id === 'r-quand') {
+        var d = $drawer.querySelector('#r-date'); if (d) d.hidden = t.value !== 'autre';
+      }
+    });
+    function surTouche(ev) { if (ev.key === 'Escape' && S.dr) fermerDrawer(); }
+    doc.addEventListener('keydown', surTouche);
+
+    // ── Cycle de vie ──────────────────────────────────────────────────────
+    var minuteur = null, horloge = null;
+    function detruire() {
+      clearInterval(minuteur); clearInterval(horloge); clearInterval(renouvellement);
+      doc.removeEventListener('keydown', surTouche);
+      if (S.dr && S.dr.fiche && estMien(S.dr.fiche)) { try { rpc('plateau_liberer', { p_sf_lead_id: S.dr.sf }); } catch (e) {} }
+      S.dr = null;
+      try { ov.remove(); } catch (e) {}
+      try { root.remove(); } catch (e) {}
+    }
+    minuteur = setInterval(function () {
+      if (!el.isConnected || !root.isConnected) { detruire(); return; }
+      if (doc.visibilityState === 'hidden' || occupe) return;
+      rafraichir(true);
+    }, REFRESH_MS);
+    // Les minuteurs affichés vieillissent sans attendre le rechargement.
+    horloge = setInterval(function () {
+      if (!el.isConnected) { detruire(); return; }
+      if (doc.visibilityState === 'hidden' || occupe || !S.charge) return;
+      var act = doc.activeElement;
+      if (act && root.contains(act) && /INPUT|SELECT|TEXTAREA/.test(act.tagName)) return;
+      render();
+    }, 20000);
+
+    await rafraichir();
   }
-});
+
+  // ==========================================================================
+  //  CHARTE (maquette « Leads Team Colin », validée le 05/10/2026)
+  // ==========================================================================
+  function injecterCss(doc) {
+    if (doc.getElementById('lmtc-css')) return;
+    if (!doc.getElementById('lmtc-font')) {
+      var f = doc.createElement('link'); f.id = 'lmtc-font'; f.rel = 'stylesheet';
+      f.href = 'https://fonts.googleapis.com/css2?family=Nunito+Sans:opsz,wght@6..12,400;6..12,600;6..12,700;6..12,800&display=swap';
+      (doc.head || doc.documentElement).appendChild(f);
+    }
+    var st = doc.createElement('style'); st.id = 'lmtc-css';
+    st.textContent = `
+.lmtc{--bg:#f1f4f9;--surface:#ffffff;--surface-2:#f6f8fc;--line:#e1e7f0;--line-2:#ccd6e4;
+  --fg:#17253b;--muted:#56657d;--faint:#8794a8;
+  --accent:#2a5ea9;--accent-dk:#1f4a87;--accent-bg:#e9eff9;--on-accent:#ffffff;
+  --ok:#0b7a58;--ok-bg:#e0f3eb;--warn:#9c5a00;--warn-bg:#fcefd6;--crit:#b42323;--crit-bg:#fbe8e8;
+  --vroom:#5a2dbd;--vroom-bg:#efe9fd;--scrim:rgba(12,22,38,.38);--shadow:0 18px 40px rgba(23,37,59,.16);
+  --f-ui:"Nunito Sans",system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+  --f-num:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+  font-family:var(--f-ui);font-size:14px;line-height:1.45;color:var(--fg);-webkit-font-smoothing:antialiased}
+.lmtc:not(.lmtc-ov){display:block;width:100%;max-width:1320px;margin:0 auto;padding:18px 16px 48px;box-sizing:border-box;background:var(--bg)}
+.lmtc *{box-sizing:border-box}
+.lmtc [hidden]{display:none!important}
+.lmtc button{font:inherit;color:inherit}
+.lmtc h2,.lmtc h3{margin:0;text-wrap:balance}
+.lmtc p{margin:0}
+.lmtc .num{font-family:var(--f-num);font-variant-numeric:tabular-nums}
+.lmtc.busy{cursor:progress}
+.lmtc .situ{display:grid;gap:12px;margin-bottom:18px}
+.lmtc .situ-l{font-size:11.5px;font-weight:800;letter-spacing:.06em;text-transform:uppercase;color:var(--muted)}
+.lmtc .situ-l .vr{color:var(--vroom)}
+.lmtc .lien{border:0;background:none;padding:0;color:var(--accent);font-weight:800;text-transform:none;letter-spacing:0;cursor:pointer;text-decoration:underline}
+.lmtc .situ-t{font-size:clamp(17px,2.1vw,21px);font-weight:700;line-height:1.35;max-width:72ch}
+.lmtc .situ-t b{font-weight:800}
+.lmtc .t-crit{color:var(--crit)} .lmtc .t-warn{color:var(--warn)} .lmtc .t-ok{color:var(--ok)} .lmtc .t-acc{color:var(--accent)} .lmtc .t-vr{color:var(--vroom)} .lmtc .t-mut{color:var(--faint);font-weight:600}
+.lmtc .kpis{display:flex;flex-wrap:wrap;gap:8px 26px}
+.lmtc .k{display:grid;gap:1px}
+.lmtc .k > span{font-size:11px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;color:var(--faint)}
+.lmtc .k b{font-family:var(--f-num);font-size:15.5px;font-weight:600}
+.lmtc .k b .txt{font-family:var(--f-ui);font-weight:800;font-size:15px}
+.lmtc .alerte{background:var(--warn-bg);color:var(--warn);border-radius:10px;padding:9px 12px;font-size:13px;font-weight:700;margin-bottom:14px}
+.lmtc .poste{display:grid;grid-template-columns:minmax(0,340px) minmax(0,1fr);gap:18px;align-items:start}
+@media (max-width:940px){.lmtc .poste{grid-template-columns:minmax(0,1fr)}}
+.lmtc .sig{background:var(--surface);border:1px solid var(--line);border-radius:12px;min-width:0}
+@media (min-width:941px){.lmtc .sig{position:sticky;top:12px;max-height:calc(100vh - 24px);overflow:auto}}
+.lmtc .zh{padding:14px 16px 11px;display:grid;gap:3px}
+.lmtc .zh h2{font-size:15px;font-weight:800;display:flex;align-items:center;gap:8px}
+.lmtc .zh p{font-size:12.5px;color:var(--muted)}
+.lmtc .cnt{font-family:var(--f-num);font-size:11.5px;font-weight:600;background:var(--accent-bg);color:var(--accent-dk);border-radius:999px;padding:1px 8px}
+.lmtc .sg{display:grid;grid-template-columns:10px minmax(0,1fr);gap:11px;padding:12px 16px;border-top:1px solid var(--line)}
+.lmtc .sg-m{width:10px;height:10px;border-radius:3px;margin-top:5px;background:var(--faint)}
+.lmtc .sg.crit .sg-m{background:var(--crit)} .lmtc .sg.warn .sg-m{background:var(--warn)} .lmtc .sg.new .sg-m{background:var(--accent)} .lmtc .sg.vr .sg-m{background:var(--vroom)} .lmtc .sg.info .sg-m{background:var(--line-2)}
+.lmtc .sg.fresh .sg-m{animation:lmtc-pulse 1.6s ease-out 4}
+@keyframes lmtc-pulse{0%{box-shadow:0 0 0 0 var(--accent)}100%{box-shadow:0 0 0 9px transparent}}
+.lmtc .sg-top{display:flex;justify-content:space-between;gap:8px;align-items:baseline}
+.lmtc .sg-k{font-size:10.5px;font-weight:800;letter-spacing:.05em;text-transform:uppercase;color:var(--muted)}
+.lmtc .sg.crit .sg-k{color:var(--crit)} .lmtc .sg.warn .sg-k{color:var(--warn)} .lmtc .sg.new .sg-k{color:var(--accent)} .lmtc .sg.vr .sg-k{color:var(--vroom)}
+.lmtc .sg-h{font-family:var(--f-num);font-size:11px;color:var(--faint);white-space:nowrap}
+.lmtc .sg-t{font-weight:700;margin-top:2px}
+.lmtc .sg-d{font-size:12.5px;color:var(--muted);margin-top:2px}
+.lmtc .sg-a{display:flex;flex-wrap:wrap;gap:6px;margin-top:9px}
+.lmtc .sig-empty{padding:18px 16px;border-top:1px solid var(--line);font-size:12.5px;color:var(--muted)}
+.lmtc .act{background:var(--surface);border:1px solid var(--line);border-radius:12px;min-width:0}
+.lmtc .tabs{display:flex;gap:2px;padding-inline:8px;border-bottom:1px solid var(--line);overflow-x:auto;scrollbar-width:thin}
+.lmtc .tabs button{flex:none;border:0;background:transparent;padding:13px 12px 11px;border-bottom:2px solid transparent;font-weight:700;font-size:13.5px;color:var(--muted);cursor:pointer;display:flex;align-items:center;gap:7px}
+.lmtc .tabs button.on{color:var(--fg);border-bottom-color:var(--accent)}
+.lmtc .tabs .cnt.z{background:var(--surface-2);color:var(--faint)}
+.lmtc .tabs .cnt.c{background:var(--crit-bg);color:var(--crit)}
+.lmtc .panel{padding:16px 18px 20px;min-width:0}
+.lmtc .ph{display:flex;flex-wrap:wrap;justify-content:space-between;align-items:flex-end;gap:10px 16px;margin-bottom:12px}
+.lmtc .ph h2{font-size:16px;font-weight:800}
+.lmtc .ph p{font-size:12.5px;color:var(--muted);max-width:68ch;margin-top:2px}
+.lmtc .ph-r{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.lmtc .barre{display:flex;flex-wrap:wrap;gap:8px 12px;align-items:center;margin-bottom:10px}
+.lmtc .btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;border:1px solid var(--line-2);background:var(--surface);color:var(--fg);border-radius:8px;padding:7px 12px;font-size:12.5px;font-weight:700;cursor:pointer;white-space:nowrap;line-height:1.2}
+.lmtc .btn:hover{border-color:var(--accent);color:var(--accent-dk)}
+.lmtc .btn.pri{background:var(--accent);border-color:var(--accent);color:var(--on-accent)}
+.lmtc .btn.pri:hover{background:var(--accent-dk);border-color:var(--accent-dk);color:var(--on-accent)}
+.lmtc .btn.vr{background:var(--vroom);border-color:var(--vroom);color:var(--on-accent)}
+.lmtc .btn.vr:hover{filter:brightness(.92);color:var(--on-accent)}
+.lmtc .btn.ghost{border-color:transparent;background:transparent;color:var(--muted)}
+.lmtc .btn.ghost:hover{color:var(--fg);border-color:var(--line-2)}
+.lmtc .btn.sm{padding:5px 9px;font-size:12px}
+.lmtc .btn.dang{color:var(--crit)}
+.lmtc .btn[disabled]{opacity:.45;cursor:not-allowed}
+.lmtc.busy .btn,.lmtc-ov.busy .btn{pointer-events:none;opacity:.7}
+.lmtc :is(.btn,.tabs button,.lr,.chip span,.seg button,.fchip):focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.lmtc select,.lmtc input[type=text],.lmtc input[type=date],.lmtc input[type=datetime-local],.lmtc textarea{font:inherit;font-size:13px;color:var(--fg);background:var(--surface);border:1px solid var(--line-2);border-radius:8px;padding:7px 9px;min-width:0}
+.lmtc select:focus,.lmtc input:focus,.lmtc textarea:focus{outline:2px solid var(--accent);outline-offset:1px}
+.lmtc .tag{display:inline-flex;align-items:center;font-size:11px;font-weight:700;border-radius:999px;padding:2px 8px;background:var(--surface-2);border:1px solid var(--line);color:var(--muted);white-space:nowrap;max-width:100%;overflow:hidden;text-overflow:ellipsis}
+.lmtc .tag.camp{background:var(--accent-bg);border-color:transparent;color:var(--accent-dk)}
+.lmtc .tag.vr{background:var(--vroom-bg);border-color:transparent;color:var(--vroom)}
+.lmtc .tag.ok{background:var(--ok-bg);border-color:transparent;color:var(--ok)}
+.lmtc .tag.crit{background:var(--crit-bg);border-color:transparent;color:var(--crit)}
+.lmtc .tag.warn{background:var(--warn-bg);border-color:transparent;color:var(--warn)}
+.lmtc .tags{display:flex;flex-wrap:wrap;gap:5px;margin-top:6px}
+.lmtc .tm{display:inline-grid;gap:2px;justify-items:start}
+.lmtc .tm b{font-family:var(--f-num);font-weight:600;font-size:13.5px;padding:3px 8px;border-radius:6px;background:var(--ok-bg);color:var(--ok);white-space:nowrap}
+.lmtc .tm.warn b{background:var(--warn-bg);color:var(--warn)}
+.lmtc .tm.crit b{background:var(--crit-bg);color:var(--crit)}
+.lmtc .tm.neutre b{background:var(--surface-2);color:var(--muted)}
+.lmtc .tm small{font-size:10.5px;color:var(--faint);white-space:nowrap}
+.lmtc .list{display:grid}
+.lmtc .lr{display:grid;grid-template-columns:112px minmax(0,1fr) auto;gap:14px;align-items:center;padding:12px 6px;border-top:1px solid var(--line);cursor:pointer;border-radius:8px}
+.lmtc .lr:hover{background:var(--surface-2)}
+.lmtc .lr.resa{opacity:.62}
+.lmtc .lr-n{font-weight:800}
+.lmtc .lr-v{color:var(--muted);font-size:12.5px;font-weight:600}
+.lmtc .lr-d{font-size:13px;margin-top:1px}
+.lmtc .lr-a{display:flex;flex-wrap:wrap;gap:6px;justify-content:flex-end;align-items:center}
+.lmtc .resa-l{font-size:12px;color:var(--muted);font-weight:600;text-align:right}
+@media (max-width:600px){.lmtc .lr{grid-template-columns:minmax(0,1fr)}.lmtc .lr-a{justify-content:flex-start}.lmtc .resa-l{text-align:left}}
+.lmtc .empty{padding:20px 6px;border-top:1px solid var(--line);color:var(--muted);font-size:13px}
+.lmtc .seg{display:inline-flex;gap:2px;padding:2px;border:1px solid var(--line);border-radius:8px;background:var(--surface-2)}
+.lmtc .seg button{border:0;background:transparent;padding:5px 9px;border-radius:6px;font-size:12px;font-weight:700;color:var(--muted);cursor:pointer}
+.lmtc .seg button.on{background:var(--surface);color:var(--fg);box-shadow:0 1px 2px rgba(23,37,59,.12)}
+.lmtc .seg .num{font-size:11px;color:var(--faint);margin-left:3px}
+.lmtc .filtres{display:flex;flex-wrap:wrap;gap:5px}
+.lmtc .fchip{border:1px solid var(--line-2);background:var(--surface);border-radius:999px;padding:4px 10px;font-size:12px;font-weight:700;color:var(--muted);cursor:pointer}
+.lmtc .fchip.on{background:var(--accent-bg);border-color:var(--accent);color:var(--accent-dk)}
+.lmtc .fchip .num{font-size:11px;margin-left:3px}
+.lmtc .scroll{overflow-x:auto}
+.lmtc table{border-collapse:separate;border-spacing:0;width:100%}
+.lmtc th{font-size:10.5px;font-weight:800;letter-spacing:.05em;text-transform:uppercase;color:var(--faint);text-align:center;padding:8px 6px;white-space:nowrap}
+.lmtc th:first-child,.lmtc td:first-child{text-align:left}
+.lmtc td{border-top:1px solid var(--line);padding:7px 6px;text-align:center;vertical-align:middle}
+.lmtc .camp-t{min-width:820px}
+.lmtc .camp-t td{font-size:13px}
+.lmtc .camp-t td.l{font-weight:700;max-width:320px}
+.lmtc .camp-t td.l small{display:block;font-weight:600;color:var(--muted);font-size:11.5px}
+.lmtc .prog{display:inline-grid;gap:4px;justify-items:center}
+.lmtc .bar{width:84px;height:5px;border-radius:2px;background:var(--line);overflow:hidden}
+.lmtc .bar i{display:block;height:100%;background:var(--accent)}
+.lmtc .bar.low i{background:var(--crit)}
+.lmtc .na{color:var(--faint);font-size:12px}
+.lmtc .foot{font-size:12px;color:var(--muted);margin-top:10px;max-width:80ch}
+.lmtc-ov .scrim{position:fixed;inset:0;background:var(--scrim);z-index:9990}
+.lmtc-ov .drawer{position:fixed;top:0;right:0;bottom:0;width:min(520px,100%);background:var(--surface);z-index:9991;box-shadow:var(--shadow);display:flex;flex-direction:column;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+.lmtc-ov .dr-h{display:flex;justify-content:space-between;gap:12px;padding:16px 18px 12px;border-bottom:1px solid var(--line)}
+.lmtc-ov .dr-h h2{font-size:19px;font-weight:800}
+.lmtc-ov .dr-s{font-size:12.5px;color:var(--muted);font-weight:600;margin-top:2px}
+.lmtc-ov .x{border:0;background:var(--surface-2);width:34px;height:34px;border-radius:8px;font-size:18px;cursor:pointer;flex:none;color:var(--muted)}
+.lmtc-ov .dr-b{flex:1;overflow:auto;padding:4px 18px 18px;display:grid;align-content:start}
+.lmtc-ov .dr-b section{padding:13px 0;border-bottom:1px solid var(--line);display:grid;gap:7px}
+.lmtc-ov .dr-b section:last-child{border-bottom:0}
+.lmtc-ov .dr-b h3{font-size:10.5px;font-weight:800;letter-spacing:.06em;text-transform:uppercase;color:var(--faint)}
+.lmtc-ov .dl{display:grid;grid-template-columns:max-content minmax(0,1fr);gap:4px 14px;font-size:13px;margin:0}
+.lmtc-ov .dl dt{color:var(--muted)}
+.lmtc-ov .dl dd{margin:0;font-weight:700}
+.lmtc-ov .tel{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.lmtc-ov .tel b{font-family:var(--f-num);font-size:15px;user-select:all}
+.lmtc-ov .mail{font-size:13px;color:var(--muted);word-break:break-all}
+.lmtc-ov .quote{font-size:13px;color:var(--muted);border-left:2px solid var(--line-2);padding-left:10px;white-space:pre-line}
+.lmtc-ov .canaux{display:flex;flex-wrap:wrap;gap:6px}
+.lmtc-ov .canaux .btn{flex:1 1 84px}
+.lmtc-ov .delais{display:flex;flex-wrap:wrap;gap:14px 22px}
+.lmtc-ov .delais > div{display:grid;gap:4px}
+.lmtc-ov .delais > div > span:first-child{font-size:11.5px;color:var(--muted);font-weight:700}
+.lmtc-ov .tl{list-style:none;margin:0;padding:0;display:grid;gap:8px}
+.lmtc-ov .tl li{display:grid;grid-template-columns:86px minmax(0,1fr);gap:10px;font-size:12.5px}
+.lmtc-ov .tl li b{font-family:var(--f-num);font-weight:500;color:var(--faint);font-size:11.5px}
+.lmtc-ov .tl li.v span{color:var(--vroom);font-weight:700}
+.lmtc-ov .dr-f{border-top:1px solid var(--line);padding:12px 18px;display:grid;gap:10px;background:var(--surface)}
+.lmtc-ov .dr-f .row{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.lmtc-ov .hint{font-size:12px;color:var(--muted)}
+.lmtc-ov .issues{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:2px;padding:2px;border:1px solid var(--line);border-radius:9px;background:var(--surface-2)}
+.lmtc-ov .issues button{border:0;background:transparent;padding:7px 4px;border-radius:7px;font-size:12.5px;font-weight:700;color:var(--muted);cursor:pointer}
+.lmtc-ov .issues button.on{background:var(--surface);color:var(--fg);box-shadow:0 1px 2px rgba(23,37,59,.14)}
+.lmtc-ov .issues button.on.qualifier{color:var(--vroom)} .lmtc-ov .issues button.on.abandon{color:var(--crit)}
+.lmtc-ov .dr-f .row.pied{justify-content:space-between;flex-wrap:nowrap}
+.lmtc-ov .dr-f .row.pied .hint{flex:1}
+@media (max-width:420px){.lmtc-ov .issues{grid-template-columns:repeat(2,minmax(0,1fr))}}
+.lmtc-ov .qf{display:grid;gap:10px}
+.lmtc-ov .q{display:grid;gap:5px}
+.lmtc-ov .q > span{font-size:12px;font-weight:700;color:var(--muted)}
+.lmtc-ov .vend{margin-top:6px}
+.lmtc-ov .chips{display:flex;flex-wrap:wrap;gap:5px}
+.lmtc-ov .chip{position:relative}
+.lmtc-ov .chip input{position:absolute;opacity:0;width:1px;height:1px}
+.lmtc-ov .chip span{display:inline-block;padding:5px 10px;border-radius:999px;border:1px solid var(--line-2);font-size:12.5px;font-weight:700;color:var(--muted);cursor:pointer}
+.lmtc-ov .chip input:checked + span{background:var(--accent-bg);border-color:var(--accent);color:var(--accent-dk)}
+.lmtc-ov .chip input:focus-visible + span{outline:2px solid var(--accent);outline-offset:2px}
+.lmtc-ov .sites{display:grid;gap:6px}
+.lmtc-ov .site-o{display:grid;grid-template-columns:auto minmax(0,1fr) auto;gap:10px;align-items:center;border:1px solid var(--line-2);border-radius:9px;padding:9px 11px;cursor:pointer}
+.lmtc-ov .site-o:has(input:checked){border-color:var(--vroom);background:var(--vroom-bg)}
+.lmtc-ov .site-o b{font-weight:800}
+.lmtc-ov .site-o small{display:block;color:var(--muted);font-size:11.5px;font-weight:600}
+.lmtc-ov .site-o input{accent-color:var(--vroom)}
+.lmtc-ov .site-o em{font-style:normal;font-family:var(--f-num);font-size:12px;color:var(--muted)}
+.lmtc-ov .toast{position:fixed;left:50%;bottom:calc(18px + env(safe-area-inset-bottom,0px));transform:translate(-50%,20px);background:var(--fg);color:#fff;padding:10px 16px;border-radius:10px;font-weight:700;font-size:13px;opacity:0;pointer-events:none;transition:opacity .2s,transform .2s;z-index:9999;max-width:calc(100% - 32px)}
+.lmtc-ov .toast.err{background:var(--crit)}
+.lmtc-ov .toast.on{opacity:1;transform:translate(-50%,0)}
+@media (prefers-reduced-motion:reduce){.lmtc *{animation:none!important;transition:none!important}}
+`;
+    (doc.head || doc.documentElement).appendChild(st);
+  }
+})();
