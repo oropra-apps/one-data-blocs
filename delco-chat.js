@@ -297,7 +297,11 @@ await (async function () {
   //   4 → vendeur ; 3,5 → manager ; 2,6,7,8 → direction ; 1 → admin.
   function profileFromRole(roleId) {
     const r = Number(roleId);
-    if (r === 4) return "vendeur";
+    // Tout rôle connu hors des rôles manager (vendeur, opérateur plateau = 10)
+    // reçoit la vue vendeur. Miroir de public.role_est_manager(), 05/10/2026 :
+    // avant, un rôle inconnu recevait les raccourcis manager.
+    // L'orchestrator fait déjà de même côté serveur (défaut : vendeur).
+    if (r === 4 || (r > 0 && ![1, 2, 3, 5, 6, 7, 8, 9].includes(r))) return "vendeur";
     if (r === 1) return "admin";
     if (r === 2 || r === 6 || r === 7 || r === 8) return "direction";
     return "manager"; // 3, 5, défaut
