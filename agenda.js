@@ -1,5 +1,8 @@
 // ============================================================================
-//  AGENDA (FullCalendar) — module One Data (OD.define)  v12 — COMPTE RENDU
+//  AGENDA (FullCalendar) — module One Data (OD.define)  v14 — COMPTE RENDU
+//  v14 (05/10/2026) : resolution de l'ID_User par getSession() au lieu de
+//  getUser() — un aller-retour vers /auth/v1/user de moins au demarrage
+//  (140 ms mesures). Repli sur getUser() si aucune session n'est posee.
 //
 //  AJOUT v12 : LE CRÉNEAU QUI RESTE À CONCLURE SE VOIT VRAIMENT
 //  (la v11 le marquait, mais .fc-event est en overflow:hidden et sa règle
@@ -104,7 +107,13 @@ OD.define('agenda', {
     let id = u.ID_User ?? u.id_user;
     if (id != null && id !== '') { CACHED_UID = Number(id); return CACHED_UID; }
     try {
-      const c = sb(); const { data: auth } = await c.auth.getUser(); const authUid = auth?.user?.id;
+      // getSession() rend le meme auth_uid sans aller-retour reseau ; getUser()
+      // coutait un appel a /auth/v1/user (mesure du 05/10/2026 : 140 ms au
+      // demarrage). On ne retombe sur getUser() que si la session est absente,
+      // cas ou il faut bien interroger le serveur.
+      const c = sb();
+      let authUid = (await c.auth.getSession())?.data?.session?.user?.id || null;
+      if (!authUid) { const { data: auth } = await c.auth.getUser(); authUid = auth?.user?.id || null; }
       if (authUid) { const { data, error } = await c.from('USER').select('"ID_User"').eq('auth_uid', authUid).single(); if (!error && data && data.ID_User != null) { CACHED_UID = Number(data.ID_User); return CACHED_UID; } }
     } catch (e) { console.error('[agenda] résolution ID_User', e); }
     return null;
