@@ -1,6 +1,6 @@
 // ============================================================================
 //  LEAD MANAGEMENT — module One Data (OD.define 'lead-mgmt')
-//  VERSION TEAM COLIN (v53) — déploiement CIBLÉ (publish-targets :
+//  VERSION TEAM COLIN (v54) — déploiement CIBLÉ (publish-targets :
 //  lead-mgmt = teamcolin). Le reste de la flotte reste sur la v48.
 //
 //  Refonte du lead management de Team Colin. Un poste de travail à deux
@@ -22,6 +22,9 @@
 //  v53 : un lead s'ouvre directement depuis le tableau de bord (« Ouvrir »)
 //  ou par l'adresse (#lead=123) ; « À faire » signale les leads plus anciens
 //  que la fenêtre de 30 jours, encore attribués au vendeur.
+//  v54 : sur le mur (chef des ventes, direction), un clic sur un chiffre ouvre
+//  la liste des leads dans le volet de droite ; une fiche ouverte depuis cette
+//  liste y revient par « Retour à la liste ».
 //
 //  DONNÉES : fonctions plateau_* (teamcolin_plateau_vroom.sql,
 //  teamcolin_plateau_bacs.sql) et poste_* (teamcolin_poste_site.sql) du
@@ -1163,6 +1166,7 @@
       catch (e) { S.erreur = messageErreur(e); if (!silencieux) toast(S.erreur, true); }
       render();
       if (S.dr && S.dr.id) { var l = S.leads.find(function (x) { return Number(x.id_lead) === Number(S.dr.id); }); if (l) { S.dr.l = l; renderDrawerPreserve(); } }
+      else if (S.cell && !$drawer.hidden) renderVolet();
     }
     async function chargerCampagnes() {
       var de = new Date(Date.now() - 90 * 86400000).toISOString().slice(0, 10), a = new Date().toISOString().slice(0, 10);
@@ -1434,7 +1438,7 @@
       var sid = sitePoste(), si = siteInfo(sid) || {};
       var gere = manager(sid);
       var pisc = compter(piscine(sid));
-      var h = '<div class="ph"><div><h2>Le mur · ' + esc(siteNom(si.site)) + '</h2><p>Qui a la main sur quoi, et depuis combien de temps. La piscine en tête : personne n\'y a la main. Cliquez un chiffre pour voir les leads.</p></div>'
+      var h = '<div class="ph"><div><h2>Le mur · ' + esc(siteNom(si.site)) + '</h2><p>Qui a la main sur quoi, et depuis combien de temps. La piscine en tête : personne n\'y a la main. Cliquez un chiffre : la liste des leads s\'ouvre dans le volet de droite.</p></div>'
         + '<div class="ph-r"><span class="lbl-s">Compter depuis</span><div class="seg"><button type="button" class="' + (S.depuis === 'site' ? 'on' : '') + '" data-a="depuis" data-id="site">L\'arrivée sur le site</button><button type="button" class="' + (S.depuis === 'bacs' ? 'on' : '') + '" data-a="depuis" data-id="bacs">La réception</button></div></div></div>';
       h += '<div class="scroll"><table class="mur"><thead><tr><th>Qui a la main</th>' + COLS.map(function (c) { return '<th>' + c[1] + '</th>'; }).join('') + '<th>Premiers contacts aujourd\'hui</th></tr></thead><tbody>';
       var cell = function (r, c, n) {
@@ -1468,22 +1472,42 @@
       var pl = leadsDu(sid).filter(function (l) { return l.zone === 'plateau'; });
       if (pl.length) h += '<tr class="vroom"><td class="who"><b>Au plateau VROOM</b><small>pas encore transmis au site</small></td><td colspan="4"><button type="button" class="cell vr" data-a="cell" data-id="plateau|tous">' + pl.length + '</button></td><td><span class="na">—</span></td></tr>';
       h += '</tbody></table></div>';
-      if (S.cell) {
-        var r = S.cell.r, c = S.cell.c, ls;
-        if (r === 'piscine') ls = pisc[c] || [];
-        else if (r === 'plateau') ls = pl;
-        else ls = (compter(S.leads.filter(function (l) { return l.zone === 'vendeur' && Number(l.id_site) === Number(sid) && String(l.id_user_attribue) === String(r); })))[c] || [];
-        var lib = r === 'plateau' ? 'au plateau VROOM' : (COLS.find(function (x) { return x[0] === c; }) || ['', ''])[1].toLowerCase();
-        var qui = r === 'piscine' ? 'Piscine' : r === 'plateau' ? 'Plateau' : propre((vs.find(function (v) { return String(v.id_user) === String(r); }) || {}).nom || '');
-        h += '<div class="zoom"><div class="zoom-h"><h3>' + esc(qui) + ' · ' + esc(lib) + ' · ' + plural(ls.length, 'lead') + '</h3>'
-          + (r === 'piscine' && c === 'stock' && gere ? '<button type="button" class="btn sm pri" data-a="solder" data-id="' + sid + '">Solder le stock</button>' : '')
-          + '<button type="button" class="btn sm ghost" data-a="cell-close">Fermer</button></div><div class="list">';
-        ls.sort(function (a, b) { return ts(arrive(a)) - ts(arrive(b)); }).slice(0, 150).forEach(function (l) { h += ligneLead(l, { action: r === 'plateau' ? 'voir' : gere ? 'attribuer' : 'voir' }); });
-        if (ls.length > 150) h += '<div class="empty">… et ' + (ls.length - 150) + ' autres.</div>';
-        h += '</div></div>';
-      }
       h += '<p class="foot">Chaque lead ouvert (pas encore contacté) est compté une fois, chez la personne qui l\'a en main. « À risque » : plus de 60 % du délai consommé. Délai : celui de la source pour un lead direct, 2 h pour un lead transmis par le plateau VROOM. « Ouverts + 24 h » : leads de moins de ' + ((S.stats && S.stats.arriere_jours) || 30) + ' jours ; les plus anciens sont comptés à part, en archives.</p>';
       return h;
+    }
+    // La case cliquée du mur → ses leads (affichés dans le volet de droite).
+    function listeCellule() {
+      if (!S.cell) return null;
+      var sid = sitePoste(), r = S.cell.r, c = S.cell.c, ls;
+      if (r === 'piscine') ls = compter(piscine(sid))[c] || [];
+      else if (r === 'plateau') ls = leadsDu(sid).filter(function (l) { return l.zone === 'plateau'; });
+      else ls = compter(S.leads.filter(function (l) { return l.zone === 'vendeur' && Number(l.id_site) === Number(sid) && String(l.id_user_attribue) === String(r); }))[c] || [];
+      var lib = r === 'plateau' ? 'Pas encore transmis au site' : (COLS.find(function (x) { return x[0] === c; }) || ['', ''])[1];
+      var nom = '';
+      if (r !== 'piscine' && r !== 'plateau') {
+        var v = vendeursDu(sid).find(function (x) { return String(x.id_user) === String(r); });
+        var lv = S.leads.find(function (x) { return String(x.id_user_attribue) === String(r) && x.vendeur_nom; });
+        nom = propre((v && v.nom) || (lv && lv.vendeur_nom) || 'Vendeur');
+      }
+      var qui = r === 'piscine' ? 'Piscine · personne' : r === 'plateau' ? 'Au plateau VROOM' : nom;
+      return { sid: sid, r: r, c: c, gere: manager(sid), qui: qui, lib: lib, leads: ls.slice().sort(function (a, b) { return ts(arrive(a)) - ts(arrive(b)); }) };
+    }
+    function renderVolet() {
+      var z = listeCellule();
+      if (!z) return fermerTout();
+      var si = siteInfo(z.sid) || {};
+      var x = '<button type="button" class="x" data-a="close" aria-label="Fermer"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg></button>';
+      var h = '<header class="dr-h"><div><h2>' + esc(z.qui) + '</h2><p class="dr-s">' + esc(z.lib) + ' · ' + plural(z.leads.length, 'lead') + ' · ' + esc(siteNom(si.site)) + '</p></div>' + x + '</header>'
+        + '<div class="dr-b vol"><div class="list">';
+      if (!z.leads.length) h += '<div class="empty">Plus aucun lead dans cette case.</div>';
+      z.leads.slice(0, 150).forEach(function (l) { h += ligneLead(l, { action: z.r === 'plateau' ? 'voir' : z.gere ? 'attribuer' : 'voir' }); });
+      if (z.leads.length > 150) h += '<div class="empty">… et ' + (z.leads.length - 150) + ' autres.</div>';
+      h += '</div></div>';
+      if (z.r === 'piscine' && z.c === 'stock' && z.gere && z.leads.length) h += '<footer class="dr-f"><div class="row pied"><span class="hint">Leads sans contact depuis plus de 24 h.</span><button type="button" class="btn pri" data-a="solder" data-id="' + z.sid + '">Solder le stock</button></div></footer>';
+      var sc = $drawer.querySelector('.dr-b'); var top = (sc && sc.classList.contains('vol')) ? sc.scrollTop : 0;
+      $drawer.innerHTML = h;
+      var sc2 = $drawer.querySelector('.dr-b'); if (sc2) sc2.scrollTop = top;
+      $scrim.hidden = false; $drawer.hidden = false;
     }
     function groupesRelais() {
       var sid = sitePoste();
@@ -1646,7 +1670,8 @@
       if (!l) { $drawer.innerHTML = '<header class="dr-h"><div><h2>Chargement…</h2></div>' + x + '</header>'; return; }
       var gere = manager(l.id_site);
       var mien = estMien(l);
-      var h = '<header class="dr-h"><div><div class="tags" style="margin:0 0 6px">' + tagsLead(l) + '</div><h2>' + esc(nomLead(l)) + '</h2><p class="dr-s">' + esc(siteNom(l.site)) + (l.vendeur_nom ? ' · chez ' + esc(propre(l.vendeur_nom)) : l.zone === 'piscine' ? ' · dans la piscine' : l.zone === 'plateau' ? ' · au plateau VROOM' : '') + '</p></div>' + x + '</header><div class="dr-b">';
+      var retour = S.cell ? '<button type="button" class="retour" data-a="retour-liste"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 6l-6 6 6 6"/></svg>Retour à la liste</button>' : '';
+      var h = '<header class="dr-h"><div>' + retour + '<div class="tags" style="margin:0 0 6px">' + tagsLead(l) + '</div><h2>' + esc(nomLead(l)) + '</h2><p class="dr-s">' + esc(siteNom(l.site)) + (l.vendeur_nom ? ' · chez ' + esc(propre(l.vendeur_nom)) : l.zone === 'piscine' ? ' · dans la piscine' : l.zone === 'plateau' ? ' · au plateau VROOM' : '') + '</p></div>' + x + '</header><div class="dr-b">';
       // Délais
       h += '<section><h3>Délai</h3><div class="delais">';
       if (l.zone === 'plateau') h += '<div><span>Au plateau VROOM</span><span class="tm neutre"><b>' + duree(mins(l.recu_le)) + '</b><small>reçu le ' + esc(quand(l.recu_le)) + '</small></span></div>';
@@ -1769,7 +1794,13 @@
       try { S.dr.envois = await rpc('poste_bacs_envois', { p_id_lead: Number(id) }) || []; } catch (e) { if (S.dr) S.dr.envois = []; }
       if (S.dr && Number(S.dr.id) === Number(id)) renderDrawerPreserve();
     }
-    function fermerDrawer() { S.dr = null; $scrim.hidden = !!S.modal ? false : true; $drawer.hidden = true; $drawer.innerHTML = ''; }
+    // Fiche ouverte depuis le volet : on revient à la liste ; sinon on ferme tout.
+    function fermerDrawer() { if (S.cell) { S.dr = null; renderVolet(); return; } fermerTout(); }
+    function fermerTout() {
+      var avait = !!S.cell;
+      S.dr = null; S.cell = null; $scrim.hidden = !S.modal; $drawer.hidden = true; $drawer.innerHTML = '';
+      if (avait) render();
+    }
 
     // ── Fenêtres ──────────────────────────────────────────────────────────
     function ouvrirModal(html) {
@@ -1778,7 +1809,7 @@
       $modal.hidden = false; $scrim.hidden = false;
       var f = $modal.querySelector('input,select,button'); if (f) try { f.focus(); } catch (e) {}
     }
-    function fermerModal() { S.modal = null; $modal.hidden = true; $modal.innerHTML = ''; if (!S.dr) $scrim.hidden = true; }
+    function fermerModal() { S.modal = null; $modal.hidden = true; $modal.innerHTML = ''; if ($drawer.hidden) $scrim.hidden = true; }
     var X_SVG = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>';
     async function modalSolder(sid) {
       var si = siteInfo(sid) || {};
@@ -1969,7 +2000,7 @@
       var m = $modal.querySelector('input[name="sold"]:checked'); if (!m) return;
       return geste(async function () {
         var r = await rpc('poste_solder', { p_id_site: Number(sid), p_mode: m.value, p_dry_run: false });
-        fermerModal(); S.cell = null;
+        fermerModal(); fermerTout();
         apres('Stock soldé : ' + plural((r && r.traites) || 0, 'lead traité', 'leads traités') + '.', true);
       });
     }
@@ -2020,8 +2051,9 @@
         case 'voir-site': S.vueSite = Number(id); S.tab = 'mur'; S.cell = null; S.campagnes = null; render(); try { FW.scrollTo(0, 0); } catch (e) {} return;
         case 'retour-sites': S.vueSite = null; S.tab = 'mur'; S.cell = null; S.campagnes = null; render(); return;
         case 'depuis': S.depuis = id; S.cell = null; render(); return;
-        case 'cell': { var p = id.split('|'); S.cell = (S.cell && S.cell.r === p[0] && S.cell.c === p[1]) ? null : { r: p[0], c: p[1] }; render(); return; }
-        case 'cell-close': S.cell = null; render(); return;
+        case 'cell': { var p = id.split('|'); S.cell = { r: p[0], c: p[1] }; S.dr = null; render(); renderVolet(); return; }
+        case 'cell-close': return fermerTout();
+        case 'retour-liste': S.dr = null; return renderVolet();
         case 'autres-vendeurs': S.autresVendeurs = !S.autresVendeurs; render(); return;
         case 'autres-sites': S.autresSites = !S.autresSites; render(); return;
         case 'camp-ouvrir':
@@ -2052,7 +2084,7 @@
           return legacy.mount(el, ctx);
         case 'reessayer': S.erreur = null; render(); return rafraichir();
         // Panneau
-        case 'close': return fermerDrawer();
+        case 'close': return fermerTout();
         case 'copier': try { await (FW.navigator || navigator).clipboard.writeText(id); toast('Numéro copié'); } catch (e) { toast(id); } return;
         case 'canal': return canal(id);
         case 'mode': if (S.dr) { S.dr.mode = id; renderDrawerPreserve(); } return;
@@ -2080,16 +2112,20 @@
     }
     root.addEventListener('click', surClic);
     ov.addEventListener('click', surClic);
-    $scrim.addEventListener('click', function () { if (S.modal) fermerModal(); else fermerDrawer(); });
+    $scrim.addEventListener('click', function () { if (S.modal) fermerModal(); else fermerTout(); });
     root.addEventListener('keydown', function (ev) {
       var t = ev.target;
       if ((ev.key === 'Enter' || ev.key === ' ') && t.classList && (t.classList.contains('lr') || t.classList.contains('todo') || t.classList.contains('clic'))) { ev.preventDefault(); action(t.getAttribute('data-a'), t.getAttribute('data-id')); }
+    });
+    ov.addEventListener('keydown', function (ev) {
+      var t = ev.target;
+      if ((ev.key === 'Enter' || ev.key === ' ') && t.classList && t.classList.contains('lr')) { ev.preventDefault(); action(t.getAttribute('data-a'), t.getAttribute('data-id')); }
     });
     ov.addEventListener('change', function (ev) {
       if (ev.target.id === 'c-aff' || ev.target.id === 'c-site') majVendeursCamp();
       if (ev.target.closest && ev.target.closest('.mb')) { var go = $modal.querySelector('#c-go'); if (go && ev.target.id !== 'c-nom') { go.disabled = true; go.removeAttribute('data-confirme'); go.textContent = 'Lancer la campagne'; } }
     });
-    function surTouche(ev) { if (ev.key === 'Escape') { if (S.modal) fermerModal(); else if (S.dr) fermerDrawer(); } }
+    function surTouche(ev) { if (ev.key === 'Escape') { if (S.modal) fermerModal(); else if (S.dr) fermerDrawer(); else if (!$drawer.hidden) fermerTout(); } }
     doc.addEventListener('keydown', surTouche);
 
     // ── Cycle de vie ──────────────────────────────────────────────────────
@@ -2417,9 +2453,6 @@
 .lmtc td.plus{text-align:left}
 .lmtc small.arch{display:block;font-size:10.5px;color:var(--ink-3);font-weight:700;margin-top:2px}
 .lmtc .ctc{font-weight:800}
-.lmtc .zoom{margin-top:14px;border:1.5px solid var(--line-in);border-radius:12px;padding:10px 12px}
-.lmtc .zoom-h{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:4px}
-.lmtc .zoom-h h3{font-size:14px;font-weight:800;color:var(--bleu-dk);margin-right:auto}
 /* À relayer */
 .lmtc .grp{margin-top:6px}
 .lmtc .grp + .grp{margin-top:14px;border-top:1.5px solid var(--line)}
@@ -2482,6 +2515,12 @@
 .lmtc-ov .est{background:var(--calme-bg);border-radius:10px;padding:10px 12px;font-size:13px;color:var(--ink-2);font-weight:600}
 .lmtc-ov .est b{color:var(--bleu-dk);font-weight:800}
 .lmtc-ov .est-v{display:flex;flex-wrap:wrap;gap:4px 14px;margin-top:6px;font-size:12px}
+.lmtc-ov .retour{display:inline-flex;align-items:center;gap:4px;margin:0 0 10px;padding:4px 12px 4px 6px;border:1.5px solid var(--line-2);border-radius:999px;background:#fff;color:var(--bleu);font:inherit;font-size:12.5px;font-weight:800;cursor:pointer}
+.lmtc-ov .retour svg{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:2.4;stroke-linecap:round;stroke-linejoin:round}
+.lmtc-ov .retour:hover{background:var(--hov)}
+.lmtc-ov .dr-b.vol{padding:4px 10px 18px}
+.lmtc-ov .dr-b.vol .lr{grid-template-columns:112px minmax(0,1fr) auto;gap:10px;padding:10px 8px}
+.lmtc-ov .dr-b.vol .lr:first-child{border-top:0}
 @media (prefers-reduced-motion:reduce){.lmtc *{animation:none!important;transition:none!important}}
 `;
     (doc.head || doc.documentElement).appendChild(st);
