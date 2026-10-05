@@ -92,6 +92,8 @@ OD.define('delco-badge', {
     if (success) {
       isBooted = true;
       console.log("[delco-badge] init OK");
+      // Le boot a reussi : le filet n'a plus lieu d'etre.
+      try { eteindreRelances(); } catch (_) { }
       if (bootTimer) { clearTimeout(bootTimer); bootTimer = null; }
       if (intervalId) clearInterval(intervalId);
       intervalId = setInterval(fetchAndApply, REFRESH_MS);
@@ -141,13 +143,25 @@ OD.define('delco-badge', {
   // parfois du temps à hydrater le DOM de l'Embed + la session Supabase ;
   // ces relances garantissent que le badge finit par s'afficher.
   const kickTimers = [];
+  // Les huit relances s'arrêtent AU PREMIER SUCCÈS. Elles continuaient sinon
+  // de requêter alors que le badge était déjà affiché : mesuré le 05/10/2026
+  // sur un HAR de démarrage, neuf appels à agent_signals_count en quatorze
+  // secondes, pour une fonction qui coûte 1 ms en base — tout était de
+  // l'aller-retour, préflight CORS compris. Le filet garde son rôle (WeWeb met
+  // parfois du temps à hydrater l'Embed et la session) ; il cesse simplement
+  // de pêcher une fois le poisson pris.
+  function eteindreRelances() {
+    kickTimers.forEach((t) => { try { clearTimeout(t); } catch (_) { } });
+    kickTimers.length = 0;
+  }
   [500, 1500, 3000, 5000, 8000, 12000, 20000, 30000].forEach((delay) => {
     kickTimers.push(setTimeout(async () => {
+      if (isBooted) return;                    // déjà servi : on ne redemande pas
       const ok = await fetchAndApply();
-      // Au premier succès, on démarre le refresh régulier s'il n'existe pas
-      if (ok && !intervalId) {
+      if (ok) {
         isBooted = true;
-        intervalId = setInterval(fetchAndApply, REFRESH_MS);
+        eteindreRelances();
+        if (!intervalId) intervalId = setInterval(fetchAndApply, REFRESH_MS);
       }
     }, delay));
   });
