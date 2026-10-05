@@ -1,5 +1,10 @@
 // ============================================================================
-//  TOP NAV — module One Data (OD.define)  v22 — SÉLECTEUR DE PÉRIMÈTRE
+//  TOP NAV — module One Data (OD.define)  v23 — SÉLECTEUR DE PÉRIMÈTRE
+//  v23 (06/10/2026) : un echec du comptage n'efface plus le badge ni le
+//  bandeau d'arbitrage. Trois reponses 500 relevees en une heure dans la nuit
+//  du 05 au 06/10, toutes des depassements du statement_timeout de 8 s : le
+//  compteur disparaissait de l'ecran sans un mot. On conserve le dernier
+//  compte connu et on reessaie a 20 puis 40 secondes.
 //  v22 (05/10/2026) : le badge ne se rafraichit plus a la fermeture de la modale
 //  d'arbitrage mais une fois le navigateur libre. Mesure juste apres une fusion :
 //  5 927 ms de temps serveur pour ce comptage, lance pile au montage de la fiche
@@ -1002,20 +1007,47 @@ OD.define('topnav', {
     if (n > 0) { el.textContent = n > 99 ? '99+' : String(n); el.hidden = false; }
     else { el.hidden = true; }
   }
+  // Comptage unique, partage par le badge et le bandeau.
+  // Le badge n'affiche qu'un nombre : client_file_arbitrage_compte s'arrete au
+  // comptage et ne construit pas les 198 apercus clients que la fonction
+  // complete fabriquait pour rien (8 a 11 ms contre 27 a 319 pour un encadrant).
+  //
+  // 06/10/2026 — UN ECHEC NE DOIT PLUS EFFACER L'AFFICHAGE. Le code rendait la
+  // main sur `if (error) return;` : badge et bandeau disparaissaient sans un
+  // mot. Releve dans les journaux la nuit du 05 au 06/10 : trois reponses 500
+  // en une heure, toutes des depassements du statement_timeout de 8 s pendant
+  // que la tache planifiee bacs_a_relire_rafraichir saturait l'instance. La
+  // cause est corrigee en base, mais l'ecran ne doit pas dependre de sa bonne
+  // sante : on rend null (= « je ne sais pas »), l'appelant laisse alors
+  // l'affichage en l'etat, et on reessaie deux fois, a 20 puis 40 secondes.
+  let arbDernierCompte = null;
+  async function arbCompter(essai) {
+    essai = essai || 1;
+    const sb = arbSb(), uid = arbUserId();
+    if (!sb || uid == null) return null;
+    try {
+      const { data, error } = await sb.rpc('client_file_arbitrage_compte', { p_id_user: uid, p_statut: 'en_attente', p_plafond: 99 });
+      if (error) throw error;
+      arbDernierCompte = Number(data) || 0;
+      return arbDernierCompte;
+    } catch (e) {
+      if (essai < 3) {
+        setTimeout(function () {
+          arbCompter(essai + 1).then(function (n) {
+            if (n == null) return;
+            majBadgeArbitrage(n);
+            afficherBandeauArbitrage(n);
+          });
+        }, essai * 20000);
+      }
+      return null;
+    }
+  }
   async function rafraichirBadgeArbitrage() {
     const el = root() && root().querySelector('#od-arb-badge');
     if (!el) return;
-    const sb = arbSb(), uid = arbUserId();
-    if (!sb || uid == null) return;
-    try {
-      // Le badge n'affiche qu'un nombre : client_file_arbitrage_compte s'arrete
-      // au comptage et ne construit pas les 198 apercus clients que la fonction
-      // complete fabriquait pour rien. Mesure du 05/10/2026 : 8 a 11 ms contre
-      // 27 a 319 ms pour un encadrant, et ~2 600 blocs de moins a lire a froid.
-      const { data, error } = await sb.rpc('client_file_arbitrage_compte', { p_id_user: uid, p_statut: 'en_attente', p_plafond: 99 });
-      if (error) return;
-      majBadgeArbitrage(Number(data) || 0);
-    } catch (e) {}
+    const n = await arbCompter();
+    if (n != null) majBadgeArbitrage(n);
   }
 
   // ---- ouverture de la modale ------------------------------------
@@ -1410,10 +1442,11 @@ OD.define('topnav', {
       arbDernierRappel = Date.now();
       // Badge + bandeau : un nombre suffit ici aussi. C'est CET appel qui partait
       // au demarrage (releve a 1,56 s dans le HAR du 05/10/2026) et qui coutait
-      // 5 028 ms de temps serveur a froid.
-      const { data, error } = await sb.rpc('client_file_arbitrage_compte', { p_id_user: uid, p_statut: 'en_attente', p_plafond: 99 });
-      if (error) return;
-      const n = Number(data) || 0;
+      // 5 028 ms de temps serveur a froid. Passe par arbCompter, donc protege
+      // par la meme reprise sur echec : null veut dire « on ne sait pas », et on
+      // laisse alors l'affichage tel qu'il est plutot que de l'effacer.
+      const n = await arbCompter();
+      if (n == null) return;
       majBadgeArbitrage(n);
       afficherBandeauArbitrage(n);
     } catch (e) {}
