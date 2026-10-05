@@ -33,5 +33,10 @@ objectifs     = teamcolin
 notifications = teamcolin
 notif-badge   = teamcolin
 
+# Lead management : la version du dépôt est celle de Team Colin depuis la v49
+# (poste du plateau VROOM, fonctions plateau_* propres à ce tenant). Le reste
+# de la flotte reste sur la v48 (tag lead-mgmt-v48). Ajouté le 05/10/2026.
+lead-mgmt     = teamcolin
+
 # Module interne OROPRA : jamais de défaut de flotte.
 onboarding   = oropra
