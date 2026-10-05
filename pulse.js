@@ -53,13 +53,19 @@ OD.define('pulse', {
     const surConnexion = () => !!document.querySelector('[data-od-module="auth"]');
     const utilisateur = () => { try { return !surConnexion() && OD.getUser ? OD.getUser() : null; } catch (e) { return null; } };
     const uidDe = (u) => (u ? String(u.auth_uid || u.ID_User) : null);
-    let dernierJeton = null;
+    let dernierJeton = null, jetonLe = 0;
+    const JETON_TTL = 30000;
     async function jeton() {
+      // getSession() lit le stockage local, mais rafraichit aupres du serveur
+      // quand le jeton approche de son echeance — d'ou des appels reseau a
+      // chaque envoi. Le jeton est valable une heure : le garder trente
+      // secondes ne risque rien et evite de redemander a chaque lot.
+      if (dernierJeton && (Date.now() - jetonLe) < JETON_TTL) return dernierJeton;
       try {
         const { data } = await sb.auth.getSession();
         const t = data && data.session && data.session.access_token;
-        if (t) dernierJeton = t;
-        return t || null;
+        if (t) { dernierJeton = t; jetonLe = Date.now(); }
+        return t || dernierJeton || null;
       } catch (e) { return dernierJeton; }
     }
 
@@ -113,7 +119,9 @@ OD.define('pulse', {
       if (!COUPE && !surConnexion()) {
         file.push(ev);
         if (file.length > 1200) file.splice(0, file.length - 1200);
-        if (file.length >= 150) planifierEnvoi(0);
+        // File chargee : on avance l'envoi, sans partir dans la seconde — une
+        // rafale d'evenements arrive justement quand la page travaille.
+        if (file.length >= 150) planifierEnvoi(1500);
       }
       fil.push({ ts: ev.ts, type: ev.type, page: ev.page, module: ev.module || null, cible: ev.cible || null, duree_ms: ev.duree_ms || null });
       if (fil.length > 40) fil.shift();
@@ -439,6 +447,14 @@ OD.define('pulse', {
     async function envoyer(final, uForce) {
       const u = uForce || utilisateur();
       if (!u || COUPE) { if (!final) planifierEnvoi(); return; }
+      // La mesure passe APRES ce qu'elle mesure. Un envoi de lot coute entre
+      // un demi et une seconde (l'edge function doit verifier le tenant puis
+      // faire valider le jeton par le tenant lui-meme) : le declencher pendant
+      // que la page charge, c'est prendre de la bande passante a l'ecran que
+      // l'utilisateur attend. Mesure du 05/10/2026 : pulse etait le premier
+      // poste reseau d'un demarrage. L'envoi final (pagehide) n'est jamais
+      // differe — il n'a pas de seconde chance.
+      if (!final && document.readyState !== 'complete') { planifierEnvoi(3000); return; }
       viderActif();
       viderApi();
       if (!file.length && !final) { planifierEnvoi(); return; }
@@ -599,7 +615,9 @@ OD.define('pulse', {
     emettre('pret', api_publique);
     try { W.dispatchEvent(new CustomEvent('od-pulse-ready')); } catch (e) {}
 
-    planifierEnvoi(4000);
+    // Premier envoi : on laisse la page s'installer. Rien ne presse, les
+    // evenements sont en file et partiront tous.
+    planifierEnvoi(12000);
     LOG(COUPE ? 'prêt (collecte coupée localement)' : 'prêt');
   },
 });
