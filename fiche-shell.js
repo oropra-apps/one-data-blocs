@@ -96,7 +96,44 @@ OD.define('fiche-shell', {
         .eq('IDVu', idvu).single();
       if (error) throw error;
       state.client = data; state.idvu = idvu;
+      consulter(idvu);
     } catch (e) { console.error('[fiche-shell] CLIENT', e); state.client = null; }
+  }
+
+  // ---------------------------------------------------------------- cycle de consultation
+  // RÈGLE (01/09/2026) : ouvrir une fiche client crée un cycle de
+  // CONSULTATION sur le site sélectionné dans la barre du haut, s'il n'y a
+  // pas déjà un cycle ouvert pour ce client sur ce site.
+  //
+  // ⚠️ v11 (05/10/2026) : la règle n'était appliquée que par la recherche
+  // client et l'historique. Toute autre entrée — redirection après un
+  // arbitrage, lien externe ?idvu=, lead management, kanban, agenda —
+  // ouvrait la fiche SANS cycle. Constaté sur la fiche 16674 ouverte après
+  // une fusion : aucun cycle, donc fiche non modifiable (la policy de mise
+  // à jour de CLIENT passe par CYCLE_COM). Six cycles de consultation en
+  // un mois sur tout le groupe.
+  //
+  // Appliquée ICI, au chargement de la fiche, elle vaut pour toutes les
+  // entrées, présentes et futures. cycle_consulter ne fait rien si un cycle
+  // ouvert ou de consultation existe déjà : les appels de la recherche et
+  // de l'historique, conservés, ne créent pas de doublon.
+  //
+  // Non bloquant : la fiche s'affiche même si l'appel échoue. Sans site
+  // sélectionné (« Tout mon périmètre »), rien n'est créé.
+  function consulter(idvu) {
+    try {
+      const w = (wwLib.getFrontWindow && wwLib.getFrontWindow()) || window;
+      const siteApi = w.oropraSite || window.oropraSite || null;
+      const idSite = siteApi && siteApi.getSiteId ? siteApi.getSiteId() : null;
+      if (idSite == null || idvu == null) return;
+      const user = w.oropraUser || {};
+      sb.rpc('cycle_consulter', {
+        p_id_client: Number(idvu),
+        p_id_site:   Number(idSite),
+        p_id_user:   user.ID_User != null ? Number(user.ID_User) : null
+      }).then(r => { if (r && r.error) console.warn('[fiche-shell] cycle_consulter:', r.error.message); },
+              e => console.warn('[fiche-shell] cycle_consulter:', e && e.message));
+    } catch (e) { console.warn('[fiche-shell] cycle_consulter:', e && e.message); }
   }
 
   // ---------------------------------------------------------------- VoIP (bouton Appeler)
