@@ -1,4 +1,9 @@
 // ============================================================================
+//  v15 (05/10/2026) : le select Civilite proposait `libelle` comme valeur
+//  ("Monsieur") alors que la base stocke `libelle_court` ("M."), comme le fait
+//  deja le select Type des societes. Aucune valeur ne correspondait donc jamais
+//  et le champ retombait sur « Selectionner » : 145 fiches sur 60 181 affichaient
+//  leur civilite. Le correctif en repare 45 708.
 //  AGENDA (FullCalendar) — module One Data (OD.define)  v14 — COMPTE RENDU
 //  v14 (05/10/2026) : resolution de l'ID_User par getSession() au lieu de
 //  getUser() — un aller-retour vers /auth/v1/user de moins au demarrage
@@ -1468,7 +1473,7 @@ OD.define('agenda', {
         body += '<div class="clp-field two"><label class="clp-label">SIRET / Raison sociale <span style="color:#e24b4a">*</span></label><div class="clp-ac"><input class="clp-input" type="text" data-clp-mfield="__siretQuery" value="' + ce(m.siretQuery || '') + '" placeholder="Rechercher SIRENE"/>' + (m.siretLoading ? '<div class="clp-status"><span class="clp-spinner"></span> Recherche SIRENE…</div>' : '') + (m.siretSuggestions && m.siretSuggestions.length ? '<div class="clp-suggestions">' + m.siretSuggestions.map((s, i) => '<div class="clp-sg" data-clp-action="pick-siret" data-idx="' + i + '"><strong>' + ce(s.raison_sociale || '') + '</strong><div style="font-size:11px;color:#9bb3d1">' + ce(s.siret || '') + ' — ' + ce(s.commune || '') + '</div></div>').join('') + '</div>' : '') + '</div></div>';
         body += mfield('Raison sociale', 'NOM', 'text', { gridClass: 'full', required: true });
       } else {
-        body += mfield('Civilité', 'CIVILITE', 'select', { options: civilitesP.map(c => ({ value: c.libelle, label: c.libelle })), required: true });
+        body += mfield('Civilité', 'CIVILITE', 'select', { options: civilitesP.map(c => ({ value: c.libelle_court, label: c.libelle })), required: true });
         body += mfield('Nom', 'NOM', 'text', { required: true });
         body += mfield('Prénom', 'PRENOM', 'text', { required: true });
         body += mfield('Date de naissance', 'BIRTHDAY', 'date');
