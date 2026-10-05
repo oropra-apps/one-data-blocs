@@ -284,8 +284,14 @@ OD.define('performances', {
     // la concession. Ils sortent du numérateur comme du dénominateur, et
     // l'objectif vaut la moitié des commandes réalisées hors loueurs — il est
     // calculé par la vue, plus saisi.
+    // « derive » : cet objectif n'est pas saisi, il vaut la moitie des
+    // commandes hors loueurs. Il doit donc etre agrege sur le MEME perimetre
+    // que le realise qu'on lui oppose — encadrement compris. Sans cela on
+    // comparait 29 financements (vendeurs + encadrement) a 43 (vendeurs
+    // seuls) : 67 % affiches pour 62 % reels, et un total de perimetre qui ne
+    // valait plus la somme de ses sites.
     { r: 'financements_hors_loueur', o: 'objectif_financements', label: 'FI', mode: 'obj',
-      pen: true, penDen: 'commandes_hors_loueur', vue: 'pilotage' },
+      pen: true, penDen: 'commandes_hors_loueur', derive: true, vue: 'pilotage' },
     { r: 'loa_realises', label: 'LOA / Easy', mode: 'taux', pen: true, vue: 'pilotage' },
     { r: 'gravages_realises', label: 'Roole', mode: 'taux', pen: true, vue: 'pilotage' },
     { r: 'phev_ev_realises', o: 'objectif_phev_ev', label: 'PHEV / EV', mode: 'obj', vue: 'pilotage' },
@@ -331,7 +337,14 @@ OD.define('performances', {
   }
   function emptyAgg() {
     const a = {};
-    for (const k of KPIS) { a[k.r] = 0; if (k.o) a[k.o] = 0; a[k.r + '_enc'] = 0; }
+    for (const k of KPIS) {
+      a[k.r] = 0; if (k.o) a[k.o] = 0; a[k.r + '_enc'] = 0;
+      // Volume realise par des vendeurs a qui PERSONNE n'a fixe d'objectif sur
+      // ce KPI. Le total les compte au numerateur sans rien au denominateur :
+      // 51 commandes pro sur un objectif de 16 donnait 319 %, et la page
+      // paraissait fausse alors que c'est la saisie qui manque.
+      if (k.o) a[k.r + '_sansobj'] = 0;
+    }
     a._ids = [];
     return a;
   }
@@ -343,11 +356,23 @@ OD.define('performances', {
   }
   function addAgg(t, row) {
     if (estVendeurPerf(row)) {
-      for (const k of KPIS) { t[k.r] += num(row[k.r]); if (k.o) t[k.o] += num(row[k.o]); }
+      for (const k of KPIS) {
+        t[k.r] += num(row[k.r]);
+        if (k.o) {
+          t[k.o] += num(row[k.o]);
+          if (num(row[k.r]) > 0 && num(row[k.o]) <= 0) t[k.r + '_sansobj'] += num(row[k.r]);
+        }
+      }
     } else {
-      // Encadrement : le volume est conservé et affiché à part, l'objectif
-      // n'entre nulle part — il n'existe pas.
-      for (const k of KPIS) { t[k.r + '_enc'] += num(row[k.r]); }
+      // Encadrement : le volume est conservé et affiché à part. Un objectif
+      // SAISI n'entre nulle part — un chef n'en porte pas. Un objectif
+      // DERIVE, lui, est calcule a partir des commandes : celles de
+      // l'encadrement en appellent du financement comme les autres, et
+      // l'exclure du denominateur seul fausse le taux.
+      for (const k of KPIS) {
+        t[k.r + '_enc'] += num(row[k.r]);
+        if (k.o && k.derive) t[k.o] += num(row[k.o]);
+      }
     }
     // Les identifiants restent complets : la popup de détail parle du VOLUME
     // de la concession, pas du sous-ensemble porteur d'objectifs.
@@ -459,6 +484,25 @@ OD.define('performances', {
     if (at >= __prorata * 0.80) return { bg: '#faeeda', text: '#633806', bar: '#fac055' };
     return { bg: '#fcebeb', text: '#791f1f', bar: '#f09595' };
   }
+  // --- KINTO ET ARVAL : UN SEUL OBJECTIF, FORMULE DEUX FOIS -------------------
+  // On ne demande pas au vendeur de placer un Kinto ET un Arval : on lui
+  // demande de placer UN LOUEUR. Celui qui en place un a tenu sa part, et les
+  // deux cases doivent le dire — sinon il lit un reproche pour un objectif
+  // qu'il a rempli, et c'est ainsi qu'on perd la confiance dans un tableau.
+  // La regle vaut pour un VENDEUR. Au niveau d'un site ou du groupe, un
+  // objectif de cinq Kinto reste un objectif de cinq Kinto.
+  const LOUEURS = ['kinto_realises', 'arval_realises'];
+  function estLoueur(k) { return LOUEURS.indexOf(k.r) >= 0; }
+  function loueurPlace(agg) {
+    return LOUEURS.reduce((n, r) => n + num(agg[r]) + num(agg[r + '_enc']), 0) >= 1;
+  }
+  const COL_OK = { bg: '#e1f5ee', text: '#085041', bar: '#53bda7' };
+  function couleurKpi(agg, k, estVendeur) {
+    const reel = volTotal(agg, k), obj = num(agg[k.o]);
+    if (estVendeur && estLoueur(k) && obj > 0 && loueurPlace(agg)) return COL_OK;
+    return kpiColorPro(reel, obj);
+  }
+
   function pctLabel(realise, objectif) {
     const r = num(realise), o = num(objectif);
     if (o <= 0) return r > 0 ? '✓' : '—';
@@ -858,7 +902,7 @@ OD.define('performances', {
   // empilés sur treize colonnes, ils rendaient la grille illisible.
   // Le chiffre se compare à l'objectif du MOIS ENTIER ; seule la couleur tient
   // compte du rythme écoulé.
-  function kpiCellTC(agg, k, kpiLabel) {
+  function kpiCellTC(agg, k, kpiLabel, estVendeur) {
     const ids = agg._ids;
     const clic = Array.isArray(ids) && ids.length > 0;
     const idsAttr = clic ? ' data-kpi-ids="' + esc(ids.join(',')) + '" data-kpi-label="' + esc(kpiLabel) + '" data-kpi-key="' + esc(k.r) + '"' : '';
@@ -868,7 +912,7 @@ OD.define('performances', {
       cls = 'sans';
     } else if (k.mode === 'obj') {
       const reel = volTotal(agg, k), obj = num(agg[k.o]);
-      const c = kpiColorPro(reel, obj);
+      const c = couleurKpi(agg, k, estVendeur);
       cls = obj <= 0 ? 'sans' : (c.bar === '#53bda7' ? 'bien' : (c.bar === '#fac055' ? 'alerte' : 'retard'));
       corps = '<span class="v">' + reel + '</span>' + (obj > 0 ? '<span class="o"> / ' + obj + '</span>' : '');
     } else {
@@ -906,10 +950,10 @@ OD.define('performances', {
       + '<span class="v du">' + r + '</span><span class="pen">cde' + (r > 1 ? 's' : '') + '</span></div></td>';
   }
 
-  function kpiCellsTree(agg, label) {
+  function kpiCellsTree(agg, label, estVendeur) {
     let h = '';
     if (IS_TC) {
-      for (const k of kpisVue()) h += '<td>' + kpiCellTC(agg, k, (label ? label + ' \u00b7 ' : '') + k.label) + '</td>';
+      for (const k of kpisVue()) h += '<td>' + kpiCellTC(agg, k, (label ? label + ' \u00b7 ' : '') + k.label, estVendeur) + '</td>';
       if (state.vueTC === 'pilotage') h += celluleReste(agg);
       return h;
     }
@@ -1161,9 +1205,19 @@ OD.define('performances', {
       // pas disparaître de l'écran : un directeur doit pouvoir raccorder le
       // total de sa concession à ce que montrent les vendeurs.
       const enc = num(agg[k.r + '_enc']);
-      const encLine = enc > 0
+      // Un objectif absent sur une partie du périmètre rendait la carte
+      // incompréhensible : 51 commandes pro contre un objectif de 16, soit
+      // 319 %, parce que L'Haÿ-les-Roses n'a aucun objectif pro saisi. Le
+      // chiffre n'est pas faux — il est incomplet, et il faut le dire plutôt
+      // que de laisser croire à une performance.
+      const sansObj = num(agg[k.r + '_sansobj']);
+      const encLine = (enc > 0
         ? '<div class="pf-kpi-enc">dont ' + enc + ' réalisées par l\'encadrement</div>'
-        : '';
+        : '')
+        + (sansObj > 0
+        ? '<div class="pf-kpi-enc" title="Ces ventes comptent au numérateur, mais aucun objectif ne leur répond au dénominateur : le pourcentage est donc surévalué.">'
+          + 'dont ' + sansObj + ' sans objectif fixé</div>'
+        : '');
       html += '<div class="pf-kpi">' +
         '<div class="pf-kpi-label">' + esc(k.label) + '</div>' +
         '<div class="pf-kpi-vals"><span class="pf-kpi-ro">' + r + ' <small>/ ' + o + '</small></span>' +
@@ -1387,7 +1441,7 @@ OD.define('performances', {
               // La ligne de celui qui regarde est mise en évidence : dans une
               // équipe de neuf, se retrouver doit être immédiat.
               const moi = String(V.key) === String(monIdUser());
-              body += '<tr class="lv-vendeur' + (collapseT ? '' : ' deep') + (moi ? ' is-moi' : '') + cls('vendeur', V.key) + '" data-lvl="vendeur" data-key="' + esc(V.key) + '" data-label="' + esc(V.label) + '"><td>' + esc(V.label) + (moi ? ' <span class="moi">vous</span>' : '') + (V.fonction ? ' <span class="fct">· ' + esc(V.fonction) + '</span>' : '') + '</td>' + kpiCellsTree(V.agg, V.label) + '</tr>';
+              body += '<tr class="lv-vendeur' + (collapseT ? '' : ' deep') + (moi ? ' is-moi' : '') + cls('vendeur', V.key) + '" data-lvl="vendeur" data-key="' + esc(V.key) + '" data-label="' + esc(V.label) + '"><td>' + esc(V.label) + (moi ? ' <span class="moi">vous</span>' : '') + (V.fonction ? ' <span class="fct">· ' + esc(V.fonction) + '</span>' : '') + '</td>' + kpiCellsTree(V.agg, V.label, true) + '</tr>';
             }
           }
         }
