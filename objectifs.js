@@ -115,8 +115,13 @@ const SECONDARY = IS_TC
 
 const userConnected = ((wwLib.getFrontWindow && wwLib.getFrontWindow()) || window).oropraUser
 const role = Number(userConnected?.ID_Role)
-const canEdit = !([4, 5].includes(role))
-const isVendeur = (role === 4)
+// Rôles qui voient au-delà de leurs propres dossiers. Miroir de la fonction
+// SQL public.role_est_manager() (04/10/2026) : 4 (vendeur) et 10 (opérateur
+// plateau, VROOM chez Team Colin) n'y sont pas. Tout rôle non listé est
+// traité comme un vendeur : fermé par défaut, jamais manager par accident.
+const ROLES_MANAGER = [1, 2, 3, 5, 6, 7, 8, 9]
+const canEdit = ROLES_MANAGER.includes(role) && role !== 5
+const isVendeur = Number.isFinite(role) && !ROLES_MANAGER.includes(role)
 const myId = userConnected?.ID_User
 
 // doc défini dans le header (__anchor.ownerDocument)
