@@ -31,8 +31,13 @@ OD.define('kanban', {
   function getViewerId() { const v = viewerData().ID_User; return v != null ? Number(v) : null; }
   function getViewerRole() { const v = viewerData().ID_Role; return v != null ? Number(v) : null; }
   function getViewerName() { return viewerData().nomComplet || ''; }
-  function isManager() { const r = getViewerRole(); return r != null && r !== 4; }
-  function perimMode() { const r = getViewerRole(); if (r === 4 || r == null) return 'self'; if (r === 3) return 'chef'; return 'cascade'; }
+  // Rôles qui voient au-delà de leurs propres dossiers. Miroir de la fonction
+  // SQL public.role_est_manager() (04/10/2026) : 4 (vendeur) et 10 (opérateur
+  // plateau, VROOM chez Team Colin) n'y sont pas. Tout rôle non listé est
+  // traité comme un vendeur : fermé par défaut, jamais manager par accident.
+  const ROLES_MANAGER = [1, 2, 3, 5, 6, 7, 8, 9];
+  function isManager() { const r = getViewerRole(); return r != null && ROLES_MANAGER.includes(r); }
+  function perimMode() { const r = getViewerRole(); if (r == null || !ROLES_MANAGER.includes(r)) return 'self'; if (r === 3) return 'chef'; return 'cascade'; }
   function fmtPeriodKan() { const f = (s) => { const d = new Date(s + 'T12:00:00'); return d.toLocaleDateString('fr-FR', { day: '2-digit', month: 'short' }); }; return f(state.period.from) + ' \u2192 ' + f(state.period.to); }
   function vnvoNorm(t) { return (t || '').toUpperCase().replace(/[^A-Z]/g, ''); }
   function vnvoRank(t) { const n = vnvoNorm(t); if (n === 'VN') return 0; if (n === 'VO') return 1; if (n === 'VNVO') return 2; return 3; }
