@@ -1,5 +1,7 @@
 // ============================================================================
-//  One Data — TELEPHONIE 3CX cote vendeur (module ambiant, sans ancre WeWeb)
+//  One Data — TELEPHONIE 3CX cote vendeur (module ambiant, sans ancre WeWeb)  v5
+//  v5 (05/10/2026) : boot() lit l'identifiant dans la session en memoire
+//  (getSession) au lieu d'appeler /auth/v1/user. Repli conserve.
 //  Panneau d'appel : le vendeur reste dans One Data, le combine porte la voix.
 //    - sonnerie  : fiche client + preconisation Delco AVANT le decroche
 //    - en cours  : chronometre et contexte client
@@ -226,7 +228,11 @@ OD.define('phone3cx', {
     /* ------------------------------------------------------ abonnement */
     async function boot() {
       let uid = null;
-      try { const { data } = await sb.auth.getUser(); uid = data && data.user && data.user.id; } catch (e) {}
+      // La session en memoire porte deja l'identifiant : getUser() faisait un
+      // aller-retour vers /auth/v1/user pour le meme resultat. Repli sur
+      // getUser() uniquement si aucune session n'est encore posee.
+      try { const { data } = await sb.auth.getSession(); uid = data && data.session && data.session.user && data.session.user.id; } catch (e) {}
+      if (!uid) { try { const { data } = await sb.auth.getUser(); uid = data && data.user && data.user.id; } catch (e) {} }
       if (!uid) return;
 
       // Poste du vendeur et mode de composition. Cette RPC ne renvoie aucun
