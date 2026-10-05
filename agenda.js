@@ -1,4 +1,9 @@
 // ============================================================================
+//  v16 (05/10/2026) : filet d'affichage. Une valeur stockee hors referentiel
+//  ("Other", une variante d'un import) ne retombe plus sur « Selectionner » :
+//  elle est ajoutee comme option, avec son libelle propre quand on sait la
+//  reconnaitre (casse, accents, point final), sinon telle quelle. Aucune
+//  ecriture : la donnee reste visible et l'utilisateur corrige s'il le souhaite.
 //  v15 (05/10/2026) : le select Civilite proposait `libelle` comme valeur
 //  ("Monsieur") alors que la base stocke `libelle_court` ("M."), comme le fait
 //  deja le select Type des societes. Aucune valeur ne correspondait donc jamais
@@ -1458,7 +1463,19 @@ OD.define('agenda', {
       opts = opts || {}; const val = st.modal.data[field]; const v = val == null ? '' : val; const cls = opts.gridClass ? 'clp-field ' + opts.gridClass : 'clp-field'; const req = opts.required ? ' <span style="color:#e24b4a">*</span>' : '';
       let inp;
       if (type === 'textarea') inp = '<textarea class="clp-input" data-clp-mfield="' + ce(field) + '" rows="3">' + ce(v) + '</textarea>';
-      else if (type === 'select') { const o2 = (opts.options || []).map(o => '<option value="' + ce(o.value) + '"' + (String(o.value) === String(v) ? ' selected' : '') + '>' + ce(o.label) + '</option>').join(''); inp = '<select class="clp-input" data-clp-mfield="' + ce(field) + '"><option value="">—</option>' + o2 + '</select>'; }
+      // Filet d'affichage (05/10/2026) : une valeur deja en base qui ne figure
+      // pas dans la liste faisait retomber le select sur « Selectionner », et la
+      // donnee disparaissait de l'ecran sans prevenir. On l'ajoute en option, avec
+      // le libelle propre quand on sait la reconnaitre (casse, accents, point final),
+      // sinon telle quelle. Rien n'est ecrit : l'utilisateur voit et corrige s'il veut.
+      let _listeOD = (opts.options || []).slice();
+      if (v != null && String(v) !== '' && !_listeOD.some(function (o) { return String(o.value) === String(v); })) {
+        var _cleOD = function (s) { return String(s == null ? '' : s).toLowerCase()
+          .normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]/g, ''); };
+        var _procheOD = _listeOD.filter(function (o) { return _cleOD(o.value) === _cleOD(v) || _cleOD(o.label) === _cleOD(v); })[0];
+        _listeOD = _listeOD.concat([{ value: v, label: _procheOD ? _procheOD.label : String(v) }]);
+      }
+      else if (type === 'select') { const o2 = _listeOD.map(o => '<option value="' + ce(o.value) + '"' + (String(o.value) === String(v) ? ' selected' : '') + '>' + ce(o.label) + '</option>').join(''); inp = '<select class="clp-input" data-clp-mfield="' + ce(field) + '"><option value="">—</option>' + o2 + '</select>'; }
       else if (type === 'checkbox') return '<div class="' + cls + '"><label class="clp-checkbox"><input type="checkbox" data-clp-mfield="' + ce(field) + '"' + (v ? ' checked' : '') + '/> <span>' + ce(label) + '</span></label></div>';
       else inp = '<input class="clp-input" type="' + (type || 'text') + '" data-clp-mfield="' + ce(field) + '" value="' + ce(v) + '" placeholder="' + ce(opts.placeholder || '') + '"/>';
       return '<div class="' + cls + '"><label class="clp-label">' + ce(label) + req + '</label>' + inp + '</div>';
