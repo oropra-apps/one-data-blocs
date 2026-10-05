@@ -1,5 +1,10 @@
 // ============================================================================
-//  TOP NAV — module One Data (OD.define)  v3 — SÉLECTEUR DE PÉRIMÈTRE
+//  TOP NAV — module One Data (OD.define)  v21 — SÉLECTEUR DE PÉRIMÈTRE
+//  v21 (05/10/2026) : le badge d'arbitrage appelle client_file_arbitrage_compte
+//  au lieu de la fonction complete. Celle-ci fabriquait 99 lignes et 198 apercus
+//  clients pour afficher un chiffre : 5 028 ms de temps serveur a froid, releves
+//  sur le demarrage du 05/10/2026. L'ouverture de la modale garde, elle, la
+//  fonction complete — c'est la qu'on a besoin des lignes.
 //
 //  CE QUI CHANGE EN v3
 //  Le sélecteur de site listait les sites à plat. Sur un groupe de vingt-sept
@@ -999,9 +1004,13 @@ OD.define('topnav', {
     const sb = arbSb(), uid = arbUserId();
     if (!sb || uid == null) return;
     try {
-      const { data, error } = await sb.rpc('client_file_arbitrage', { p_id_user: uid, p_statut: 'en_attente', p_limit: 99 });
+      // Le badge n'affiche qu'un nombre : client_file_arbitrage_compte s'arrete
+      // au comptage et ne construit pas les 198 apercus clients que la fonction
+      // complete fabriquait pour rien. Mesure du 05/10/2026 : 8 a 11 ms contre
+      // 27 a 319 ms pour un encadrant, et ~2 600 blocs de moins a lire a froid.
+      const { data, error } = await sb.rpc('client_file_arbitrage_compte', { p_id_user: uid, p_statut: 'en_attente', p_plafond: 99 });
       if (error) return;
-      majBadgeArbitrage(data && data.lignes ? data.lignes.length : 0);
+      majBadgeArbitrage(Number(data) || 0);
     } catch (e) {}
   }
 
@@ -1380,9 +1389,12 @@ OD.define('topnav', {
       const sb = arbSb(), uid = arbUserId();
       if (!sb || uid == null) return;
       arbDernierRappel = Date.now();
-      const { data, error } = await sb.rpc('client_file_arbitrage', { p_id_user: uid, p_statut: 'en_attente', p_limit: 99 });
+      // Badge + bandeau : un nombre suffit ici aussi. C'est CET appel qui partait
+      // au demarrage (releve a 1,56 s dans le HAR du 05/10/2026) et qui coutait
+      // 5 028 ms de temps serveur a froid.
+      const { data, error } = await sb.rpc('client_file_arbitrage_compte', { p_id_user: uid, p_statut: 'en_attente', p_plafond: 99 });
       if (error) return;
-      const n = (data && data.lignes) ? data.lignes.length : 0;
+      const n = Number(data) || 0;
       majBadgeArbitrage(n);
       afficherBandeauArbitrage(n);
     } catch (e) {}
