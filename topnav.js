@@ -1,5 +1,9 @@
 // ============================================================================
-//  TOP NAV — module One Data (OD.define)  v21 — SÉLECTEUR DE PÉRIMÈTRE
+//  TOP NAV — module One Data (OD.define)  v22 — SÉLECTEUR DE PÉRIMÈTRE
+//  v22 (05/10/2026) : le badge ne se rafraichit plus a la fermeture de la modale
+//  d'arbitrage mais une fois le navigateur libre. Mesure juste apres une fusion :
+//  5 927 ms de temps serveur pour ce comptage, lance pile au montage de la fiche
+//  client. C'est ce qui rendait la navigation apres fusion si lente.
 //  v21 (05/10/2026) : le badge d'arbitrage appelle client_file_arbitrage_compte
 //  au lieu de la fonction complete. Celle-ci fabriquait 99 lignes et 198 apercus
 //  clients pour afficher un chiffre : 5 028 ms de temps serveur a froid, releves
@@ -1037,7 +1041,22 @@ OD.define('topnav', {
     arbRender();
   }
 
-  function arbClose() { const bg = doc.querySelector('.od-arb-bg'); if (bg) bg.remove(); ARB = null; rafraichirBadgeArbitrage(); }
+  // Le rafraichissement du badge partait a la fermeture, c'est-a-dire a la
+  // milliseconde ou la fiche client se monte. Mesure du 05/10/2026, juste apres
+  // une fusion : 5 927 ms de temps serveur pour ce seul comptage, en concurrence
+  // avec entreprise.js, get_propales_client, v_historique_cycles et les lectures
+  // CLIENT — d'ou la navigation « tres lente » ressentie. On laisse la fiche
+  // s'afficher d'abord, exactement comme au demarrage.
+  function arbClose() {
+    const bg = doc.querySelector('.od-arb-bg'); if (bg) bg.remove(); ARB = null;
+    let parti = false;
+    const go = function () { if (parti) return; parti = true; rafraichirBadgeArbitrage(); };
+    try {
+      if (typeof window.requestIdleCallback === 'function') window.requestIdleCallback(go, { timeout: 6000 });
+      else setTimeout(go, 3000);
+    } catch (e) { setTimeout(go, 3000); }
+    setTimeout(go, 7000);   // filet : le badge finit toujours par se remettre a jour
+  }
 
   // ---- rendu ------------------------------------------------------
   function arbRender(loading) {
