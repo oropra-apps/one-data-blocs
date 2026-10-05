@@ -1,5 +1,13 @@
 // ============================================================================
-//  TOP NAV — module One Data (OD.define)  v23 — SÉLECTEUR DE PÉRIMÈTRE
+//  TOP NAV — module One Data (OD.define)  v24 — SÉLECTEUR DE PÉRIMÈTRE
+//  v24 (06/10/2026) : l'arbitrage sait enfin saisir une TROISIEME valeur.
+//  Il ne proposait que le choix entre la fiche existante et la source ; quand
+//  les deux sont fausses — BACS annoncant « Mme » pour un monsieur prenomme
+//  Francois Xavier — l'arbitre devait fusionner une erreur puis la corriger
+//  dans la fiche. Chaque ligne a trancher porte desormais un champ de saisie,
+//  alimente par ref_type_client pour la civilite. Corrige au passage un cas
+//  ou le choix de l'arbitre etait ignore : quand un seul des deux cotes
+//  portait une valeur, cliquer « non renseigne » ne changeait rien.
 //  v23 (06/10/2026) : un echec du comptage n'efface plus le badge ni le
 //  bandeau d'arbitrage. Trois reponses 500 relevees en une heure dans la nuit
 //  du 05 au 06/10, toutes des depassements du statement_timeout de 8 s : le
@@ -953,6 +961,12 @@ OD.define('topnav', {
 '.od-arb-opt .os{font-size:10px;font-weight:600;margin-left:6px;white-space:nowrap}.od-arb-opt.a .os{color:#2a5ea9}.od-arb-opt.b .os{color:#53bda7}' +
 '.od-arb-opt.a[aria-pressed="true"]{border-color:#2a5ea9;background:#eef4fc}.od-arb-opt.b[aria-pressed="true"]{border-color:#53bda7;background:#eaf7f4}' +
 '.od-arb-opt[aria-pressed="true"]::after{content:"✓";position:absolute;top:8px;right:9px;font-size:11px;font-weight:900}.od-arb-opt.a[aria-pressed="true"]::after{color:#2a5ea9}.od-arb-opt.b[aria-pressed="true"]::after{color:#53bda7}' +
+// Saisie libre : troisieme ligne sous les deux propositions, en orange de la
+// charte pour la distinguer de l'existante (bleu) et de la source (vert).
+'.od-arb-opt.c{grid-column:2 / span 2;display:flex;align-items:center;gap:9px;padding:7px 24px 7px 11px;cursor:default}' +
+'.od-arb-opt.c .os{color:#d2941f}.od-arb-opt.c[aria-pressed="true"]{border-color:#d2941f;background:#fdf6e9}.od-arb-opt.c[aria-pressed="true"]::after{color:#d2941f}' +
+'.od-arb-si{flex:1;min-width:0;border:1px solid #cfdcef;border-radius:7px;padding:6px 8px;font:700 13px inherit;color:#1F4A85;background:#fff;font-family:inherit}' +
+'.od-arb-si:focus{outline:none;border-color:#d2941f;box-shadow:0 0 0 2px rgba(210,148,31,.18)}' +
 '.od-arb-id{margin-top:5px}.od-arb-id summary{font-size:12px;color:#7a98c5;cursor:pointer;padding:8px 0;font-weight:600;list-style:none}.od-arb-id summary::-webkit-details-marker{display:none}.od-arb-id summary::before{content:"▸ ";color:#acc5e4}.od-arb-id[open] summary::before{content:"▾ "}' +
 '.od-arb-id .idr{display:grid;grid-template-columns:90px 1fr;gap:9px;font-size:12px;padding:4px 0;color:#5a72a0}.od-arb-id .idk{font-weight:700;color:#7a98c5}' +
 '.od-arb-act{display:flex;gap:9px;padding:15px 22px;border-top:1px solid #e8eef7;background:#f7f9fc}' +
@@ -963,7 +977,7 @@ OD.define('topnav', {
 '.od-arb-vide{padding:60px 30px;text-align:center}.od-arb-vide .ok{width:64px;height:64px;border-radius:50%;background:#eaf7f4;display:flex;align-items:center;justify-content:center;margin:0 auto 16px;color:#53bda7}.od-arb-vide .ok svg{width:30px;height:30px}' +
 '.od-arb-vide h2{font-size:18px;font-weight:900;margin:0 0 6px}.od-arb-vide p{color:#7a98c5;margin:0;font-size:13px}' +
 '.od-arb-badge{display:inline-flex;align-items:center;justify-content:center;min-width:18px;height:18px;padding:0 5px;margin-left:auto;background:#e24b4a;color:#fff;font-size:11px;font-weight:800;border-radius:99px}' +
-'@media(max-width:620px){.od-arb-modal{width:100%}.od-arb-res .rg{grid-template-columns:1fr}.od-arb-cf{grid-template-columns:1fr;gap:5px}.od-arb-act{flex-wrap:wrap}.od-arb-b{flex:1 1 100%}}' +
+'@media(max-width:620px){.od-arb-modal{width:100%}.od-arb-res .rg{grid-template-columns:1fr}.od-arb-cf{grid-template-columns:1fr;gap:5px}.od-arb-opt.c{grid-column:1}.od-arb-act{flex-wrap:wrap}.od-arb-b{flex:1 1 100%}}' +
 '</style>';
 
 
@@ -1061,14 +1075,24 @@ OD.define('topnav', {
     bg.innerHTML = ARB_STYLE + '<div class="od-arb-modal" id="od-arb"></div>';
     bg.addEventListener('mousedown', function (e) { if (e.target === bg) bg.remove(); });
     doc.body.appendChild(bg);
-    ARB = { file: [], i: 0, choix: {}, survivant: 'a', busy: false, fus: 0, rej: 0 };
+    ARB = { file: [], i: 0, choix: {}, saisie: {}, civilites: [], survivant: 'a', busy: false, fus: 0, rej: 0 };
 
     arbRender(true);   // état de chargement
     if (!sb || uid == null) { ARB.err = "Session indisponible."; arbRender(); return; }
     try {
-      const { data, error } = await sb.rpc('client_file_arbitrage', { p_id_user: uid, p_statut: 'en_attente', p_limit: 200 });
-      if (error) throw error;
-      ARB.file = (data && data.lignes) ? data.lignes : [];
+      // Le referentiel des civilites part en meme temps que la file : il
+      // alimente la saisie libre de la ligne « Civilite ». En parallele, donc
+      // sans rien couter de plus que l'appel le plus lent des deux.
+      const [r, rc] = await Promise.all([
+        sb.rpc('client_file_arbitrage', { p_id_user: uid, p_statut: 'en_attente', p_limit: 200 }),
+        sb.from('ref_type_client').select('libelle,libelle_court,ordre')
+          .eq('actif', true).eq('multivu', 0).order('ordre')
+      ]);
+      if (r.error) throw r.error;
+      ARB.file = (r.data && r.data.lignes) ? r.data.lignes : [];
+      // Referentiel indisponible : la saisie retombe sur un champ libre, la
+      // modale ne doit pas echouer pour autant.
+      ARB.civilites = (rc && !rc.error && rc.data) ? rc.data : [];
     } catch (e) { ARB.err = (e && e.message) || 'Erreur de chargement.'; }
     arbRender();
   }
@@ -1133,7 +1157,7 @@ OD.define('topnav', {
         id_file: ligne.id_file, score: ligne.score, detail: ligne.detail || {},
         a: data.fiche_candidat || {}, b: data.fiche_entrant || {}
       };
-      ARB.choix = {}; ARB.survivant = 'a';
+      ARB.choix = {}; ARB.saisie = {}; ARB.survivant = 'a';
       arbRender();
     } catch (e) { ARB.err = (e && e.message) || 'Dossier illisible.'; arbRender(); }
   }
@@ -1218,11 +1242,17 @@ OD.define('topnav', {
   function arbResultat(d, conflits) {
     const cells = ARB_CHAMPS.map(function (pair) {
       const k = pair[0], lbl = pair[1], va = arbVal(d.a, k), vb = arbVal(d.b, k);
+      const ch = ARB.choix[k];
       let src, v;
-      if (va && vb && va.toLowerCase() === vb.toLowerCase()) { src = ARB.survivant; v = va; }
+      // Une valeur saisie l'emporte sur tout le reste.
+      if (ch === 'c') { src = 'c'; v = (ARB.saisie && ARB.saisie[k]) || ''; }
+      else if (va && vb && va.toLowerCase() === vb.toLowerCase()) { src = ARB.survivant; v = va; }
       else if (!va && !vb) { src = null; v = ''; }
-      else if (va && vb) { src = ARB.choix[k] || 'a'; v = (src === 'a') ? va : vb; }
-      else { src = va ? 'a' : 'b'; v = va || vb; }
+      else if (va && vb) { src = ch || 'a'; v = (src === 'a') ? va : vb; }
+      // Un seul des deux cotes porte une valeur : le choix de l'arbitre restait
+      // ignore ici, alors que c'est exactement le cas de la civilite de ce soir
+      // (existante vide, BACS faux). On l'honore.
+      else { src = ch || (va ? 'a' : 'b'); v = (src === 'a') ? va : vb; }
       const pin = src ? '<span class="pin ' + src + '"></span>' : '';
       return '<div class="rc"><span class="rk">' + lbl + '</span><span class="rv' + (v ? '' : ' vide') + '">' + pin + (esc(v) || '—') + '</span></div>';
     }).join('');
@@ -1231,7 +1261,33 @@ OD.define('topnav', {
   function arbLigne(d, row) {
     const k = row[0], lbl = row[1], va = row[2], vb = row[3];
     return '<div class="od-arb-cf" data-champ="' + k + '"><div class="ck">' + lbl + '</div>' +
-      arbOpt('a', k, va) + arbOpt('b', k, vb) + '</div>';
+      arbOpt('a', k, va) + arbOpt('b', k, vb) + arbSaisie(k) + '</div>';
+  }
+  // TROISIEME VOIE (06/10/2026) : aucune des deux valeurs proposees n'est
+  // forcement juste. Cas rencontre ce soir — BACS propose « Mme » pour un
+  // monsieur prenomme Francois Xavier, et l'existante est vide : l'arbitre
+  // n'avait d'autre choix que de fusionner une erreur, puis d'aller la corriger
+  // dans la fiche. On ouvre donc une saisie libre a cote des deux propositions.
+  // Pour la civilite, c'est le referentiel ref_type_client qui alimente la
+  // liste — le meme que les formulaires client, pour ne pas reintroduire des
+  // variantes la ou on vient d'en normaliser 12 745.
+  function arbSaisie(k) {
+    const on = ARB.choix[k] === 'c';
+    const v = (ARB.saisie && ARB.saisie[k] != null) ? String(ARB.saisie[k]) : '';
+    let champ;
+    if (k === 'civilite' && ARB.civilites && ARB.civilites.length) {
+      champ = '<select class="od-arb-si" data-saisie="' + k + '">' +
+        '<option value="">— autre valeur —</option>' +
+        ARB.civilites.map(function (c) {
+          return '<option value="' + esc(c.libelle_court) + '"' + (v === c.libelle_court ? ' selected' : '') + '>' +
+                 esc(c.libelle) + '</option>';
+        }).join('') + '</select>';
+    } else {
+      champ = '<input class="od-arb-si" type="' + (k === 'naissance' ? 'date' : 'text') +
+        '" data-saisie="' + k + '" value="' + esc(v) + '" placeholder="autre valeur">';
+    }
+    return '<div class="od-arb-opt c" data-champ="' + k + '" data-cote="c" aria-pressed="' + on + '">' +
+      champ + '<span class="os">(saisie)</span></div>';
   }
   function arbOpt(cote, k, v) {
     const on = (ARB.choix[k] || 'a') === cote;
@@ -1268,9 +1324,29 @@ OD.define('topnav', {
     if (!simple) {
       doc.querySelectorAll('.od-arb-opt').forEach(function (b) {
         b.addEventListener('click', function () {
-          ARB.choix[b.getAttribute('data-champ')] = b.getAttribute('data-cote');
+          const k = b.getAttribute('data-champ'), cote = b.getAttribute('data-cote');
+          // Cliquer la zone de saisie alors qu'elle est vide ne doit pas
+          // imposer une valeur vide : on la laisse prendre le focus.
+          if (cote === 'c' && !(ARB.saisie && ARB.saisie[k])) return;
+          ARB.choix[k] = cote;
           arbRepeindre(d, conflits);
         });
+      });
+      // Saisie libre : on met a jour sans re-rendre la ligne, sinon le champ
+      // perdrait le focus a chaque frappe. arbRepeindre ne refait que la fiche
+      // finale et les etats des boutons.
+      doc.querySelectorAll('[data-saisie]').forEach(function (el) {
+        const k = el.getAttribute('data-saisie');
+        const maj = function () {
+          const val = el.value;
+          if (!ARB.saisie) ARB.saisie = {};
+          ARB.saisie[k] = val;
+          if (val === '') { delete ARB.choix[k]; } else { ARB.choix[k] = 'c'; }
+          arbRepeindre(d, conflits);
+        };
+        el.addEventListener('input', maj);
+        el.addEventListener('change', maj);
+        el.addEventListener('click', function (e) { e.stopPropagation(); });
       });
     }
     doc.querySelectorAll('[data-arb]').forEach(function (b) {
@@ -1307,7 +1383,11 @@ OD.define('topnav', {
         const champs = {};
         (conflits || []).forEach(function (row) {
           const k = row[0]; const choisi = ARB.choix[k] || 'a';
-          if (choisi !== survCote) {
+          if (choisi === 'c') {
+            // Valeur saisie par l'arbitre : ni celle de la fiche, ni celle de
+            // la source. On l'impose toujours, quel que soit le survivant.
+            champs[k] = (ARB.saisie && ARB.saisie[k]) || '';
+          } else if (choisi !== survCote) {
             // la valeur retenue vient de l'absorbé -> on l'impose
             const f = choisi === 'a' ? d.a : d.b;
             champs[k] = f[k];
@@ -1343,7 +1423,7 @@ OD.define('topnav', {
       ARB.rej++;
       if (carte) carte.classList.add(anim);
       setTimeout(function () {
-        ARB.i++; ARB.detail = null; ARB.choix = {}; ARB.survivant = 'a'; ARB.busy = false;
+        ARB.i++; ARB.detail = null; ARB.choix = {}; ARB.saisie = {}; ARB.survivant = 'a'; ARB.busy = false;
         arbRender();
       }, 430);
       return;
@@ -1364,7 +1444,7 @@ OD.define('topnav', {
     if (action === 'rejet') ARB.rej++;
     if (carte) carte.classList.add(anim);
     setTimeout(function () {
-      ARB.i++; ARB.detail = null; ARB.choix = {}; ARB.survivant = 'a'; ARB.busy = false;
+      ARB.i++; ARB.detail = null; ARB.choix = {}; ARB.saisie = {}; ARB.survivant = 'a'; ARB.busy = false;
       arbRender();
     }, 430);
   }
