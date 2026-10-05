@@ -589,7 +589,10 @@ OD.define('notifications', {
 
     function famille() {
       const r = num((state.j && state.j.moi && state.j.moi.role));
-      if (r === 4) return 'vendeur';
+      // Tout rôle connu hors des rôles manager (vendeur, opérateur plateau = 10)
+      // reçoit la vue vendeur. Miroir de public.role_est_manager(), 05/10/2026 :
+      // avant, un rôle inconnu tombait sur la vue direction.
+      if (r === 4 || (r > 0 && ![1, 2, 3, 5, 6, 7, 8, 9].includes(r))) return 'vendeur';
       if (r === 3) return 'chef';
       if (r === 9) return 'secretaire';
       if (r === 5) return 'marketing';
