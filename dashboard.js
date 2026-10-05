@@ -1,5 +1,11 @@
 // ============================================================================
-//  DASHBOARD — module One Data (OD.define)   v49 — PROFIL TEAM COLIN
+//  DASHBOARD — module One Data (OD.define)   v50 — PROFIL TEAM COLIN
+//
+//  v50 : « Jamais contactés » suit la définition du lead management : leads
+//  attribués, ouverts, sans premier contact, reçus depuis moins de 30 jours,
+//  fiches anonymisées écartées (dash_refresh_vendeur_etat, dash_refresh_site,
+//  dashboard_tc_liste). Chaque ligne a un bouton « Ouvrir » qui ouvre le lead
+//  dans la page Lead management.
 //
 //  v49 : l'opérateur du plateau VROOM (rôle 10) a SA page — la piscine BACS,
 //  sa journée, l'activité du plateau sur 14 et 30 jours, ce que deviennent
@@ -254,6 +260,8 @@ OD.define('dashboard', {
 #dash-root .davis{background:var(--alerte-bg);border-radius:10px;padding:10px 14px;
   font-size:12.5px;line-height:1.5;color:var(--ink-2)}
 #dash-root .dvide{padding:22px;color:var(--ink-2);font-size:14px}
+#dash-root .dlead{font:inherit;font-size:12px;font-weight:700;color:#fff;background:var(--bleu);border:0;border-radius:8px;padding:5px 11px;cursor:pointer;white-space:nowrap}
+#dash-root .dlead:hover{background:#1F4A85}
 @media (prefers-reduced-motion:reduce){#dash-root *{transition:none!important}}
 `;
     if (!doc.getElementById('dash-tc-css')) {
@@ -1412,11 +1420,13 @@ OD.define('dashboard', {
         const avecVendeur = famille() !== 'vendeur';
         const cols = [{ t: 'Client', v: l => esc(l.client || '—') }];
         if (avecVendeur) cols.push({ t: 'Vendeur', v: l => esc(l.vendeur || '—') });
-        cols.push({ t: 'Véhicule', v: l => l.vehicule ? esc(l.vehicule) : null });
+        cols.push({ t: 'Véhicule', v: l => l.vehicule ? '<span title="' + esc(l.vehicule) + '">' + esc(l.vehicule.length > 48 ? l.vehicule.slice(0, 46) + '…' : l.vehicule) + '</span>' : null });
         cols.push({ t: 'Ancienneté', v: l => l.age == null ? null : (fmt(l.age) + ' j') });
         cols.push({ t: 'Téléphone', v: l => l.tel
           ? '<a class="dtel" href="tel:' + esc(String(l.tel).replace(/\s/g, '')) + '">' + esc(l.tel) + '</a>'
           : null });
+        if (t.liste === 'leads_jamais') cols.push({ t: '', v: l => l.id_lead
+          ? '<button type="button" class="dlead" data-lead="' + esc(l.id_lead) + '">Ouvrir</button>' : null });
         const h = tableau(cols, lignes,
           num(j && j.total) > lignes.length
             ? ('Les ' + lignes.length + ' premiers sur ' + fmt(j.total) + '.') : '');
@@ -1428,6 +1438,16 @@ OD.define('dashboard', {
       }
     }
 
+    function ouvrirLead(id) {
+      const FW = (window.wwLib && wwLib.getFrontWindow && wwLib.getFrontWindow()) || window;
+      try { FW.sessionStorage.setItem('od-lead-ouvrir', String(id)); } catch (e) { }
+      let editeur = false;
+      try { editeur = window.self !== window.top; } catch (e) { editeur = true; }
+      if (editeur) { try { wwLib.wwApp.goTo('99519997-f935-471a-9147-b0118191b991'); return; } catch (e) { } return; }
+      try { wwLib.goTo('/fr/marketing'); return; } catch (e) { }
+      try { FW.location.href = '/fr/marketing#lead=' + encodeURIComponent(id); } catch (e) { }
+    }
+
     // =========================================================================
     //  LES CLICS
     // =========================================================================
@@ -1436,6 +1456,10 @@ OD.define('dashboard', {
 
       const fer = ev.target.closest('[data-role="fermer"]');
       if (fer && r.contains(fer)) { fermer(); return; }
+
+      // « Ouvrir » un lead : la page Lead management l'ouvre à son arrivée.
+      const ol = ev.target.closest('.dlead');
+      if (ol && r.contains(ol)) { ouvrirLead(ol.getAttribute('data-lead')); return; }
 
       const tu = ev.target.closest('.dtuile');
       if (tu && r.contains(tu) && tu.getAttribute('data-id')) {
