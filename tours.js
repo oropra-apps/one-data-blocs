@@ -5,6 +5,9 @@
 //  Aucune dépendance Supabase. Expose window.OneDataTour ; délégation de clic sur
 //  [data-tour-launch] (garde __odtLaunchBound) ; reprise auto via localStorage.
 //  NB : nommé 'tours' — 'tutos' est déjà pris par le module centre d'aide.
+//  v3 : visites du lead management par poste (lm-vendeur, lm-chef,
+//  lm-direction, lm-plateau), lancées depuis la section Lead management du
+//  centre d'aide (tutos v3).
 // ============================================================================
 /* =====================================================================
    One Data — Visites guidées « Montre-moi en vrai »  (v5)
@@ -61,6 +64,81 @@ OD.define('tours', {
         { optional: true, action: { click: '#lead-mgmt-root .lm-toggle [data-view="a_traiter"]' }, target: { css: '#lead-mgmt-root .card' }, title: 'Un cycle à traiter', body: 'Chaque carte est un cycle. La couleur et le délai signalent l\u2019urgence. Clique pour ouvrir la fiche client.' },
         { requires: '#lead-mgmt-root .lm-toggle [data-view="pipeline"]', action: { click: '#lead-mgmt-root .lm-toggle [data-view="pipeline"]' }, target: { css: '#lead-mgmt-root .lm-kanban' }, title: 'Le pipeline', body: 'L\u2019autre vue : tes cycles répartis par étape — Nouveau, En cours, Avancé, Clos. Clique une carte pour ouvrir la fiche client.' },
         { action: { click: '#lead-mgmt-root .lm-toggle [data-view="a_traiter"]' }, title: 'À toi de jouer', body: 'Traite tes leads à temps — c\u2019est souvent là que la vente se gagne.' },
+      ],
+    },
+
+    // ── Lead management par poste (Team Colin, lead-mgmt v52 et plus) ──────
+    // Une visite par poste ; le centre d'aide choisit celle du rôle. Les
+    // actions basculent d'onglet pour révéler la cible suivante.
+    'lm-vendeur': {
+      pageId: '99519997-f935-471a-9147-b0118191b991',
+      rootCheck: '.lmtc .poste .tabs',
+      steps: [
+        { title: 'Ton poste vendeur', body: 'Je te montre ton poste en moins d’une minute. Clique « Suivant ».' },
+        { action: { click: '.lmtc .tabs [data-id="afaire"]' }, target: { css: '.lmtc .situ .situ-t' }, title: 'La situation', body: 'Une phrase dit combien de personnes tu as à appeler et combien de leads sont libres dans la piscine du site.' },
+        { target: { css: '.lmtc .situ .kpis' }, title: 'Les chiffres du jour', body: 'Tes premiers contacts et tes prises du jour, ce qui reste à faire, la piscine et tes relances de campagne.' },
+        { target: { css: '.lmtc .poste .sig' }, title: 'Les signaux', body: 'Ce qui vient d’arriver : un lead qualifié par le plateau, un lead que ton chef te confie, un rappel. Chaque signal porte son bouton ; « Vu » le retire.' },
+        { target: { css: '.lmtc .poste .tabs' }, title: 'Tes trois onglets', body: 'À faire, la piscine du site et tes campagnes. Le chiffre passe en rouge dès qu’un lead est hors délai.' },
+        { target: { css: '.lmtc .poste .panel' }, title: 'À faire', body: 'Tes leads pas encore contactés, le plus pressé en tête, puis tes relances. Chaque ligne dit quoi faire et pourquoi. Clique-la : la fiche s’ouvre à droite, et en bas tu dis ce qui s’est passé.' },
+        { action: { click: '.lmtc .tabs [data-id="piscine"]' }, target: { css: '.lmtc .poste .panel' }, title: 'La piscine du site', body: 'Les leads que personne n’a pris. « Prendre » met le lead à ton nom : il passe dans « À faire ».' },
+        { action: { click: '.lmtc .tabs [data-id="campagnes"]' }, target: { css: '.lmtc .poste .panel' }, title: 'Mes campagnes', body: 'Les clients que ton chef t’a confiés. Un clic ouvre la fiche du client : appelle, puis fais ton compte rendu.' },
+        { optional: true, target: { css: '.lmtc .situ [data-a="ancien"]' }, title: 'L’écran précédent', body: '« Tableaux détaillés » ramène aux cycles, au kanban et à la synthèse.' },
+        { action: { click: '.lmtc .tabs [data-id="afaire"]' }, title: 'À toi de jouer', body: 'Commence par le haut de « À faire ». Les tutos Lead management du centre d’aide détaillent chaque geste.' },
+      ],
+    },
+
+    'lm-chef': {
+      pageId: '99519997-f935-471a-9147-b0118191b991',
+      rootCheck: '.lmtc .poste .tabs',
+      steps: [
+        { title: 'Ton poste chef des ventes', body: 'Je te montre ton poste en moins d’une minute. Clique « Suivant ».' },
+        { action: { click: '.lmtc .tabs [data-id="mur"]' }, target: { css: '.lmtc .situ .situ-t' }, title: 'La situation', body: 'Combien de leads sont hors délai dans la piscine, combien sont pris sans appel, et les premiers contacts de l’équipe aujourd’hui.' },
+        { target: { css: '.lmtc .situ .kpis' }, title: 'Les chiffres du site', body: 'Leads libres, chez les vendeurs, au plateau VROOM, ouverts depuis plus de 24 h (et les archives), et le délai moyen de premier contact.' },
+        { target: { css: '.lmtc .poste .sig' }, title: 'Les signaux', body: 'Ce qui demande ton intervention, chacun avec son bouton. « Vu » le retire.' },
+        { target: { css: '.lmtc table.mur:not(.sites)' }, title: 'Le mur', body: 'Qui a la main sur quoi, et depuis combien de temps. Chaque lead ouvert est compté une fois, chez la personne qui l’a en main.' },
+        { target: { css: '.lmtc table.mur tr.pisc' }, title: 'La piscine en tête', body: 'Personne n’y a la main : c’est la première ligne à regarder.' },
+        { optional: true, target: { css: '.lmtc table.mur tr.vroom' }, title: 'Au plateau VROOM', body: 'Les leads BACS de ton site que le plateau n’a pas encore qualifiés.' },
+        { optional: true, target: { css: '.lmtc table.mur .cell[data-a="cell"]' }, title: 'Clique un chiffre', body: 'La liste de ces leads s’ouvre dans le volet de droite. Ouvre un lead pour l’attribuer, puis « Retour à la liste ».' },
+        { target: { css: '.lmtc .ph-r .seg' }, title: 'Compter depuis', body: 'L’arrivée sur le site (le transfert du plateau, sinon la réception) ou la réception dans BACS.' },
+        { action: { click: '.lmtc .tabs [data-id="relayer"]' }, target: { css: '.lmtc .poste .panel' }, title: 'À relayer', body: 'Ce qui reste en plan, groupe par groupe, avec le geste proposé : attribuer, rendre, renvoyer, confier au plateau, solder le stock.' },
+        { action: { click: '.lmtc .tabs [data-id="campagnes"]' }, target: { css: '.lmtc .poste .panel' }, title: 'Campagnes', body: 'L’avancement de chaque campagne, vendeur par vendeur, et « Créer une campagne ».' },
+        { action: { click: '.lmtc .tabs [data-id="mur"]' }, title: 'À toi de jouer', body: 'Un coup d’œil au mur, puis « À relayer ». Les tutos Lead management du centre d’aide détaillent chaque geste.' },
+      ],
+    },
+
+    'lm-direction': {
+      pageId: '99519997-f935-471a-9147-b0118191b991',
+      rootCheck: '.lmtc .poste .tabs',
+      steps: [
+        { action: { click: '.lmtc [data-a="retour-sites"]' }, title: 'Ton poste direction', body: 'Je te montre ton poste en moins d’une minute. Clique « Suivant ».' },
+        { action: { click: '.lmtc .tabs [data-id="mur"]' }, target: { css: '.lmtc .situ .situ-t' }, title: 'La situation', body: 'Les trois délais de premier contact les plus longs sur 30 jours, et les leads ouverts depuis plus de 24 h.' },
+        { target: { css: '.lmtc .situ .kpis' }, title: 'Les chiffres du périmètre', body: 'Leads reçus sur 7 jours, en piscine, hors délai, ouverts depuis plus de 24 h, encore au plateau VROOM.' },
+        { target: { css: '.lmtc .poste .sig' }, title: 'Les signaux', body: 'Ce qui demande une attention, site par site.' },
+        { target: { css: '.lmtc table.mur.sites' }, title: 'Le mur des sites', body: 'Une ligne par site : où en sont les leads maintenant, puis le délai de premier contact et la part dans le délai sur 30 jours.' },
+        { optional: true, target: { css: '.lmtc [data-a="voir-site"]' }, title: 'Ouvrir un site', body: 'Montre le mur du chef des ventes de ce site. « ← Tous les sites » ramène ici.' },
+        { action: { click: '.lmtc .tabs [data-id="relais"]' }, target: { css: '.lmtc .poste .panel' }, title: 'Le relais', body: 'De BACS au premier appel, en temps médian par site. Les segments hachurés n’appartiennent à personne : c’est là que le temps se perd.' },
+        { action: { click: '.lmtc .tabs [data-id="campagnes"]' }, target: { css: '.lmtc .poste .panel' }, title: 'Campagnes', body: 'Les campagnes de tout ton périmètre, et la création d’une campagne.' },
+        { action: { click: '.lmtc .tabs [data-id="mur"]' }, title: 'À toi de jouer', body: 'Repère le site le plus lent, puis ouvre son mur.' },
+      ],
+    },
+
+    'lm-plateau': {
+      pageId: '99519997-f935-471a-9147-b0118191b991',
+      rootCheck: '.lmtc .poste .tabs',
+      steps: [
+        { title: 'Ton poste plateau VROOM', body: 'Je te montre ton poste en moins d’une minute. Clique « Suivant ».' },
+        { action: { click: '.lmtc .tabs [data-id="piscine"]' }, target: { css: '.lmtc .situ .situ-t' }, title: 'La situation', body: 'Combien de leads sont libres et hors délai dans la piscine BACS, depuis quand attend le plus ancien, et les rappels dus.' },
+        { target: { css: '.lmtc .situ .kpis' }, title: 'Les chiffres du plateau', body: 'Pris, qualifiés, rappels, abandonnés aujourd’hui ; l’âge de la copie BACS ; et le report dans BACS, « automatique » quand tout passe.' },
+        { optional: true, target: { css: '.lmtc .bd' }, title: 'Le canal BACS', body: 'Rouge : aucune session BACS ne répond, ouvre BACS et connecte-toi. Bleu : tes gestes passent par un collègue. Orange : des gestes attendent.' },
+        { target: { css: '.lmtc .poste .sig' }, title: 'Les signaux', body: 'Nouveau lead, hors délai, rappel, relais bloqué : chaque signal porte son bouton. « Vu » le retire.' },
+        { target: { css: '.lmtc .poste .tabs' }, title: 'Tes quatre onglets', body: 'La piscine BACS, les rappels, les transferts et les campagnes.' },
+        { optional: true, target: { css: '.lmtc .chips.filtres' }, title: 'Les sources', body: 'Une pastille par source. Le trafic atelier est masqué par défaut : clique une pastille pour l’ajouter ou la retirer.' },
+        { optional: true, target: { css: '.lmtc .barre .seg' }, title: 'Le stock accepté', body: 'Les leads acceptés il y a plus de 14 jours, jamais qualifiés ni abandonnés.' },
+        { target: { css: '.lmtc .poste .panel' }, title: 'La piscine BACS', body: 'Du plus ancien au plus récent. « Prendre » réserve le lead à ton nom, le passe en Accepté dans BACS et ouvre sa fiche : qualifie, oriente, choisis l’issue.' },
+        { action: { click: '.lmtc .tabs [data-id="rappels"]' }, target: { css: '.lmtc .poste .panel' }, title: 'Rappels', body: 'Injoignables et projets long terme, du plus en retard au plus lointain.' },
+        { action: { click: '.lmtc .tabs [data-id="transferts"]' }, target: { css: '.lmtc .poste .panel' }, title: 'Transferts', body: 'Ce que deviennent tes leads qualifiés. Après 2 h sans contact, « Relancer le chef » alerte le site.' },
+        { action: { click: '.lmtc .tabs [data-id="campagnes"]' }, target: { css: '.lmtc .poste .panel' }, title: 'Campagnes', body: 'Les campagnes BACS. « Filtrer » restreint tes files à une campagne.' },
+        { action: { click: '.lmtc .tabs [data-id="piscine"]' }, title: 'À toi de jouer', body: 'Prends le plus ancien. Garde l’onglet BACS ouvert et connecté : One Data y écrit pour toi.' },
       ],
     },
 
@@ -173,7 +251,7 @@ OD.define('tours', {
 .odt-hl{position:fixed;z-index:2147483000;border-radius:10px;border:2px solid #53bda7;
   box-shadow:0 0 0 100vmax rgba(20,30,50,.55),0 0 0 4px rgba(83,189,167,.5);pointer-events:none;transition:all .2s ease;display:none;}
 .odt-tip{position:fixed;z-index:2147483002;background:#fff;color:#1c2b45;border-radius:14px;padding:16px 18px;
-  max-width:320px;width:calc(100vw - 32px);box-shadow:0 16px 40px rgba(0,0,0,.28);
+  max-width:320px;width:calc(100vw - 32px);box-shadow:0 16px 40px rgba(28,43,69,.28);
   font-family:'Nunito Sans',-apple-system,Segoe UI,Roboto,sans-serif;display:none;}
 .odt-tip h4{margin:0 14px 6px 0;font-size:16px;font-weight:800;}
 .odt-tip p{margin:0;font-size:14px;line-height:1.5;color:#41506b;}
@@ -223,7 +301,12 @@ OD.define('tours', {
     }
   }
 
-  function show() { catcher.style.display = 'block'; tip.style.display = 'block'; }
+  let veille = null;
+  function show() {
+    catcher.style.display = 'block'; tip.style.display = 'block';
+    clearInterval(veille);
+    veille = setInterval(() => { if (!tour) { clearInterval(veille); return; } if (curNode && !curNode.isConnected) reposition(); }, 400);
+  }
   function hide() { if (catcher) catcher.style.display = 'none'; if (tip) tip.style.display = 'none'; if (hl) hl.style.display = 'none'; }
 
   function go(i) {
@@ -245,6 +328,9 @@ OD.define('tours', {
 
   function reposition() {
     if (!tour || !tip) return;
+    // La page a été redessinée (rechargement, données arrivées après un
+    // changement d'onglet) : la cible d'avant n'est plus dans le document.
+    if (curNode && !curNode.isConnected) { const st = tour.steps[idx]; curNode = (st && st.target) ? resolveTarget(st.target) : null; }
     if (curNode && visible(curNode)) {
       const r = curNode.getBoundingClientRect();
       hl.style.display = 'block';
