@@ -21,6 +21,10 @@ performances  = teamcolin
 site-bus      = teamcolin
 topnav        = teamcolin
 phone3cx      = teamcolin
+# Objectifs : la version du dépôt est celle de Team Colin (v8, KPI du
+# reporting maison). Le reste de la flotte est en v3. Ajouté le 04/10/2026 :
+# sans cette ligne, publier objectifs remplaçait la v3 de tous les clients.
+objectifs     = teamcolin
 
 # Notifications refondues (dette client) : elles appellent notif_lire,
 # notif_feu, notif_dettes, notif_reporter… qui n'existent que chez Team Colin.
