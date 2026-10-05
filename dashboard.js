@@ -1,5 +1,11 @@
 // ============================================================================
-//  DASHBOARD — module One Data (OD.define)   v47 — PROFIL TEAM COLIN
+//  DASHBOARD — module One Data (OD.define)   v49 — PROFIL TEAM COLIN
+//
+//  v49 : l'opérateur du plateau VROOM (rôle 10) a SA page — la piscine BACS,
+//  sa journée, l'activité du plateau sur 14 et 30 jours, ce que deviennent
+//  les transferts, les opérateurs — au lieu de celle d'un vendeur
+//  (plateau_tableau, teamcolin_poste_site.sql). Chiffres en Nunito Sans
+//  tabulaire, comme le veut la charte : plus de police à chasse fixe.
 //
 //  REFONTE : LA PAGE NE CALCULE PLUS RIEN, ELLE LIT
 //
@@ -115,8 +121,8 @@ OD.define('dashboard', {
   --ok-bg:#e4f4f0;--alerte-bg:#fdf3de;--chaud-bg:#fbeceb;--calme-bg:#eef2f8;
   --ombre:0 1px 2px rgba(28,43,69,.05),0 8px 24px rgba(28,43,69,.06);
   --ui:"Nunito Sans",system-ui,-apple-system,sans-serif;
-  --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
-  font-family:var(--ui);color:var(--ink);background:var(--ground);
+  --mono:"Nunito Sans",system-ui,-apple-system,sans-serif;
+  font-family:var(--ui);color:var(--ink);background:var(--ground);font-variant-numeric:tabular-nums;
   display:block;width:100%;padding:18px 16px 40px;box-sizing:border-box}
 #dash-root *{box-sizing:border-box}
 #dash-root .dw{max-width:1180px;margin:0 auto;display:flex;flex-direction:column;gap:16px}
@@ -1479,12 +1485,208 @@ OD.define('dashboard', {
     });
 
     // =========================================================================
+    //  LE TABLEAU DU PLATEAU VROOM (rôle 10)
+    //
+    //  Un opérateur plateau ne vend pas : ses commandes, son pipe et son stock
+    //  ne veulent rien dire. Sa page répond à « où en est la piscine, qu'ai-je
+    //  fait aujourd'hui, que deviennent nos transferts ? ».
+    //  Une seule source : plateau_tableau (teamcolin_poste_site.sql), qui lit
+    //  l'état de la piscine (plateau_kpis), les gestes faits dans One Data et
+    //  l'historique BACS des comptes VROOM partagés.
+    // =========================================================================
+    async function roleConnu() {
+      try {
+        let u = ctx.user || (window.OD && OD.getUser && OD.getUser());
+        if (!u) {
+          const FW = (window.wwLib && wwLib.getFrontWindow && wwLib.getFrontWindow()) || window;
+          if (typeof FW.oropraLoadUser === 'function') u = await FW.oropraLoadUser();
+        }
+        if (Array.isArray(u)) u = u[0];
+        const r = u && Number(u.ID_Role);
+        return isFinite(r) && r > 0 ? r : null;
+      } catch (e) { return null; }
+    }
+    const CSS_PL = `
+#dash-root .pl-band p{font-size:17px}
+#dash-root .pl-sec{display:grid;gap:10px}
+#dash-root .pl-sec > h2{font-size:11px;font-weight:800;letter-spacing:.07em;text-transform:uppercase;color:var(--ink-2);margin:0}
+#dash-root .pl-tuiles{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:10px}
+#dash-root .pl-t{background:var(--card);border:1px solid var(--line);border-radius:13px;padding:11px 13px 10px;box-shadow:var(--ombre);min-height:84px;display:flex;flex-direction:column}
+#dash-root .pl-t .lab{font-size:10.5px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:var(--ink-3);line-height:1.3}
+#dash-root .pl-t .v{font-size:24px;font-weight:800;letter-spacing:-.01em;margin-top:auto;font-variant-numeric:tabular-nums;color:var(--ink)}
+#dash-root .pl-t .v small{font-size:13px;font-weight:700;color:var(--ink-3);margin-left:3px}
+#dash-root .pl-t .c{font-size:11px;font-weight:700;color:var(--ink-3);margin-top:2px}
+#dash-root .pl-t.crit .v{color:var(--m-rouge)} #dash-root .pl-t.warn .v{color:var(--m-orange)}
+#dash-root .pl-t.ok .v{color:var(--m-vert)} #dash-root .pl-t.bleu .v{color:var(--bleu)}
+#dash-root .pl-carte .pl-tuiles{grid-template-columns:repeat(auto-fill,minmax(118px,1fr))}
+#dash-root .pl-deux{display:grid;grid-template-columns:minmax(0,1.25fr) minmax(0,1fr);gap:16px;align-items:start}
+@media (max-width:900px){#dash-root .pl-deux{grid-template-columns:minmax(0,1fr)}}
+#dash-root .pl-carte{background:var(--card);border:1px solid var(--line);border-radius:14px;box-shadow:var(--ombre);padding:16px 18px;display:grid;gap:12px;min-width:0}
+#dash-root .pl-carte h3{font-size:14px;font-weight:800;color:#1F4A85;margin:0}
+#dash-root .pl-carte .s{font-size:12px;color:#7a98c5;font-weight:600;margin:-6px 0 0}
+#dash-root .pl-graph{display:grid;grid-template-columns:repeat(14,minmax(0,1fr));gap:6px;align-items:end;height:150px;padding-top:8px}
+#dash-root .pl-col{display:flex;flex-direction:column-reverse;height:100%;gap:2px;position:relative}
+#dash-root .pl-col i{display:block;border-radius:3px;min-height:0}
+#dash-root .pl-col i.q{background:var(--vert)} #dash-root .pl-col i.r{background:var(--bleu-clair)} #dash-root .pl-col i.a{background:var(--rouge)}
+#dash-root .pl-col b{position:absolute;left:0;right:0;border-top:2px solid var(--bleu);height:0}
+#dash-root .pl-jours{display:grid;grid-template-columns:repeat(14,minmax(0,1fr));gap:6px;font-size:10px;color:var(--ink-3);font-weight:700;text-align:center;font-variant-numeric:tabular-nums}
+#dash-root .pl-leg{display:flex;flex-wrap:wrap;gap:6px 16px;font-size:11.5px;color:var(--ink-2);font-weight:600}
+#dash-root .pl-leg i{display:inline-block;width:12px;height:10px;border-radius:3px;margin-right:6px;vertical-align:-1px}
+#dash-root .pl-leg i.q{background:var(--vert)} #dash-root .pl-leg i.r{background:var(--bleu-clair)} #dash-root .pl-leg i.a{background:var(--rouge)}
+#dash-root .pl-leg i.p{height:0;border-top:2px solid var(--bleu);vertical-align:3px}
+#dash-root table.pl-tab{width:100%;border-collapse:separate;border-spacing:0;font-size:13px}
+#dash-root table.pl-tab th{font-size:9.5px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--ink-3);text-align:center;padding:8px 6px;background:var(--calme-bg)}
+#dash-root table.pl-tab th:first-child{text-align:left;border-radius:9px 0 0 9px} #dash-root table.pl-tab th:last-child{border-radius:0 9px 9px 0}
+#dash-root table.pl-tab td{border-top:1px solid var(--line);padding:8px 6px;text-align:center;font-variant-numeric:tabular-nums}
+#dash-root table.pl-tab tbody tr:first-child td{border-top:0}
+#dash-root table.pl-tab td:first-child{text-align:left;font-weight:700}
+#dash-root table.pl-tab td small{display:block;font-weight:600;color:var(--ink-3);font-size:11px}
+#dash-root table.pl-tab tr.moi td{background:#eef4fc}
+#dash-root .pl-na{color:var(--ink-3)}
+#dash-root .pl-barre{height:8px;border-radius:4px;background:var(--calme-bg);overflow:hidden}
+#dash-root .pl-barre i{display:block;height:100%;background:var(--vert);border-radius:4px}
+#dash-root .pl-ligne{display:flex;justify-content:space-between;gap:10px;font-size:13px;color:var(--ink-2);font-weight:600}
+#dash-root .pl-ligne b{color:var(--ink);font-weight:800;font-variant-numeric:tabular-nums}
+#dash-root .pl-lien{display:inline-flex;align-items:center;gap:6px;background:#2a5ea9;color:#fff;border:0;border-radius:9px;padding:7px 13px;font:inherit;font-size:12.5px;font-weight:700;cursor:pointer;text-decoration:none;margin-left:auto}
+#dash-root .pl-lien:hover{background:#1F4A85}
+`;
+    async function tableauPlateau() {
+      if (!doc.getElementById('dash-tc-css-pl')) {
+        const st = doc.createElement('style'); st.id = 'dash-tc-css-pl'; st.textContent = CSS_PL;
+        doc.head.appendChild(st);
+      }
+      const root = getRoot();
+      const duree = m => {
+        if (m == null || !isFinite(Number(m))) return '—';
+        m = Math.max(0, Number(m));
+        if (m < 1) return '< 1 min';
+        if (m < 60) return Math.round(m) + ' min';
+        if (m < 1440) { const h = Math.floor(m / 60), r = Math.round(m % 60); return h + ' h ' + String(r).padStart(2, '0'); }
+        return Math.floor(m / 1440) + ' j';
+      };
+      const propre = s => { s = String(s || '').trim(); return !s || s !== s.toUpperCase() ? s : s.toLowerCase().replace(/(^|[\s\-'’])([a-zà-ÿ])/g, (x, a, b) => a + b.toUpperCase()); };
+      const siteNom = s => propre(String(s || '').replace(/\s+TT\d+$/i, ''));
+      const tuile = (lab, v, c, cls) => '<div class="pl-t ' + (cls || '') + '"><span class="lab">' + esc(lab) + '</span><span class="v">' + v + '</span>' + (c ? '<span class="c">' + esc(c) + '</span>' : '') + '</div>';
+      root.innerHTML = '<div class="dw"><div class="drail"><h1>Le plateau VROOM</h1><span class="dt">' + esc(dateLongue()) + '</span><span class="drole">Opérateur plateau</span></div>'
+        + '<div class="dband pl-band"><div class="d"><div class="q">Chargement</div><p>Lecture de la piscine BACS…</p></div></div></div>';
+      let j;
+      try {
+        const jwt = await getUserJwt();
+        const res = await fetch(SUPABASE_URL + '/rest/v1/rpc/plateau_tableau', {
+          method: 'POST',
+          headers: { 'apikey': SUPABASE_KEY, 'Authorization': 'Bearer ' + jwt, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ p_jours: 30 })
+        });
+        if (!res.ok) throw new Error('HTTP ' + res.status);
+        j = await res.json();
+      } catch (e) {
+        root.innerHTML = '<div class="dw"><div class="dvide">Le tableau du plateau n’a pas pu être chargé (' + esc(e.message || e) + ').</div></div>';
+        return;
+      }
+      const f = j.file || {}, moi = j.moi_aujourdhui || {}, eq = j.aujourdhui || {}, p = j.periode || {}, dp = j.delai_prise || {}, tr = j.transferts || {};
+      const prenom = String(propre(j.nom || '')).split(' ')[0];
+      const syncMin = f.derniere_synchro ? (Date.now() - new Date(f.derniere_synchro).getTime()) / 60000 : null;
+
+      // La phrase
+      let t = (prenom ? esc(prenom) + ', l' : 'L') + 'a piscine BACS compte <b>' + fmt(f.n_piscine || 0) + ' lead' + (num(f.n_piscine) > 1 ? 's' : '') + '</b> à traiter';
+      t += num(f.n_rappels_dus) ? ' et <b style="color:#d2941f">' + fmt(f.n_rappels_dus) + ' rappel' + (num(f.n_rappels_dus) > 1 ? 's sont dus' : ' est dû') + '</b>.' : '.';
+      t += ' Aujourd’hui, vous avez pris <b>' + fmt(moi.pris || 0) + '</b> lead' + (num(moi.pris) > 1 ? 's' : '') + ' et transmis <b>' + fmt(moi.qualifies || 0) + '</b> aux sites.';
+      if (num(f.n_transferts_sans_contact)) t += ' <b style="color:#c0524f">' + fmt(f.n_transferts_sans_contact) + ' transfert' + (num(f.n_transferts_sans_contact) > 1 ? 's attendent' : ' attend') + '</b> encore un vendeur.';
+
+      const qualifTaux = (num(p.qualifies) + num(p.abandons)) ? Math.round(100 * num(p.qualifies) / (num(p.qualifies) + num(p.abandons))) : null;
+      const dans1h = num(dp.n) ? Math.round(100 * num(dp.dans_1h) / num(dp.n)) : null;
+      const dans2h = num(tr.contactes) ? Math.round(100 * num(tr.dans_2h) / num(tr.contactes)) : null;
+
+      let h = '<div class="dw"><div class="drail"><h1>Le plateau VROOM</h1><span class="dt">' + esc(dateLongue()) + '</span><span class="drole">Opérateur plateau</span></div>';
+      h += '<div class="dband pl-band"><div class="d"><div class="q">Votre journée</div><p>' + t + '</p></div></div>';
+
+      h += '<section class="pl-sec"><h2>La piscine, maintenant</h2><div class="pl-tuiles">'
+        + tuile('Leads à traiter', fmt(f.n_piscine || 0), num(f.n_nouveaux) ? fmt(f.n_nouveaux) + ' jamais pris' : 'tous déjà acceptés', num(f.n_piscine) ? 'bleu' : '')
+        + tuile('Rappels dus', fmt(f.n_rappels_dus || 0), num(f.n_rappels_retard) ? fmt(f.n_rappels_retard) + ' en retard de plus de 30 min' : 'à l’heure', num(f.n_rappels_retard) ? 'crit' : num(f.n_rappels_dus) ? 'warn' : 'ok')
+        + tuile('Transferts non pris', fmt(f.n_transferts_sans_contact || 0), 'au-delà de 2 h sur le site', num(f.n_transferts_sans_contact) ? 'crit' : 'ok')
+        + tuile('Stock accepté + 14 j', fmt(f.stock_acceptes_anciens || 0), 'acceptés sans suite', num(f.stock_acceptes_anciens) ? 'warn' : 'ok')
+        + tuile('Trafic atelier', fmt(f.atelier_en_file || 0), 'hors piscine par défaut', '')
+        + tuile('Copie BACS', syncMin == null ? '—' : syncMin < 1 ? 'à l’instant' : duree(syncMin), syncMin == null ? 'jamais synchronisée' : 'depuis la dernière lecture', syncMin == null || syncMin > 1440 ? 'crit' : syncMin > 120 ? 'warn' : 'ok')
+        + '</div></section>';
+
+      h += '<section class="pl-sec"><h2>Aujourd’hui</h2><div class="pl-tuiles">'
+        + tuile('Vous · pris', fmt(moi.pris || 0), 'plateau : ' + fmt(eq.pris || 0), 'bleu')
+        + tuile('Vous · transmis aux sites', fmt(moi.qualifies || 0), 'plateau : ' + fmt(eq.qualifies || 0), num(moi.qualifies) ? 'ok' : '')
+        + tuile('Vous · rappels programmés', fmt(moi.rappels || 0), 'plateau : ' + fmt(eq.rappels || 0), '')
+        + tuile('Vous · abandonnés', fmt(moi.abandons || 0), 'plateau : ' + fmt(eq.abandons || 0), '')
+        + tuile('Votre délai de prise', duree(j.moi_delai_prise_min), 'médiane, 30 jours', '')
+        + '</div></section>';
+
+      // Série 14 jours
+      const serie = j.serie || [];
+      const max = Math.max(1, ...serie.map(d => Math.max(num(d.pris), num(d.qualifies) + num(d.rappels) + num(d.abandons))));
+      let g = '<div class="pl-graph">';
+      serie.forEach(d => {
+        const hh = x => (100 * num(x) / max).toFixed(1) + '%';
+        g += '<div class="pl-col" title="' + esc(d.jour) + ' : ' + num(d.pris) + ' pris, ' + num(d.qualifies) + ' qualifiés, ' + num(d.rappels) + ' en rappel, ' + num(d.abandons) + ' abandonnés">'
+          + '<i class="q" style="height:' + hh(d.qualifies) + '"></i><i class="r" style="height:' + hh(d.rappels) + '"></i><i class="a" style="height:' + hh(d.abandons) + '"></i>'
+          + (num(d.pris) ? '<b style="bottom:' + hh(d.pris) + '"></b>' : '') + '</div>';
+      });
+      g += '</div><div class="pl-jours">' + serie.map(d => { const x = new Date(d.jour + 'T12:00:00'); return '<span>' + ['di', 'lu', 'ma', 'me', 'je', 've', 'sa'][x.getDay()] + ' ' + x.getDate() + '</span>'; }).join('') + '</div>'
+        + '<div class="pl-leg"><span><i class="q"></i>Qualifiés, transmis</span><span><i class="r"></i>Mis en rappel</span><span><i class="a"></i>Abandonnés</span><span><i class="p"></i>Pris</span></div>';
+
+      h += '<div class="pl-deux"><div class="pl-carte"><h3>Le plateau sur 14 jours</h3><p class="s">Leads distincts par jour, tous opérateurs, gestes faits dans BACS ou dans One Data.</p>' + g + '</div>';
+      h += '<div class="pl-carte"><h3>Sur 30 jours</h3>'
+        + '<div class="pl-ligne"><span>Leads pris</span><b>' + fmt(p.pris || 0) + '</b></div>'
+        + '<div class="pl-ligne"><span>Délai de prise, médiane</span><b>' + duree(dp.median_min) + '</b></div>'
+        + '<div class="pl-ligne"><span>Pris en moins d’une heure</span><b>' + (dans1h == null ? '—' : dans1h + ' %') + '</b></div>'
+        + '<div class="pl-barre"><i style="width:' + (dans1h || 0) + '%"></i></div>'
+        + '<div class="pl-ligne"><span>Qualifiés et transmis</span><b>' + fmt(p.qualifies || 0) + '</b></div>'
+        + '<div class="pl-ligne"><span>Abandonnés</span><b>' + fmt(p.abandons || 0) + '</b></div>'
+        + '<div class="pl-ligne"><span>Taux de qualification</span><b>' + (qualifTaux == null ? '—' : qualifTaux + ' %') + '</b></div>'
+        + '<div class="pl-barre"><i style="width:' + (qualifTaux || 0) + '%"></i></div>'
+        + '<div class="pl-ligne"><span>Chefs des ventes relancés</span><b>' + fmt(p.relances || 0) + '</b></div>'
+        + '<div class="pl-ligne"><span>Leads confiés par les sites</span><b>' + fmt(p.confies || 0) + '</b></div>'
+        + '</div></div>';
+
+      // Transferts
+      const sites = (j.par_site || []);
+      h += '<div class="pl-deux"><div class="pl-carte"><h3>Ce que deviennent les transferts</h3><p class="s">Leads qualifiés par le plateau ces 30 derniers jours, suivis sur le site.</p>'
+        + '<div class="pl-tuiles">'
+        + tuile('Transmis', fmt(tr.n || 0), '', 'bleu')
+        + tuile('Contactés', fmt(tr.contactes || 0), dans2h == null ? '' : dans2h + ' % dans les 2 h', 'ok')
+        + tuile('En attente', fmt(tr.en_attente || 0), fmt(tr.en_retard || 0) + ' au-delà de 2 h', num(tr.en_retard) ? 'crit' : '')
+        + tuile('Délai du site', duree(tr.median_site_min), 'médiane, jusqu’au contact', '')
+        + '</div>';
+      if (sites.length) {
+        h += '<table class="pl-tab"><thead><tr><th>Site</th><th>Transmis</th><th>Contactés</th><th>En retard</th><th>Délai médian</th></tr></thead><tbody>'
+          + sites.map(s => '<tr><td>' + esc(siteNom(s.site)) + '</td><td>' + fmt(s.n) + '</td><td>' + fmt(s.contactes) + '</td><td>' + (num(s.en_retard) ? '<b style="color:#c0524f">' + fmt(s.en_retard) + '</b>' : '<span class="pl-na">0</span>') + '</td><td>' + duree(s.median_min) + '</td></tr>').join('')
+          + '</tbody></table>';
+      }
+      h += '</div>';
+
+      // Opérateurs
+      const ops = j.operateurs || [], cb = j.comptes_bacs || {};
+      h += '<div class="pl-carte"><h3>Les opérateurs, 30 jours</h3><p class="s">Gestes faits dans One Data, par personne. Les comptes VROOM partagés de BACS ne disent pas qui a agi : ils sont comptés à part.</p>'
+        + '<table class="pl-tab"><thead><tr><th>Opérateur</th><th>Pris</th><th>Qualifiés</th><th>Rappels</th><th>Aban&shy;dons</th><th>Délai de prise</th></tr></thead><tbody>'
+        + (ops.length ? ops.map(o => '<tr' + (o.moi ? ' class="moi"' : '') + '><td>' + esc(propre(o.nom)) + (o.dernier ? '<small>dernier geste ' + esc(new Date(o.dernier).toLocaleString('fr-FR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })) + '</small>' : '') + '</td><td>' + fmt(o.pris) + '</td><td>' + fmt(o.qualifies) + '</td><td>' + fmt(o.rappels) + '</td><td>' + fmt(o.abandons) + '</td><td>' + duree(o.delai_median_min) + '</td></tr>').join('')
+          : '<tr><td colspan="6" class="pl-na">Aucun geste fait dans One Data sur la période.</td></tr>')
+        + '<tr><td>Comptes VROOM (BACS)<small>gestes faits directement dans BACS</small></td><td>' + fmt(cb.pris || 0) + '</td><td>' + fmt(cb.qualifies || 0) + '</td><td>' + fmt(cb.rappels || 0) + '</td><td>' + fmt(cb.abandons || 0) + '</td><td class="pl-na">—</td></tr>'
+        + '</tbody></table>';
+      const motifs = j.motifs || [];
+      if (motifs.length) h += '<div class="pl-ligne" style="flex-wrap:wrap;justify-content:flex-start;gap:6px 16px"><span>Motifs d’abandon :</span>' + motifs.slice(0, 6).map(m => '<span>' + esc(m.motif) + ' <b>' + fmt(m.n) + '</b></span>').join('') + '</div>';
+      h += '</div></div>';
+
+      h += '<p class="dpied">Piscine : état de la copie BACS synchronisée par l’extension, corrigé des gestes faits dans One Data. Activité : historique BACS des comptes VROOM et gestes du plateau dans One Data, un lead compté une fois par type de geste et par jour. Délai de prise : de la réception dans BACS à la première prise. Le travail se fait dans le poste du plateau (page Leads).</p></div>';
+      root.innerHTML = h;
+    }
+
+    // =========================================================================
     //  MONTAGE
     //
     //  Le cadre d'abord, l'appel ensuite. On n'attend plus le bus avant de
     //  charger : dash_lire rend tout le périmètre d'un coup, et adopter le
     //  site de la barre du haut ne coûte plus qu'un nouveau rendu en mémoire.
     // =========================================================================
+    // L'opérateur plateau a sa propre page : on le sait souvent avant tout appel.
+    const roleUser = await roleConnu();
+    if (roleUser === 10) { await tableauPlateau(); return; }
+
     squelette();
 
     const siteInitial = siteDuBusMaintenant();
@@ -1495,6 +1697,8 @@ OD.define('dashboard', {
     } catch (e) {
       state.erreur = e && e.message ? e.message : 'erreur inconnue';
     }
+    // Rôle inconnu au montage : dash_lire le donne.
+    if (!state.erreur && state.j && num(state.j.role) === 10) { await tableauPlateau(); return; }
     if (!state.erreur && siteInitial != null) {
       const per = (state.j.perimetre || []);
       if (per.length > 1 && per.some(x => Number(x.id_site) === siteInitial)) poserSite(siteInitial);
