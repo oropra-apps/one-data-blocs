@@ -1,6 +1,6 @@
 // ============================================================================
 //  LEAD MANAGEMENT — module One Data (OD.define 'lead-mgmt')
-//  VERSION TEAM COLIN (v52) — déploiement CIBLÉ (publish-targets :
+//  VERSION TEAM COLIN (v53) — déploiement CIBLÉ (publish-targets :
 //  lead-mgmt = teamcolin). Le reste de la flotte reste sur la v48.
 //
 //  Refonte du lead management de Team Colin. Un poste de travail à deux
@@ -19,6 +19,9 @@
 //  Rôles 1 et 8 : le poste VROOM en aperçu avec #plateau dans l'adresse.
 //  Chaque poste garde un lien « Tableaux détaillés » vers la version 48
 //  (cycles, kanban, synthèse, règles d'attribution).
+//  v53 : un lead s'ouvre directement depuis le tableau de bord (« Ouvrir »)
+//  ou par l'adresse (#lead=123) ; « À faire » signale les leads plus anciens
+//  que la fenêtre de 30 jours, encore attribués au vendeur.
 //
 //  DONNÉES : fonctions plateau_* (teamcolin_plateau_vroom.sql,
 //  teamcolin_plateau_bacs.sql) et poste_* (teamcolin_poste_site.sql) du
@@ -36,7 +39,7 @@
 //  ⚠️ CE FICHIER EST DÉSORMAIS CELUI DE TEAM COLIN (comme objectifs.js).
 //  La version de flotte vit au tag lead-mgmt-v48. Pour la corriger :
 //  repartir de `git show lead-mgmt-v48:lead-mgmt.js`, jamais de ce fichier.
-//  Retour arrière Team Colin : ré-épingler la v51 (plateau seul) ou la v48.
+//  Retour arrière Team Colin : ré-épingler la v52, la v51 (plateau seul) ou la v48.
 // ============================================================================
 (function () {
   'use strict';
@@ -1392,7 +1395,10 @@
           + '<div><span class="lr-n">' + esc(propre(t.client_nom)) + '</span><p class="why">' + esc(siteNom(t.nom_site)) + '</p><div class="tags"><span class="tag camp">' + esc(t.campagne) + '</span></div></div>'
           + '<div><span class="tm ' + (t.anciennete_j >= 3 ? 'warn' : 'ok') + '"><b>' + (t.anciennete_j ? plural(t.anciennete_j, 'jour') : 'aujourd\'hui') + '</b><small>depuis le lancement</small></span></div></div>';
       });
-      return h + '</div>';
+      h += '</div>';
+      var arch = Number((S.stats || {}).mes_archives) || 0;
+      if (arch) h += '<p class="foot">' + (arch > 1 ? arch + ' autres leads vous sont encore attribués' : 'Un autre lead vous est encore attribué') + ', reçu' + (arch > 1 ? 's' : '') + ' il y a plus de ' + ((S.stats && S.stats.arriere_jours) || 30) + ' jours. Ils ne sont plus à appeler en priorité : votre chef des ventes les solde.</p>';
+      return h;
     }
     function vuePiscineVendeur() {
       var ls = piscine(null).sort(function (a, b) { return (slaDe(a) - mins(arrive(a))) - (slaDe(b) - mins(arrive(b))); });
@@ -2110,6 +2116,15 @@
 
     await rafraichir();
     if (POSTE === 'vendeur') { chargerCampagnes().then(render); }
+    // Un lead demandé par une autre page (tableau de bord : « Ouvrir ») ou par
+    // l'adresse (#lead=123) s'ouvre directement.
+    (function () {
+      var id = null;
+      try { id = FW.sessionStorage.getItem('od-lead-ouvrir'); FW.sessionStorage.removeItem('od-lead-ouvrir'); } catch (e) {}
+      if (!id) { try { var m = /[#&]lead=(\d+)/.exec(FW.location.hash || ''); if (m) id = m[1]; } catch (e) {} }
+      if (id && S.leads.some(function (l) { return String(l.id_lead) === String(id); })) ouvrir(id);
+      else if (id) toast('Ce lead n\'est plus à traiter : il a été contacté, clos ou réattribué.');
+    })();
   }
 
   // ==========================================================================
