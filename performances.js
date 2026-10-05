@@ -165,7 +165,9 @@ OD.define('performances', {
       return r == null ? null : Number(r);
     } catch (e) { return null; }
   }
-  const EST_VENDEUR = () => Number(monRole()) === 4;
+  // Vue personnelle pour tout rôle non manager (vendeur, opérateur plateau) :
+  // miroir de public.role_est_manager(), 04/10/2026.
+  const EST_VENDEUR = () => { const r = monRole(); return r != null && ![1, 2, 3, 5, 6, 7, 8, 9].includes(r); };
 
   async function loadPerfData(deb, fin) {
     if (!perimSites.length) await loadPerimeter();
