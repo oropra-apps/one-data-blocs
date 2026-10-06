@@ -274,6 +274,48 @@ OD.define('whatsapp', {
     } catch (e) { console.error('[wa] sendAudio', e); state.sending = false; state.error = e.message || String(e); render(); }
   }
 
+  /* ---- pieces jointes : URL signees ----
+     Le bucket wa-attachments est PRIVE, et c'est voulu : il contient des
+     documents de clients. Cote serveur, getPublicUrl() fabriquait pourtant une
+     adresse /object/public/... sans jamais echouer ; cette adresse repond
+     NoSuchBucket. Resultat : aucune piece jointe -- image, video, vocal ou
+     document -- ne s'affichait dans One Data, alors que le client les recevait
+     parfaitement. Constate le 06/10/2026.
+     On demande donc une URL signee a l'affichage, et on la garde en cache. */
+  const attCache = win.__waAttCache || (win.__waAttCache = new Map());
+  async function attUrl(id) {
+    if (!id) return '';
+    const hit = attCache.get(id);
+    if (hit && hit.exp > Date.now()) return hit.url;
+    try {
+      const r = await fetch(SUPABASE_URL + '/functions/v1/wa-attachment-url', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', apikey: anonKey(), Authorization: 'Bearer ' + (await authToken()) },
+        body: JSON.stringify({ attachment_id: id })
+      });
+      const j = await r.json().catch(function () { return null; });
+      if (!r.ok || !j || !j.url) return '';
+      // On expire 5 min avant le serveur : une URL morte afficherait un lecteur vide.
+      const ttl = Math.max(60, (j.expire_dans || 3600) - 300) * 1000;
+      attCache.set(id, { url: j.url, exp: Date.now() + ttl });
+      return j.url;
+    } catch (e) { return ''; }
+  }
+  async function hydrateAtt(root) {
+    const els = Array.prototype.slice.call(root.querySelectorAll('[data-wa-att]'));
+    if (!els.length) return;
+    const ids = [];
+    els.forEach(function (e) { const i = e.getAttribute('data-wa-att'); if (i && ids.indexOf(i) < 0) ids.push(i); });
+    const urls = {};
+    await Promise.all(ids.map(async function (i) { urls[i] = await attUrl(i); }));
+    els.forEach(function (el) {
+      const u = urls[el.getAttribute('data-wa-att')];
+      el.removeAttribute('data-wa-att');
+      if (!u) { el.classList.add('wa-att-ko'); el.setAttribute('title', 'Pièce jointe indisponible'); return; }
+      if (el.tagName === 'A') el.setAttribute('href', u); else el.setAttribute('src', u);
+    });
+  }
+
   /* ---- rendu d'un message ---- */
   function statusTicks(it) {
     if (it.direction !== 'out') return '';
@@ -290,11 +332,17 @@ OD.define('whatsapp', {
   function attHtml(it) {
     let atts = it.attachments; try { if (typeof atts === 'string') atts = JSON.parse(atts); } catch (e) { }
     if (!Array.isArray(atts) || !atts.length) return '';
-    const a = atts[0]; const url = a.public_url || a.url || ''; const mt = (a.mime_type || a.msg_type || '').toLowerCase();
-    if (it.msg_type === 'image' || mt.startsWith('image')) return '<a href="' + esc(url) + '" target="_blank"><img class="wa-media" src="' + esc(url) + '" loading="lazy"></a>';
-    if (it.msg_type === 'video' || mt.startsWith('video')) return '<video class="wa-media" src="' + esc(url) + '" controls preload="metadata"></video>';
-    if (it.msg_type === 'audio' || mt.startsWith('audio')) return '<audio class="wa-audio" src="' + esc(url) + '" controls preload="metadata"></audio>';
-    return '<a class="wa-doc" href="' + esc(url) + '" target="_blank"><span class="wa-doc-ic">📄</span><span class="wa-doc-nm">' + esc(a.filename || 'Document') + '</span></a>';
+    const a = atts[0];
+    const mt = (a.mime_type || a.msg_type || '').toLowerCase();
+    const nom = esc(a.filename || 'Document');
+    // Aucun src/href ici : hydrateAtt() les posera avec une URL signee.
+    // a.public_url n'est volontairement plus lu -- il pointe sur un bucket prive.
+    if (!a.id) return '<span class="wa-doc wa-att-ko" title="Pièce jointe sans identifiant"><span class="wa-doc-ic">📄</span><span class="wa-doc-nm">' + nom + '</span></span>';
+    const d = ' data-wa-att="' + esc(a.id) + '"';
+    if (it.msg_type === 'image' || mt.startsWith('image')) return '<a' + d + ' target="_blank" rel="noopener"><img class="wa-media"' + d + ' loading="lazy" alt=""></a>';
+    if (it.msg_type === 'video' || mt.startsWith('video')) return '<video class="wa-media"' + d + ' controls preload="metadata"></video>';
+    if (it.msg_type === 'audio' || mt.startsWith('audio')) return '<audio class="wa-audio"' + d + ' controls preload="metadata"></audio>';
+    return '<a class="wa-doc"' + d + ' target="_blank" rel="noopener"><span class="wa-doc-ic">📄</span><span class="wa-doc-nm">' + nom + '</span></a>';
   }
   function bubble(it) {
     const out = it.direction === 'out';
@@ -309,6 +357,7 @@ OD.define('whatsapp', {
   const STYLE = '<style>' +
     '#' + ROOT_ID + '{font-family:-apple-system,"Segoe UI",Helvetica,Arial,sans-serif}' +
     '#' + ROOT_ID + ' *{box-sizing:border-box}' +
+    '.wa-att-ko{opacity:.45;filter:grayscale(1);cursor:not-allowed}' +
     '.wa-card{position:fixed;left:24px;bottom:24px;width:min(380px,calc(100vw - 32px));height:min(620px,86vh);background:#efeae2;border-radius:14px;display:flex;flex-direction:column;overflow:hidden;box-shadow:0 18px 52px rgba(0,0,0,.30);z-index:9990}' +
     '.wa-head{display:flex;align-items:center;gap:10px;padding:10px 12px;background:#075E54;color:#fff;flex:0 0 auto;cursor:move;touch-action:none;user-select:none}' +
     '.wa-ava{width:38px;height:38px;border-radius:50%;background:#ffffff2b;display:flex;align-items:center;justify-content:center;font-size:14px;font-weight:700;flex:0 0 auto}' +
@@ -418,6 +467,7 @@ OD.define('whatsapp', {
     bind(root);
     applyPos(root); makeDraggable(root);
     const body = root.querySelector('.wa-body'); if (body) body.scrollTop = body.scrollHeight;
+    hydrateAtt(root);
   }
 
   function applyPos(root) {
