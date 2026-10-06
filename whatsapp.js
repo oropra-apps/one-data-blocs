@@ -392,8 +392,27 @@ OD.define('whatsapp', {
     const d = ' data-wa-att="' + esc(a.id) + '"';
     if (it.msg_type === 'image' || mt.startsWith('image')) return '<a' + d + ' target="_blank" rel="noopener"><img class="wa-media"' + d + ' loading="lazy" alt=""></a>';
     if (it.msg_type === 'video' || mt.startsWith('video')) return '<video class="wa-media"' + d + ' controls preload="metadata"></video>';
-    if (it.msg_type === 'audio' || mt.startsWith('audio')) return '<audio class="wa-audio"' + d + ' controls preload="metadata"></audio>';
+    if (it.msg_type === 'audio' || mt.startsWith('audio')) {
+      return '<audio class="wa-audio"' + d + ' controls preload="metadata"></audio>' + transcriptionHtml(a);
+    }
     return '<a class="wa-doc"' + d + ' target="_blank" rel="noopener">' + corpsDoc + '</a>';
+  }
+  /* La transcription de la note vocale, sous le lecteur.
+     Elle est produite par `wa-transcrire` (Whisper) au moment ou la piece
+     arrive, dans les deux sens : on lit donc aussi ce que le vendeur a dit.
+     Quatre etats, et chacun dit quelque chose de different -- un silence
+     n'est pas une panne, et une transcription qui arrive n'est pas une
+     transcription absente. */
+  function transcriptionHtml(a) {
+    if (!a) return '';
+    const st = a.transcription_statut;
+    if (st === 'fait' && a.transcription) {
+      return '<div class="wa-tr">' + esc(a.transcription) + '</div>';
+    }
+    if (st === 'en_cours') return '<div class="wa-tr wa-tr-gris">Transcription en cours…</div>';
+    if (st === 'vide') return '<div class="wa-tr wa-tr-gris">Pas de parole audible.</div>';
+    if (st === 'erreur') return '<div class="wa-tr wa-tr-gris">Transcription indisponible.</div>';
+    return '';
   }
   function bubble(it) {
     const out = it.direction === 'out';
@@ -427,7 +446,10 @@ OD.define('whatsapp', {
     '.wa-row.in .wa-bubble{background:#fff;border-top-left-radius:2px}' +
     '.wa-txt{white-space:pre-wrap}' +
     '.wa-media{max-width:230px;width:100%;border-radius:7px;display:block;margin-bottom:3px}' +
-    '.wa-audio{width:220px;height:38px;margin-bottom:2px}' +
+    '.wa-audio{width:220px;height:38px;margin-bottom:2px;display:block}' +
+    '.wa-tr{font-size:12.5px;line-height:1.45;color:#374151;font-style:italic;max-width:230px;' +
+      'border-left:2px solid rgba(76,175,125,.35);padding-left:8px;margin:2px 0 3px}' +
+    '.wa-tr-gris{color:#9ca3af;font-style:normal}' +
     '.wa-doc{display:inline-flex;align-items:center;gap:8px;border:1px solid rgba(76,175,125,.25);background:rgba(76,175,125,.06);border-radius:8px;padding:7px 12px;text-decoration:none;margin-bottom:3px;max-width:100%}' +
     '.wa-doc-ex{flex:0 0 auto;display:block}' +
     '.wa-doc-tx{display:flex;flex-direction:column;gap:1px;min-width:0}' +
