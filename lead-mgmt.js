@@ -1,6 +1,6 @@
 // ============================================================================
 //  LEAD MANAGEMENT — module One Data (OD.define 'lead-mgmt')
-//  VERSION TEAM COLIN (v54) — déploiement CIBLÉ (publish-targets :
+//  VERSION TEAM COLIN (v55) — déploiement CIBLÉ (publish-targets :
 //  lead-mgmt = teamcolin). Le reste de la flotte reste sur la v48.
 //
 //  Refonte du lead management de Team Colin. Un poste de travail à deux
@@ -25,6 +25,8 @@
 //  v54 : sur le mur (chef des ventes, direction), un clic sur un chiffre ouvre
 //  la liste des leads dans le volet de droite ; une fiche ouverte depuis cette
 //  liste y revient par « Retour à la liste ».
+//  v55 : visites guidées (« Montre-moi en vrai ») : chaque poste expose
+//  window.__lmtcTour (fiche d'exemple où aucun geste n'est enregistré).
 //
 //  DONNÉES : fonctions plateau_* (teamcolin_plateau_vroom.sql,
 //  teamcolin_plateau_bacs.sql) et poste_* (teamcolin_poste_site.sql) du
@@ -721,6 +723,7 @@
       }
       h += '</footer>';
       var sc = $drawer.querySelector('.dr-b'); var top = sc ? sc.scrollTop : 0;
+      if (D.demo) h = h.replace('<div class="dr-b">', '<p class="demo">Fiche d\'exemple de la visite guidée : rien n\'est enregistré, rien ne part dans BACS.</p><div class="dr-b">');
       $drawer.innerHTML = h;
       var sc2 = $drawer.querySelector('.dr-b'); if (sc2) sc2.scrollTop = top;
     }
@@ -761,6 +764,25 @@
     }
 
     var renouvellement = null;
+    // Visite guidée : la fiche d'un vrai lead, présentée comme réservée à
+    // l'opérateur pour montrer la qualification, l'orientation et les issues.
+    // Aucun geste n'est enregistré (geste() et canal() refusent), rien n'est
+    // réservé ni libéré dans BACS.
+    async function ouvrirExemple() {
+      var cand = [].concat(S.piscine || [], S.stockListe || [], S.rappels || [], S.transferts || []).filter(function (x) { return x && x.sf_lead_id; })[0];
+      var fiche = null;
+      if (cand) { try { fiche = await rpc('plateau_fiche', { p_sf_lead_id: cand.sf_lead_id }); } catch (e) { fiche = null; } }
+      if (!fiche) fiche = { sf_lead_id: 'exemple', prenom: 'Client', nom: 'Exemple', recu_le: new Date(Date.now() - 1200000).toISOString(), fiche_bacs: { type_demande: 'Demande d\'essai', modele: 'Yaris Cross' } };
+      fiche = JSON.parse(JSON.stringify(fiche));
+      fiche.statut_eff = 'Accepté'; fiche.verrou_par = MOI; fiche.verrou_nom = null;
+      fiche.verrou_jusqu = new Date(Date.now() + 3600000).toISOString();
+      fermerDrawer(true);
+      S.dr = { sf: fiche.sf_lead_id, fiche: fiche, sites: null, vendeurs: null, site: null, envois: [], demo: true };
+      $scrim.hidden = false; $drawer.hidden = false;
+      renderDrawer();
+      if (fiche.sf_lead_id !== 'exemple') { await chargerEnvois(); await chargerSites(); }
+      else if (S.dr) { S.dr.sites = []; renderDrawer(); }
+    }
     async function ouvrir(sf) {
       fermerDrawer(true);
       S.dr = { sf: sf, fiche: null, sites: null, vendeurs: null, site: null };
@@ -809,7 +831,7 @@
       var D = S.dr; S.dr = null;
       $scrim.hidden = true; $drawer.hidden = true; $drawer.innerHTML = '';
       // Fermer sans geste rend le lead aux collègues tout de suite.
-      if (D && D.fiche && estMien(D.fiche) && !silencieux) {
+      if (D && D.fiche && estMien(D.fiche) && !silencieux && !D.demo) {
         try { await rpc('plateau_liberer', { p_sf_lead_id: D.sf }); } catch (e) {}
         rafraichir(true);
       }
@@ -818,6 +840,7 @@
     // ── Gestes ────────────────────────────────────────────────────────────
     var occupe = false;
     async function geste(fn) {
+      if (S.dr && S.dr.demo) { toast('Visite guidée : rien n\'est enregistré sur la fiche d\'exemple.'); return; }
       if (occupe) return; occupe = true;
       ov.classList.add('busy'); root.classList.add('busy');
       try { await fn(); }
@@ -896,6 +919,7 @@
     }
     function canal(act) {
       var D = S.dr; if (!D || !D.fiche) return;
+      if (D.demo) { toast('Visite guidée : les boutons de contact ne font rien sur la fiche d\'exemple.'); return; }
       var f = D.fiche;
       var nom = propre(f.nom || '');
       var client = { IDVu: f.id_client, TEl_MOB: f.telephone, EMAIL: f.email, nom: nom, prenom: '' };
@@ -1002,14 +1026,17 @@
     });
     function surTouche(ev) { if (ev.key === 'Escape' && S.dr) fermerDrawer(); }
     doc.addEventListener('keydown', surTouche);
+    // Accès des visites guidées (module tours) : fiche d'exemple et fermeture.
+    try { FW.__lmtcTour = { poste: 'vroom', exemple: ouvrirExemple, fermer: function () { if (S.dr) fermerDrawer(); } }; } catch (e) {}
 
     // ── Cycle de vie ──────────────────────────────────────────────────────
     var minuteur = null, horloge = null;
     function detruire() {
       clearInterval(minuteur); clearInterval(horloge); clearInterval(renouvellement);
       doc.removeEventListener('keydown', surTouche);
-      if (S.dr && S.dr.fiche && estMien(S.dr.fiche)) { try { rpc('plateau_liberer', { p_sf_lead_id: S.dr.sf }); } catch (e) {} }
+      if (S.dr && S.dr.fiche && estMien(S.dr.fiche) && !S.dr.demo) { try { rpc('plateau_liberer', { p_sf_lead_id: S.dr.sf }); } catch (e) {} }
       S.dr = null;
+      try { if (FW.__lmtcTour && FW.__lmtcTour.poste === 'vroom') delete FW.__lmtcTour; } catch (e) {}
       try { ov.remove(); } catch (e) {}
       try { root.remove(); } catch (e) {}
     }
@@ -1165,7 +1192,7 @@
       try { await charger(); }
       catch (e) { S.erreur = messageErreur(e); if (!silencieux) toast(S.erreur, true); }
       render();
-      if (S.dr && S.dr.id) { var l = S.leads.find(function (x) { return Number(x.id_lead) === Number(S.dr.id); }); if (l) { S.dr.l = l; renderDrawerPreserve(); } }
+      if (S.dr && S.dr.id && !S.dr.demo) { var l = S.leads.find(function (x) { return Number(x.id_lead) === Number(S.dr.id); }); if (l) { S.dr.l = l; renderDrawerPreserve(); } }
       else if (S.cell && !$drawer.hidden) renderVolet();
     }
     async function chargerCampagnes() {
@@ -1694,6 +1721,7 @@
       if (l.qualification) h += '<section><h3>' + (l.par_plateau ? 'Qualification du plateau VROOM' : 'Qualification') + '</h3><p class="qualif">' + esc(l.qualification) + '</p>' + (l.transfere_par_nom ? '<p class="hint">Par ' + esc(propre(l.transfere_par_nom)) + ', le ' + esc(quand(l.transfere_le)) + '.</p>' : '') + '</section>';
       h += sectionBacs();
       h += '</div><footer class="dr-f">' + piedDrawer(l, gere, mien) + '</footer>';
+      if (D.demo) h = h.replace('<div class="dr-b">', '<p class="demo">Fiche d\'exemple de la visite guidée : rien n\'est enregistré.</p><div class="dr-b">');
       var sc = $drawer.querySelector('.dr-b'); var top = sc ? sc.scrollTop : 0;
       $drawer.innerHTML = h;
       var sc2 = $drawer.querySelector('.dr-b'); if (sc2) sc2.scrollTop = top;
@@ -1784,6 +1812,24 @@
         var sel = { vendeur: '#dr-vendeur', site: '#dr-site', rdv: '#rdv-date', duree: '#rdv-duree', sujet: '#rdv-sujet', note: '#res-note', motif: '#clore-motif', cnote: '#clore-note' }[k];
         var x2 = $drawer.querySelector(sel); if (x2) x2.value = v[k];
       });
+    }
+    // Visite guidée : ouvre la fiche d'un lead du poste. Vendeur : un de ses
+    // leads ; chef et direction : un lead du site affiché. S'il n'y en a pas,
+    // une fiche d'exemple (copie d'un lead visible) où aucun geste n'est
+    // enregistré.
+    async function ouvrirExemple() {
+      var sid = sitePoste();
+      var l = POSTE === 'vendeur' ? mesLeads()[0] : leadsDu(sid).filter(function (z) { return z.zone !== 'plateau'; })[0];
+      if (l) { S.cell = null; return ouvrir(l.id_lead); }
+      var src = S.leads.filter(function (z) { return z.zone !== 'plateau'; })[0] || S.leads[0];
+      var x = src ? JSON.parse(JSON.stringify(src)) : { id_lead: 0, prenom: 'Client', nom: 'Exemple', site: (siteInfo(sid) || {}).site, id_site: sid,
+        recu_le: new Date(Date.now() - 1500000).toISOString(), arrive_le: new Date(Date.now() - 1500000).toISOString(), sla_site: 60, source_libelle: 'Site constructeur' };
+      if (POSTE === 'vendeur') { x.zone = 'vendeur'; x.id_user_attribue = MOI; x.vendeur_nom = (S.stats && S.stats.nom) || ''; x.attribue_le = new Date(Date.now() - 600000).toISOString(); x.verrou_par = null; }
+      else if (!x.zone || x.zone === 'plateau') x.zone = 'piscine';
+      S.cell = null;
+      S.dr = { id: x.id_lead, l: x, envois: [], mode: null, res: null, demo: true };
+      $scrim.hidden = false; $drawer.hidden = false;
+      renderDrawer();
     }
     async function ouvrir(id) {
       var l = S.leads.find(function (x) { return Number(x.id_lead) === Number(id); });
@@ -1907,6 +1953,7 @@
     // ── Gestes ────────────────────────────────────────────────────────────
     var occupe = false;
     async function geste(fn) {
+      if (S.dr && S.dr.demo) { toast('Visite guidée : rien n\'est enregistré sur la fiche d\'exemple.'); return; }
       if (occupe) return; occupe = true;
       ov.classList.add('busy'); root.classList.add('busy');
       try { await fn(); }
@@ -2011,6 +2058,7 @@
     }
     function canal(act) {
       var D = S.dr; if (!D || !D.l) return;
+      if (D.demo) { toast('Visite guidée : les boutons de contact ne font rien sur la fiche d\'exemple.'); return; }
       var l = D.l, nom = nomLead(l);
       var client = { IDVu: l.id_client, TEl_MOB: l.telephone, EMAIL: l.email, nom: nom, prenom: '' };
       try {
@@ -2127,6 +2175,8 @@
     });
     function surTouche(ev) { if (ev.key === 'Escape') { if (S.modal) fermerModal(); else if (S.dr) fermerDrawer(); else if (!$drawer.hidden) fermerTout(); } }
     doc.addEventListener('keydown', surTouche);
+    // Accès des visites guidées (module tours).
+    try { FW.__lmtcTour = { poste: POSTE, exemple: ouvrirExemple, fermer: function () { if (S.modal) fermerModal(); fermerTout(); } }; } catch (e) {}
 
     // ── Cycle de vie ──────────────────────────────────────────────────────
     var minuteur = null, horloge = null;
@@ -2134,6 +2184,7 @@
       clearInterval(minuteur); clearInterval(horloge);
       doc.removeEventListener('keydown', surTouche);
       S.dr = null;
+      try { if (FW.__lmtcTour && FW.__lmtcTour.poste !== 'vroom') delete FW.__lmtcTour; } catch (e) {}
       try { ov.remove(); } catch (e) {}
       try { root.remove(); } catch (e) {}
     }
@@ -2521,6 +2572,7 @@
 .lmtc-ov .dr-b.vol{padding:4px 10px 18px}
 .lmtc-ov .dr-b.vol .lr{grid-template-columns:112px minmax(0,1fr) auto;gap:10px;padding:10px 8px}
 .lmtc-ov .dr-b.vol .lr:first-child{border-top:0}
+.lmtc-ov .demo{margin:0;padding:8px 18px;background:#eaf1fb;color:var(--bleu-dk);font-size:12.5px;font-weight:800;border-bottom:1.5px solid #eef2f8}
 @media (prefers-reduced-motion:reduce){.lmtc *{animation:none!important;transition:none!important}}
 `;
     (doc.head || doc.documentElement).appendChild(st);
