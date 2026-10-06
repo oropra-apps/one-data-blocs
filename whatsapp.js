@@ -331,6 +331,7 @@ OD.define('whatsapp', {
   }
   /* Pastille de document : l'extension sur fond colore, plutot qu'un meme
      pictogramme pour tous les formats. Couleurs de la charte One Data. */
+  /* Couleurs de la charte One Data, une par famille de format. */
   const DOC_COULEURS = {
     pdf: '#e24b4a',
     xls: '#3a8d7b', xlsx: '#3a8d7b', xlsm: '#3a8d7b', csv: '#3a8d7b', ods: '#3a8d7b',
@@ -350,11 +351,24 @@ OD.define('whatsapp', {
     if (mt.indexOf('presentation') >= 0 || mt.indexOf('powerpoint') >= 0) return 'pptx';
     return '';
   }
+  /* Feuille avec coin replie, a la couleur du format, l'extension inscrite
+     dessus. Volontairement GENERIQUE : les icones d'Acrobat, Word, Excel et
+     PowerPoint sont des marques deposees ; One Data etant vendu a des tiers,
+     on ne les embarque pas. Le trombone de email.js et contacts.js ne dit que
+     \u00ab piece jointe \u00bb ; ici on veut lire le format d'un coup d'oeil. */
   function docBadge(ext) {
     const c = DOC_COULEURS[ext] || '#7a98c5';
-    const t = ext ? esc(ext.toUpperCase().slice(0, 4)) : '•';
-    return '<span class="wa-doc-ex" style="background:' + c + '">' + t + '</span>';
+    const t = ext ? ext.toUpperCase().slice(0, 4) : '';
+    const taille = t.length >= 4 ? 8 : (t.length === 3 ? 9.5 : 11);
+    return '<svg class="wa-doc-ex" viewBox="0 0 32 40" width="28" height="35" aria-hidden="true">' +
+      '<path d="M4 3a2 2 0 0 1 2-2h12l10 10v26a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2z" fill="' + c + '"/>' +
+      '<path d="M18 1l10 10h-8a2 2 0 0 1-2-2z" fill="#ffffff" fill-opacity=".42"/>' +
+      (t ? '<text x="16" y="29" text-anchor="middle" fill="#ffffff" font-size="' + taille +
+           '" font-weight="700" font-family="-apple-system,Segoe UI,Helvetica,Arial,sans-serif" letter-spacing=".3">' +
+           esc(t) + '</text>' : '') +
+      '</svg>';
   }
+
   function poids(o) {
     const n = Number(o);
     if (!isFinite(n) || n <= 0) return '';
@@ -414,11 +428,11 @@ OD.define('whatsapp', {
     '.wa-txt{white-space:pre-wrap}' +
     '.wa-media{max-width:230px;width:100%;border-radius:7px;display:block;margin-bottom:3px}' +
     '.wa-audio{width:220px;height:38px;margin-bottom:2px}' +
-    '.wa-doc{display:flex;align-items:center;gap:8px;background:#00000008;border-radius:8px;padding:9px 11px;text-decoration:none;color:#111b21;margin-bottom:3px}' +
+    '.wa-doc{display:inline-flex;align-items:center;gap:8px;border:1px solid rgba(76,175,125,.25);background:rgba(76,175,125,.06);border-radius:8px;padding:7px 12px;text-decoration:none;margin-bottom:3px;max-width:100%}' +
+    '.wa-doc-ex{flex:0 0 auto;display:block}' +
     '.wa-doc-tx{display:flex;flex-direction:column;gap:1px;min-width:0}' +
-    '.wa-doc-nm{font-size:13px;word-break:break-word;line-height:1.25}' +
-    '.wa-doc-sz{font-size:11px;color:#5a72a0;letter-spacing:.2px}' +
-    '.wa-doc-ex{flex:0 0 auto;width:34px;height:34px;border-radius:7px;display:flex;align-items:center;justify-content:center;color:#fff;font-size:10px;font-weight:700;letter-spacing:.3px}' +
+    '.wa-doc-nm{font-size:12.5px;color:#374151;word-break:break-word;line-height:1.3}' +
+    '.wa-doc-sz{font-size:11px;color:#9ca3af;letter-spacing:.2px}' +
     '.wa-meta{float:right;font-size:10.5px;color:#667781;margin:6px 0 -3px 8px;display:inline-flex;align-items:center;gap:2px}' +
     '.wa-ticks{display:inline-flex}' +
     '.wa-foot{flex:0 0 auto;display:flex;align-items:flex-end;gap:6px;padding:8px 8px;background:#f0f2f5}' +
