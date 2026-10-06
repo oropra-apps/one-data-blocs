@@ -384,6 +384,23 @@ OD.define('notifications', {
 #notif-root .ev.manq{background:var(--chaud-bg);color:var(--m-rouge)}
 #notif-root .cli .extrait{font-size:13px;color:var(--ink-2);margin:9px 0 0;font-style:italic;
   border-left:2px solid var(--line);padding-left:10px;line-height:1.45}
+#notif-root .extrait.media{font-style:normal}
+#notif-root .vocal{display:inline-flex;align-items:center;gap:9px;background:var(--calme-bg);
+  border:1px solid var(--bleu-clair);border-radius:999px;padding:5px 14px 5px 5px;margin-top:9px;
+  max-width:330px;width:100%;box-sizing:border-box}
+#notif-root .vocal .voc{border:none;background:var(--bleu);color:#fff;width:24px;height:24px;
+  border-radius:50%;display:flex;align-items:center;justify-content:center;flex:0 0 auto;
+  cursor:pointer;padding:0}
+#notif-root .vocal .voc:disabled{opacity:.45;cursor:default}
+#notif-root .vocal .voc svg{width:9px;height:9px;fill:currentColor}
+#notif-root .vbar{flex:1 1 auto;min-width:40px;height:3px;background:var(--bleu-clair);
+  border-radius:2px;position:relative;cursor:pointer}
+#notif-root .vprog{position:absolute;inset:0 auto 0 0;width:0;background:var(--bleu);
+  border-radius:2px;pointer-events:none}
+#notif-root .vtime{font-size:11.5px;font-weight:700;color:var(--bleu);flex:0 0 auto;
+  font-variant-numeric:tabular-nums;min-width:30px;text-align:right}
+#notif-root .vtr{font-style:italic}
+#notif-root .vtr.attente{color:var(--ink-3);font-style:normal}
 #notif-root .actes{display:flex;flex-direction:column;gap:7px;align-items:stretch;min-width:132px}
 #notif-root .btn{font:inherit;font-size:12.5px;font-weight:700;border-radius:9px;padding:8px 13px;
   cursor:pointer;border:1px solid transparent;text-align:center;white-space:nowrap}
@@ -764,6 +781,69 @@ OD.define('notifications', {
     }
     const ENJEU = { cde: ['cde', 'Commande en cours'], devis: ['devis', 'Devis en cours'] };
 
+    // =========================================================================
+    //  L'APERÇU D'UN MÉDIA
+    //
+    //  Le connecteur WhatsApp écrit « [audio] », « [image] »… dans le corps du
+    //  message quand il n'y a pas de texte. Ces marqueurs techniques
+    //  remontaient tels quels dans l'aperçu de la carte : le vendeur lisait
+    //  « [audio] » et n'avait aucun moyen d'entendre quoi que ce soit depuis
+    //  cette page.
+    //
+    //  Pour une note vocale on pose donc un vrai lecteur — bouton, barre de
+    //  temps, durée — ET la transcription juste en dessous. C'est le média le
+    //  plus fréquent en concession, et demander d'ouvrir la fiche pour trois
+    //  secondes de son annule le bénéfice de la page : on vient ici pour
+    //  savoir quoi faire, pas pour naviguer.
+    //
+    //  La transcription est la vraie réponse au besoin : un vendeur en
+    //  clientèle lit en deux secondes ce qu'il mettrait vingt secondes à
+    //  écouter, et il peut le faire sans son. Le lecteur reste là pour le ton
+    //  de la voix, qui ne se transcrit pas.
+    //
+    //  L'URL signée est posée à l'AFFICHAGE, pas au clic — voir hydraterVocaux.
+    // =========================================================================
+    const MEDIA_LIB = {
+      '[audio]': 'Note vocale', '[image]': 'Photo', '[video]': 'Vidéo',
+      '[document]': 'Document', '[sticker]': 'Sticker',
+      '[localisation]': 'Localisation', '[contact]': 'Contact'
+    };
+    const IC_LECTURE = '<svg viewBox="0 0 10 12"><path d="M0 0l10 6-10 6z"/></svg>';
+    const IC_PAUSE   = '<svg viewBox="0 0 12 12"><rect x="0" y="0" width="4" height="12" rx="1"/>'
+                     + '<rect x="8" y="0" width="4" height="12" rx="1"/></svg>';
+    function libelleApercu(t) {
+      const k = String(t == null ? '' : t).trim().toLowerCase();
+      return MEDIA_LIB[k] || t;
+    }
+    function estMedia(t) {
+      const k = String(t == null ? '' : t).trim().toLowerCase();
+      return Object.prototype.hasOwnProperty.call(MEDIA_LIB, k);
+    }
+    function mmss(s) {
+      const n = Math.max(0, Math.round(Number(s) || 0));
+      return Math.floor(n / 60) + ':' + String(n % 60).padStart(2, '0');
+    }
+    function apercuHtml(x) {
+      if (!x || !x.apercu) return '';
+      const k = String(x.apercu).trim().toLowerCase();
+      if (k === '[audio]' && Array.isArray(x.cycles) && x.cycles.length) {
+        // Le bouton reste désactivé jusqu'à ce que l'URL signée soit posée :
+        // un bouton qui ne fait rien au clic est pire qu'un bouton grisé.
+        // La durée affiche --:-- tant que la transcription n'a pas rendu la
+        // sienne : mieux vaut un tiret qu'un 0:00 qui serait un mensonge.
+        return '<div class="vocal" data-voc="' + esc(x.cycles.join(',')) + '">'
+          + '<button type="button" class="voc" disabled aria-label="Écouter">'
+          + IC_LECTURE + '</button>'
+          + '<div class="vbar"><div class="vprog"></div></div>'
+          + '<span class="vtime">--:--</span>'
+          + '</div>'
+          + '<p class="extrait vtr attente" data-vtr="' + esc(x.cycles.join(',')) + '">'
+          + 'Transcription…</p>';
+      }
+      return '<p class="extrait' + (estMedia(x.apercu) ? ' media' : '') + '">'
+        + esc(libelleApercu(x.apercu)) + '</p>';
+    }
+
     function carteDette(x) {
       const ton = x.feu === 'chaud' ? 'chaud' : (x.feu === 'tiede' ? 'tiede' : 'froid');
       const e = ENJEU[x.enjeu];
@@ -782,7 +862,7 @@ OD.define('notifications', {
         +   '</p>'
         +   '<div class="fil">' + pastillesCanaux(x.medias, x.a_un_manque)
         +     '<span class="ev">' + esc(quandLisible(x.attend_depuis)) + '</span></div>'
-        +   (x.apercu ? '<p class="extrait">' + esc(x.apercu) + '</p>' : '')
+        +   apercuHtml(x)
         +   (ouvert ? blocReport('client', x.id_client) : '')
         + '</div>'
         + '<div class="actes">'
@@ -833,7 +913,8 @@ OD.define('notifications', {
         + '<div class="fil">' + pastillesCanaux([i.media], false)
         +   '<span class="ev">Dernier : ' + esc(quandLisible(i.last_contact)) + '</span>'
         +   (i.site ? '<span class="ev">Reçu sur ' + esc(i.site) + '</span>' : '') + '</div>'
-        + (i.apercu ? '<p class="extrait">' + esc(i.apercu) + '</p>' : '')
+        + (i.apercu ? '<p class="extrait' + (estMedia(i.apercu) ? ' media' : '') + '">'
+            + esc(libelleApercu(i.apercu)) + '</p>' : '')
         + '</div>'
         + '<div class="actes">'
         +   '<button type="button" class="btn p" data-role="appeler" data-tel="'
@@ -1103,7 +1184,7 @@ OD.define('notifications', {
           + esc(jourLisible(x.jusqu_a)) + ' ' + esc(heure(x.jusqu_a))
           + '</span> — attend depuis ' + duree(x.attend_min) + '</p>'
           + '<div class="fil">' + pastillesCanaux(x.medias, false) + '</div>'
-          + (x.apercu ? '<p class="extrait">' + esc(x.apercu) + '</p>' : '')
+          + apercuHtml(x)
           + '</div><div class="actes">'
           + '<button type="button" class="btn s" data-role="reprendre-report">Reprendre maintenant</button>'
           + '<button type="button" class="btn t" data-role="repondre">Ouvrir la fiche</button>'
@@ -1142,6 +1223,225 @@ OD.define('notifications', {
       if (!state.section) state.section = premiereSectionUtile();
       getRoot().innerHTML = '<div class="nw">'
         + enTete() + bandeau() + onglets() + corps() + pied() + '</div>';
+      hydraterVocaux(getRoot());
+    }
+
+    // =========================================================================
+    //  LES NOTES VOCALES
+    //
+    //  Deux temps, et l'ordre compte.
+    //
+    //  1. À l'affichage : on cherche la dernière note vocale ENTRANTE de
+    //     chaque dette (DEUX requêtes pour toute la page, pas deux par carte),
+    //     on récupère sa transcription et sa durée, puis on demande une URL
+    //     signée à `wa-attachment-url`. Le bucket `wa-attachments` est privé :
+    //     l'adresse « publique » stockée en base ne répond pas, c'est le même
+    //     piège que dans le fil WhatsApp.
+    //
+    //  2. Au clic : `play()` est appelé SYNCHRONEMENT. Aucun `await` entre le
+    //     geste de l'utilisateur et la lecture — Safari casse la lecture si le
+    //     geste est rompu par une attente. C'est toute la raison pour laquelle
+    //     la signature est faite au temps 1 et pas au temps 2.
+    //
+    //  La DURÉE vient de la base, pas du fichier : Whisper la rend dans sa
+    //  réponse `verbose_json` et on la range. Sans elle il faudrait charger
+    //  les métadonnées de chaque fichier pour afficher la barre, soit une
+    //  requête réseau par carte pour écrire « 0:05 ».
+    // =========================================================================
+    const VOC = { audio: null, cle: null };
+    // rendre() est rappelé à chaque changement d'onglet et à chaque écho du
+    // temps réel : sans ce cache, chaque repeinture redemanderait une signature
+    // pour les mêmes fichiers. On garde l'URL un peu moins longtemps que sa
+    // validité réelle, pour ne jamais servir une URL qui vient d'expirer.
+    const VOC_CACHE = new Map();
+
+    function majBarre(el) {
+      const prog = el.querySelector('.vprog');
+      const tps = el.querySelector('.vtime');
+      const dur = Number(el.getAttribute('data-dur')) || 0;
+      const joue = VOC.audio && VOC.cle === el.getAttribute('data-voc');
+      const t = joue ? (VOC.audio.currentTime || 0) : 0;
+      const d = (joue && VOC.audio.duration && isFinite(VOC.audio.duration))
+        ? VOC.audio.duration : dur;
+      if (prog) prog.style.width = (d > 0 ? Math.min(100, t / d * 100) : 0) + '%';
+      // Pendant la lecture on montre le temps ÉCOULÉ, à l'arrêt la durée
+      // totale : c'est ce que fait WhatsApp, et c'est l'information utile
+      // dans chacun des deux cas.
+      if (tps) tps.textContent = d > 0 ? mmss(joue && t > 0 ? t : d) : '--:--';
+    }
+
+    async function hydraterVocaux(root) {
+      const els = Array.prototype.slice.call(root.querySelectorAll('.vocal[data-voc]'));
+      if (!els.length) return;
+      const cycles = [];
+      els.forEach(function (e) {
+        String(e.getAttribute('data-voc') || '').split(',').forEach(function (c) {
+          c = c.trim();
+          if (c && /^\d+$/.test(c) && cycles.indexOf(c) < 0) cycles.push(c);
+        });
+      });
+      if (!cycles.length) return;
+
+      const jwt = await getUserJwt();
+      if (!jwt) return;
+      const entetes = { apikey: SUPABASE_KEY, Authorization: 'Bearer ' + jwt };
+
+      let messages = [];
+      try {
+        const url = SUPABASE_URL + '/rest/v1/wa_messages'
+          + '?id_cycle_com=in.(' + cycles.join(',') + ')'
+          + '&direction=eq.in&msg_type=eq.audio'
+          + '&select=id,id_cycle_com,created_at&order=created_at.desc';
+        const r = await fetch(url, { headers: entetes });
+        if (r.ok) messages = await r.json();
+      } catch (e) { return; }
+
+      // la requête est déjà triée du plus récent au plus ancien : le premier
+      // vu pour un cycle est le bon.
+      const parCycle = {};
+      (messages || []).forEach(function (m) {
+        const c = String(m.id_cycle_com);
+        if (!parCycle[c]) parCycle[c] = m.id;
+      });
+      const idsMsg = Object.keys(parCycle).map(function (c) { return parCycle[c]; });
+      if (!idsMsg.length) {
+        els.forEach(function (el) { marquerVocalAbsent(el, 'Note vocale introuvable'); });
+        return;
+      }
+
+      // Transcription et durée, en une seule requête pour toute la page.
+      const parMessage = {};
+      try {
+        const url = SUPABASE_URL + '/rest/v1/wa_message_attachments'
+          + '?message_id=in.(' + idsMsg.join(',') + ')'
+          + '&msg_type=eq.audio'
+          + '&select=id,message_id,transcription,transcription_statut,duree_s';
+        const r = await fetch(url, { headers: entetes });
+        if (r.ok) {
+          (await r.json()).forEach(function (a) {
+            if (!parMessage[a.message_id]) parMessage[a.message_id] = a;
+          });
+        }
+      } catch (e) { /* la transcription est un plus, pas une condition */ }
+
+      await Promise.all(els.map(async function (el) {
+        let msg = null;
+        const ids = String(el.getAttribute('data-voc') || '').split(',');
+        for (let i = 0; i < ids.length; i++) {
+          const c = ids[i].trim();
+          if (parCycle[c]) { msg = parCycle[c]; break; }
+        }
+        if (!msg) { marquerVocalAbsent(el, 'Note vocale introuvable'); return; }
+
+        const piece = parMessage[msg] || null;
+        if (piece && piece.duree_s) el.setAttribute('data-dur', String(piece.duree_s));
+        poserTranscription(el, piece);
+        majBarre(el);
+
+        const bouton = el.querySelector('.voc');
+        const enCache = VOC_CACHE.get(msg);
+        if (enCache && enCache.exp > Date.now()) {
+          el.setAttribute('data-src', enCache.url);
+          if (bouton) { bouton.disabled = false; bouton.title = 'Écouter la note vocale'; }
+          return;
+        }
+        try {
+          const r = await fetch(SUPABASE_URL + '/functions/v1/wa-attachment-url', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', apikey: SUPABASE_KEY,
+                       Authorization: 'Bearer ' + (await getUserJwt()) },
+            body: JSON.stringify({ message_id: msg })
+          });
+          const j = await r.json().catch(function () { return null; });
+          if (!r.ok || !j || !j.url) throw new Error('url absente');
+          VOC_CACHE.set(msg, {
+            url: j.url,
+            exp: Date.now() + Math.max(60, (j.expire_dans || 3600) - 300) * 1000
+          });
+          el.setAttribute('data-src', j.url);
+          if (bouton) { bouton.disabled = false; bouton.title = 'Écouter la note vocale'; }
+        } catch (e) {
+          if (bouton) bouton.title = 'Note vocale indisponible';
+        }
+      }));
+    }
+
+    function marquerVocalAbsent(el, texte) {
+      const b = el.querySelector('.voc');
+      if (b) b.title = texte;
+      poserTranscription(el, null);
+    }
+
+    // Quatre états, et chacun dit quelque chose de different au vendeur :
+    // un texte, « rien de dit » (silence ou bruit), « en cours » (la note
+    // vient d'arriver), et l'echec, où on ne promet rien plutôt que de
+    // laisser un « Transcription… » qui ne viendra jamais.
+    function poserTranscription(el, piece) {
+      const cle = el.getAttribute('data-voc');
+      const p = getRoot() && getRoot().querySelector('[data-vtr="' + cle + '"]');
+      if (!p) return;
+      const statut = piece && piece.transcription_statut;
+      const texte = piece && piece.transcription;
+      if (statut === 'fait' && texte) {
+        // Espaces insécables : sans elles le guillemet fermant part seul à la
+        // ligne quand la transcription tombe juste en fin de ligne.
+        p.textContent = '« ' + texte + ' »';
+        p.classList.remove('attente');
+        return;
+      }
+      p.classList.add('attente');
+      if (statut === 'en_cours') { p.textContent = 'Transcription en cours…'; return; }
+      if (statut === 'vide') { p.textContent = 'Note vocale sans parole audible.'; return; }
+      if (statut === 'erreur') { p.textContent = 'Transcription indisponible.'; return; }
+      p.textContent = 'Note vocale.';
+    }
+
+    function peindreVocaux() {
+      const r = getRoot();
+      if (!r) return;
+      Array.prototype.slice.call(r.querySelectorAll('.vocal[data-voc]')).forEach(function (el) {
+        const joue = !!(VOC.audio && !VOC.audio.paused && VOC.cle === el.getAttribute('data-voc'));
+        const b = el.querySelector('.voc');
+        if (b) b.innerHTML = joue ? IC_PAUSE : IC_LECTURE;
+        majBarre(el);
+      });
+    }
+
+    function jouerVocal(el) {
+      const src = el.getAttribute('data-src');
+      if (!src) return;
+      const cle = el.getAttribute('data-voc');
+      if (!VOC.audio) {
+        VOC.audio = new Audio();
+        ['play', 'pause', 'ended', 'timeupdate', 'loadedmetadata'].forEach(function (e) {
+          VOC.audio.addEventListener(e, peindreVocaux);
+        });
+      }
+      if (VOC.cle === cle && !VOC.audio.paused) { VOC.audio.pause(); return; }
+      if (VOC.cle !== cle) { VOC.audio.pause(); VOC.audio.src = src; VOC.cle = cle; }
+      VOC.audio.play().catch(function () {
+        const b = el.querySelector('.voc');
+        if (b) b.title = 'Lecture refusée par le navigateur';
+      });
+    }
+
+    // Déplacement dans la bande. Sans source chargée il n'y a rien à
+    // déplacer : on lance la lecture à la position visée plutôt que de ne
+    // rien faire, ce qui est ce qu'attend quelqu'un qui clique au milieu.
+    function deplacerVocal(el, ev) {
+      const barre = el.querySelector('.vbar');
+      if (!barre) return;
+      const r = barre.getBoundingClientRect();
+      const part = Math.min(1, Math.max(0, (ev.clientX - r.left) / r.width));
+      const cle = el.getAttribute('data-voc');
+      if (!VOC.audio || VOC.cle !== cle) {
+        jouerVocal(el);
+        if (!VOC.audio || VOC.cle !== cle) return;
+      }
+      const d = (VOC.audio.duration && isFinite(VOC.audio.duration))
+        ? VOC.audio.duration : (Number(el.getAttribute('data-dur')) || 0);
+      if (d > 0) VOC.audio.currentTime = part * d;
+      peindreVocaux();
     }
 
     async function recharger() {
@@ -1682,6 +1982,17 @@ OD.define('notifications', {
         const liste = ((state.j && state.j.promesses) || {}).a_conclure || [];
         const l = liste.filter(x => String(x.id_rdv) === String(id))[0];
         if (l) openCompteRendu(l);
+        return;
+      }
+
+      // --- écouter une note vocale, ou se déplacer dedans (avant l'ouverture
+      //     de fiche : le lecteur est dans la carte, dont le clic ne doit pas
+      //     naviguer)
+      const voc = ev.target.closest('.vocal[data-voc]');
+      if (voc && r.contains(voc)) {
+        ev.stopPropagation();
+        if (ev.target.closest('.vbar')) deplacerVocal(voc, ev);
+        else jouerVocal(voc);
         return;
       }
 
