@@ -329,6 +329,40 @@ OD.define('whatsapp', {
     const double_svg = '<svg viewBox="0 0 16 10" width="19" height="12" fill="none" stroke="' + color + '" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M1 5.4l2.6 2.7L9.6 1.6"/><path d="M5.2 5.4l2.6 2.7L13.8 1.6"/></svg>';
     return '<span class="wa-ticks">' + (single ? single_svg : double_svg) + '</span>';
   }
+  /* Pastille de document : l'extension sur fond colore, plutot qu'un meme
+     pictogramme pour tous les formats. Couleurs de la charte One Data. */
+  const DOC_COULEURS = {
+    pdf: '#e24b4a',
+    xls: '#3a8d7b', xlsx: '#3a8d7b', xlsm: '#3a8d7b', csv: '#3a8d7b', ods: '#3a8d7b',
+    doc: '#2a5ea9', docx: '#2a5ea9', odt: '#2a5ea9', rtf: '#2a5ea9',
+    ppt: '#d2941f', pptx: '#d2941f', odp: '#d2941f',
+    zip: '#5a72a0', rar: '#5a72a0', '7z': '#5a72a0',
+    txt: '#7a98c5', xml: '#7a98c5', json: '#7a98c5'
+  };
+  function docExt(a) {
+    const n = String(a && a.filename || '');
+    const m = n.match(/\.([a-z0-9]{1,5})$/i);
+    if (m) return m[1].toLowerCase();
+    const mt = String(a && a.mime_type || '').toLowerCase();
+    if (mt.indexOf('pdf') >= 0) return 'pdf';
+    if (mt.indexOf('spreadsheet') >= 0 || mt.indexOf('excel') >= 0) return 'xlsx';
+    if (mt.indexOf('wordprocessing') >= 0 || mt.indexOf('msword') >= 0) return 'docx';
+    if (mt.indexOf('presentation') >= 0 || mt.indexOf('powerpoint') >= 0) return 'pptx';
+    return '';
+  }
+  function docBadge(ext) {
+    const c = DOC_COULEURS[ext] || '#7a98c5';
+    const t = ext ? esc(ext.toUpperCase().slice(0, 4)) : '•';
+    return '<span class="wa-doc-ex" style="background:' + c + '">' + t + '</span>';
+  }
+  function poids(o) {
+    const n = Number(o);
+    if (!isFinite(n) || n <= 0) return '';
+    if (n < 1024) return n + ' o';
+    if (n < 1024 * 1024) return Math.round(n / 1024) + ' Ko';
+    return (n / 1048576).toFixed(1).replace('.', ',') + ' Mo';
+  }
+
   function attHtml(it) {
     let atts = it.attachments; try { if (typeof atts === 'string') atts = JSON.parse(atts); } catch (e) { }
     if (!Array.isArray(atts) || !atts.length) return '';
@@ -337,12 +371,15 @@ OD.define('whatsapp', {
     const nom = esc(a.filename || 'Document');
     // Aucun src/href ici : hydrateAtt() les posera avec une URL signee.
     // a.public_url n'est volontairement plus lu -- il pointe sur un bucket prive.
-    if (!a.id) return '<span class="wa-doc wa-att-ko" title="Pièce jointe sans identifiant"><span class="wa-doc-ic">📄</span><span class="wa-doc-nm">' + nom + '</span></span>';
+    const ex = docExt(a), pds = poids(a.file_size_bytes);
+    const corpsDoc = docBadge(ex) + '<span class="wa-doc-tx"><span class="wa-doc-nm">' + nom + '</span>' +
+      (pds || ex ? '<span class="wa-doc-sz">' + [ex ? esc(ex.toUpperCase()) : '', pds].filter(Boolean).join(' · ') + '</span>' : '') + '</span>';
+    if (!a.id) return '<span class="wa-doc wa-att-ko" title="Pièce jointe sans identifiant">' + corpsDoc + '</span>';
     const d = ' data-wa-att="' + esc(a.id) + '"';
     if (it.msg_type === 'image' || mt.startsWith('image')) return '<a' + d + ' target="_blank" rel="noopener"><img class="wa-media"' + d + ' loading="lazy" alt=""></a>';
     if (it.msg_type === 'video' || mt.startsWith('video')) return '<video class="wa-media"' + d + ' controls preload="metadata"></video>';
     if (it.msg_type === 'audio' || mt.startsWith('audio')) return '<audio class="wa-audio"' + d + ' controls preload="metadata"></audio>';
-    return '<a class="wa-doc"' + d + ' target="_blank" rel="noopener"><span class="wa-doc-ic">📄</span><span class="wa-doc-nm">' + nom + '</span></a>';
+    return '<a class="wa-doc"' + d + ' target="_blank" rel="noopener">' + corpsDoc + '</a>';
   }
   function bubble(it) {
     const out = it.direction === 'out';
@@ -378,7 +415,10 @@ OD.define('whatsapp', {
     '.wa-media{max-width:230px;width:100%;border-radius:7px;display:block;margin-bottom:3px}' +
     '.wa-audio{width:220px;height:38px;margin-bottom:2px}' +
     '.wa-doc{display:flex;align-items:center;gap:8px;background:#00000008;border-radius:8px;padding:9px 11px;text-decoration:none;color:#111b21;margin-bottom:3px}' +
-    '.wa-doc-nm{font-size:13px;word-break:break-word}' +
+    '.wa-doc-tx{display:flex;flex-direction:column;gap:1px;min-width:0}' +
+    '.wa-doc-nm{font-size:13px;word-break:break-word;line-height:1.25}' +
+    '.wa-doc-sz{font-size:11px;color:#5a72a0;letter-spacing:.2px}' +
+    '.wa-doc-ex{flex:0 0 auto;width:34px;height:34px;border-radius:7px;display:flex;align-items:center;justify-content:center;color:#fff;font-size:10px;font-weight:700;letter-spacing:.3px}' +
     '.wa-meta{float:right;font-size:10.5px;color:#667781;margin:6px 0 -3px 8px;display:inline-flex;align-items:center;gap:2px}' +
     '.wa-ticks{display:inline-flex}' +
     '.wa-foot{flex:0 0 auto;display:flex;align-items:flex-end;gap:6px;padding:8px 8px;background:#f0f2f5}' +
