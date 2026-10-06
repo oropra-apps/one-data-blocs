@@ -1,5 +1,5 @@
 // ============================================================================
-//  TUTOS / Centre d'aide Delco coach — module One Data (OD.define)  v3
+//  TUTOS / Centre d'aide Delco coach — module One Data (OD.define)  v4
 //  Migré : rend DANS l'ancre `el` (aucun getElementById -> pas de collision
 //  d'ID) ; edge via ctx.fn('tutos-coach') ; rôle via socle oropraUser.
 //  v3 : section « Lead management » (un tuto par geste, par poste : vendeur,
@@ -7,6 +7,11 @@
 //  tenant sert le lead management par poste (lead-mgmt v52 et plus, lu dans
 //  le manifeste du socle). Ailleurs, l'ancien tuto « Lead Management » reste.
 //  Accueil rangé par section ; le coach ne reçoit que les tutos visibles.
+//  v4 (06/10/2026, Team Colin — publish-targets : tutos = teamcolin) :
+//  « Montre-moi en vrai » sur chaque tuto Lead management (visites de
+//  tours v4) ; tuto « Tableau de bord » par rôle ; tutos Gestion des ventes,
+//  Suivi d'activité, Performances et Objectifs réécrits sur les écrans
+//  actuels ; l'opérateur VROOM voit aussi son tableau de bord.
 // ============================================================================
 OD.define('tutos', {
   mount(__anchor, ctx) {
@@ -103,7 +108,7 @@ OD.define('tutos', {
   const POSTES = ['vendeur', 'chef', 'manager', 'vroom'];
   const TOUR_POSTE = { vendeur: 'lm-vendeur', chef: 'lm-chef', manager: 'lm-direction', vroom: 'lm-plateau' };
   function lm(id, category, duration, aud, title, subtitle, intro, steps, extra) {
-    return Object.assign({ id, product: 'leads', category, duration, available: true, poste: true, aud, title, subtitle, intro, steps }, extra || {});
+    return Object.assign({ id, product: 'leads', category, duration, available: true, poste: true, aud, title, subtitle, intro, steps, tour: id }, extra || {});
   }
   const TUTOS_LEADS = [
     /* ---------- Premiers pas, pour tous les postes ---------- */
@@ -125,7 +130,7 @@ OD.define('tutos', {
             vroom: 'Tes files de travail : « La piscine BACS », « Rappels », « Transferts » et « Campagnes ». Le chiffre d’un onglet passe en rouge dès qu’il y a un retard.' } },
         { title: 'La fiche du lead', body: 'Un clic sur une ligne ouvre la fiche à droite : délais, téléphone avec Appeler, WhatsApp, Email et SMS, la demande, puis ce qui est parti dans BACS. La croix, la touche Échap ou un clic à côté la ferment.' },
         { title: 'L’écran se tient à jour', body: 'Il se recharge tout seul chaque minute. Le lien « Tableaux détaillés », en haut, ramène à l’écran précédent : cycles, kanban, synthèse et règles d’attribution.' },
-      ], { tourBy: TOUR_POSTE }),
+      ], { tourBy: TOUR_POSTE, tour: null }),
 
     lm('lm-delais', 'Premiers pas', '2 min', POSTES, 'Délais et couleurs', 'Vert, orange, rouge',
       'Chaque lead a un délai de premier contact. Le minuteur à gauche de chaque ligne dit où il en est.',
@@ -154,7 +159,7 @@ OD.define('tutos', {
         { title: 'Et pourquoi', body: 'Qualifié par le plateau VROOM (avec sa qualification), attribué par ton chef, ou pas joint au dernier essai : la raison est écrite sous le nom.' },
         { title: 'Ouvre et appelle', body: 'Clique la ligne : la fiche s’ouvre à droite avec le téléphone et les boutons Appeler, WhatsApp, Email et SMS. Lis la qualification du plateau avant d’appeler.' },
         { title: 'Les leads plus anciens', body: 'En bas de la liste, une ligne compte tes leads de plus de 30 jours encore à ton nom. Ils ne sont plus à appeler en priorité : ton chef des ventes les solde.' },
-      ], { tour: 'lm-vendeur' }),
+      ]),
 
     lm('lm-v-piscine', 'Vendeur', '1 min', ['vendeur'], 'Prendre un lead dans la piscine', 'Libre-service, premier arrivé',
       'La piscine contient les leads du site que personne n’a pris.',
@@ -185,8 +190,11 @@ OD.define('tutos', {
     lm('lm-dashboard', 'Vendeur', '1 min', ['vendeur', 'chef'], 'Ouvrir un lead depuis le tableau de bord', 'Jamais contactés',
       'Le tableau de bord et le poste comptent les mêmes leads.',
       [
-        { title: 'Jamais contactés', body: 'Le bloc « Jamais contactés » du tableau de bord liste les leads ouverts sans premier contact, avec leur âge.' },
-        { title: 'Ouvrir', body: 'Le bouton « Ouvrir » d’un lead t’emmène sur Lead management, sa fiche déjà ouverte.' },
+        { title: 'Jamais contactés', body: 'La tuile « Jamais contactés » du tableau de bord compte les leads ouverts sans premier contact, comme ton poste.' },
+        { title: 'La liste', body: 'Un clic sur la tuile ouvre la liste : client, véhicule, ancienneté, téléphone.',
+          bodyBy: { chef: 'Un clic sur la tuile donne, vendeur par vendeur, les leads jamais appelés, ceux à plus de 48 h et le plus ancien.' } },
+        { title: 'Ouvrir', body: 'Le bouton « Ouvrir » d’un lead t’emmène sur Lead management, sa fiche déjà ouverte.',
+          bodyBy: { chef: 'Pour agir, ouvre ton mur dans Lead management : la même case y donne la liste des leads.' } },
       ]),
 
     /* ---------- Chef des ventes ---------- */
@@ -198,7 +206,7 @@ OD.define('tutos', {
         { title: 'Clique un chiffre', body: 'La liste de ces leads s’ouvre dans le volet de droite. Ouvre un lead pour l’attribuer, puis « Retour à la liste » ramène à la liste.' },
         { title: 'Compter depuis', body: 'L’arrivée sur le site (le transfert du plateau, sinon la réception) ou la réception dans BACS.' },
         { title: 'Plusieurs sites', body: 'Si tu encadres plusieurs sites, des pastilles en haut changent de site. Les vendeurs sans lead en cours sont repliés sous « Afficher les autres vendeurs ».' },
-      ], { tour: 'lm-chef' }),
+      ]),
 
     lm('lm-c-relayer', 'Chef des ventes', '2 min', ['chef', 'manager'], 'À relayer : remettre les leads en route', 'Un geste par groupe',
       'L’onglet « À relayer » regroupe ce qui reste en plan, avec le geste proposé pour chaque groupe.',
@@ -244,7 +252,7 @@ OD.define('tutos', {
         { title: 'Maintenant', body: 'Les quatre premières colonnes : leads dans les temps, à risque, hors délai, ouverts depuis plus de 24 h (et les archives), puis ceux encore au plateau.' },
         { title: 'Sur la durée', body: 'Le délai moyen de premier contact et la part des contacts faits dans le délai, sur 30 jours ; les leads reçus sur 7 jours.' },
         { title: 'Ouvrir un site', body: '« Ouvrir » montre le mur du chef des ventes de ce site. « ← Tous les sites », en haut, ramène au mur des sites.' },
-      ], { tour: 'lm-direction' }),
+      ]),
 
     lm('lm-d-relais', 'Direction', '1 min', ['manager'], 'Le relais : où le temps se perd', 'De BACS au premier appel',
       'Le chemin d’un lead, de BACS au premier appel, en temps médian par site.',
@@ -281,7 +289,7 @@ OD.define('tutos', {
         { title: 'Les sources', body: 'Une pastille par source, avec son nombre de leads. Le trafic atelier est masqué par défaut ; clique une pastille pour ajouter ou retirer une source.' },
         { title: 'Le stock accepté', body: 'Le bouton « Stock accepté » affiche les leads acceptés il y a plus de 14 jours, jamais qualifiés ni abandonnés. Le bouton de ligne devient « Rappeler ».' },
         { title: 'La copie BACS', body: 'One Data lit une copie de BACS. Un lead arrivé après la dernière lecture n’est pas encore visible : l’indicateur « Copie BACS » donne son âge. Tes gestes, eux, comptent tout de suite.' },
-      ], { tour: 'lm-plateau' }),
+      ]),
 
     lm('lm-p-traiter', 'Plateau VROOM', '3 min', ['vroom'], 'Traiter un lead, pas à pas', 'Prendre, qualifier, orienter',
       'De la prise à la validation, sans ouvrir BACS.',
@@ -333,7 +341,7 @@ OD.define('tutos', {
         { title: 'La piscine, maintenant', body: 'Leads à traiter, rappels dus et en retard, transferts non pris au-delà de 2 h, stock accepté, trafic atelier, âge de la copie BACS.' },
         { title: 'Aujourd’hui et sur 30 jours', body: 'Tes leads pris, transmis, mis en rappel, abandonnés, face au total du plateau ; ton délai de prise médian ; le taux de qualification.' },
         { title: 'Les transferts et les opérateurs', body: 'Ce que deviennent les leads qualifiés, site par site. Puis les gestes par personne ; les comptes VROOM partagés de BACS sont sur une ligne à part.' },
-      ]),
+      ], { tour: 'tdb-plateau' }),
 
     /* ---------- Questions fréquentes ---------- */
     lm('lm-faq-sites', 'Questions fréquentes', '2 min', SITES, 'Questions fréquentes', 'Vendeurs, chefs, direction',
@@ -400,42 +408,54 @@ OD.define('tutos', {
 
     /* CRM — phase 2 */
     crm('crm-start', 'Démarrer', 'Connexion, navigation, périmètre'),
-    { id: 'crm-dashboard', product: 'crm', category: 'Piloter son activité', duration: '3 min', available: true, aud: ALL,
-      title: 'Suivi d\u2019activité', subtitle: 'Indicateurs, arbre, graphes, export', tour: 'suivi-activite',
-      intro: 'Mesure l\u2019activité de l\u2019équipe : contacts, RDV choc, pipeline et transformation. Lance la visite guidée pour parcourir la page.',
+    { id: 'crm-tdb', product: 'crm', category: 'Piloter son activité', duration: '2 min', available: true, aud: ['vendeur', 'chef', 'manager', 'vroom'],
+      title: 'Tableau de bord', subtitle: 'Ta page d’accueil', tourBy: { vendeur: 'tdb', chef: 'tdb', manager: 'tdb', vroom: 'tdb-plateau' },
+      intro: 'La page d’accueil répond à la question de ton rôle. Lance la visite guidée pour la parcourir.',
       steps: [
-        { title: 'Choisis période et périmètre', body: 'La barre du haut fixe la période ; l\u2019arbre en bas filtre par réseau, affaire, site, type ou vendeur.' },
-        { title: 'Lis les indicateurs', body: 'Le résumé et les deux graphes (contacts par jour, pipeline dans le temps) se recalculent selon ta sélection.' },
-        { title: 'Va dans le détail', body: 'Sélectionne un site ou un vendeur pour la cadence jour par jour et le détail par vendeur. Le logo Excel exporte le tout.' } ] },
+        { title: 'Le constat', body: 'Une question selon ton rôle (« Qui appeler aujourd’hui », « Qui décroche, et sur quoi », « Quelle entité décroche »…), une phrase qui y répond et quatre chiffres.',
+          bodyBy: { vroom: 'Ta journée : leads à traiter dans la piscine, rappels dus, ce que tu as pris et transmis, transferts qui attendent un vendeur.' } },
+        { title: 'Les tuiles', body: 'Rangées par famille. Un clic ouvre le détail juste dessous, avec « Ce qu’il faut en faire ».',
+          bodyBy: { vroom: 'La piscine maintenant, ta journée, le plateau sur 14 et 30 jours, ce que deviennent les transferts, et les opérateurs.' } },
+        { title: 'Le mois et le périmètre', body: 'Le mois en cours ou les deux précédents ; à droite, tout ton périmètre ou un site. Les chiffres se rafraîchissent toutes les 2 minutes.',
+          bodyBy: { vroom: 'Les chiffres portent sur le plateau ; l’activité additionne l’historique BACS des comptes VROOM et tes gestes dans One Data.' } },
+      ] },
+    { id: 'crm-dashboard', product: 'crm', category: 'Piloter son activité', duration: '3 min', available: true, aud: ALL,
+      title: 'Suivi d’activité', subtitle: 'Contacts, RDV choc, pipeline, cadence', tour: 'suivi-activite',
+      intro: 'L’activité de l’équipe : contacts, RDV choc, propositions et transformation. Lance la visite guidée pour parcourir la page.',
+      steps: [
+        { title: 'Période, type et export', body: 'Du 1er du mois à aujourd’hui à chaque arrivée ; Tous, VN, VO ou VN/VO ; le logo Excel exporte la page.' },
+        { title: 'Le résumé et les graphes', body: 'Contacts, RDV choc, propositions, BDC, wins, abandons ; les contacts par jour (avec la moyenne mobile sur 7 jours) et le pipeline dans le temps.' },
+        { title: 'Le périmètre', body: 'Un clic sur une ligne de l’arbre filtre la page ; un site devient le site global. Sur un site : la cadence jour par jour et le détail par vendeur.' },
+        { title: 'Comparer', body: '« ⇄ Comparer », puis deux lignes de l’arbre : la meilleure valeur ressort sur chaque mesure.' } ] },
     { id: 'crm-leads', product: 'crm', category: 'Piloter son activité', duration: '2 min', available: true, aud: ALL, poste: false,
       title: 'Lead Management', subtitle: 'À traiter, pipeline, suivi', tour: 'lead-management',
       intro: 'Le poste de pilotage des leads et des cycles commerciaux. Lance la visite guidée pour le parcourir sur ton écran.',
       steps: [
         { title: 'Choisis ta vue', body: 'Vendeur : « À traiter » et « Pipeline ». Manager : « Synthèse », « Suivi leads » et « Campagnes ».' },
         { title: 'Traite les urgences', body: 'Dans « À traiter », les cycles sont triés par urgence (SLA). Clique une carte pour ouvrir la fiche client.' },
-        { title: 'Analyse et pilote', body: 'Manager : la Synthèse donne KPI, classement et graphes ; l\u2019équipe se déplie par réseau, affaire et site.' } ] },
+        { title: 'Analyse et pilote', body: 'Manager : la Synthèse donne KPI, classement et graphes ; l’équipe se déplie par réseau, affaire et site.' } ] },
     { id: 'crm-kanban', product: 'crm', category: 'Piloter son activité', duration: '2 min', available: true, aud: ALL,
-      title: 'Gestion des ventes (Kanban)', subtitle: 'Piloter son pipeline', tour: 'gestion-ventes',
-      intro: 'Ton pipe commercial, du brouillon à la vente. Lance la visite guidée pour le découvrir directement sur ton écran.',
+      title: 'Gestion des ventes', subtitle: 'De la simulation à la commande', tour: 'gestion-ventes',
+      intro: 'Ton pipe commercial, de la simulation à la commande validée. Lance la visite guidée pour le découvrir sur ton écran.',
       steps: [
-        { title: 'Ouvre la page', body: 'Menu > Gestion des ventes. Tes affaires sont réparties en colonnes : Brouillon, Propale, BDC, Gagné, Perdu.' },
-        { title: 'Choisis le périmètre', body: 'Filtre par période, par VN/VO, par type de client ou par financement. Les managers peuvent changer de vendeur.' },
-        { title: 'Fais avancer une affaire', body: 'Glisse-dépose une carte d\u2019une colonne à l\u2019autre, ou utilise le bouton « Déplacer ». Le passage en Gagné ou Perdu est réservé aux managers.' },
-        { title: 'Agis depuis la carte', body: 'Génère le PDF (proposition ou bon de commande), modifie la propale, ouvre la fiche client, ou archive l\u2019affaire.' } ] },
+        { title: 'Qui et quand', body: 'Vendeur : tes affaires. Chef des ventes : un vendeur de ton site. Direction : réseau, affaire, site, vendeur. La période revient au mois en cours à chaque visite.' },
+        { title: 'Cinq colonnes', body: 'Simulations, Commandes, Demande d’approbation, Transmis TFR / Validée, Abandonné ; en tête, le nombre, le montant et le taux de passage.' },
+        { title: 'Une affaire', body: 'Le statut BACS en haut, le client (vers sa fiche), le véhicule, le montant et l’âge. Loupe pour consulter, crayon pour modifier, « B » pour ouvrir dans BACS.' },
+        { title: 'Faire avancer', body: 'Glisse-dépose ou « Déplacer ». Une affaire BACS ne passe ici que de Simulations à Commandes : la suite se fait dans BACS. Transmis et Abandonné sont réservés aux managers.' } ] },
     { id: 'crm-performances', product: 'crm', category: 'Piloter son activité', duration: '3 min', available: true, aud: ALL,
       title: 'Performances', subtitle: 'Réalisé vs objectifs', tour: 'performances',
-      intro: 'Suis ton réalisé face aux objectifs : commandes, financement, Waxoyl, CS, gravage. Lance la visite guidée pour parcourir la page.',
+      intro: 'Ton réalisé face aux objectifs du reporting commandes : Cde, Cde part., Cde pro, FI, PHEV / EV, VU, Kinto, Arval. Lance la visite guidée pour parcourir la page.',
       steps: [
-        { title: 'Choisis période et périmètre', body: 'La barre du haut fixe la période et le type (VN/VO) ; l\u2019arbre filtre par réseau, affaire, site ou vendeur.' },
-        { title: 'Lis au prorata du mois', body: 'Les couleurs comparent ton atteinte au temps écoulé du mois : vert dans les temps, orange léger retard, rouge loin derrière.' },
-        { title: 'Va dans le détail', body: 'Clique un chiffre pour voir les commandes correspondantes (et télécharger le BDC). Le logo Excel exporte le périmètre affiché.' } ] },
+        { title: 'Choisis ce que tu regardes', body: 'Période, type (VN/VO), activité (réseau, grands comptes ou tous) et vue (pilotage ou mix produit).' },
+        { title: 'Lis au prorata du mois', body: 'Chaque tuile : réalisé sur objectif. Vert si l’atteinte suit le mois écoulé, orange un peu en dessous, rouge loin derrière, gris sans objectif.' },
+        { title: 'Le périmètre et le reste à faire', body: 'L’arbre donne chaque site et chaque vendeur (toi : « vous »), avec ce qui reste à faire. Un chiffre ouvre les commandes qui le composent.' } ] },
     { id: 'crm-objectifs', product: 'crm', category: 'Piloter son activité', duration: '3 min', available: true, aud: ALL,
       title: 'Objectifs', subtitle: 'Définir et suivre', tour: 'objectifs',
-      intro: 'Définis les objectifs du mois et suis ton rythme. La page s\u2019adapte : saisie pour le chef, tableau de marche pour le vendeur. Lance la visite guidée pour la parcourir.',
+      intro: 'Les objectifs du mois et ton rythme. La page s’adapte : tableau de marche pour le vendeur, saisie pour le chef des ventes. Lance la visite guidée pour la parcourir.',
       steps: [
-        { title: 'Vendeur : ton rythme', body: 'Chaque indicateur montre ton réalisé sur l\u2019objectif et le rythme attendu au prorata du mois, avec la cadence pour finir dans les temps.' },
-        { title: 'Chef : le cap d\u2019équipe', body: 'Pose la cible de commandes, laisse les taux M-1 déduire les cibles secondaires, puis répartis entre tes vendeurs (équitable, prorata M-1, jours de présence).' },
-        { title: 'Brouillon puis enregistrement', body: 'Tes saisies restent en brouillon ; le bandeau « Enregistrer les objectifs » valide tout en une fois.' } ] },
+        { title: 'Vendeur : ton rythme', body: 'Commandes particuliers, commandes pro, PHEV / EV, VU, Kinto, Arval : ton réalisé sur l’objectif, le trait bleu du mois écoulé, et la cadence pour finir dans les temps.' },
+        { title: 'Chef : l’atelier', body: 'Pose la cible de commandes, laisse les taux du mois précédent déduire les autres cibles, puis répartis (équitable, prorata M-1, jours de présence) ou reconduis le mois précédent.' },
+        { title: 'Brouillon puis enregistrement', body: 'Tout reste en brouillon, corrigeable case par case dans l’arbre, jusqu’à « Enregistrer les objectifs ».' } ] },
     crm('crm-client', 'Fiche client (CRM 360)', 'Historique multicanal'),
     crm('crm-propales', 'Propositions & bons de commande', 'Propale, BDC, PDF, VN/VO'),
     crm('crm-bilaterales', 'Bilatérales', 'Suivi propales & BDC'),
