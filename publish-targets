@@ -38,5 +38,12 @@ notif-badge   = teamcolin
 # de la flotte reste sur la v48 (tag lead-mgmt-v48). Ajouté le 05/10/2026.
 lead-mgmt     = teamcolin
 
+# Centre d'aide et visites guidées : depuis la v4 (06/10/2026), ils décrivent
+# les écrans de Team Colin (postes du lead management, tableau de bord,
+# performances et objectifs du reporting maison). Le reste de la flotte
+# reste sur tutos v3 / tours v3.
+tutos         = teamcolin
+tours         = teamcolin
+
 # Module interne OROPRA : jamais de défaut de flotte.
 onboarding   = oropra
