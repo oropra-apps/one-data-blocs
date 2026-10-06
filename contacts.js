@@ -157,6 +157,50 @@ OD.define('contacts', {
 
   var formatSize = function (b) { if (!b) return ''; if (b < 1024) return b + ' o'; if (b < 1048576) return Math.round(b/1024) + ' Ko'; return (b/1048576).toFixed(1) + ' Mo'; };
 
+  // ---- pastille de format de document (identique a whatsapp.js v4) --------
+  // Une feuille a coin replie, coloree par famille de format, l'extension
+  // inscrite dessus. Volontairement GENERIQUE : les icones d'Acrobat, Word,
+  // Excel et PowerPoint sont des marques deposees et One Data est vendu a des
+  // tiers, donc on ne les embarque pas. Le trombone precedent ne disait que
+  // « piece jointe » ; ici on lit le format d'un coup d'oeil.
+  // Les couleurs sont celles de la charte One Data, pas celles des editeurs.
+  var DOC_COULEURS = {
+    pdf: '#e24b4a',
+    xls: '#3a8d7b', xlsx: '#3a8d7b', xlsm: '#3a8d7b', csv: '#3a8d7b', ods: '#3a8d7b',
+    doc: '#2a5ea9', docx: '#2a5ea9', odt: '#2a5ea9', rtf: '#2a5ea9',
+    ppt: '#d2941f', pptx: '#d2941f', odp: '#d2941f',
+    zip: '#5a72a0', rar: '#5a72a0', '7z': '#5a72a0',
+    txt: '#7a98c5', xml: '#7a98c5', json: '#7a98c5'
+  };
+  // L'extension du nom de fichier d'abord ; le type MIME seulement en secours,
+  // car WhatsApp renvoie parfois un nom sans extension.
+  function docExt(a) {
+    var n = String((a && a.filename) || '');
+    var m = n.match(/\.([a-z0-9]{1,5})$/i);
+    if (m) return m[1].toLowerCase();
+    var mt = String((a && a.mime_type) || '').toLowerCase();
+    if (mt.indexOf('pdf') >= 0) return 'pdf';
+    if (mt.indexOf('spreadsheet') >= 0 || mt.indexOf('excel') >= 0) return 'xlsx';
+    if (mt.indexOf('wordprocessing') >= 0 || mt.indexOf('msword') >= 0) return 'docx';
+    if (mt.indexOf('presentation') >= 0 || mt.indexOf('powerpoint') >= 0) return 'pptx';
+    return '';
+  }
+  // largeur : 28 dans le fil WhatsApp, 20 sur les puces de pieces jointes
+  // d'email, qui sont plus compactes.
+  function docBadge(ext, largeur) {
+    var w = largeur || 28, h = Math.round(w * 1.25);
+    var c = DOC_COULEURS[ext] || '#7a98c5';
+    var t = ext ? ext.toUpperCase().slice(0, 4) : '';
+    var taille = t.length >= 4 ? 8 : (t.length === 3 ? 9.5 : 11);
+    return '<svg viewBox="0 0 32 40" width="' + w + '" height="' + h + '" aria-hidden="true" style="flex:0 0 auto;display:block;">' +
+      '<path d="M4 3a2 2 0 0 1 2-2h12l10 10v26a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2z" fill="' + c + '"/>' +
+      '<path d="M18 1l10 10h-8a2 2 0 0 1-2-2z" fill="#ffffff" fill-opacity=".42"/>' +
+      (t ? '<text x="16" y="29" text-anchor="middle" fill="#ffffff" font-size="' + taille +
+           '" font-weight="700" font-family="-apple-system,Segoe UI,Helvetica,Arial,sans-serif" letter-spacing=".3">' +
+           esc(t) + '</text>' : '') +
+      '</svg>';
+  }
+
   // ---- globals (une fois) : lecteur audio unifié + toggle + download PJ ----
   if (!window.__voipAudio) window.__voipAudio = new Audio();
   if (!window.__ctPlay) window.__ctPlay = function (btnId, accent) {
@@ -270,7 +314,16 @@ OD.define('contacts', {
       } else if (statut === 'video' && aurl) {
         contentHtml = '<a href="'+esc(aurl)+'" target="_blank" style="display:inline-block;position:relative;width:72px;height:72px;border-radius:10px;overflow:hidden;border:1px solid rgba(76,175,125,.25);background:#000;"><video src="'+esc(aurl)+'" preload="metadata" muted style="width:72px;height:72px;object-fit:cover;display:block;pointer-events:none;"></video><div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;"><div style="width:26px;height:26px;border-radius:50%;background:rgba(255,255,255,.9);display:flex;align-items:center;justify-content:center;"><svg width="9" height="11" viewBox="0 0 10 12" fill="#374151"><path d="M0 0l10 6-10 6z"/></svg></div></div></a>'+captionHtml;
       } else if (statut === 'document' && aurl) {
-        contentHtml = '<div onclick="window.open(\''+esc(aurl)+'\',\'_blank\')" style="display:inline-flex;align-items:center;gap:8px;padding:7px 12px;border:1px solid rgba(76,175,125,.25);border-radius:8px;background:rgba(76,175,125,.06);cursor:pointer;max-width:100%;box-sizing:border-box;"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#4CAF7D" stroke-width="2"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg><span style="font-size:12px;color:#374151;word-break:break-word;">'+esc(truncate(fname,30))+'</span></div>'+captionHtml;
+        // Pastille de format au lieu du trombone : meme grammaire que le fil
+        // WhatsApp de la fiche client (whatsapp.js v4).
+        var dex = docExt(att);
+        var dlbl = [dex ? dex.toUpperCase() : '', formatSize(att && att.file_size)].filter(Boolean).join(' · ');
+        contentHtml = '<div onclick="window.open(\''+esc(aurl)+'\',\'_blank\')" style="display:inline-flex;align-items:center;gap:9px;padding:7px 12px;border:1px solid rgba(76,175,125,.25);border-radius:8px;background:rgba(76,175,125,.06);cursor:pointer;max-width:100%;box-sizing:border-box;">'
+          + docBadge(dex)
+          + '<span style="display:flex;flex-direction:column;gap:1px;min-width:0;">'
+          +   '<span style="font-size:12.5px;color:#374151;word-break:break-word;line-height:1.3;">'+esc(truncate(fname,30))+'</span>'
+          +   (dlbl ? '<span style="font-size:11px;color:#9ca3af;letter-spacing:.2px;">'+esc(dlbl)+'</span>' : '')
+          + '</span></div>'+captionHtml;
       }
       var deliveryHtml = isOut && deliveryStatus ? '<span style="font-size:14px;color:'+(deliveryStatus==='read'?'#0075df':'#9ca3af')+';">'+(deliveryStatus==='sent'?'\u2713':'\u2713\u2713')+'</span>' : '';
       metaRight = '<span style="font-size:11px;color:#9ca3af;white-space:nowrap;text-align:right;line-height:1.4">'+formatDate(dateContact)+'</span>'+deliveryHtml;
@@ -286,7 +339,7 @@ OD.define('contacts', {
       var stripHtml=function(h){return h?h.replace(/<[^>]*>/g,'').replace(/\s+/g,' ').trim():'';};
       var bodyHtml=sanitize(item.email_body_html||''), fullContent=bodyHtml||esc(item.contenu_texte||''), fullPlain=stripHtml(item.email_body_html||'')||(item.contenu_texte||''), showT3=fullPlain.length>snippetSrc.length+10;
       var atts=(item.email_has_attachments&&Array.isArray(item.attachments))?item.attachments:[];
-      var attachHtml=atts.length?'<div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:8px;">'+atts.map(function(a){return '<div id="att_'+a.id+'" data-storage-path="'+esc(a.storage_path||'')+'" onclick="window.__emDownload(\''+esc(a.id)+'\',\''+((a.filename||'fichier').replace(/'/g,"\\'"))+'\')" style="display:inline-flex;align-items:center;gap:6px;padding:5px 10px;border:1px solid #e5e7eb;border-radius:8px;background:#fff;cursor:pointer;font-size:12px;color:#374151;"><span style="word-break:break-word;">'+esc(truncate(a.filename||'fichier',25))+'</span><span style="color:#9ca3af;font-size:11px;">'+formatSize(a.file_size)+'</span></div>';}).join('')+'</div>':'';
+      var attachHtml=atts.length?'<div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:8px;">'+atts.map(function(a){return '<div id="att_'+a.id+'" data-storage-path="'+esc(a.storage_path||'')+'" onclick="window.__emDownload(\''+esc(a.id)+'\',\''+((a.filename||'fichier').replace(/'/g,"\\'"))+'\')" style="display:inline-flex;align-items:center;gap:6px;padding:5px 10px;border:1px solid #e5e7eb;border-radius:8px;background:#fff;cursor:pointer;font-size:12px;color:#374151;">'+docBadge(docExt(a),20)+'<span style="word-break:break-word;">'+esc(truncate(a.filename||'fichier',25))+'</span><span style="color:#9ca3af;font-size:11px;">'+formatSize(a.file_size)+'</span></div>';}).join('')+'</div>':'';
       headerMiddle='<span style="font-size:13px;font-weight:600;color:#111827;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="'+esc(subject)+'">'+esc(subject)+'</span>';
       contentHtml='<div style="font-size:13px;color:#4b5563;line-height:1.5;"><span id="sum_'+eid+'" style="color:#6b7280;">'+esc(snippetTrunc)+'</span>'+(showT3?toggleBtn(eid):'')+'<div id="ful_'+eid+'" style="display:none;color:#374151;word-break:break-word;overflow-wrap:anywhere;margin-top:4px;">'+fullContent+toggleBtn(eid,'voir moins')+'</div>'+attachHtml+'</div>';
       var btnBase='display:inline-flex;align-items:center;gap:5px;padding:5px 12px;border-radius:6px;font-size:12px;cursor:pointer;border:1px solid #e5e7eb;background:#fff;color:#4b5563;font-family:sans-serif;';
