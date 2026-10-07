@@ -474,7 +474,11 @@ OD.define('vn-liste', {
     + '.vn-equip h3{font-size:11.5px;text-transform:uppercase;letter-spacing:.05em;color:#8ba3c0;margin:0 0 6px;font-weight:700}'
     + '.vn-equip p{margin:0;font-size:12.5px;color:#54678a;line-height:1.5}'
     + '@media(max-width:820px){.vn-reperes{grid-template-columns:repeat(2,1fr)}'
-      + '.vn-tab .c-site,.vn-tab .c-d{display:none}.vn-sel{flex:1 1 140px;max-width:none}}';
+      + '.vn-tab .c-site,.vn-tab .c-d{display:none}.vn-sel{flex:1 1 140px;max-width:none}'
+      // 07/10/2026 (recette, largeur mobile) : onglets et tableau elargissaient
+      // la page (600 px sur un ecran de 375). Les onglets passent a la ligne,
+      // le tableau defile dans son propre cadre.
+      + '.vn-onglets{flex-wrap:wrap}.vn-tab{display:block;overflow-x:auto;-webkit-overflow-scrolling:touch}}';
 
   // ───────────────────────────────────────────────────────────── boot
   function suivreSite() {
