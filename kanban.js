@@ -1,4 +1,6 @@
 // ============================================================================
+//  v56 (08/10/2026) : diaporama des photos, meme correction que vo-liste v11
+//  (un seul ecouteur clavier, premier plan au-dessus de la bulle Pulse).
 //  v54 (07/10/2026) : recette Team Colin, gestion des ventes du marketing et
 //  de la secretaire.
 //  * Responsable marketing (5) : decision d'Antoine, il voit TOUS les chefs
@@ -1724,7 +1726,7 @@ OD.define('kanban', {
     function buildDiap() {
       var total = urls.length;
       var ov = doc.createElement('div'); ov.id = 'vf-diap-ov';
-      ov.style.cssText = 'position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,.94);display:flex;flex-direction:column;align-items:center;justify-content:center;font-family:"Nunito Sans",system-ui,sans-serif';
+      ov.style.cssText = 'position:fixed;inset:0;z-index:2147483000;background:rgba(0,0,0,.94);display:flex;flex-direction:column;align-items:center;justify-content:center;font-family:"Nunito Sans",system-ui,sans-serif';
       // Image principale
       var imgW = doc.createElement('div'); imgW.style.cssText = 'flex:1;display:flex;align-items:center;justify-content:center;width:100%;padding:48px 70px 10px;position:relative';
       var img = doc.createElement('img'); img.src = urls[idx]; img.style.cssText = 'max-width:100%;max-height:78vh;object-fit:contain;border-radius:8px;display:block;user-select:none';
@@ -1752,11 +1754,23 @@ OD.define('kanban', {
         }); ov.appendChild(thumbRow);
       }
       ov.addEventListener('mousedown', function (e) { if (e.target === ov) ov.remove(); });
-      var onKey = function (e) { if (e.key === 'ArrowLeft' && idx > 0) { idx--; refresh(); } else if (e.key === 'ArrowRight' && idx < total - 1) { idx++; refresh(); } else if (e.key === 'Escape') { ov.remove(); doc.removeEventListener('keydown', onKey); } };
-      doc.addEventListener('keydown', onKey);
       return ov;
     }
     function refresh() { var old2 = doc.getElementById('vf-diap-ov'); if (old2) old2.remove(); doc.body.appendChild(buildDiap()); }
+    // 08/10/2026 (recette Team Colin) : UN seul ecouteur clavier par diaporama.
+    // Il etait pose dans buildDiap, donc a chaque photo affichee : apres trois
+    // photos, une fleche avancait de quatre. Il se retire tout seul quand le
+    // diaporama est ferme, quel que soit le moyen (croix, fond, Echap).
+    var onKey = function (e) {
+      if (!doc.getElementById('vf-diap-ov')) { doc.removeEventListener('keydown', onKey); return; }
+      var total = urls.length;
+      if (e.key === 'ArrowLeft' && idx > 0) { idx--; refresh(); }
+      else if (e.key === 'ArrowRight' && idx < total - 1) { idx++; refresh(); }
+      else if (e.key === 'Escape') { var o = doc.getElementById('vf-diap-ov'); if (o) o.remove(); doc.removeEventListener('keydown', onKey); }
+    };
+    if (doc.__vfDiapKey) doc.removeEventListener('keydown', doc.__vfDiapKey);
+    doc.__vfDiapKey = onKey;
+    doc.addEventListener('keydown', onKey);
     doc.body.appendChild(buildDiap());
   }
 
