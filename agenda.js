@@ -353,7 +353,14 @@ OD.define('agenda', {
     if (!sites.some(o => String(o.key) === String(sel.idSite))) sel.idSite = sites.length ? Number(sites[0].key) : null;
     const veRows = stRows.filter(r => String(r.id_site) === String(sel.idSite));
     const seenV = {}, vendeurs = [];
-    for (const v of veRows) { const k = String(v.id_user); if (seenV[k]) continue; seenV[k] = 1; vendeurs.push(v); }
+    for (const v of veRows) {
+      const k = String(v.id_user); if (seenV[k]) continue; seenV[k] = 1;
+      // Rôle 9 (secrétaire commerciale) écarté de TOUS les sélecteurs de
+      // collaborateurs (arbitrage du 25/08/2026) : la cascade du directeur
+      // l'oubliait (recette Team Colin 07/10/2026). Elle reste visible d'elle-même.
+      if (Number(v.id_role) === 9 && !v.est_moi) continue;
+      vendeurs.push(v);
+    }
     return { reseaux, affaires, sites, vendeurs, sel };
   }
   // Catégorie d'un collaborateur pour le regroupement du menu (rôle, + VN/VO pour les vendeurs).
