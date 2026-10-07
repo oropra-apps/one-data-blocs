@@ -1,4 +1,18 @@
 // ============================================================================
+//  v54 (07/10/2026) : recette Team Colin, gestion des ventes du marketing et
+//  de la secretaire.
+//  * Responsable marketing (5) : decision d'Antoine, il voit TOUS les chefs
+//    des ventes et vendeurs de sa marque, tries par site, role, VN / VO, nom.
+//    Il passait par la cascade des directeurs, qui suit l'organigramme
+//    (Manager_User_ID) : sans N-1, il ne voyait que lui-meme (0 affaire).
+//    Il rejoint le mode « chef » : un seul selecteur, groupe par site.
+//    Choisir quelqu'un d'un autre site cale le site de la top nav sur le
+//    sien, puisque les affaires sont lues par site.
+//  * Secretaire (9) : le chef des ventes du site (qui vend aussi) entre dans
+//    la liste ; elle-meme n'y figure plus sous « Chef des ventes ».
+//  Source : get_kanban_collaborateurs (migration 20261007450000).
+//  Le chef des ventes (3) garde get_kanban_vendeurs, inchange.
+// ============================================================================
 //  v52 (07/10/2026) : réglage du tenant propale_creation_one_data. Chez un
 //  client qui crée ses propositions dans BACS (Team Colin), la fiche VO et le
 //  sélecteur de client n'offrent plus que le Like : bouton « Proposition »
@@ -82,7 +96,10 @@ OD.define('kanban', {
   // La secrétaire commerciale (9) voit tout son site, comme le chef des ventes :
   // la cascade hiérarchique ne lui donnait qu'elle-même (décision d'Antoine,
   // recette Team Colin 07/10/2026).
-  function perimMode() { const r = getViewerRole(); if (r == null || !ROLES_MANAGER.includes(r)) return 'self'; if (r === 3 || r === 9) return 'chef'; return 'cascade'; }
+  function perimMode() { const r = getViewerRole(); if (r == null || !ROLES_MANAGER.includes(r)) return 'self'; if (r === 3 || r === 5 || r === 9) return 'chef'; return 'cascade'; }
+  // v54 : roles servis par get_kanban_collaborateurs (liste triee en base, sans soi-meme).
+  function estListeCollab() { const r = getViewerRole(); return r === 5 || r === 9; }
+  function estMarque() { return getViewerRole() === 5; }
   function fmtPeriodKan() { const f = (s) => { const d = new Date(s + 'T12:00:00'); return d.toLocaleDateString('fr-FR', { day: '2-digit', month: 'short' }); }; return f(state.period.from) + ' \u2192 ' + f(state.period.to); }
   function vnvoNorm(t) { return (t || '').toUpperCase().replace(/[^A-Z]/g, ''); }
   function vnvoRank(t) { const n = vnvoNorm(t); if (n === 'VN') return 0; if (n === 'VO') return 1; if (n === 'VNVO') return 2; return 3; }
@@ -292,6 +309,17 @@ OD.define('kanban', {
 
   async function loadVendeurs() {
     if (state.vendeurs !== null) return;
+    if (estListeCollab()) {
+      // v54 : marketing = toute sa marque (p_id_site null) ; secretaire = son site.
+      if (!estMarque() && state.busSite == null) { state.vendeurs = []; return; }
+      try {
+        const r = await ctx.supabase.rpc('get_kanban_collaborateurs', { p_id_site: estMarque() ? null : Number(state.busSite) });
+        if (r.error) throw r.error;
+        state.vendeurs = (r.data || []).map(v => ({ id_user: Number(v.id_user), nom: v.nom_complet || ('#' + v.id_user), id_site: v.id_site != null ? Number(v.id_site) : null, site: v.nom_site || '', isChef: Number(v.id_role) === 3, vn_vo: (v.vn_vo || '').toUpperCase() }));
+      } catch (e) { console.warn('[kanban] get_kanban_collaborateurs', e); state.vendeurs = []; }
+      if (state.selOpen) render();
+      return;
+    }
     if (state.busSite == null) { state.vendeurs = []; return; }
     try {
       const supabase = ctx.supabase;
@@ -317,10 +345,28 @@ OD.define('kanban', {
     // Hors mode chef, le sélecteur de site doit AUSSI filtrer les cartes : on
     // mémorise le site et on recharge (sans toucher à la liste des vendeurs).
     if (perimMode() !== 'chef') { state.busSite = id; loadData(); return; }
+    if (estMarque()) {
+      // v54 : la liste du marketing couvre toute la marque, elle ne se recharge
+      // pas. Si la personne choisie n'est pas sur le nouveau site, on prend la
+      // premiere de ce site (un chef des ventes d'abord).
+      state.busSite = id; state.openVersions = null; state.versionsData = {};
+      if (id == null) { state.cards = []; render(); return; }
+      await loadVendeurs();
+      const liste = Array.isArray(state.vendeurs) ? state.vendeurs : [];
+      const cur = liste.find(v => v.id_user === state.vendeurId && v.id_site === id);
+      if (!cur) { const p = liste.find(v => v.id_site === id) || null; state.vendeurId = p ? p.id_user : null; state.vendeurName = p ? p.nom : ''; }
+      state.cards = null; loadData();
+      return;
+    }
     state.busSite = id; state.vendeurs = null; state.vendeurId = null; state.vendeurName = '';
     state.vendeurSearch = ''; state.selOpen = false; state.openVersions = null; state.versionsData = {};
     if (id == null) { state.cards = []; render(); return; }
     await loadVendeurs();
+    if (state.vendeurId == null && estListeCollab()) {
+      // v54 : la secretaire n'a pas d'affaires a elle ; on ouvre sur la premiere personne du site.
+      const p = Array.isArray(state.vendeurs) && state.vendeurs.length ? state.vendeurs[0] : null;
+      if (p) { state.vendeurId = p.id_user; state.vendeurName = p.nom; }
+    }
     if (state.vendeurId == null) {
       const self = getViewerId();
       if (self != null) { state.vendeurId = self; const me = Array.isArray(state.vendeurs) ? state.vendeurs.find(v => v.id_user === self) : null; state.vendeurName = me ? me.nom : getViewerName(); }
@@ -391,16 +437,17 @@ OD.define('kanban', {
   }
 
   function renderVendeurPanel() {
-    let h = '<div class="k-vpanel"><input type="text" class="k-vsearch" placeholder="Rechercher un vendeur…" value="' + esc(state.vendeurSearch) + '" oninput="window.__kanVendSearch(this.value)">';
+    let h = '<div class="k-vpanel"><input type="text" class="k-vsearch" placeholder="' + (estMarque() ? 'Rechercher un nom ou un site…' : 'Rechercher un vendeur…') + '" value="' + esc(state.vendeurSearch) + '" oninput="window.__kanVendSearch(this.value)">';
     if (state.vendeurs === null) { h += '<div class="k-vempty">Chargement…</div></div>'; return h; }
     const q = (state.vendeurSearch || '').toLowerCase().trim();
-    const list = state.vendeurs.filter(v => !q || v.nom.toLowerCase().includes(q));
+    const list = state.vendeurs.filter(v => !q || v.nom.toLowerCase().includes(q) || (estMarque() && String(v.site || '').toLowerCase().includes(q)));
     if (!list.length) { h += '<div class="k-vempty">Aucun vendeur sur ce site.</div></div>'; return h; }
     let lastType = null;
     list.forEach(v => {
-      const t = v.isChef ? 'Chef des ventes' : vnvoLabel(v.vn_vo);
+      const t0 = v.isChef ? 'Chef des ventes' : vnvoLabel(v.vn_vo);
+      const t = estMarque() ? (v.site + ' · ' + t0) : t0;
       if (t !== lastType) { h += '<div class="k-vgroup">' + esc(t) + '</div>'; lastType = t; }
-      h += '<button class="k-vitem' + (v.id_user === state.vendeurId ? ' on' : '') + '" data-vend="' + v.id_user + '" data-vname="' + esc(v.nom) + '">' + esc(v.nom) + '</button>';
+      h += '<button class="k-vitem' + (v.id_user === state.vendeurId ? ' on' : '') + '" data-vend="' + v.id_user + '" data-vname="' + esc(v.nom) + '"' + (v.id_site != null ? ' data-vsite="' + v.id_site + '"' : '') + '>' + esc(v.nom) + '</button>';
     });
     return h + '</div>';
   }
@@ -2831,7 +2878,16 @@ OD.define('kanban', {
     if (so) { state.selOpen = !state.selOpen; if (state.selOpen) loadVendeurs(); render(); return; }
 
     const ve = e.target.closest('[data-vend]');
-    if (ve) { state.vendeurId = Number(ve.getAttribute('data-vend')); state.vendeurName = ve.getAttribute('data-vname') || ''; state.selOpen = false; state.cards = null; state.versionsData = {}; state.openVersions = null; loadData(); return; }
+    if (ve) {
+      state.vendeurId = Number(ve.getAttribute('data-vend')); state.vendeurName = ve.getAttribute('data-vname') || ''; state.selOpen = false; state.cards = null; state.versionsData = {}; state.openVersions = null;
+      // v54 : marketing, personne d'un autre site -> la top nav suit (les affaires sont lues par site).
+      const vs = ve.getAttribute('data-vsite');
+      if (estMarque() && vs != null && String(vs) !== String(state.busSite)) {
+        state.busSite = Number(vs);
+        try { const b = siteBus(); if (b && b.setSiteId) b.setSiteId(Number(vs)); } catch (x) { }
+      }
+      loadData(); return;
+    }
 
     const vb = e.target.closest('[data-versions]');
     if (vb) { const id = Number(vb.getAttribute('data-versions')); state.openVersions = (state.openVersions === id) ? null : id; if (state.openVersions === id && state.versionsData[id] === undefined) loadVersions(id); render(); return; }
