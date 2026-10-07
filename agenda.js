@@ -1573,8 +1573,11 @@ OD.define('agenda', {
     const v = collaborateursVisibles();
     if (!v) return [];
     const moi = v.find(x => x.est_moi);
-    return groupeParFonction(v, moi ? moi.id_user : null)
-      .map(g => ({ label: g.label, items: g.items }));
+    // On ne s'évalue pas soi-même : la liste proposait le chef en tête
+    // (recette Team Colin 07/10/2026, AGD-08). La base refuse aussi.
+    return groupeParFonction(v.filter(x => !x.est_moi), moi ? moi.id_user : null)
+      .map(g => ({ label: g.label, items: g.items }))
+      .filter(g => g.items && g.items.length);
   }
   const pad2 = (n) => String(n).padStart(2, '0');
   function endStrFrom(date, time, mins) { const [Y, Mo, D] = date.split('-').map(Number); const [h, mi] = time.split(':').map(Number); const dt = new Date(Y, Mo - 1, D, h, mi); dt.setMinutes(dt.getMinutes() + Number(mins)); return dt.getFullYear() + '-' + pad2(dt.getMonth() + 1) + '-' + pad2(dt.getDate()) + ' ' + pad2(dt.getHours()) + ':' + pad2(dt.getMinutes()) + ':00'; }
