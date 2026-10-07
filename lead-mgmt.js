@@ -1,6 +1,10 @@
 // ============================================================================
 //  LEAD MANAGEMENT — module One Data (OD.define 'lead-mgmt')
-//  VERSION TEAM COLIN (v55) — déploiement CIBLÉ (publish-targets :
+//  VERSION TEAM COLIN (v58) — déploiement CIBLÉ (publish-targets :
+//  v58 (07/10/2026) : le délai de premier contact par site est une MÉDIANE
+//  (poste_site_stats, migration 20261007440000). La moyenne affichait
+//  « 5 j à Arcueil » pour une médiane de 13 min : un seul lead rappelé au
+//  bout de 21 jours. Libellés alignés. Même mesure que l'accueil marketing.
 //  lead-mgmt = teamcolin). Le reste de la flotte reste sur la v48.
 //
 //  Refonte du lead management de Team Colin. Un poste de travail à deux
@@ -1349,7 +1353,7 @@
         k = [['Leads libres', p.length], ['Chez les vendeurs', leadsDu(sid).filter(function (x) { return x.zone === 'vendeur'; }).length],
              ['Au plateau VROOM', leadsDu(sid).filter(function (x) { return x.zone === 'plateau'; }).length],
              ['Ouverts + 24 h', stockDu(sid) + (si.archives ? '<span class="mes">+ ' + si.archives + ' archives</span>' : '')], ['Leads 7 j', si.n7 || 0],
-             ['1er contact moyen, 30 j', si.d30_min != null ? dureeMes(si.d30_min) : '—']];
+             ['1er contact médian, 30 j', si.d30_min != null ? dureeMes(si.d30_min) : '—']];
         if (POSTE === 'chef' && sitesStats().filter(function (s) { return s.manager; }).length > 1) {
           l += '<span class="site-chips">' + sitesStats().filter(function (s) { return s.manager; }).map(function (s) {
             return '<button type="button" class="fchip' + (Number(s.id_site) === Number(sid) ? ' on' : '') + '" data-a="site" data-id="' + s.id_site + '">' + esc(siteNom(s.site)) + '</button>';
@@ -1360,7 +1364,7 @@
         var pires = ss2.filter(function (s) { return s.d30_min != null && s.nc30 >= 2; }).sort(function (a, b) { return b.d30_min - a.d30_min; }).slice(0, 3);
         var st = S.leads.filter(function (x) { return x.zone !== 'plateau' && mins(x.arrive_le) >= 1440; }).length;
         l = 'Direction · ' + plural(ss2.length, 'site') + ' · ' + esc(nom) + ' ·' + lienAncien();
-        t = pires.length ? 'Le premier contact arrive en ' + pires.map(function (s, i) { return '<b class="' + (i === 0 ? (s.d30_min > 240 ? 't-crit' : 't-warn') : '') + '">' + dureeMes(s.d30_min) + '</b> à ' + esc(siteNom(s.site)); }).join(', ') + ' en moyenne sur 30 jours.'
+        t = pires.length ? 'Le premier contact arrive en ' + pires.map(function (s, i) { return '<b class="' + (i === 0 ? (s.d30_min > 240 ? 't-crit' : 't-warn') : '') + '">' + dureeMes(s.d30_min) + '</b> à ' + esc(siteNom(s.site)); }).join(', ') + ' en délai médian sur 30 jours.'
           : 'Pas encore assez de premiers contacts mesurés sur 30 jours.';
         if (st) t += ' <b>' + plural(st, 'lead est ouvert', 'leads sont ouverts') + '</b> depuis plus de 24 h.';
         k = [['Leads 7 j', ss2.reduce(function (a, s) { return a + (s.n7 || 0); }, 0)], ['En piscine', S.leads.filter(function (x) { return x.zone === 'piscine'; }).length],
@@ -1604,7 +1608,7 @@
         .sort(function (a, b) { return (b.c.crit.length - a.c.crit.length) || (b.s.n7 - a.s.n7); });
       var autres = rows.filter(function (r) { return actifs.indexOf(r) === -1; });
       var h = '<div class="ph"><div><h2>Le mur des sites</h2><p>Une ligne par site. Les quatre premières colonnes disent où en sont les leads maintenant, les suivantes ce qui s\'est passé sur la durée.</p></div></div>';
-      h += '<div class="scroll"><table class="mur sites"><thead><tr><th>Site</th><th>Dans les temps</th><th>À risque</th><th>Hors délai</th><th>Ouverts + 24 h</th><th>Au plateau</th><th>1er contact, moyenne 30 j</th><th>Dans le délai, 30 j</th><th>Leads 7 j</th><th></th></tr></thead><tbody>';
+      h += '<div class="scroll"><table class="mur sites"><thead><tr><th>Site</th><th>Dans les temps</th><th>À risque</th><th>Hors délai</th><th>Ouverts + 24 h</th><th>Au plateau</th><th>1er contact, médiane 30 j</th><th>Dans le délai, 30 j</th><th>Leads 7 j</th><th></th></tr></thead><tbody>';
       var ligne = function (r) {
         var s = r.s, n = function (x, c) { return x ? '<span class="cell ' + c + ' fixe">' + x + '</span>' : '<span class="cell zero">·</span>'; };
         var taux = s.nc30 ? Math.round(100 * s.dans_sla30 / s.nc30) : null;
@@ -1621,7 +1625,7 @@
         h += '<tr><td colspan="10" class="plus"><button type="button" class="btn sm ghost" data-a="autres-sites">' + (S.autresSites ? 'Masquer' : 'Afficher') + ' les ' + plural(autres.length, 'autre site', 'autres sites') + ' sans lead récent</button></td></tr>';
         if (S.autresSites) autres.forEach(function (r) { h += ligne(r); });
       }
-      h += '</tbody></table></div><p class="foot">Colonnes « maintenant » : leads ouverts, pas encore contactés, comptés depuis leur arrivée sur le site. « 1er contact » : délai moyen entre l\'arrivée sur le site et le premier contact, sur les leads reçus ces 30 derniers jours et contactés. « Dans le délai » : part de ces contacts faits dans le délai de la source (2 h pour un lead du plateau).</p>';
+      h += '</tbody></table></div><p class="foot">Colonnes « maintenant » : leads ouverts, pas encore contactés, comptés depuis leur arrivée sur le site. « 1er contact » : délai médian entre l\'arrivée sur le site et le premier contact, sur les leads reçus ces 30 derniers jours et contactés. « Dans le délai » : part de ces contacts faits dans le délai de la source (2 h pour un lead du plateau).</p>';
       return h;
     }
     function vueRelais() {
