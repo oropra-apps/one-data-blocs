@@ -27,6 +27,12 @@
 //  liste y revient par « Retour à la liste ».
 //  v55 : visites guidées (« Montre-moi en vrai ») : chaque poste expose
 //  window.__lmtcTour (fiche d'exemple où aucun geste n'est enregistré).
+//  v56 (07/10/2026, recette A-48) : un lead sans fiche client (identité
+//  douteuse en attente d'arbitrage, ou fiche disparue) ne peut plus être
+//  marqué « joint » sans client. Le vendeur choisit la fiche parmi celles que
+//  propose le résolveur (poste_lead_candidats), ou en crée une
+//  (poste_lead_rattacher) : il a le client au téléphone, c'est lui qui
+//  tranche. La base refuse aussi « joint » sans fiche.
 //
 //  DONNÉES : fonctions plateau_* (teamcolin_plateau_vroom.sql,
 //  teamcolin_plateau_bacs.sql) et poste_* (teamcolin_poste_site.sql) du
@@ -1761,9 +1767,12 @@
       var D = S.dr, r = D.res || 'rdv';
       var RES = [['rdv', 'Joint · RDV'], ['joint', 'Joint · sans RDV'], ['pasjoint', 'Pas joint'], ['clore', 'Clore']];
       var h = '<p class="hint">Après l\'appel, dites ce qui s\'est passé :</p><div class="issues" role="radiogroup" aria-label="Résultat de l\'appel">' + RES.map(function (x) {
-        return '<button type="button" role="radio" aria-checked="' + (x[0] === r) + '" class="' + (x[0] === r ? 'on ' + x[0] : '') + '" data-a="res" data-id="' + x[0] + '">' + x[1] + '</button>'; }).join('') + '</div><div class="row">';
+        return '<button type="button" role="radio" aria-checked="' + (x[0] === r) + '" class="' + (x[0] === r ? 'on ' + x[0] : '') + '" data-a="res" data-id="' + x[0] + '">' + x[1] + '</button>'; }).join('') + '</div>';
+      // v56 : client joint mais lead sans fiche -> d'abord la fiche.
+      if ((r === 'rdv' || r === 'joint') && sansFiche(l)) return h + blocRattacher(l);
+      h += '<div class="row">';
       if (r === 'rdv') {
-        if (!l.id_client) h += '<span class="hint">Pas de fiche client rattachée : le rendez-vous ne peut pas être posé ici. Choisissez « Joint · sans RDV » et posez-le depuis l\'agenda.</span>';
+        if (!l.id_client) h += '<span class="hint">Pas de fiche client rattachée : le rendez-vous ne peut pas être posé ici.</span>';
         else h += '<input type="datetime-local" id="rdv-date" value="' + dateLocale(demainA(10, 1)) + '" aria-label="Date du rendez-vous"><select id="rdv-duree" aria-label="Durée"><option value="30">30 min</option><option value="60" selected>1 h</option><option value="90">1 h 30</option></select>'
           + '<input type="text" id="rdv-sujet" placeholder="Objet (essai, offre…)" aria-label="Objet"><button type="button" class="btn vr" data-a="rdv" data-id="' + l.id_lead + '">Enregistrer le RDV</button>';
       } else if (r === 'joint') {
@@ -1776,6 +1785,53 @@
       h += '</div>';
       if (!dansChef) h += '<div class="row pied"><span class="hint">' + (l.sf_lead_id ? 'Lead BACS : le RDV et la clôture partent aussi dans BACS.' : 'Lead hors BACS : tout est enregistré dans One Data.') + '</span><button type="button" class="btn sm ghost" data-a="rendre" data-id="' + l.id_lead + '">Rendre à la piscine</button></div>';
       return h;
+    }
+    // ── v56 : rattacher le lead à une fiche client ─────────────────────────
+    function sansFiche(l) { return !l.id_client && !!(l.telephone || l.email); }
+    function blocRattacher(l) {
+      var D = S.dr;
+      if (!D.cands || !D.cands.charge) { if (!D.cands) chargerCandidats(l.id_lead); return '<div class="ratt"><p class="ratt-t">Ce lead n\'a pas encore de fiche client</p><p class="hint">Recherche des fiches qui pourraient correspondre…</p></div>'; }
+      if (D.cands.erreur) return '<div class="ratt"><p class="ratt-t">Ce lead n\'a pas encore de fiche client</p><p class="hint err">' + esc(D.cands.erreur) + '</p></div>';
+      var c = D.cands.candidats || [];
+      var IND = { mobile_identique: 'même mobile', email_identique: 'même email', siret_identique: 'même SIRET', nom_prenom_exact: 'même nom et prénom', nom_societe_equivalent: 'même société', naissance_differente: 'naissance différente' };
+      var h = '<div class="ratt"><p class="ratt-t">Ce lead n\'a pas encore de fiche client</p>'
+        + '<p class="hint">Avant de noter le contact, dites qui est ce client. ' + (c.length ? 'Ces fiches lui ressemblent : comparez avec ce qu\'il vous dit.' : 'Aucune fiche existante ne lui ressemble.') + '</p>';
+      if (c.length) {
+        h += '<ul class="ratt-l">' + c.map(function (x) {
+          var nom = [x.civilite, x.prenom, x.nom].filter(Boolean).map(propre).join(' ') || 'Fiche ' + x.id_client;
+          var ind = (x.indices || []).map(function (k) { return IND[k]; }).filter(Boolean);
+          return '<li><div><b>' + esc(nom) + '</b><small>' + esc([x.ville ? propre(x.ville) : '', x.mobile, x.email].filter(Boolean).join(' · ')) + '</small>'
+            + (ind.length ? '<small class="ind">' + esc(ind.join(' · ')) + '</small>' : '') + '</div>'
+            + '<button type="button" class="btn pri sm" data-a="rattacher" data-id="' + l.id_lead + '|' + x.id_client + '">C\'est ce client</button></li>';
+        }).join('') + '</ul>';
+      }
+      h += '<div class="row"><button type="button" class="btn" data-a="rattacher" data-id="' + l.id_lead + '|new">' + (c.length ? 'Aucune ne correspond : créer sa fiche' : 'Créer sa fiche') + '</button>'
+        + '<span class="hint">La fiche reprend le nom, le mobile et l\'email du lead.</span></div></div>';
+      return h;
+    }
+    async function chargerCandidats(id) {
+      var D = S.dr; if (!D || D.cands) return;
+      D.cands = { charge: false, candidats: [] };
+      try {
+        var r = await rpc('poste_lead_candidats', { p_id_lead: Number(id) });
+        if (!S.dr || Number(S.dr.id) !== Number(id)) return;
+        S.dr.cands = { charge: true, candidats: (r && r.candidats) || [] };
+        if (r && r.rattache) { await rafraichir(true); return; }
+      } catch (e) {
+        if (S.dr && Number(S.dr.id) === Number(id)) S.dr.cands = { charge: true, erreur: messageErreur(e) };
+      }
+      if (S.dr && Number(S.dr.id) === Number(id)) renderDrawerPreserve();
+    }
+    function rattacher(v) {
+      var p = String(v).split('|'), id = Number(p[0]), idc = p[1] === 'new' ? null : Number(p[1]);
+      var l = leadDe(id);
+      return geste(async function () {
+        var r = await rpc('poste_lead_rattacher', { p_id_lead: id, p_id_client: idc });
+        if (S.dr && Number(S.dr.id) === id) S.dr.cands = null;
+        toast(r && r.cree ? 'Fiche client créée pour ' + nomLead(l) + '. Notez maintenant le résultat de l\'appel.'
+                          : nomLead(l) + ' est rattaché à sa fiche client. Notez maintenant le résultat de l\'appel.');
+        await rafraichir(true);
+      });
     }
     function piedClore(l) {
       return '<div class="row"><select id="clore-motif" aria-label="Motif">' + MOTIFS_CLORE.map(function (m) { return '<option value="' + m[0] + '">' + m[1] + '</option>'; }).join('') + '</select>'
@@ -1834,7 +1890,7 @@
     async function ouvrir(id) {
       var l = S.leads.find(function (x) { return Number(x.id_lead) === Number(id); });
       if (!l) { toast('Ce lead n\'est plus ouvert.', true); return; }
-      S.dr = { id: l.id_lead, l: l, envois: null, mode: null, res: null };
+      S.dr = { id: l.id_lead, l: l, envois: null, mode: null, res: null, cands: null };
       $scrim.hidden = false; $drawer.hidden = false;
       renderDrawer();
       try { S.dr.envois = await rpc('poste_bacs_envois', { p_id_lead: Number(id) }) || []; } catch (e) { if (S.dr) S.dr.envois = []; }
@@ -2139,6 +2195,7 @@
         case 'res': if (S.dr) { S.dr.res = id; renderDrawerPreserve(); } return;
         case 'rdv': return rdv(id);
         case 'joint': return resultat(id, 'joint');
+        case 'rattacher': return rattacher(id);
         case 'pasjoint': return resultat(id, 'pas_joint');
         case 'clore': return clore(id);
         case 'bacs-relancer':
@@ -2442,6 +2499,15 @@
 .lmtc-ov .dr-f .row.pied{justify-content:space-between;flex-wrap:nowrap}
 .lmtc-ov .dr-f .row.pied .hint{flex:1}
 .lmtc-ov .hint{font-size:11.5px;color:var(--mut);font-weight:600;line-height:1.5}
+.lmtc-ov .ratt{display:grid;gap:8px;padding:12px;border:1.5px solid #c9dcf3;border-radius:12px;background:#f5f9fe}
+.lmtc-ov .ratt-t{margin:0;font-size:13px;font-weight:800;color:#1F4A85}
+.lmtc-ov .ratt .hint.err{color:#c0392b}
+.lmtc-ov .ratt-l{list-style:none;margin:0;padding:0;display:grid;gap:6px}
+.lmtc-ov .ratt-l li{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:8px 10px;background:#fff;border:1px solid #e2eaf5;border-radius:10px}
+.lmtc-ov .ratt-l li div{display:grid;gap:2px;min-width:0}
+.lmtc-ov .ratt-l b{font-size:12.5px;color:#1F4A85}
+.lmtc-ov .ratt-l small{font-size:11px;color:#5a7196;overflow:hidden;text-overflow:ellipsis}
+.lmtc-ov .ratt-l small.ind{color:#2f8a76;font-weight:700}
 .lmtc-ov .issues{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));border:1.5px solid var(--line-in);border-radius:10px;overflow:hidden}
 .lmtc-ov .issues button{border:0;background:#fff;padding:9px 6px;font-size:12px;font-weight:700;color:var(--mut);cursor:pointer;transition:all .12s}
 .lmtc-ov .issues button:not(:last-child){border-right:1.5px solid var(--line-in)}
