@@ -1,4 +1,10 @@
 // ============================================================================
+//  v12 (07/10/2026) : réglage du tenant propale_creation_one_data. Chez un
+//  client qui crée ses propositions dans BACS (Team Colin), la page de
+//  création affiche une carte d'information et « Nouveau brouillon » est
+//  masqué. Une page de modification rechargée (F5) affiche un message clair
+//  au lieu de l'erreur technique. Réglage absent : rien ne change.
+// ============================================================================
 //  PROPALE VO (create / update) — module One Data (OD.define)  v1
 //  Une seule définition pour les deux pages ; le mode vient de data-od-props
 //  ({"mode":"create"} / {"mode":"update"}), avec repli sur l'URL.
@@ -13,6 +19,22 @@
 OD.define('propale-vo', {
   async mount(__anchor, ctx) {
   'use strict';
+
+  // ── Réglage du tenant : propositions créées dans One Data ou dans BACS ──
+  // app_settings.propale_creation_one_data = false chez un client qui crée
+  // toutes ses propositions VO/VN dans BACS (Team Colin). Absent = oui.
+  function odCreaPropale(sbc) {
+    if (!OD.__creaPropale) {
+      OD.__creaPropale = (async () => {
+        try {
+          const r = await sbc.from('app_settings').select('value').eq('key', 'propale_creation_one_data').maybeSingle();
+          OD.__creaPropaleVal = !(r && r.data && r.data.value === false);
+        } catch (e) { OD.__creaPropaleVal = true; }
+        return OD.__creaPropaleVal;
+      })();
+    }
+    return OD.__creaPropale;
+  }
 
   /* ========================== CONFIG ========================== */
   const STICKY_TOP = 140;
@@ -990,7 +1012,7 @@ OD.define('propale-vo', {
     let extra = '';
     if (ST.mode === 'update' && !ST.cmBloquante) {
       if (ST.P.status === 'draft') extra = `<button class="pv-btn pv-btn-blue" data-act="promote">Définir comme proposition</button>`;
-      else if (ST.P.status === 'propale') extra = `<button class="pv-btn pv-btn-grey" data-act="promote">Nouveau brouillon</button>`;
+      else if (ST.P.status === 'propale' && ST.creaOD !== false) extra = `<button class="pv-btn pv-btn-grey" data-act="promote">Nouveau brouillon</button>`;
     }
     // CHOIX EXPLICITE BROUILLON / PROPOSITION (demande du 25/08/2026).
     // Auparavant la création n'offrait qu'« Enregistrer le brouillon », et la
@@ -1243,13 +1265,40 @@ OD.define('propale-vo', {
     ST.rootId = rootId;
     const root = __anchor;   // fourni par le loader
     root.innerHTML = '<div style="padding:40px;text-align:center;color:#7a98c5;font-family:\'Nunito Sans\',sans-serif;font-size:14px">Chargement…</div>';
+    ST.creaOD = await odCreaPropale(ctx.supabase);
+    // Client qui crée ses propositions dans BACS : pas de création ici.
+    if (mode === 'create' && ST.creaOD === false) {
+      root.innerHTML = carteInfo('Les propositions se créent dans BACS',
+        'Chez votre groupe, les propositions VO et VN sont saisies dans BACS. Elles remontent ensuite automatiquement dans la gestion des ventes de One Data.');
+      return;
+    }
     try {
       await loadData();
       render(root);
     } catch(e) {
       console.error('[propaleVO] boot error', e);
-      root.innerHTML = `<div style="padding:40px;color:#e24b4a;font-family:sans-serif;font-size:13px"><strong>Erreur de chargement</strong><br>${esc(e.message||String(e))}</div>`;
+      // Page rechargée (F5) ou ouverte par un lien : la variable WeWeb qui
+      // porte la proposition est vide. Message clair plutôt qu'erreur brute.
+      if (/id_propale_bdc/.test(String(e && e.message || ''))) {
+        root.innerHTML = carteInfo('Proposition non retrouvée',
+          'La page a été rechargée et la proposition ouverte n\'est plus connue. Rouvrez-la depuis la gestion des ventes ou la fiche client.');
+        return;
+      }
+      root.innerHTML = `<div style="padding:40px;color:#e24b4a;font-family:'Nunito Sans',sans-serif;font-size:13px"><strong>Erreur de chargement</strong><br>${esc(e.message||String(e))}</div>`;
     }
+  }
+
+  // Carte d'information (charte One Data) avec retour à la gestion des ventes.
+  function carteInfo(titre, texte) {
+    setTimeout(() => {
+      const b = __anchor.querySelector('[data-pv-retour]');
+      if (b) b.addEventListener('click', goPipe);
+    }, 0);
+    return `<div style="max-width:560px;margin:40px auto;padding:28px 26px;background:#fff;border:1px solid #e2eaf5;border-radius:16px;font-family:'Nunito Sans',system-ui,sans-serif;text-align:center;box-shadow:0 10px 28px rgba(31,74,133,.08)">
+      <div style="font-size:17px;font-weight:800;color:#1F4A85;margin-bottom:10px">${esc(titre)}</div>
+      <div style="font-size:14px;line-height:1.5;color:#5a7196;margin-bottom:20px">${esc(texte)}</div>
+      <button type="button" data-pv-retour style="padding:10px 20px;border-radius:999px;border:none;background:#2a5ea9;color:#fff;font:inherit;font-size:14px;font-weight:700;cursor:pointer">Retour à la gestion des ventes</button>
+    </div>`;
   }
 
   // Démarrage : le mode n'est plus déduit du ROOT_ID présent dans le DOM (le
