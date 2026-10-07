@@ -134,8 +134,17 @@ function applyBusSiteAct(siteId) {
 function adoptBusSelectionAct() {
   const st = window.__act; if (!st || !st.busSelPending) return;
   if (st.busSite == null || st.rawData === null) return;   // données pas prêtes (retenté plus tard)
-  const row = (st.rawData || []).find(r => String(r.id_site) === String(st.busSite));
-  if (!row) return;
+  let row = (st.rawData || []).find(r => String(r.id_site) === String(st.busSite));
+  // 07/10/2026 (recette Team Colin) : un site sans ligne sur la periode etait
+  // ignore, la page restait sur le site precedent alors que la topnav en
+  // affichait un autre. Libelle et branche viennent alors du bus ; les
+  // indicateurs tombent a zero.
+  if (!row) {
+    const b = siteBus();
+    const s = b && b.getSites ? (b.getSites() || []).find(x => String(x.id_site) === String(st.busSite)) : null;
+    if (!s) return;
+    row = { id_site: s.id_site, nom_site: s.site, reseau: s.reseau, id_affaire: s.id_affaire };
+  }
   st.busSelPending = false;
   st.selection = { level: 'site', key: String(row.id_site), label: row.nom_site || ('Site ' + row.id_site) };
   const rKey = 'r:' + row.reseau;
@@ -862,6 +871,10 @@ function injectStyle() {
 #act-root .act-cmp-cell.is-win { background:#e1f5ee; box-shadow:inset 0 0 0 1.5px #53bda7; color:#085041; }
 @media (max-width:900px){ #act-root .act-cmp-grid{ grid-template-columns:84px 1fr 1fr; } }
 #act-root .act-hm-wrap { overflow-x:auto; }
+/* 07/10/2026 (recette, largeur mobile) : les deux tableaux debordaient la
+   page entiere (936 px de large sur un ecran de 375). Sous 900 px ils
+   defilent dans leur propre cadre ; la page ne bouge plus. */
+@media (max-width:900px){ #act-root .act-vtable, #act-root .act-tree { display:block; overflow-x:auto; -webkit-overflow-scrolling:touch; } }
 #act-root .act-hm { border-collapse:collapse; }
 #act-root .act-hm th { font-size:8px; color:var(--text-mut); font-weight:500; padding:0 1px 4px; text-align:center; min-width:15px; }
 #act-root .act-hm th.sun { color:#c4554a; font-weight:700; }
