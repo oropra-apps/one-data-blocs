@@ -1,5 +1,9 @@
 // ============================================================================
 //  PERFORMANCES ÉQUIPE — module One Data (OD.define)  v1
+//  v20 (07/10/2026) RECETTE TEAM COLIN — le site choisi dans la topnav est
+//    suivi meme quand il n'a aucune ligne sur la periode (il etait ignore et
+//    la page restait sur le site precedent). Voir adoptBusSelectionPerf.
+//
 //  v4.13 (30/09/2026) TEAM COLIN — LE VENDEUR VOIT SON ÉQUIPE
 //    La vue des performances est bornée par propale_visible_user_ids() : un
 //    vendeur n'y trouvait que sa propre ligne, sans pouvoir se situer. Pour lui
@@ -318,8 +322,18 @@ OD.define('performances', {
   function adoptBusSelectionPerf() {
     const st = window.__perf; if (!st || !st.busSelPending) return;
     if (st.busSite == null) return;
-    const row = (allRawData || []).find(r => String(r.id_site) === String(st.busSite));
-    if (!row) return;                       // données pas encore chargées (retenté au render)
+    let row = (allRawData || []).find(r => String(r.id_site) === String(st.busSite));
+    // v20 (07/10/2026) : un site SANS LIGNE sur la periode (aucune commande ni
+    // objectif, ex. MEAUX du 01 au 07/10) etait ignore : la topnav affichait
+    // MEAUX, la page restait sur le site precedent sans le dire. Le libelle et
+    // la branche viennent alors du bus ; les indicateurs tombent a zero, et
+    // les lignes du site s'afficheront d'elles-memes si les donnees arrivent.
+    if (!row) {
+      const b = siteBus();
+      const s = b && b.getSites ? (b.getSites() || []).find(x => String(x.id_site) === String(st.busSite)) : null;
+      if (!s) return;                       // bus pas encore pret (retente au render)
+      row = { id_site: s.id_site, SITE: s.site, RESEAU: s.reseau, AFFAIRE: s.affaire };
+    }
     st.busSelPending = false;
     st.selection = { level: 'site', key: String(row.id_site), label: row.SITE || ('Site ' + row.id_site) };
     const rKey = 'r:' + (row.RESEAU || '__sr');
