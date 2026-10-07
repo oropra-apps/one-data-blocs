@@ -751,7 +751,9 @@ OD.define('notifications', {
         jauge = [
           ['en retard<br>(> 24 h)', fmt(c.chaud), num(c.chaud) > 0 ? 'chaud' : ''],
           ['à surveiller<br>(> 4 h)', fmt(c.tiede), num(c.tiede) > 0 ? 'tiede' : ''],
-          ['promesses<br>du jour', fmt(num(c.relances) + num(c.rdv)), ''],
+          // v7 (07/10/2026) : « du jour » était faux — la tuile additionne les
+          // relances ouvertes et les RDV des 30 prochains jours (notif_lire).
+          ['promesses<br>à tenir', fmt(num(c.relances) + num(c.rdv)), ''],
           ['reportées', fmt(c.reportees), '']
         ];
       }
