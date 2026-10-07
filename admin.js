@@ -1,5 +1,25 @@
 // ============================================================================
-//  ADMIN — module One Data (OD.define)  v10
+//  ADMIN — module One Data (OD.define)  v11
+//  v11 (07/10/2026) : recette Team Colin, administrateur 259.
+//  * Decision d'Antoine : « Rôle et manager », « Définir comme site
+//    principal » et « Retirer de ce site » quittent la modale d'actions.
+//    L'editeur « Périmètre et hiérarchie » couvre ces trois gestes (role et
+//    N+1 par site, ajout et retrait de sites). « Définir comme site principal »
+//    etait d'ailleurs casse (UPDATE direct de USER refuse au navigateur).
+//  * « Désactiver l'utilisateur » ne pouvait aboutir : edge function absente,
+//    repli navigateur qui cherche une colonne booleenne (USER.status est un
+//    texte) et des tables RDV / colonnes ID_User qui ne sont pas celles du
+//    modele. Il passe par admin_portefeuille_inventaire et
+//    admin_desactiver_utilisateur (migration 20261008470000) : inventaire
+//    RDV a venir / affaires ouvertes / leads ouverts, repreneur choisi parmi
+//    les chefs et vendeurs actifs d'un site commun, transfert, statut
+//    'inactive', connexion bloquee, sessions fermees. Le repli historique est
+//    garde pour un tenant sans ces fonctions.
+//  * « Ne rien transferer » etait refuse des qu'il y avait un portefeuille
+//    (la valeur vide valait aussi « pas encore choisi »).
+//  * Un utilisateur desactive propose « Réactiver l'utilisateur ».
+//  * Editeur « Périmètre et hiérarchie » sous 780 px : le pied ne laisse plus
+//    passer le clic vers l'arbre (voir injectPeriCss).
 //  v10 (05/10/2026) : currentRole() lit l'auth_uid dans la session en memoire
 //  (getSession) au lieu d'appeler /auth/v1/user. Repli conserve.
 //  Rendu dans __anchor ; SUPA_URL -> ctx.tenant (couvre les 7 edge functions) ;
@@ -459,7 +479,6 @@ OD.define('admin', {
     return out;
   }
   async function upsertUserSite(target, id_site, id_role, manager) { return callFn(FN_US_UP, { target_user_id: target, id_site: id_site, id_role: id_role, manager_user_id: manager }); }
-  async function deleteUserSite(target, id_site) { return callFn(FN_US_DEL, { target_user_id: target, id_site: id_site }); }
 
   /* --------------------------------------------------------- filtres/cascade */
   function reseauOptions() { return distinct(state.rows.map(function (r) { return r.reseau; })).sort(byLocale); }
@@ -1249,12 +1268,11 @@ OD.define('admin', {
       + act('edit', 'blue', ICON.edit, 'Éditer le profil')
       + act('reset', 'orange', ICON.key, 'Réinitialiser le mot de passe')
       + act('invite', mst.broken ? 'red' : 'green', ICON.at, mailLabel, mst.label !== '—' ? '<span class="oda-badge ' + mst.cls + '">' + esc(mst.label) + '</span>' : '')
-      + act('deact', 'red', ICON.power, 'Désactiver l\'utilisateur')
+      + (String(row.user_status || '').toLowerCase() === 'inactive'
+          ? act('react', 'green', ICON.power, 'Réactiver l\'utilisateur')
+          : act('deact', 'red', ICON.power, 'Désactiver l\'utilisateur'))
       + '</section>'
       + '<section class="oda-actcol"><h3>Affectation</h3>'
-      + act('rolemgr', 'blue', ICON.swap, 'Rôle et manager')
-      + act('principal', 'orange', ICON.star, 'Définir comme site principal')
-      + act('unsite', 'red', ICON.xcircle, 'Retirer de ce site')
       + act('perimetre', 'blue', ICON.org, 'Périmètre et hiérarchie')
       + act('delete', 'danger', ICON.trash, 'Suppression de l\'utilisateur')
       + '</section></div></div>', 'wide');
@@ -1266,101 +1284,72 @@ OD.define('admin', {
         else if (a === 'reset') modalReset(row);
         else if (a === 'invite') modalInvite(row);
         else if (a === 'deact') modalDeactivate(row);
-        else if (a === 'rolemgr') modalRoleManager(row);
-        else if (a === 'principal') modalPrincipal(row);
-        else if (a === 'unsite') modalRemoveSite(row);
+        else if (a === 'react') modalReactivate(row);
         else if (a === 'perimetre') modalPerimetre(row);
         else if (a === 'delete') modalDelete(row);
       };
     });
   }
 
-  /* ---- 2. rôle et manager sur le site courant -------------------------- */
-  function modalRoleManager(row) {
-    if (row.id_site == null) { toast('Aucun site sur cette ligne'); return; }
-    var curRole = row.site_role_id != null ? row.site_role_id : (row.user_role_id != null ? row.user_role_id : row.id_role);
-    var curMgr = row.manager_user_id != null ? row.manager_user_id : (row.id_superieur != null ? row.id_superieur : null);
-    var sel = { role: curRole != null ? String(curRole) : '', mgr: curMgr != null ? String(curMgr) : '__self__' };
-    sel.showAll = false;
-    var opts = '<option value="">Choisir un rôle…</option>' + state.roles.map(function (r) {
-      return '<option value="' + esc(r.id) + '"' + (String(r.id) === sel.role ? ' selected' : '') + '>' + esc(r.label) + '</option>';
-    }).join('');
-    var ov = actionModal({
-      title: 'Rôle et manager', sub: fullName(row) + ' · ' + (row.site_name || ''), cta: 'Enregistrer',
-      body: '<div class="oda-place-role"><label>Rôle sur ce site<span class="oda-star">*</span></label><select data-f="role">' + opts + '</select></div>'
-        + '<p class="oda-note">Rattaché à (manager sur ce site)<span class="oda-star">*</span> :</p><div class="oda-mgr-slot"></div>',
-      onReady: function (ov2) {
-        var slot = ov2.querySelector('.oda-mgr-slot');
-        function drawMgrs() {
-          slot.innerHTML = mgrListHtml(row.id_site, sel.role, sel.mgr, row.id_user, sel.showAll);
-          slot.querySelectorAll('.oda-mrow').forEach(function (el) {
-            el.onclick = function () {
-              sel.mgr = el.getAttribute('data-mgr');
-              slot.querySelectorAll('.oda-mrow').forEach(function (x) { x.classList.toggle('active', x === el); });
-            };
-          });
-          var all = slot.querySelector('[data-mgr-all]');
-          if (all) all.onclick = function () { sel.showAll = all.getAttribute('data-mgr-all') === '1'; drawMgrs(); };
-        }
-        ov2.querySelector('[data-f="role"]').onchange = function () {
-          sel.role = this.value;
-          // le N+1 retenu doit rester de rang supérieur au nouveau rôle
-          if (sel.mgr !== '__self__' && sel.mgr) {
-            var ok = managerCandidatesForSite(row.id_site, sel.role, row.id_user).some(function (m) { return String(m.id_user) === String(sel.mgr); });
-            if (!ok && !sel.showAll) sel.mgr = '__self__';
-          }
-          drawMgrs();
-        };
-        drawMgrs();
-      },
-      run: async function (setErr) {
-        if (!sel.role) { setErr('Choisissez un rôle.'); return false; }
-        var res = await upsertUserSite(row.id_user, Number(row.id_site), Number(sel.role), sel.mgr === '__self__' ? null : Number(sel.mgr));
-        if (res.error) { setErr(res.error); return false; }
-        return 'Rôle et rattachement mis à jour';
-      }
-    });
-    return ov;
-  }
-
-  /* ---- 3. site principal ----------------------------------------------- */
-  function modalPrincipal(row) {
-    actionModal({
-      title: 'Définir comme site principal', sub: fullName(row), cta: 'Définir',
-      body: '<p class="oda-note">Le site <b>' + esc(row.site_name || '—') + '</b> deviendra le site principal de cet utilisateur : c\'est celui qui pilote son rattachement par défaut (agenda, portefeuille, statistiques).</p>'
-        + '<p class="oda-note">Ses autres affectations ne sont pas modifiées.</p>',
-      run: async function (setErr) {
-        if (row.id_site == null) { setErr('Aucun site sur cette ligne.'); return false; }
-        var cols = await tableCols(TABLE_USER), field = pickCol(cols, PRINCIPAL_FIELDS);
-        if (!field) { setErr('Colonne du site principal introuvable sur la table ' + TABLE_USER + '. Ajoutez son nom dans PRINCIPAL_FIELDS en tête de fichier.'); return false; }
-        var upd = {}; upd[field] = Number(row.id_site);
-        var r = await sb().from(TABLE_USER).update(upd).eq('ID_User', row.id_user);
-        if (r.error) { setErr(r.error.message); return false; }
-        return 'Site principal mis à jour';
-      }
-    });
-  }
-
-  /* ---- 4. retirer de ce site ------------------------------------------- */
-  function modalRemoveSite(row) {
-    var others = state.rows.filter(function (r) { return String(r.id_user) === String(row.id_user) && String(r.id_site) !== String(row.id_site); });
-    actionModal({
-      title: 'Retirer de ce site', sub: fullName(row), cta: 'Retirer', danger: true,
-      body: '<p class="oda-note">L\'affectation de <b>' + esc(fullName(row)) + '</b> sur <b>' + esc(row.site_name || '—') + '</b> sera supprimée : il perdra l\'accès aux données de ce site.</p>'
-        + (others.length
-          ? '<p class="oda-note">Il conserve ' + others.length + ' autre' + (others.length > 1 ? 's' : '') + ' affectation' + (others.length > 1 ? 's' : '') + '.</p>'
-          : '<div class="oda-warn">C\'est sa <b>seule</b> affectation visible ici. Sans site, il n\'aura plus accès à aucune donnée — préférez « Désactiver l\'utilisateur ».</div>')
-        + '<p class="oda-note">Son compte, son profil et son portefeuille ne sont pas touchés.</p>',
-      run: async function (setErr) {
-        var res = await deleteUserSite(row.id_user, Number(row.id_site));
-        if (res.error) { setErr(res.error); return false; }
-        return 'Affectation retirée';
-      }
-    });
-  }
-
   /* ---- 5. désactivation + redistribution du portefeuille ---------------- */
+  /* v11 : desactivation par le serveur (admin_portefeuille_inventaire /
+     admin_desactiver_utilisateur). Repli sur l'ancien parcours si le tenant
+     n'a pas ces fonctions. */
+  function rpcAbsente(err) { return /PGRST202|42883|Could not find the function/i.test(String((err && (err.code + ' ' + err.message)) || '')); }
   function modalDeactivate(row) {
+    var inv = null, chosen = null;   // chosen : null = pas choisi ; '' = ne rien transferer ; id
+    var ov = actionModal({
+      title: 'Désactiver l\'utilisateur', sub: fullName(row), cta: 'Désactiver', danger: true,
+      body: '<p class="oda-note">L\'accès de <b>' + esc(fullName(row)) + '</b> sera coupé (connexion bloquée, sessions fermées). Son historique est conservé.</p>'
+        + '<div class="oda-scan"><div class="oda-loading"><span class="oda-spin"></span>Inventaire du portefeuille…</div></div>'
+        + '<div class="oda-succ" style="display:none"></div>',
+      run: async function (setErr) {
+        if (!inv) { setErr('Inventaire en cours, réessayez dans un instant.'); return false; }
+        var total = Number(inv.rdv_a_venir || 0) + Number(inv.affaires_ouvertes || 0) + Number(inv.leads_ouverts || 0);
+        if (total > 0 && chosen === null) { setErr('Choisissez un repreneur, ou « Ne rien transférer ».'); return false; }
+        var r = await sb().rpc('admin_desactiver_utilisateur', { p_id_user: Number(row.id_user), p_repreneur: chosen ? Number(chosen) : null });
+        if (r.error) { setErr(r.error.message); return false; }
+        var d = r.data || {}, n = Number(d.rdv || 0) + Number(d.affaires || 0) + Number(d.leads || 0);
+        return 'Utilisateur désactivé' + (n ? ' — ' + n + ' élément(s) transféré(s)' : '');
+      }
+    });
+    (async function () {
+      var r = await sb().rpc('admin_portefeuille_inventaire', { p_id_user: Number(row.id_user) });
+      if (r.error && rpcAbsente(r.error)) { ov.remove(); modalDeactivateLegacy(row); return; }
+      var box = ov.querySelector('.oda-scan'); if (!box) return;
+      if (r.error) { box.innerHTML = '<div class="oda-error">' + esc(r.error.message) + '</div>'; return; }
+      inv = r.data || {};
+      var lignes = [['RDV à venir', inv.rdv_a_venir], ['Affaires ouvertes (simulations, propales, BDC)', inv.affaires_ouvertes], ['Leads ouverts', inv.leads_ouverts]];
+      box.innerHTML = '<div class="oda-mbox"><dl>' + lignes.map(function (l) { return '<dt>' + esc(l[0]) + '</dt><dd>' + String(Number(l[1] || 0)) + '</dd>'; }).join('') + '</dl></div>';
+      var total = lignes.reduce(function (a, l) { return a + Number(l[1] || 0); }, 0);
+      var sc = ov.querySelector('.oda-succ');
+      if (total > 0) {
+        var reps = inv.repreneurs || [];
+        sc.innerHTML = '<label style="font-size:11px;font-weight:600;color:var(--text-mut);text-transform:uppercase;letter-spacing:.3px;display:block;margin:14px 0 6px">Repreneur du portefeuille</label>'
+          + '<select data-f="succ"><option value="">Choisir…</option><option value="__aucun">Ne rien transférer</option>'
+          + reps.map(function (m) { return '<option value="' + esc(m.id_user) + '">' + esc(m.nom || ('#' + m.id_user)) + (Number(m.role) === 3 ? ' — Chef des ventes' : ' — Vendeur') + '</option>'; }).join('')
+          + '</select>';
+        sc.style.display = '';
+        sc.querySelector('[data-f="succ"]').onchange = function () { chosen = this.value === '__aucun' ? '' : (this.value || null); };
+      } else {
+        chosen = '';
+      }
+    })();
+  }
+
+  function modalReactivate(row) {
+    actionModal({
+      title: 'Réactiver l\'utilisateur', sub: fullName(row), cta: 'Réactiver',
+      body: '<p class="oda-note">La connexion de <b>' + esc(fullName(row)) + '</b> sera rouverte. Le portefeuille transféré à la désactivation reste chez son repreneur.</p>',
+      run: async function (setErr) {
+        var r = await sb().rpc('admin_reactiver_utilisateur', { p_id_user: Number(row.id_user) });
+        if (r.error) { setErr(r.error.message); return false; }
+        return 'Utilisateur réactivé';
+      }
+    });
+  }
+
+  function modalDeactivateLegacy(row) {
     var candidates = managersOnSite(row.id_site).filter(function (m) { return String(m.id_user) !== String(row.id_user); });
     var chosen = '';
     var ov = actionModal({
@@ -2028,7 +2017,11 @@ OD.define('admin', {
       '.pe-site .pe-cur{margin-left:auto;text-align:right}',
       '.pe-ctrls select.pe-need{border-color:#e0803b;background:#fff8f1}',
       '.pe-mwarn{font-size:11px;color:#b06a2e;margin-top:2px}',
-      '@media(max-width:780px){.pe-wrap{height:82vh}.pe-body{flex-direction:column}.pe-left{border-right:none;border-bottom:1px solid var(--line)}}'
+      // v11 : sous 780 px, l'organisation et les regles debordaient par-dessus le pied ;
+      // le bouton « Enregistrer » laissait passer le clic vers l'arbre (un clic
+      // a ainsi colore une affaire au lieu d'enregistrer). Le corps defile
+      // seul, le pied reste en bas et au-dessus.
+      '@media(max-width:780px){.pe-wrap{height:min(82vh,calc(100vh - 150px))}.pe-body{flex-direction:column;overflow-y:auto}.pe-left,.pe-right{flex:0 0 auto}.pe-tree{overflow:visible}.pe-left{border-right:none;border-bottom:1px solid var(--line)}.pe-ft{position:relative;z-index:2}}'
     ].join('');
     d.head.appendChild(st);
   }
