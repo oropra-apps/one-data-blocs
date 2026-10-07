@@ -5,6 +5,8 @@
 //  Lecture 100 % Supabase via RPC get_v_likes(p_id_client, p_id_user) — pas d'Heroku.
 //  Grille de cartes responsive : photo, marque/modèle, immat/date, badges
 //  (VO, Contremarqué), action Pcom (Nouvelle Pcom / propale en cours).
+//  v2 (07/10/2026) : si le tenant crée ses propositions dans BACS
+//  (app_settings.propale_creation_one_data = false), aucune action Pcom.
 // ============================================================================
 OD.define('likes', {
   mount(__anchor, ctx) {
@@ -100,8 +102,21 @@ OD.define('likes', {
   var cap = function (s) { return (s || '').toString().toLowerCase().replace(/(^|[\s\-'])([a-zà-ÿ])/g, function (m, sep, c) { return sep + c.toUpperCase(); }); };
   function fmtDate(d) { if (!d) return ''; var dt = new Date(d); if (isNaN(dt)) return ''; var p = function (n) { return String(n).padStart(2, '0'); }; return p(dt.getDate()) + '/' + p(dt.getMonth() + 1) + '/' + dt.getFullYear(); }
 
+  // Réglage du tenant : les propositions se créent-elles dans One Data ?
+  // Faux chez un client qui les crée dans BACS (Team Colin). Absent = oui.
+  var _creaOD = null;
+  async function creationPropaleOD() {
+    if (_creaOD !== null) return _creaOD;
+    try {
+      var r = await sb.from('app_settings').select('value').eq('key', 'propale_creation_one_data').maybeSingle();
+      _creaOD = !(r && r.data && r.data.value === false);
+    } catch (e) { _creaOD = true; }
+    return _creaOD;
+  }
+
   // ---- data ----
   async function load() {
+    state.creaOD = await creationPropaleOD();
     var idvu = currentIdvu();
     if (idvu == null) { state.rows = []; state.loading = false; return; }
     try {
@@ -172,6 +187,7 @@ OD.define('likes', {
     if (r.etat_cm) badges += '<span class="lk-badge lk-cm" data-cmvin="' + esc(r.VIN) + '" title="' + esc(cmCache[r.VIN] || 'Contremarqué') + '">Contremarqué</span>';
     var action;
     if (r.etat_cm) action = '';                                   // contremarqué -> aucune action propale
+    else if (state.creaOD === false) action = '';                 // propositions créées dans BACS
     else if (state.propales[r.VIN] != null) action = '<button class="lk-act lk-upd" data-pcom="' + i + '">Modifier la propale</button>';
     else action = '<button class="lk-act lk-new" data-pcom="' + i + '">+ Nouvelle Pcom</button>';
     return '<div class="lk-card">' +
