@@ -308,7 +308,20 @@ OD.define('contacts', {
         var sid='wt_'+uid, resume=truncate(contenu,80), showT=contenu.length>80;
         contentHtml = '<div style="font-size:13px;color:#4b5563;line-height:1.5;word-break:break-word;"><span id="sum_'+sid+'">'+esc(resume)+'</span>'+(showT?toggleBtn(sid):'')+'<span id="ful_'+sid+'" style="display:none;">'+esc(contenu)+(showT?toggleBtn(sid,'voir moins'):'')+'</span></div>';
       } else if (statut === 'audio' && aurl) {
-        contentHtml = audioPill(aurl, 0, '#4CAF7D', uid) + captionHtml;
+        // Transcription de la note vocale (wa-transcrire), comme dans le fil
+        // WhatsApp de la fiche (recette Team Colin 08/10/2026 : elle n'était
+        // visible que dans la fenêtre WhatsApp).
+        var trSt = att && att.transcription_statut, trHtml = '';
+        var trStyle = 'margin-top:6px;padding:6px 10px;border-left:3px solid rgba(76,175,125,.45);background:rgba(76,175,125,.06);border-radius:0 8px 8px 0;font-size:12.5px;line-height:1.5;word-break:break-word;';
+        if (trSt === 'fait' && att.transcription) {
+          var tsid = 'wtr_' + uid, tx = String(att.transcription), showTr = tx.length > 160;
+          trHtml = '<div style="' + trStyle + 'color:#4b5563;font-style:italic;"><span id="sum_' + tsid + '">' + esc(truncate(tx, 160)) + '</span>' + (showTr ? toggleBtn(tsid) : '') +
+            '<span id="ful_' + tsid + '" style="display:none;">' + esc(tx) + (showTr ? toggleBtn(tsid, 'voir moins') : '') + '</span></div>';
+        } else if (trSt === 'en_cours') trHtml = '<div style="' + trStyle + 'color:#9ca3af;">Transcription en cours…</div>';
+        else if (trSt === 'vide') trHtml = '<div style="' + trStyle + 'color:#9ca3af;">Pas de parole audible.</div>';
+        else if (trSt === 'erreur') trHtml = '<div style="' + trStyle + 'color:#9ca3af;">Transcription indisponible.</div>';
+        var duree = att && att.duree_s ? Math.round(Number(att.duree_s)) || 0 : 0;
+        contentHtml = audioPill(aurl, duree, '#4CAF7D', uid) + trHtml + captionHtml;
       } else if (statut === 'image' && aurl) {
         contentHtml = '<a href="'+esc(aurl)+'" target="_blank" style="display:inline-block;width:72px;height:72px;border-radius:10px;overflow:hidden;border:1px solid rgba(76,175,125,.25);"><img src="'+esc(aurl)+'" style="width:72px;height:72px;object-fit:cover;display:block;"/></a>'+captionHtml;
       } else if (statut === 'video' && aurl) {
