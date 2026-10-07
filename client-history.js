@@ -1,5 +1,7 @@
 // ============================================================================
 //  HISTORIQUE CLIENT (top nav) — module One Data (OD.define)  v1
+//  v4 (08/10/2026) : le panneau se ferme au clic (ou toucher) en dehors et a
+//  la touche Echap, y compris apres un redessin de la top nav.
 //  v3 (08/10/2026) : le panneau s'ancre a DROITE du bouton. Ancre a gauche,
 //  il debordait de l'ecran de 174 px (bouton pres du bord droit, panneau de
 //  340 px), « Clients consultés récemment » coupe. Largeur bornee a l'ecran.
@@ -240,16 +242,27 @@ function bindEvents() {
   }));
 }
 
+// Les écouteurs globaux ne sont posés qu'une fois, mais le module est remonté
+// à chaque redessin de la top nav : ils appellent donc les fonctions du
+// montage COURANT (window.__chApi), pas celles du premier. Avant v4, le clic
+// à l'extérieur passait state.open à false puis redessinait l'ancienne ancre,
+// retirée du DOM : le panneau visible restait ouvert (recette Team Colin 08/10).
+window.__chApi = { close: close, refresh: function () { if (state.open) loadHistory(); }, render: render, root: getRoot };
+
 if (!window.__chDocOutsideBound) {
-  doc.addEventListener('mousedown', function (e) {
+  const fermerSiDehors = function (e) {
     const r = doc.getElementById('oropra-client-history');
-    if (r && !r.contains(e.target)) close();
+    if (window.__ch && window.__ch.open && r && !r.contains(e.target) && window.__chApi) window.__chApi.close();
+  };
+  doc.addEventListener('pointerdown', fermerSiDehors, true);
+  doc.addEventListener('keydown', function (e) {
+    if (e.key === 'Escape' && window.__ch && window.__ch.open && window.__chApi) window.__chApi.close();
   }, true);
   window.__chDocOutsideBound = true;
 }
 
 if (!window.__chHistoryListenerBound) {
-  window.addEventListener('oropra-history-updated', () => { if (state.open) loadHistory(); });
+  window.addEventListener('oropra-history-updated', () => { if (window.__chApi) window.__chApi.refresh(); });
   window.__chHistoryListenerBound = true;
 }
 
@@ -258,8 +271,9 @@ render();
 
 if (!window.__chMoBound) {
   const mo = new MutationObserver(() => {
-    const root = getRoot();
-    if (root && !root.querySelector('style')) render();
+    const api = window.__chApi; if (!api) return;
+    const root = api.root();
+    if (root && root.isConnected && !root.querySelector('style')) api.render();
   });
   try { mo.observe(doc.body, { childList: true, subtree: true }); } catch (e) {}
   window.__chMoBound = true;
