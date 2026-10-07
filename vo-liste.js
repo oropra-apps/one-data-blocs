@@ -1,4 +1,9 @@
 // ============================================================================
+//  v10 (07/10/2026) : réglage du tenant propale_creation_one_data. Chez un
+//  client qui crée ses propositions dans BACS (Team Colin), la fiche VO et le
+//  sélecteur de client n'offrent plus que le Like : bouton « Proposition »
+//  masqué, doPcom bloqué. Réglage absent : rien ne change.
+// ============================================================================
 //  v9 (05/10/2026) : filet d'affichage. Une valeur stockee hors referentiel
 //  ("Other", une variante d'un import) ne retombe plus sur « Selectionner » :
 //  elle est ajoutee comme option, avec son libelle propre quand on sait la
@@ -30,6 +35,25 @@
 // ============================================================================
 OD.define('vo-liste', {
   async mount(__anchor, ctx) {
+
+    // ── Réglage du tenant : propositions créées dans One Data ou dans BACS ──
+    // app_settings.propale_creation_one_data = false chez un client qui crée
+    // toutes ses propositions VO/VN dans BACS (Team Colin) : on masque alors
+    // la « Proposition » / P.Com. Réglage absent = comportement historique.
+    function odCreaPropale(sbc) {
+      if (!OD.__creaPropale) {
+        OD.__creaPropale = (async () => {
+          try {
+            const r = await sbc.from('app_settings').select('value').eq('key', 'propale_creation_one_data').maybeSingle();
+            OD.__creaPropaleVal = !(r && r.data && r.data.value === false);
+          } catch (e) { OD.__creaPropaleVal = true; }
+          return OD.__creaPropaleVal;
+        })();
+      }
+      return OD.__creaPropale;
+    }
+    function odCreaPropaleSync() { return OD.__creaPropaleVal !== false; }
+    odCreaPropale(ctx.supabase);
     const OROPRA_DOUBLONS_URL = 'https://cdn.jsdelivr.net/gh/oropra-apps/one-data-blocs@aa457b862a926340283e1b8e2e956cbff6357658/oropra-doublons.js';
     function chargerDoublons() {
       if (window.oropraDoublons) return Promise.resolve();
@@ -310,7 +334,7 @@ OD.define('vo-liste', {
       + '<div class="vf-head-right">'
       + '<div class="vf-price">' + esc(prix) + '</div>'
       + '<span class="vf-status ' + (isDisp ? 'dispo' : 'cm') + '">' + (isDisp ? 'Disponible à la vente' : 'Contremarqué') + '</span>'
-      + '<button type="button" class="vf-like" id="vf-like">Like / P.Com</button>'
+      + '<button type="button" class="vf-like" id="vf-like">' + (odCreaPropaleSync() ? 'Like / P.Com' : 'Like') + '</button>'
       + '</div>'
       + '</div>';
 
@@ -516,7 +540,7 @@ OD.define('vo-liste', {
     // Header
     var hd = doc.createElement('div'); hd.style.cssText = 'padding:16px 22px;border-bottom:1px solid #eef2f8;display:flex;align-items:center;justify-content:space-between;flex-shrink:0;background:#fff';
     var titleEl = doc.createElement('div'); titleEl.style.cssText = 'font-size:17px;font-weight:800;color:#1F4A85';
-    titleEl.textContent = 'Like / Proposition commerciale — ' + (esc(row.MARQUE_DMS || '') + ' ' + esc(row.MODELE_DMS || '')).trim() + (vin ? ' (' + esc(vin) + ')' : '');
+    titleEl.textContent = (odCreaPropaleSync() ? 'Like / Proposition commerciale — ' : 'Like — ') + (esc(row.MARQUE_DMS || '') + ' ' + esc(row.MODELE_DMS || '')).trim() + (vin ? ' (' + esc(vin) + ')' : '');
     var btnX = doc.createElement('button'); btnX.style.cssText = 'width:34px;height:34px;border-radius:50%;border:1.5px solid #e2eaf5;background:#fff;cursor:pointer;color:#7a98c5;display:flex;align-items:center;justify-content:center;font-size:18px';
     btnX.innerHTML = '✕'; btnX.addEventListener('click', function () { ov.remove(); });
     hd.appendChild(titleEl); hd.appendChild(btnX); modal.appendChild(hd);
@@ -707,6 +731,7 @@ OD.define('vo-liste', {
 
     async function doPcom() {
       if (!state.selectedClient || state.busy) return;
+      if (!(await odCreaPropale(ctx.supabase))) return;   // propositions créées dans BACS
       setBusy(true);
       try {
         const client = state.selectedClient;
@@ -1158,7 +1183,7 @@ OD.define('vo-liste', {
       let h = '<div class="vop-footer">';
       if (state.busyError) h += `<div class="vop-footer-err">${vopEsc(state.busyError)}</div>`;
       h += `<button class="vop-act vop-act-like" data-vop-action="like"${disabled ? ' disabled' : ''}>${state.busy ? '<span class="vop-spinner"></span>' : VOP_ICON_HEART}<span>Like</span></button>`;
-      h += `<button class="vop-act vop-act-pcom" data-vop-action="pcom"${disabled ? ' disabled' : ''}>${state.busy ? '<span class="vop-spinner"></span>' : VOP_ICON_DOC}<span>Proposition</span></button>`;
+      if (odCreaPropaleSync()) h += `<button class="vop-act vop-act-pcom" data-vop-action="pcom"${disabled ? ' disabled' : ''}>${state.busy ? '<span class="vop-spinner"></span>' : VOP_ICON_DOC}<span>Proposition</span></button>`;
       return h + '</div>';
     }
 
