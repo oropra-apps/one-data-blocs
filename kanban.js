@@ -47,6 +47,14 @@ OD.define('kanban', {
   // traité comme un vendeur : fermé par défaut, jamais manager par accident.
   const ROLES_MANAGER = [1, 2, 3, 5, 6, 7, 8, 9];
   function isManager() { const r = getViewerRole(); return r != null && ROLES_MANAGER.includes(r); }
+  // Valider, refuser, rouvrir une commande : encadrement commercial seul (07/10/2026).
+  // La secrétaire (9) et le marketing (5) voient comme des managers mais ne valident pas.
+  // Miroir de role_peut_valider() en base, qui reste l'autorité.
+  const ROLES_VALIDEURS = [1, 2, 3, 6, 7, 8];
+  // Cartes affichées par colonne avant « Afficher plus » (déclarée ici, en tête,
+  // pour éviter toute zone morte temporelle si un rendu part avant la suite).
+  const KAN_PAGE = 50;
+  function peutValider() { const r = getViewerRole(); return r != null && ROLES_VALIDEURS.includes(r); }
   function perimMode() { const r = getViewerRole(); if (r == null || !ROLES_MANAGER.includes(r)) return 'self'; if (r === 3) return 'chef'; return 'cascade'; }
   function fmtPeriodKan() { const f = (s) => { const d = new Date(s + 'T12:00:00'); return d.toLocaleDateString('fr-FR', { day: '2-digit', month: 'short' }); }; return f(state.period.from) + ' \u2192 ' + f(state.period.to); }
   function vnvoNorm(t) { return (t || '').toUpperCase().replace(/[^A-Z]/g, ''); }
@@ -128,7 +136,7 @@ OD.define('kanban', {
     const T = bacs ? TRANSITIONS_BACS : TRANSITIONS;
     return (T[from] && T[from][to]) || null;
   }
-  function canMove(from, to, bacs) { const lvl = transitionLevel(from, to, bacs); if (!lvl) return false; if (lvl === 'M' && !isManager()) return false; return true; }
+  function canMove(from, to, bacs) { const lvl = transitionLevel(from, to, bacs); if (!lvl) return false; if (lvl === 'M' && !peutValider()) return false; return true; }
   function estBacs(c) { return !!(c && (c.bacs_sf_id || c.id_affaire_bacs)); }
   function canArchive(status) { return status === 'draft' || status === 'propale'; }
 
@@ -172,6 +180,7 @@ OD.define('kanban', {
 
   async function loadData() {
     window.__kanLoadData = loadData;
+    state.colLimit = {};
     const _pm = perimMode();
     if (_pm === 'self') {
       if (state.vendeurId == null) state.vendeurId = getViewerId();
@@ -574,7 +583,16 @@ OD.define('kanban', {
       h += '<div class="kc-head kc-' + col.key + '"><div class="kc-title"><span class="kc-dot"></span>' + esc(col.label) + '<span class="kc-n" title="' + nbAffaires + ' affaire(s), ' + nbDocs + ' document(s)">' + compteur + '</span></div><div class="kc-sum">' + eur(total) + (conv != null ? '<span class="kc-conv">' + conv + '% ↗</span>' : '') + '</div></div>';
       h += '<div class="kc-body">';
       if (!list.length) h += '<div class="kc-empty">—</div>';
-      list.forEach(c => { h += renderCard(c); });
+      // Pagination (07/10/2026) : une plage de dates large peut ramener des
+      // centaines de documents. On n'affiche que les KAN_PAGE premiers par
+      // colonne ; les compteurs et montants de l'en-tête restent ceux de TOUTE
+      // la colonne.
+      const lim = (state.colLimit && state.colLimit[col.key]) || KAN_PAGE;
+      list.slice(0, lim).forEach(c => { h += renderCard(c); });
+      if (list.length > lim) {
+        const reste = list.length - lim;
+        h += '<button type="button" class="kc-more" data-kmore="' + col.key + '">Afficher ' + Math.min(KAN_PAGE, reste) + ' de plus <span class="kc-more-n">(' + reste + ' restante' + (reste > 1 ? 's' : '') + ')</span></button>';
+      }
       h += '</div></div>';
     });
     return h + '</div>';
@@ -845,7 +863,7 @@ OD.define('kanban', {
   }
 
   async function ouvrirValidation(c) {
-    if (!isManager()) { toast('Réservé au chef des ventes.', true); return; }
+    if (!peutValider()) { toast('Réservé à l\'encadrement commercial.', true); return; }
     const orderId = String(c.bacs_sf_id || '');
     if (!/^801/.test(orderId)) { toast('Ouvrez la commande à transmettre.', true); return; }
     const estVN = c.vn_vo === 'VN';
@@ -2728,6 +2746,9 @@ OD.define('kanban', {
     if (!(e.target.closest && e.target.closest('#kanban-root'))) return;
     e.__kanDone = true;
 
+    const more = e.target.closest('[data-kmore]');
+    if (more) { const k = more.getAttribute('data-kmore'); state.colLimit = state.colLimit || {}; state.colLimit[k] = ((state.colLimit[k]) || KAN_PAGE) + KAN_PAGE; render(); return; }
+
     const f = e.target.closest('[data-filter]');
     if (f) { const [g, v] = f.getAttribute('data-filter').split(':'); if (g === 'type') state.fType = v; else if (g === 'client') state.fClient = v; else if (g === 'fin') state.fFin = v; render(); return; }
 
@@ -2930,6 +2951,9 @@ OD.define('kanban', {
     '#kanban-root .kc-conv{color:#2c7a68;font-weight:700}' +
     '#kanban-root .kc-body{display:flex;flex-direction:column;gap:8px;min-height:40px}' +
     '#kanban-root .kc-empty{text-align:center;color:#cfcdc5;font-size:13px;padding:10px}' +
+    '#kanban-root .kc-more{display:block;width:100%;margin:6px 0 2px;padding:8px 10px;border:1px dashed #b5c7e3;border-radius:10px;background:#eaf0f9;color:#1f4a87;font:inherit;font-size:12.5px;font-weight:700;cursor:pointer}' +
+    '#kanban-root .kc-more:hover{background:#dde7f5}' +
+    '#kanban-root .kc-more-n{font-weight:500;opacity:.8}' +
     '#kanban-root .kc-card{position:relative;background:#fff;border:0.5px solid #ece9e1;border-left:3px solid #cfcdc5;border-radius:10px;padding:10px 12px;cursor:grab;transition:box-shadow .12s}' +
     '#kanban-root .kc-card:hover{box-shadow:0 4px 14px rgba(42,94,169,.10)}' +
     '#kanban-root .kc-card.dragging{opacity:.45}' +
