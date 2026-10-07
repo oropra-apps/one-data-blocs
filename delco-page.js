@@ -1,5 +1,5 @@
 // ============================================================================
-//  DELCO — PAGE (brief + radar) — module One Data (OD.define)  v1
+//  DELCO — PAGE (brief + radar) — module One Data (OD.define)  v3 — fermé aux rôles 4 et 9
 //  Rendu dans __anchor ; client via ctx.supabase ; création de #dp-root retirée
 //  (le loader fournit l'ancre). Navigation fiche client corrigée : préfixe /fr
 //  en prod (sans lui -> page blanche). Le CTA chat cible #cp-root sur la page.
@@ -56,6 +56,20 @@ await (async function () {
   window.__delcoPage = {};
 
   const doc = __anchor.ownerDocument || document;
+
+  // Delco n'est pas ouvert aux vendeurs (4) ni aux secrétaires (9) — 07/10/2026.
+  // La base le refuse aussi ; ici on affiche un message au lieu d'une page vide.
+  {
+    let __u = {};
+    try { __u = (typeof wwLib !== "undefined" && wwLib.getFrontWindow().oropraUser) || window.oropraUser || {}; } catch (_) { __u = window.oropraUser || {}; }
+    const __r = Number(__u.ID_Role != null ? __u.ID_Role : __u.id_role);
+    if (__r === 4 || __r === 9) {
+      __anchor.innerHTML = '<div style="font-family:Nunito Sans,-apple-system,sans-serif;color:#1c2b45;background:#f5f7fb;padding:48px 24px;text-align:center;border-radius:12px">'
+        + '<div style="font-size:18px;font-weight:800;color:#2a5ea9;margin-bottom:8px">Delco n\u2019est pas disponible pour votre profil</div>'
+        + '<div style="font-size:14px;color:#7a8aa3">Rapprochez-vous de votre responsable pour toute question.</div></div>';
+      return;
+    }
+  }
 
   // ───── CSS ──────────────────────────────────────────────────
   {
