@@ -140,16 +140,20 @@ function dureeMin(b){ // minutes depuis start/end (fiable), sinon null
   const s=new Date(b.start_date.replace(' ','T')), e=new Date(b.end_date.replace(' ','T'));
   const m=Math.round((e-s)/60000); return (m>0&&m<600)?m:null;
 }
-// Statut fiabilisé (D) : programmée si à venir ; sinon réalisée si un champ du CR
-// est rempli (résultat / actions / engagement) ; sinon en retard. Calculé côté JS
-// pour ne pas dépendre de l'heuristique de get_bilaterales.
+// Statut fiabilisé (D) : réalisée dès qu'un champ du CR est rempli (résultat /
+// actions / engagement), même si l'heure prévue n'est pas encore passée ; sinon
+// programmée si à venir ; sinon en retard. Calculé côté JS pour ne pas dépendre
+// de l'heuristique de get_bilaterales.
+// Recette Team Colin 07/10/2026 (BIL-02) : un compte rendu saisi en avance
+// (mode réunion ouvert avant l'heure) restait « non encore réalisé » et la
+// carte ne passait jamais en Historique.
 function computeStatut(b){
-  const future = b.start_date && new Date(String(b.start_date).replace(' ','T')) > new Date();
-  if (future) return 'programmee';
   const filled = (b.resultat && String(b.resultat).trim()) ||
                  (b.actions && String(b.actions).trim()) ||
                  (b.engagement && String(b.engagement).trim());
-  return filled ? 'realisee' : 'retard';
+  if (filled) return 'realisee';
+  const future = b.start_date && new Date(String(b.start_date).replace(' ','T')) > new Date();
+  return future ? 'programmee' : 'retard';
 }
 // Fin du mois d'une date 'YYYY-MM-..' -> 'YYYY-MM-JJ' (dernier jour du mois).
 function endOfMonth(dstr){
