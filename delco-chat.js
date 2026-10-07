@@ -6,6 +6,21 @@
 OD.define('delco-chat', {
   async mount(__anchor, ctx) {
   __anchor.id = 'cp-root';
+  // v6 (07/10/2026) : rôles exclus de Delco (réglage du tenant
+  // app_settings.delco_roles_exclus, [4, 9] chez Team Colin). Pour eux le chat
+  // ne se dessine pas : delco-page affiche déjà le message, l'orchestrateur
+  // refuse de toute façon. Réglage absent : personne n'est exclu.
+  {
+    let __u = {};
+    try { __u = (typeof wwLib !== "undefined" && wwLib.getFrontWindow().oropraUser) || window.oropraUser || {}; } catch (_) { __u = window.oropraUser || {}; }
+    const __r = Number(__u.ID_Role != null ? __u.ID_Role : __u.id_role);
+    let __exclus = [];
+    try {
+      const __s = await ctx.supabase.from('app_settings').select('value').eq('key', 'delco_roles_exclus').maybeSingle();
+      if (__s && __s.data && Array.isArray(__s.data.value)) __exclus = __s.data.value.map(Number);
+    } catch (_) { __exclus = []; }
+    if (__exclus.includes(__r)) { __anchor.innerHTML = ''; __anchor.style.display = 'none'; return; }
+  }
 // ====================================================================
 //  Delco CRM360 — Chat agent (Custom JS WeWeb) — Logo Éclair — v2 responsive
 //  --------------------------------------------------------------------
