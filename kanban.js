@@ -79,7 +79,10 @@ OD.define('kanban', {
   // pour éviter toute zone morte temporelle si un rendu part avant la suite).
   const KAN_PAGE = 50;
   function peutValider() { const r = getViewerRole(); return r != null && ROLES_VALIDEURS.includes(r); }
-  function perimMode() { const r = getViewerRole(); if (r == null || !ROLES_MANAGER.includes(r)) return 'self'; if (r === 3) return 'chef'; return 'cascade'; }
+  // La secrétaire commerciale (9) voit tout son site, comme le chef des ventes :
+  // la cascade hiérarchique ne lui donnait qu'elle-même (décision d'Antoine,
+  // recette Team Colin 07/10/2026).
+  function perimMode() { const r = getViewerRole(); if (r == null || !ROLES_MANAGER.includes(r)) return 'self'; if (r === 3 || r === 9) return 'chef'; return 'cascade'; }
   function fmtPeriodKan() { const f = (s) => { const d = new Date(s + 'T12:00:00'); return d.toLocaleDateString('fr-FR', { day: '2-digit', month: 'short' }); }; return f(state.period.from) + ' \u2192 ' + f(state.period.to); }
   function vnvoNorm(t) { return (t || '').toUpperCase().replace(/[^A-Z]/g, ''); }
   function vnvoRank(t) { const n = vnvoNorm(t); if (n === 'VN') return 0; if (n === 'VO') return 1; if (n === 'VNVO') return 2; return 3; }
