@@ -1,4 +1,11 @@
 // VEHICULES — module One Data (OD.define) v1 (Lot B)
+//  08/10/2026 (recette Team Colin, CLI-08) : 98 % des vehicules clients n'ont
+//  ni marque ni modele (l'export DMS « parc vehicule » n'est pas encore livre).
+//  La carte affichait « Véhicule » et une date trompeuse : la date de
+//  chargement du pipeline (creation_date) passait pour la mise en circulation.
+//  Sans libelle, on montre le VIN ; la date n'est affichee que si c'est la 1re
+//  mise en circulation (DT_PMEC). Marque, modele et immatriculation sont completes
+//  par get_v_likes depuis gold.veh quand le DMS les fournit (20261008480000).
 // ============================================================================
 //  FICHE CLIENT — Onglet VÉHICULES  ·  root: #oropra-vehicules-root
 //  Véhicules possédés / anciennement possédés : CLIENT_STOCK.Status = 'A' / 'I'.
@@ -69,9 +76,9 @@ OD.define('vehicules', {
 
   function card(r, actif) {
     var titre = [r.MARQUE ? String(r.MARQUE).toUpperCase() : '', cap(r.NomModele || r.VERSION || '')].filter(Boolean).join(' ') || 'Véhicule';
-    var ver = (r.NomModele && r.VERSION) ? cap(r.VERSION) : '';
+    var ver = (r.NomModele && r.VERSION) ? cap(r.VERSION) : ((titre === 'Véhicule' && r.VIN) ? 'VIN ' + String(r.VIN) : '');
     var immat = r.IMMAT || '';
-    var dt = fmtDate(r.DT_PMEC || r.creation_date);
+    var dt = r.DT_PMEC ? '1re MEC ' + fmtDate(r.DT_PMEC) : '';
     var aff = r.ID_AFFAIRE != null ? state.affaires[r.ID_AFFAIRE] : '';
     var photo = r.photo_url ? '<img class="vh-img" src="' + esc(r.photo_url) + '" loading="lazy" alt="">' : '<div class="vh-img vh-noimg">' + CAR + '</div>';
     var badges = '';
