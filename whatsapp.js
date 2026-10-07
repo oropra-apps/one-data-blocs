@@ -99,12 +99,19 @@ OD.define('whatsapp', {
   }
 
   async function loadThread() {
-    if (!state.conv) { state.items = []; return; }
-    state.loading = true; render();
+    if (!state.conv) { state.items = []; state.itemsConv = null; return; }
+    // « Chargement… » seulement à l'ouverture d'une conversation : un accusé
+    // (envoyé, délivré, lu) ou un nouveau message rafraîchit le fil en place,
+    // sans le vider (recette Team Colin 08/10/2026 : trois clignotements par
+    // message envoyé).
+    const convId = state.conv.id;
+    if (state.itemsConv !== convId) { state.loading = true; render(); }
     try {
-      const res = await sb().from('v_wa_thread_items').select('*').eq('conversation_id', state.conv.id).order('created_at', { ascending: true });
+      const res = await sb().from('v_wa_thread_items').select('*').eq('conversation_id', convId).order('created_at', { ascending: true });
       if (res.error) throw res.error;
+      if (!state.conv || state.conv.id !== convId) return;
       state.items = res.data || [];
+      state.itemsConv = convId;
       state.error = null;
     } catch (e) { console.error('[wa] loadThread', e); state.error = e.message || String(e); }
     state.loading = false; render();
@@ -125,9 +132,21 @@ OD.define('whatsapp', {
     if (!state.conv) return;
     try { if (state.channel) sb().removeChannel(state.channel); } catch (e) { }
     let t = null; const reload = () => { clearTimeout(t); t = setTimeout(loadThread, 250); };
+    // Un message ENTRANT rouvre la fenêtre de 24 h : on met à jour
+    // last_inbound_at sans attendre une réouverture du panneau (recette Team
+    // Colin 08/10/2026 : le bandeau « Fenêtre 24h fermée » restait affiché
+    // après la réponse du client).
+    const onMessage = (p) => {
+      const n = p && p.new;
+      if (n && n.direction === 'in' && state.conv) {
+        const at = n.created_at || new Date().toISOString();
+        if (!state.conv.last_inbound_at || new Date(at) > new Date(state.conv.last_inbound_at)) state.conv.last_inbound_at = at;
+      }
+      reload();
+    };
     state.channel = sb().channel('wa_thread_' + state.conv.id)
       // nouveaux messages (entrants/sortants) de la conversation
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'wa_messages', filter: 'conversation_id=eq.' + state.conv.id }, reload)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'wa_messages', filter: 'conversation_id=eq.' + state.conv.id }, onMessage)
       // accusés (sent -> delivered -> read) : ils arrivent dans wa_message_status
       .on('postgres_changes', { event: '*', schema: 'public', table: 'wa_message_status' }, reload)
       .subscribe();
@@ -543,6 +562,14 @@ OD.define('whatsapp', {
     bind(root);
     applyPos(root); makeDraggable(root);
     const body = root.querySelector('.wa-body'); if (body) body.scrollTop = body.scrollHeight;
+    // Une image ou une vidéo prend sa hauteur une fois chargée, après le
+    // défilement ci-dessus : on redescend si l'on était en bas du fil.
+    if (body) body.querySelectorAll('img.wa-media, video.wa-media').forEach(m => {
+      m.addEventListener(m.tagName === 'IMG' ? 'load' : 'loadedmetadata', () => {
+        const avant = body.scrollHeight - m.offsetHeight;
+        if (avant - body.scrollTop - body.clientHeight < 80) body.scrollTop = body.scrollHeight;
+      }, { once: true });
+    });
     hydrateAtt(root);
   }
 
