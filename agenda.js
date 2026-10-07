@@ -313,7 +313,11 @@ OD.define('agenda', {
         role_nom: (r.role_nom || '').trim(),
         fonction: (r.fonction || '').trim(),
         niveau: r.niveau != null ? Number(r.niveau) : null,
-        vn_vo: (r.vn_vo || '').toUpperCase()
+        vn_vo: (r.vn_vo || '').toUpperCase(),
+        // est_moi était perdu ici : collaborateursVisibles() le lisait toujours
+        // faux, si bien que le chef apparaissait dans « Vendeur évalué » et que
+        // « Moi » n'était jamais reconnu (recette Team Colin 07/10/2026).
+        est_moi: r.est_moi === true || (r.niveau != null && Number(r.niveau) === 0)
       }));
       setPerimRows(rows);
     } catch (e) { console.error('[agenda] get_agenda_perimeter', e); setPerimRows([]); }
