@@ -518,6 +518,7 @@ OD.define('topnav', {
 
     var __u = user();
     var __role = Number(__u.ID_Role != null ? __u.ID_Role : __u.id_role);
+    var __delcoOk = (__role !== 4 && __role !== 9);
     var __userMenu = USER_MENU.slice();
     if (__role === 1 || __role === 8) { __userMenu.splice(__userMenu.length - 1, 0, { t: 'Administration', p: P.admin }); }
     let userItems = '';
@@ -533,7 +534,10 @@ OD.define('topnav', {
           '<div class="od-logo" data-page="' + P.accueil + '">' + (LOGO_URL ? '<img class="od-logo-img" src="' + LOGO_URL + '" alt="Oropra">' : 'Oropra') + '</div>' +
           '<button class="od-burger" data-burger>' + I.burger + '</button>' +
           '<div class="od-menus">' + menusHtml +
-            '<a class="od-delco" id="delco-header-link">' + I.delco + '<span class="od-delco-txt">Delco</span><span id="delco-header-badge" data-state="idle"><span class="delco-header-badge-num"></span></span></a>' +
+            // Delco réservé à l'encadrement et aux fonctions support (07/10/2026) :
+            // pas de lien pour les vendeurs (4) ni les secrétaires (9). La base
+            // refuse aussi Delco à ces rôles ; ce filtre évite une page vide.
+            (__delcoOk ? '<a class="od-delco" id="delco-header-link">' + I.delco + '<span class="od-delco-txt">Delco</span><span id="delco-header-badge" data-state="idle"><span class="delco-header-badge-num"></span></span></a>' : '') +
             // Compteur d'arbitrage sur la barre (06/10/2026). Il ne vivait que
             // dans le menu de l'avatar, donc invisible tant qu'on ne l'ouvre pas,
             // et le bandeau — seule surface visible — se tait 30 minutes des
