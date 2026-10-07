@@ -59,9 +59,11 @@
   var LEGACY_URL = 'https://cdn.jsdelivr.net/gh/oropra-apps/one-data-blocs@6383ae37cc242b32685fd155feefae361f23e9f6/lead-mgmt.js';
   var ROLES_PLATEAU = [10];
   var ROLES_APERCU = [1, 8];
-  // Rôle → poste des sites. Les rôles absents (5 marketing, 9 secrétariat)
-  // gardent la version 48.
-  var POSTE_DU_ROLE = { 4: 'vendeur', 3: 'chef', 1: 'direction', 2: 'direction', 6: 'direction', 7: 'direction', 8: 'direction' };
+  // Rôle → poste des sites. Le marketing (5) a le poste de direction : il
+  // traite et transfère les leads de ses réseaux et crée des campagnes comme
+  // un directeur de groupe (décision d'Antoine, recette Team Colin 07/10/2026).
+  // Le secrétariat (9) garde la version 48 (lead management fermé).
+  var POSTE_DU_ROLE = { 4: 'vendeur', 3: 'chef', 1: 'direction', 2: 'direction', 5: 'direction', 6: 'direction', 7: 'direction', 8: 'direction' };
 
   function frontWindow() {
     try { var w = window.wwLib && wwLib.getFrontWindow && wwLib.getFrontWindow(); if (w) return w; } catch (e) {}
@@ -1645,7 +1647,7 @@
     // ── Campagnes : chef et direction ─────────────────────────────────────
     function vueCampagnesManager() {
       var sid = sitePoste();
-      var peutCreer = POSTE === 'direction' ? sitesStats().some(function (s) { return s.manager; }) || [1, 2, 6, 7, 8].indexOf(opt.role) !== -1 : true;
+      var peutCreer = POSTE === 'direction' ? sitesStats().some(function (s) { return s.manager; }) || [1, 2, 5, 6, 7, 8].indexOf(opt.role) !== -1 : true;
       var h = '<div class="ph"><div><h2>Campagnes</h2><p>L\'avancement se lit avant le résultat : une campagne à moitié traitée n\'a pas un mauvais taux, elle a du retard.' + (sid != null ? ' Site : ' + esc(siteNom((siteInfo(sid) || {}).site)) + '.' : '') + '</p></div>'
         + (peutCreer ? '<div class="ph-r"><button type="button" class="btn pri" data-a="creer-camp">Créer une campagne</button></div>' : '') + '</div>';
       if (!S.campagnes) return h + '<div class="empty">Chargement des campagnes…</div>';
