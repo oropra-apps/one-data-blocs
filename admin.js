@@ -1,5 +1,8 @@
 // ============================================================================
-//  ADMIN — module One Data (OD.define)  v11
+//  ADMIN — module One Data (OD.define)  v12
+//  v12 (08/10/2026) : un compte desactive (statut 'inactive' avec un compte de connexion) porte un
+//  badge « Désactivé » a cote du nom et sa ligne est grisee : seule l'action
+//  « Réactiver » du menu le revelait (recette Team Colin, A-91).
 //  v11 (07/10/2026) : recette Team Colin, administrateur 259.
 //  * Decision d'Antoine : « Rôle et manager », « Définir comme site
 //    principal » et « Retirer de ce site » quittent la modale d'actions.
@@ -217,6 +220,7 @@ OD.define('admin', {
   + '.oda-badge{display:inline-block;padding:2px 8px;border-radius:999px;font-size:11px;font-weight:600;background:var(--grey-bg);color:var(--grey-text);text-transform:capitalize;}'
   + '.oda-badge.ok{background:var(--green-bg);color:#1b7a44;} .oda-badge.pending{background:var(--orange-bg);color:#8a6014;} .oda-badge.none{background:var(--grey-bg);color:var(--grey-text);}'
   + '.oda-badge.alert{background:var(--red-bg);color:var(--red-soft);}'
+  + 'tr.oda-off td:not(.oda-actions-cell){opacity:.6}'
   + '.oda-menu button.alert{color:var(--red-soft);} .oda-menu button.alert:hover{background:var(--red-bg);}'
   + '.oda-mbox{border:1px solid var(--border);border-radius:10px;background:var(--bg);padding:12px 14px;margin-bottom:14px;}'
   + '.oda-mbox dl{display:grid;grid-template-columns:auto 1fr;gap:6px 14px;margin:0;font-size:12px;}'
@@ -727,12 +731,17 @@ OD.define('admin', {
   }
   function rowKey(r) { return r.user_site_unique_id != null ? r.user_site_unique_id : r.id_user; }
 
+  // v12 : desactive = statut 'inactive' ET un compte de connexion. Chez Team
+  // Colin, 'inactive' sans compte designe aussi les vendeurs pas encore
+  // ouverts au pilote : ils ne sont pas marques.
+  function estDesactive(r) { return String(r.user_status || '').toLowerCase() === 'inactive' && !!r.auth_uid; }
   function userRowHtml(r, indentClass) {
-    var html = '<tr class="oda-user">';
+    var html = '<tr class="oda-user' + (estDesactive(r) ? ' oda-off' : '') + '">';
     activeColumns().forEach(function (c, i) {
       var cls = (i === 0 ? 'oda-nom ' + (indentClass || '') : (c.grow ? 'oda-grow' : '')).trim();
       var cell = (c.field === '__affect') ? affectCell(r)
                : (c.kind === 'status') ? statusBadge(r[c.field]) : esc(r[c.field]);
+      if (i === 0 && estDesactive(r)) cell += ' <span class="oda-badge alert">Désactivé</span>';
       html += '<td' + (cls ? ' class="' + cls + '"' : '') + '>' + cell + '</td>';
     });
     html += '<td class="oda-actions-cell"><button class="oda-iconbtn" data-menu="' + esc(rowKey(r)) + '" title="Actions">' + ICON.dots + '</button></td>';
