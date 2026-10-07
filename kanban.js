@@ -12,6 +12,10 @@
 //    la liste ; elle-meme n'y figure plus sous « Chef des ventes ».
 //  Source : get_kanban_collaborateurs (migration 20261007450000).
 //  Le chef des ventes (3) garde get_kanban_vendeurs, inchange.
+//  v55 (07/10/2026) : le marketing CONSULTE (« voir », decision d'Antoine) :
+//  cartes sans glisser-deposer, sans corbeille ni bouton Deplacer ; la loupe,
+//  la fiche client et le renvoi BACS restent. La base refuse aussi ses
+//  deplacements sur les affaires des autres (20261007460000).
 // ============================================================================
 //  v52 (07/10/2026) : réglage du tenant propale_creation_one_data. Chez un
 //  client qui crée ses propositions dans BACS (Team Colin), la fiche VO et le
@@ -719,7 +723,8 @@ OD.define('kanban', {
     const j = ageJours(c.maj);
     const isPdf = (c.status === 'propale' || c.status === 'bdc' || c.status === 'win');
     const pdfType = (c.status === 'propale') ? 'propale' : 'bdc';
-    let h = '<div class="kc-card vt-' + vt + (c._moving ? ' moving' : '') + '" draggable="true" data-card="' + c.id_propale_bdc + '" data-from="' + c.status + '" data-kbacs="' + (deBacs ? '1' : '') + '">';
+    const lecture = estMarque();   // v55 : marketing en consultation
+    let h = '<div class="kc-card vt-' + vt + (c._moving ? ' moving' : '') + '" draggable="' + (lecture ? 'false' : 'true') + '" data-card="' + c.id_propale_bdc + '" data-from="' + c.status + '" data-kbacs="' + (deBacs ? '1' : '') + '">';
     h += pastilleBacs(c);
     if (c._moving) h += '<div class="kc-spin"><span class="kc-spinner"></span></div>';
 
@@ -779,7 +784,7 @@ OD.define('kanban', {
     if (!vnMulti) {
       if (deBacs) {
         h += '<button class="kc-ic" data-modif="' + c.id_propale_bdc + '" title="Consulter">' + ICON_SEARCH_VN + '</button>';
-      } else if (c.status === 'propale' || c.status === 'draft') {
+      } else if (!lecture && (c.status === 'propale' || c.status === 'draft')) {
         h += '<button class="kc-ic" data-modif="' + c.id_propale_bdc + '" title="Modifier">' + ICON_EDIT + '</button>';
       } else {
         h += '<button class="kc-ic" data-modif="' + c.id_propale_bdc + '" title="Consulter">' + ICON_SEARCH_VN + '</button>';
@@ -800,7 +805,7 @@ OD.define('kanban', {
     // Commandes. Au-dela (approbation lancee, transmise, abandonnee), c'est
     // BACS qui tranche.
     const colonneAvecCorbeille = (c.status === 'draft' || c.status === 'propale');
-    if (colonneAvecCorbeille && ((canArchive(c.status) && abandonPossible) || cmdUnitaire))
+    if (!lecture && colonneAvecCorbeille && ((canArchive(c.status) && abandonPossible) || cmdUnitaire))
       h += '<button class="kc-ic" data-archive="' + c.id_propale_bdc + '" title="'
          + (cmdUnitaire ? 'Abandonner la commande' : 'Archiver') + '">' + ICON_TRASH + '</button>';
     // Renvoi vers BACS : l'affaire si la carte est plurale (plusieurs documents),
@@ -809,7 +814,7 @@ OD.define('kanban', {
       const cible = vnMulti ? c.id_affaire_bacs : (c.bacs_sf_id || c.id_affaire_bacs);
       if (cible) h += '<button class="kc-ic kc-bacs" data-bacs="' + esc(cible) + '" title="Ouvrir dans BACS">B</button>';
     }
-    h += '<button class="kc-ic kc-move" data-menu="' + c.id_propale_bdc + '" title="Déplacer">' + ICON_MOVE + '</button>';
+    if (!lecture) h += '<button class="kc-ic kc-move" data-menu="' + c.id_propale_bdc + '" title="Déplacer">' + ICON_MOVE + '</button>';
     h += '</div>';
     if (state.menuFor === c.id_propale_bdc) h += renderMoveMenu(c);
     return h + '</div>';
