@@ -1,5 +1,15 @@
 // ============================================================================
-//  TOP NAV — module One Data (OD.define)  v28 — SÉLECTEUR DE PÉRIMÈTRE
+//  TOP NAV — module One Data (OD.define)  v30 — SÉLECTEUR DE PÉRIMÈTRE
+//  v30 (07/10/2026) : l'arbitrage des doublons n'apparait qu'aux roles qui
+//  le tranchent — administrateur (1), vendeur (4), secretaire (9) —, comme
+//  la base le fait depuis 20261007430000. Corrige aussi un defaut d'affichage
+//  ancien : .od-arb-bar (display:flex) et .od-arb-badge (display:inline-flex)
+//  l'emportaient sur l'attribut hidden. A zero dossier, la barre restait donc
+//  affichee avec une pastille orange vide, et l'entree Doublons du menu de
+//  l'avatar avec une pastille rouge vide. Constate en recette sur le compte
+//  marketing (largeur 644 px).
+//  v29 (07/10/2026) : pas de lien Delco pour les vendeurs (4) ni les
+//  secretaires (9).
 //  v24 (06/10/2026) : l'arbitrage gagne une TROISIEME COLONNE de saisie et la
 //  ligne NATURE (particulier / societe), jusque-la totalement absente alors
 //  qu'elle commande toute la presentation de la fiche client. 15,2 % des
@@ -394,6 +404,7 @@ OD.define('topnav', {
 .od-arb-bar svg{width:17px;height:17px;color:#d2941f;flex:0 0 auto}
 #od-arb-bar-n{min-width:18px;height:18px;padding:0 5px;border-radius:9px;font-size:10px;font-weight:700;display:inline-flex;align-items:center;justify-content:center;background:#d2941f;color:#fff}
 @media(max-width:1100px){.od-arb-bar-txt{display:none}}
+.od-arb-bar[hidden],.od-arb-badge[hidden]{display:none!important}
 .od-user{position:relative;flex:0 0 auto}
 .od-user>button{display:flex;align-items:center;gap:7px;background:none;border:none;cursor:pointer;padding:4px 6px 4px 4px;border-radius:30px;transition:background .15s}
 .od-user>button:hover{background:#f2f6fc}
@@ -519,7 +530,9 @@ OD.define('topnav', {
     var __u = user();
     var __role = Number(__u.ID_Role != null ? __u.ID_Role : __u.id_role);
     var __delcoOk = (__role !== 4 && __role !== 9);
-    var __userMenu = USER_MENU.slice();
+    // Arbitrage des doublons : administrateur, vendeur, secretaire (07/10/2026).
+    var __arbOk = (__role === 1 || __role === 4 || __role === 9);
+    var __userMenu = USER_MENU.filter(function (it) { return __arbOk || it.act !== 'doublons'; });
     if (__role === 1 || __role === 8) { __userMenu.splice(__userMenu.length - 1, 0, { t: 'Administration', p: P.admin }); }
     let userItems = '';
     __userMenu.forEach(function (it) {
@@ -543,11 +556,11 @@ OD.define('topnav', {
             // et le bandeau — seule surface visible — se tait 30 minutes des
             // qu'on clique sa croix. Un chef des ventes avec 99 dossiers en
             // attente ne voyait alors plus rien nulle part.
-            '<a class="od-arb-bar" id="od-arb-bar" hidden title="Clients à arbitrer">'
+            (__arbOk ? '<a class="od-arb-bar" id="od-arb-bar" hidden title="Clients à arbitrer">'
               + '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">'
               + '<path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/>'
               + '<path d="M12 9v4"/><path d="M12 17h.01"/></svg>'
-              + '<span class="od-arb-bar-txt">Arbitrage</span><span id="od-arb-bar-n"></span></a>' +
+              + '<span class="od-arb-bar-txt">Arbitrage</span><span id="od-arb-bar-n"></span></a>' : '') +
           '</div>' +
           '<div class="od-user"><button class="od-user-btn" data-toggle="user" data-tip="' + esc(userFullName()) + '"><span class="od-avatar">' + esc(userInitials()) + '</span></button>' +
             '<div class="od-drop">' + userItems + '</div></div>' +
