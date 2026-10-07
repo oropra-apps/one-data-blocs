@@ -1,5 +1,8 @@
 // ============================================================================
 //  HISTORIQUE CLIENT (top nav) — module One Data (OD.define)  v1
+//  v3 (08/10/2026) : le panneau s'ancre a DROITE du bouton. Ancre a gauche,
+//  il debordait de l'ecran de 174 px (bouton pres du bord droit, panneau de
+//  340 px), « Clients consultés récemment » coupe. Largeur bornee a l'ecran.
 //  Extrait d'auth.js (bootHistoClient), où il n'était initialisé QU'AU LOGIN :
 //  après un F5 ou en navigation, il ne démarrait jamais. Il est désormais monté
 //  par la TOP NAV via une ancre (patron sous-loader), donc présent partout.
@@ -171,7 +174,7 @@ const STYLE = `<style>
 #oropra-client-history .ch-trigger{background:none;border:none;cursor:pointer;color:#2a5ea9;padding:5px 7px;display:inline-flex;align-items:center;border-radius:5px;line-height:0;transition:background-color .15s,color .15s}
 #oropra-client-history .ch-trigger:hover{color:#0c447c;background:#f2f6fc}
 #oropra-client-history .ch-trigger.is-open{color:#0c447c;background:#eef4fc}
-#oropra-client-history .ch-panel{position:absolute;top:calc(100% + 8px);left:0;background:#fff;border:1px solid #e3edf9;border-radius:10px;box-shadow:0 10px 30px rgba(42,94,169,.16);width:340px;max-height:480px;display:flex;flex-direction:column;z-index:200;color:#2a5ea9}
+#oropra-client-history .ch-panel{position:absolute;top:calc(100% + 8px);left:auto;right:0;background:#fff;border:1px solid #e3edf9;border-radius:10px;box-shadow:0 10px 30px rgba(42,94,169,.16);width:min(340px,calc(100vw - 32px));max-height:480px;display:flex;flex-direction:column;z-index:200;color:#2a5ea9}
 #oropra-client-history .ch-panel-header{padding:14px 16px;border-bottom:1px solid #f0f4fa;font-size:11px;text-transform:uppercase;letter-spacing:.4px;color:#7a98c5;font-weight:600}
 #oropra-client-history .ch-list{overflow-y:auto;flex:1}
 #oropra-client-history .ch-item{padding:11px 16px;cursor:pointer;border-bottom:1px solid #f5f8fc;display:flex;align-items:flex-start;gap:10px}
