@@ -238,7 +238,10 @@ OD.define('topnav', {
     try { const w = wwLib.getFrontWindow(); w.oropraUser = null; w.__oropraUserPromise = null; w.__oropraAuthUid = null; } catch (e) {}
     try {
       const sb = wwLib.wwPlugins && wwLib.wwPlugins.supabase && wwLib.wwPlugins.supabase.instance;
-      if (sb && sb.auth && typeof sb.auth.signOut === 'function') { await sb.auth.signOut(); }
+      // scope 'local' : ne ferme QUE la session de ce navigateur. Par défaut,
+      // signOut() est 'global' et déconnecte l'utilisateur de tous ses appareils
+      // (PC du showroom, téléphone…) — constaté en recette Team Colin le 08/10/2026.
+      if (sb && sb.auth && typeof sb.auth.signOut === 'function') { await sb.auth.signOut({ scope: 'local' }); }
     } catch (e) {}
     if (inEditor()) {
       const authUid = PAGE_UID['/authentification'];
@@ -729,6 +732,8 @@ OD.define('topnav', {
         if (Number(d.relances_en_retard || 0) > 0)
           parts.push(d.relances_en_retard + (d.relances_en_retard > 1
             ? ' relances en retard' : ' relance en retard'));
+        if (Number(d.rdv_a_conclure || 0) > 0)
+          parts.push(d.rdv_a_conclure + ' RDV \u00e0 conclure');
         p.setAttribute('title', parts.length ? parts.join(' \u00b7 ') : 'Rien en attente');
       } else { p.removeAttribute('title'); }
       // Le battement ne signale que du NOUVEAU depuis le dernier passage sur la
