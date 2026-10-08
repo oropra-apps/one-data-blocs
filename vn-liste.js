@@ -483,15 +483,18 @@ OD.define('vn-liste', {
   // ───────────────────────────────────────────────────────────── boot
   function suivreSite() {
     var api = siteApi(); if (!api) return;
+    // Abonnements posés une fois, mais module remonté à chaque navigation : ils
+    // appellent la fonction du montage COURANT (window.__vnSurSite). Avant v3, un
+    // changement de site après navigation alimentait l'instance morte et la liste
+    // restait sur l'ancien site (recette Team Colin 08/10/2026, même défaut que
+    // vo-liste).
+    window.__vnSurSite = function () { S.__perimetrePose = false; poserPerimetreParDefaut(); rendre(); };
+    var relai = function () { if (window.__vnSurSite) window.__vnSurSite(); };
     if (api.onChange && !window.__vnSiteSub) {
-      window.__vnSiteSub = api.onChange(function () { S.__perimetrePose = false; poserPerimetreParDefaut(); rendre(); });
+      window.__vnSiteSub = api.onChange(relai);
     }
     if (!window.__vnSiteEvt) {
-      try {
-        doc.addEventListener('oropra-site-changed', function () {
-          S.__perimetrePose = false; poserPerimetreParDefaut(); rendre();
-        });
-      } catch (e) { }
+      try { doc.addEventListener('oropra-site-changed', relai); } catch (e) { }
       window.__vnSiteEvt = true;
     }
   }
