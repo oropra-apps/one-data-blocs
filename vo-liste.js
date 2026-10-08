@@ -2466,8 +2466,15 @@ OD.define('vo-liste', {
 
   function watchSite() {
     var api = siteApi(); if (!api) return;
-    if (api.onChange && !window.__voSiteSub) { window.__voSiteSub = api.onChange(function () { reloadForSite(); }); }
-    if (!window.__voSiteEvt) { try { doc.addEventListener('oropra-site-changed', reloadForSite); } catch (e) { } window.__voSiteEvt = true; }
+    // Les abonnements ne sont posés qu'une fois, mais le module est remonté à
+    // chaque navigation : ils appellent la fonction du montage COURANT
+    // (window.__voReloadForSite), pas celle du premier. Avant v12, changer de
+    // site après une navigation laissait la liste sur l'ancien site (recette
+    // Team Colin 08/10/2026 : sélecteur SCEAUX, liste « Site : ARCUEIL »).
+    window.__voReloadForSite = reloadForSite;
+    var relai = function () { if (window.__voReloadForSite) window.__voReloadForSite(); };
+    if (api.onChange && !window.__voSiteSub) { window.__voSiteSub = api.onChange(relai); }
+    if (!window.__voSiteEvt) { try { doc.addEventListener('oropra-site-changed', relai); } catch (e) { } window.__voSiteEvt = true; }
   }
   function boot(tries) {
     tries = tries || 0;
@@ -3595,8 +3602,15 @@ OD.define('vo-liste', {
 
   function watchSite() {
     var api = siteApi(); if (!api) return;
-    if (api.onChange && !window.__voSiteSub) { window.__voSiteSub = api.onChange(function () { reloadForSite(); }); }
-    if (!window.__voSiteEvt) { try { doc.addEventListener('oropra-site-changed', reloadForSite); } catch (e) { } window.__voSiteEvt = true; }
+    // Les abonnements ne sont posés qu'une fois, mais le module est remonté à
+    // chaque navigation : ils appellent la fonction du montage COURANT
+    // (window.__voReloadForSite), pas celle du premier. Avant v12, changer de
+    // site après une navigation laissait la liste sur l'ancien site (recette
+    // Team Colin 08/10/2026 : sélecteur SCEAUX, liste « Site : ARCUEIL »).
+    window.__voReloadForSite = reloadForSite;
+    var relai = function () { if (window.__voReloadForSite) window.__voReloadForSite(); };
+    if (api.onChange && !window.__voSiteSub) { window.__voSiteSub = api.onChange(relai); }
+    if (!window.__voSiteEvt) { try { doc.addEventListener('oropra-site-changed', relai); } catch (e) { } window.__voSiteEvt = true; }
   }
   // Boot : le loader fournit __anchor et possède le cycle de vie (re-montage SPA
   // compris). Plus d'attente d'ancre, plus de garde de version (elle empêcherait
