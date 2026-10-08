@@ -1,5 +1,9 @@
 // ============================================================================
-//  DASHBOARD — module One Data (OD.define)   v50 — PROFIL TEAM COLIN
+//  DASHBOARD — module One Data (OD.define)   v51 — PROFIL TEAM COLIN
+//
+//  v51 (08/10/2026) : sans objectif du mois saisi, le bandeau ne dit plus
+//  « toute l'équipe tient son objectif » : il dit que les objectifs ne sont
+//  pas encore saisis (chef) / « objectifs du mois non saisis » (direction).
 //
 //  v50 : « Jamais contactés » suit la définition du lead management : leads
 //  attribués, ouverts, sans premier contact, reçus depuis moins de 30 jours,
@@ -1194,7 +1198,11 @@ OD.define('dashboard', {
         q = 'Qui décroche, et sur quoi';
         const r = classement(A, v => num(v.obj_cdes) ? num(v.cdes) - num(v.obj_cdes) : 9999, 'asc')
           .filter(v => num(v.obj_cdes) > 0 && num(v.cdes) < num(v.obj_cdes));
-        txt = r.length
+        // Sans objectif saisi, « toute l'équipe tient son objectif » serait faux
+        // (recette Team Colin 08/10/2026 : objectifs d'octobre à 0).
+        txt = !num(p.obj_cdes)
+          ? '<b>' + fmt(p.cdes) + '</b> commandes ce mois-ci. Les objectifs du mois ne sont pas encore saisis : impossible de dire qui décroche.'
+          : r.length
           ? 'L’équipe est à <b>' + fmt(p.cdes) + '</b> commandes pour ' + fmt(p.obj_cdes)
             + '. L\u2019\u00e9cart le plus important est celui de <b>' + esc(r[0].nom) + '</b>.'
           : '<b>' + fmt(p.cdes) + '</b> commandes ce mois-ci : toute l’équipe tient son objectif.';
@@ -1213,7 +1221,9 @@ OD.define('dashboard', {
         q = 'Quelle entité décroche';
         const r = parEntite(A, 'affaire').filter(x => num(x.obj_cdes) > 0 && x.cdes < x.obj_cdes)
           .sort((a, b) => (a.cdes - a.obj_cdes) - (b.cdes - b.obj_cdes));
-        txt = '<b>' + fmt(p.cdes) + '</b> commandes pour ' + fmt(p.obj_cdes) + ' attendues, '
+        txt = (num(p.obj_cdes)
+            ? '<b>' + fmt(p.cdes) + '</b> commandes pour ' + fmt(p.obj_cdes) + ' attendues, '
+            : '<b>' + fmt(p.cdes) + '</b> commandes (objectifs du mois non saisis), ')
           + '<b>' + fmtEur(A.engage) + '</b> engagés et non soldés'
           + (r.length ? ', et <b>' + esc(r[0].nom) + '</b> porte le plus gros retard.' : '.');
         pouls = [['Commandes', fmt(p.cdes)], ['Objectif', fmt(p.obj_cdes)],
