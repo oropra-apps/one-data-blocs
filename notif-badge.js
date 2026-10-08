@@ -87,8 +87,12 @@ OD.define('notif-badge', {
       catch (e) { console.error('[notif-badge] updateValue', e); }
       try { const w = fwin(); if (w.variables) w.variables[VAR_NB_NOTIFS + '-value'] = n; } catch (e) {}
 
+      // detail : la barre du haut en tire l'infobulle de la pastille (« 1 RDV à
+      // conclure · 1 relance en retard »). Il n'était pas transmis : la
+      // pastille n'avait jamais d'infobulle (recette Team Colin 08/10/2026).
       const feu = { n: n, feu: (etat && etat.feu) || 'calme',
-                    nouveau: !!(etat && etat.nouveau), maj: Date.now() };
+                    nouveau: !!(etat && etat.nouveau), detail: (etat && etat.detail) || null,
+                    maj: Date.now() };
       try { window.__odNotifFeu = feu; } catch (e) {}
       try { const w = fwin(); w.__odNotifFeu = feu; } catch (e) {}
       // La barre du haut repeint sur cet événement, sans attendre son cycle
