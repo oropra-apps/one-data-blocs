@@ -1,5 +1,9 @@
 // ============================================================================
-//  VOIP-INIT — module One Data (OD.define)  v6
+//  VOIP-INIT — module One Data (OD.define)  v7
+//  v7 (08/10/2026) : le jeton est demandé AVANT de charger le SDK Twilio. Un
+//  compte sans poste Twilio (tout Team Colin, en 3CX) ne télécharge plus le
+//  SDK à chaque page et ne journalise plus d'erreur : la fonction répond
+//  { token: null, reason: 'sans_voip' } et le module s'arrête en silence.
 //  v6 (05/10/2026) : deux attentes inutiles retirees. getUser() remplace par la
 //  session deja en memoire (un appel /auth/v1/user de moins au demarrage), et le
 //  sommeil fixe de 2000 ms avant la creation du Device remplace par une attente
@@ -12,18 +16,6 @@
 // ============================================================================
 OD.define('voip-init', {
   async mount(__anchor, ctx) {
-// 0. SDK Twilio
-if (!window.Twilio) {
-  await new Promise((resolve, reject) => {
-    const script = document.createElement('script')
-    script.src = 'https://cdn.jsdelivr.net/npm/@twilio/voice-sdk@2.10.2/dist/twilio.min.js'
-    script.onload = resolve
-    script.onerror = (e) => { console.error('❌ Erreur chargement SDK:', e); reject(e) }
-    document.head.appendChild(script)
-  })
-  console.log('✅ SDK Twilio chargé dynamiquement')
-}
-
 // 1. Skip si device déjà actif
 const existingDevice = (globalThis.__ONE_DATA__?.device) || window.parent._twilioDevice
 if (existingDevice?.state && existingDevice.state !== 'destroyed') {
@@ -57,8 +49,11 @@ const response = await fetch(`${supabaseUrl}/functions/v1/voip-generate-token`, 
   },
   body: JSON.stringify({ email })
 })
-const data = await response.json()
-if (!data?.token) { console.error('❌ Token error:', data); return { success: false } }
+const data = await response.json().catch(() => ({}))
+if (!data?.token) {
+  if (data?.reason) { console.log('ℹ️ Téléphonie Twilio non utilisée pour ce compte (' + data.reason + ')'); return { success: false, reason: data.reason } }
+  console.error('❌ Token error:', data); return { success: false }
+}
 
 // Le token revient AVEC une identité nulle quand le compte n'a pas de numéro
 // VOIP (direction, admin, back-office). Initialiser un Device Twilio avec un
@@ -69,6 +64,18 @@ if (!data.identity) {
   return { success: false, reason: 'sans_voip' }
 }
 console.log('✅ Token récupéré pour:', data.identity)
+// 0. SDK Twilio (chargé seulement pour un compte équipé)
+if (!window.Twilio) {
+  await new Promise((resolve, reject) => {
+    const script = document.createElement('script')
+    script.src = 'https://cdn.jsdelivr.net/npm/@twilio/voice-sdk@2.10.2/dist/twilio.min.js'
+    script.onload = resolve
+    script.onerror = (e) => { console.error('❌ Erreur chargement SDK:', e); reject(e) }
+    document.head.appendChild(script)
+  })
+  console.log('✅ SDK Twilio chargé dynamiquement')
+}
+
 if (!window.Twilio) { console.error('❌ SDK Twilio toujours non disponible'); return { success: false } }
 
 // Attente de la disponibilite reelle du constructeur, au lieu d'un sommeil
