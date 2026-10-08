@@ -1,5 +1,13 @@
 // ============================================================================
-//  DELCO — CHAT AGENT — module One Data (OD.define)  v1
+//  DELCO — CHAT AGENT — module One Data (OD.define)  v7
+//  v7 (09/10/2026) — plan d'action performance Delco :
+//   · la réponse s'affiche AU FIL DE LA RÉDACTION (agent-orchestrator v7,
+//     { stream: true } → événements meta / etape / delta / efface / fin) ;
+//     les étapes (« Je lis le tableau de bord… ») remplacent les trois points
+//     tant qu'aucun mot n'est arrivé. Orchestrateur plus ancien (réponse
+//     JSON) : lecture d'avant, sans changement visible.
+//   · boutons « Synthèse pipeline » : « ce mois-ci » (mêmes chiffres que le
+//     tableau de bord, qui raisonne au mois) au lieu de « 30 derniers jours ».
 //  Rendu dans __anchor ; FN_URL (agent-orchestrator) -> ctx.tenant ;
 //  client via ctx.supabase ; création de #cp-root retirée (loader).
 // ============================================================================
@@ -56,18 +64,18 @@ await (async function () {
     manager: [
       { emoji: "🌅", label: "Brief du matin",    prompt: "Fais-moi le brief du matin." },
       { emoji: "🔥", label: "Dossiers chauds",   prompt: "Quels sont les dossiers les plus chauds à signer cette semaine ?" },
-      { emoji: "📊", label: "Synthèse pipeline", prompt: "Fais-moi la synthèse du pipeline de mon équipe sur les 30 derniers jours." },
+      { emoji: "📊", label: "Synthèse pipeline", prompt: "Fais-moi la synthèse du pipeline de mon équipe ce mois-ci." },
       { emoji: "📱", label: "Activité 7j",       prompt: "Comment se débrouille mon équipe en termes d'activité ces 7 derniers jours ?" },
     ],
     direction: [
       { emoji: "🌅", label: "Brief du matin",    prompt: "Fais-moi le brief du matin." },
-      { emoji: "📊", label: "Synthèse pipeline", prompt: "Fais-moi la synthèse du pipeline de mon périmètre sur les 30 derniers jours." },
+      { emoji: "📊", label: "Synthèse pipeline", prompt: "Fais-moi la synthèse du pipeline de mon périmètre ce mois-ci." },
       { emoji: "🏆", label: "Comparer mes sites", prompt: "Compare mes sites entre eux : qui sur-performe, qui décroche, et sur quels critères ?" },
       { emoji: "📡", label: "Signaux faibles",   prompt: "Détecte les signaux faibles de mon périmètre : qu'est-ce qui se prépare ou décroche avant que ça touche les ventes ?" },
     ],
     admin: [
       { emoji: "🌅", label: "Brief du matin",     prompt: "Fais-moi le brief du matin." },
-      { emoji: "📊", label: "Synthèse pipeline",  prompt: "Fais-moi la synthèse du pipeline sur les 30 derniers jours." },
+      { emoji: "📊", label: "Synthèse pipeline",  prompt: "Fais-moi la synthèse du pipeline ce mois-ci." },
       { emoji: "🏆", label: "Comparer mes sites", prompt: "Compare mes sites entre eux : qui sur-performe, qui décroche ?" },
       { emoji: "📡", label: "Signaux faibles",    prompt: "Détecte les signaux faibles : qu'est-ce qui se prépare ?" },
     ],
@@ -155,6 +163,9 @@ await (async function () {
       .cp-typing span{width:6px;height:6px;background:var(--green);border-radius:50%;animation:cp-bounce 1.2s infinite;}
       .cp-typing span:nth-child(2){animation-delay:.15s;}
       .cp-typing span:nth-child(3){animation-delay:.3s;}
+      .cp-etape{font-size:12px;color:var(--muted);font-weight:600;margin-top:2px;}
+      .cp-bubble.cp-live p:last-child::after{content:"";display:inline-block;width:7px;height:14px;margin-left:2px;background:var(--green);vertical-align:-2px;animation:cp-blink 1s steps(2) infinite;}
+      @keyframes cp-blink{50%{opacity:0;}}
       @keyframes cp-bounce{0%,60%,100%{transform:translateY(0);opacity:.5;}30%{transform:translateY(-4px);opacity:1;}}
       .cp-empty{text-align:center;padding:60px 24px;color:var(--muted);}
       .cp-empty-logo{width:64px;height:64px;margin:0 auto 16px;border-radius:16px;background:linear-gradient(135deg,var(--green),var(--blue));display:flex;align-items:center;justify-content:center;box-shadow:0 8px 24px rgba(42,94,169,0.15);}
@@ -591,7 +602,7 @@ await (async function () {
     const el = doc.createElement("div");
     el.className = "cp-msg assistant";
     el.id = "cp-typing-row";
-    el.innerHTML = `<div class="cp-avatar">${LOGO_SVG}</div><div class="cp-bubble"><div class="cp-typing"><span></span><span></span><span></span></div></div>`;
+    el.innerHTML = `<div class="cp-avatar">${LOGO_SVG}</div><div class="cp-bubble"><div class="cp-typing"><span></span><span></span><span></span></div><div class="cp-etape"></div></div>`;
     $stream.appendChild(el);
     scrollToBottom();
   }
@@ -719,6 +730,107 @@ await (async function () {
     return nom ? { id_site: id, nom_site: nom } : { id_site: id };
   }
 
+  // ── Lecture du flux SSE de l'orchestrateur (v7) ─────────────────────
+  // meta {threadId} · etape {texte} · delta {t} · efface {} · fin {finalText}
+  // · erreur {error}. Le texte reçu s'affiche dans une bulle « vivante »,
+  // redessinée au plus une fois par image ; « efface » vide la bulle (texte
+  // de préambule ou réponse réécrite après le contrôle des chiffres).
+  async function lireFlux(r) {
+    const reader = r.body.getReader();
+    const dec = new TextDecoder();
+    let tampon = "", texte = "", bulle = null, aDessiner = false, fini = false;
+
+    const etape = (t) => {
+      const el = doc.querySelector("#cp-typing-row .cp-etape");
+      if (el) el.textContent = t || "";
+    };
+    const dessiner = () => {
+      aDessiner = false;
+      if (!texte) return;
+      if (!bulle) {
+        hideTyping();
+        const row = doc.createElement("div");
+        row.className = "cp-msg assistant";
+        row.id = "cp-live-row";
+        row.innerHTML = `<div class="cp-avatar">${LOGO_SVG}</div><div class="cp-bubble cp-live"></div>`;
+        $stream.appendChild(row);
+        bulle = row.querySelector(".cp-bubble");
+      }
+      bulle.innerHTML = renderMarkdown(parseExports(texte).clean);
+      scrollToBottom();
+    };
+    const planifier = () => {
+      if (aDessiner) return;
+      aDessiner = true;
+      (doc.defaultView.requestAnimationFrame || setTimeout)(dessiner);
+    };
+    const effacer = () => {
+      texte = "";
+      const row = doc.getElementById("cp-live-row");
+      if (row) row.remove();
+      bulle = null;
+      if (!doc.getElementById("cp-typing-row")) showTyping();
+    };
+
+    const traiter = async (nom, d) => {
+      if (nom === "meta") {
+        if (d.threadId && d.threadId !== currentThreadId) currentThreadId = d.threadId;
+      } else if (nom === "etape") {
+        etape(d.texte);
+      } else if (nom === "delta") {
+        texte += d.t || "";
+        planifier();
+      } else if (nom === "efface") {
+        effacer();
+      } else if (nom === "fin") {
+        fini = true;
+        const row = doc.getElementById("cp-live-row");
+        if (row) row.remove();
+        hideTyping();
+        if (d.threadId && d.threadId !== currentThreadId) currentThreadId = d.threadId;
+        currentMessages.push({ role: "assistant", content: d.finalText || "*(réponse vide)*" });
+        renderMessages();
+        loadThreads().catch(() => {});
+      } else if (nom === "erreur") {
+        fini = true;
+        const row = doc.getElementById("cp-live-row");
+        if (row) row.remove();
+        hideTyping();
+        currentMessages.push({ role: "assistant", content: `⚠️ **Erreur :** ${d.error || "inconnue"}` });
+        renderMessages();
+      }
+    };
+
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      tampon += dec.decode(value, { stream: true });
+      let i;
+      while ((i = tampon.indexOf("\n\n")) >= 0) {
+        const bloc = tampon.slice(0, i);
+        tampon = tampon.slice(i + 2);
+        let nom = null, data = null;
+        for (const l of bloc.split("\n")) {
+          if (l.startsWith("event:")) nom = l.slice(6).trim();
+          else if (l.startsWith("data:")) data = l.slice(5).trim();
+        }
+        if (!nom || !data) continue;
+        let d = {};
+        try { d = JSON.parse(data); } catch (_) { continue; }
+        await traiter(nom, d);
+      }
+    }
+    if (!fini) {
+      // Flux coupé avant la fin : on garde ce qui est arrivé, signalé.
+      const row = doc.getElementById("cp-live-row");
+      if (row) row.remove();
+      hideTyping();
+      currentMessages.push({ role: "assistant", content: (texte ? texte + "\n\n" : "") + "⚠️ *La réponse a été interrompue. Relance la question si besoin.*" });
+      renderMessages();
+      loadThreads().catch(() => {});
+    }
+  }
+
   async function sendPrompt(prompt) {
     if (!prompt || !prompt.trim() || isSending) return;
     isSending = true;
@@ -753,6 +865,7 @@ await (async function () {
         body.date_du_jour = new Date().toISOString().slice(0, 10);
       } catch (e) { console.warn('[delco] contexte ecran', e); }
 
+      body.stream = true;
       const r = await fetch(FN_URL, {
         method: "POST",
         headers: {
@@ -761,6 +874,15 @@ await (async function () {
         },
         body: JSON.stringify(body)
       });
+
+      // ── v7 : réponse en flux (SSE) ───────────────────────────────────
+      const ctype = r.headers.get("content-type") || "";
+      if (ctype.includes("text/event-stream") && r.body) {
+        await lireFlux(r);
+        return;
+      }
+
+      // Orchestrateur ancien : réponse JSON d'un bloc.
       const j = await r.json();
       hideTyping();
 
