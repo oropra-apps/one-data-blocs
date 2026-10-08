@@ -1,4 +1,11 @@
 // ============================================================================
+//  v20 (08/10/2026) : le selecteur de collaborateur suit le site choisi dans
+//  la barre du haut. Chef des ventes : la liste ne garde que les
+//  collaborateurs de ce site (ou de tout le perimetre si « Tout mon
+//  perimetre » est choisi). Direction (cascade) : la cascade se cale sur ce
+//  site a chaque changement. Si le collaborateur affiche n'est plus dans la
+//  liste, l'agenda revient a celui de l'utilisateur. Les vendeurs sortis de
+//  l'effectif sont retires cote base (get_agenda_perimeter, 08/10/2026).
 //  v16 (05/10/2026) : filet d'affichage. Une valeur stockee hors referentiel
 //  ("Other", une variante d'un import) ne retombe plus sur « Selectionner » :
 //  elle est ajoutee comme option, avec son libelle propre quand on sait la
@@ -107,6 +114,7 @@ OD.define('agenda', {
   function siteIds() { const v = siteValRaw(); return v == null ? null : (Array.isArray(v) ? v.map(Number) : [Number(v)]); }
   function agendaUserVal() { return wwVal(CFG.agendaUserVar); }
   function setAgendaUser(id) { try { wwLib().wwVariable.updateValue(CFG.agendaUserVar, Number(id)); } catch (e) {} }
+  function clearAgendaUser() { try { wwLib().wwVariable.updateValue(CFG.agendaUserVar, null); } catch (e) {} }
 
   function userRow() { try { let d = frontWin().oropraUser; if (Array.isArray(d)) d = d[0]; return d || {}; } catch (e) { return {}; } }
   function viewerName() { const u = userRow(); return u.nomComplet || u.nom_complet || ''; }
@@ -220,11 +228,16 @@ OD.define('agenda', {
   // ne porte aucune notion de hiérarchie, et depuis dashboard.js v18 il
   // contient aussi l'encadrement, donc les collègues de même niveau.
   // Renvoie null tant que le périmètre n'est pas chargé.
-  function collaborateursVisibles() {
+  // sites (optionnel) : ne garder que les collaborateurs rattaches a l'un de
+  // ces sites (le viewer reste toujours present). Filtre AVANT dedoublonnage :
+  // un vendeur de deux sites est retenu s'il est sur l'un des sites demandes.
+  function collaborateursVisibles(sites) {
     const perim = perimRows();
     if (perim === null) { loadPerim(); return null; }
+    const filtre = Array.isArray(sites) && sites.length ? new Set(sites.map(Number)) : null;
     const vus = {}, out = [];
     for (const r of perim) {
+      if (filtre && !r.est_moi && !filtre.has(Number(r.id_site))) continue;
       const k = String(r.id_user);
       if (vus[k]) continue;
       vus[k] = 1;
@@ -263,7 +276,8 @@ OD.define('agenda', {
       // donc les autres chefs — deux personnes de même niveau ne doivent
       // pas pouvoir se consulter. On passe par la RPC, qui ne descend que
       // la hiérarchie (N-1, N-2, N-3...).
-      const vus = collaborateursVisibles();
+      // v20 : la liste suit le site de la barre du haut.
+      const vus = collaborateursVisibles(siteIds());
       if (vus === null) return null;
       const moi = vus.find(v => v.est_moi);
       groups.push({ label: (moi && moi.role_nom) || 'Chef des ventes', items: [{ id: vid, nom: vname }] });
@@ -343,6 +357,16 @@ OD.define('agenda', {
       if (self) { sel.reseau = self.reseau; sel.affKey = affKeyOf(self); sel.idSite = self.id_site; }
       sel.init = true;
     }
+    // v20 : à chaque changement de site dans la barre du haut, la cascade se
+    // cale sur ce site (s'il n'y en a qu'un et qu'il est dans le perimetre).
+    const top = siteIds(); const topSig = JSON.stringify(top);
+    if (sel.topnav !== topSig) {
+      sel.topnav = topSig;
+      if (top && top.length === 1) {
+        const ligne = rows.find(r => Number(r.id_site) === Number(top[0]));
+        if (ligne) { sel.reseau = ligne.reseau; sel.affKey = affKeyOf(ligne); sel.idSite = ligne.id_site; }
+      }
+    }
     const reseaux = uniqOpts(rows, r => r.reseau, r => r.reseau);
     if (!reseaux.some(o => o.key === sel.reseau)) sel.reseau = reseaux.length ? reseaux[0].key : null;
     const afRows = rows.filter(r => r.reseau === sel.reseau);
@@ -420,6 +444,11 @@ OD.define('agenda', {
     const curId = currentCollabId();
     const selfId = model.selfId != null ? model.selfId : CACHED_UID;
     const selVal = r.vendeurs.some(v => String(v.id_user) === String(curId)) ? curId : selfId;
+    // v20 : collaborateur affiche hors du site retenu -> retour a soi.
+    const affC = agendaUserVal();
+    if (affC != null && String(affC) !== String(selfId) && !r.vendeurs.some(v => String(v.id_user) === String(affC))) {
+      clearAgendaUser(); try { refetch(); } catch (e) {}
+    }
     const lvl = (id, label, opts, val, show) => {
       if (!show) return '';
       return '<label class="agc-lvl"><span class="agc-lvl-lbl">' + esc(label) + '</span>'
@@ -620,6 +649,12 @@ OD.define('agenda', {
     if (model.mode === 'cascade') { renderCascade(host, model); return; }
     if (model.mode === 'none') { host.style.display = 'none'; host.innerHTML = ''; return; }
     host.style.display = '';
+    // v20 : collaborateur affiche absent de la liste du site choisi -> on
+    // revient a l'agenda de l'utilisateur.
+    const aff = agendaUserVal();
+    if (aff != null && String(aff) !== String(CACHED_UID) && !model.allById[Number(aff)]) {
+      clearAgendaUser(); collabSig = null; try { refetch(); } catch (e) {}
+    }
     const curId = currentCollabId();
     const curName = model.allById[curId] || model.selfName || '';
     let menu = '';
