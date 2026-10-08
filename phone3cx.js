@@ -1,5 +1,8 @@
 // ============================================================================
-//  One Data — TELEPHONIE 3CX cote vendeur (module ambiant, sans ancre WeWeb)  v5
+//  One Data — TELEPHONIE 3CX cote vendeur (module ambiant, sans ancre WeWeb)  v6
+//  v6 (08/10/2026) : si la commande d'appel est refusee (pas de poste, pont
+//  injoignable, session invalide), le bandeau le dit au lieu de rester sur
+//  « Votre poste sonne » ; il se referme seul apres 8 s.
 //  v5 (05/10/2026) : boot() lit l'identifiant dans la session en memoire
 //  (getSession) au lieu d'appeler /auth/v1/user. Repli conserve.
 //  Panneau d'appel : le vendeur reste dans One Data, le combine porte la voix.
@@ -62,6 +65,7 @@ OD.define('phone3cx', {
         '.od3cx-mince{display:flex;align-items:center;gap:9px;padding:11px 12px 11px 14px}',
         '.od3cx-mt{font-size:13px;font-weight:600;color:#1f2a37;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}',
         '.od3cx-mince .od3cx-x{margin-left:4px}',
+        '.od3cx-mt.err{white-space:normal;color:#e24b4a;line-height:1.35}',
       ].join('');
       (doc.head || doc.documentElement).appendChild(st);
     }
@@ -112,8 +116,10 @@ OD.define('phone3cx', {
         el.innerHTML =
           '<div class="od3cx-mince">' +
           '<span class="od3cx-pt"></span>' +
-          '<span class="od3cx-mt">' +
-            (encours
+          '<span class="od3cx-mt' + (a.erreur ? ' err' : '') + '">' +
+            (a.erreur
+              ? 'Appel impossible : ' + esc(a.erreur)
+              : encours
               ? (a.direct ? 'Appel de ' : 'En ligne avec ') + esc(a.nom || a.numero || '') +
                 ' · <span class="od3cx-chrono" id="od3cx-t">' + mmss(Date.now() - S.depuis) + '</span>'
               : 'Votre poste sonne — décrochez pour appeler ' + esc(a.nom || a.numero || '')) +
@@ -220,7 +226,17 @@ OD.define('phone3cx', {
         if (direct) S.depuis = Date.now();
         rendre();
         if (direct) return Promise.resolve({ ok: true, via: 'client3cx' });
-        return commande('appeler', { numero: numero });
+        return commande('appeler', { numero: numero }).catch((e) => ({ ok: false, error: (e && e.message) || 'erreur réseau' }))
+          .then((j) => {
+            if (!j || !j.ok) {
+              if (S.appel && S.appel.sortant && S.appel.numero === numero) {
+                S.appel = Object.assign({}, S.appel, { erreur: (j && j.error) || 'le poste n\u2019a pas pu être appelé' });
+                rendre();
+                setTimeout(() => { if (S.appel && S.appel.erreur) fermer(); }, 8000);
+              }
+            }
+            return j;
+          });
       },
       actif() { return !!S.appel; },
     };
