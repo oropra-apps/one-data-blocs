@@ -1,5 +1,8 @@
 // ============================================================================
-//  DELCO — CHAT AGENT — module One Data (OD.define)  v8
+//  DELCO — CHAT AGENT — module One Data (OD.define)  v9
+//  v9 (09/10/2026) — pouce haut / bas sous chaque réponse (plan Delco, O3) :
+//     enregistré dans agent_feedback ; un pouce bas demande un mot
+//     d'explication (facultatif) et verse la question au banc d'essai.
 //  v8 (09/10/2026) — cartes d'action (plan Delco, P3) : quand Delco propose
 //     un RDV, une relance ou un message WhatsApp, sa réponse porte
 //     [[ACTION:<id>]] ; le chat dessine une carte « Valider / Ignorer ».
@@ -208,6 +211,26 @@ await (async function () {
       .cp-export-btn.xlsx{ color:var(--green); }
       .cp-export-btn.xlsx:hover{ background:#ecf8f5; border-color:var(--green); }
       .cp-export-btn:disabled{ opacity:.55; cursor:wait; }
+
+      /* ─── v9 : pouces ─── */
+      .cp-pouces{ display:flex; align-items:center; gap:6px; margin-top:10px; flex-wrap:wrap; }
+      .cp-pouce{
+        border:1px solid var(--line); background:#fff; border-radius:8px;
+        padding:2px 8px; cursor:pointer; font-size:13px; line-height:20px;
+        filter:grayscale(1); opacity:.6; transition:all .15s;
+      }
+      .cp-pouce:hover{ opacity:1; filter:none; border-color:var(--lblue); }
+      .cp-pouce.on{ opacity:1; filter:none; border-color:var(--green); background:#ecf8f5; }
+      .cp-pouce-merci{ font-size:12px; color:var(--muted); font-weight:700; }
+      .cp-pouce-zone{ display:flex; gap:6px; width:100%; }
+      .cp-pouce-zone input{
+        flex:1; border:1px solid var(--line); border-radius:8px; padding:6px 10px;
+        font-family:inherit; font-size:12.5px; color:var(--text);
+      }
+      .cp-pouce-zone button{
+        border:1px solid var(--blue); background:var(--blue); color:#fff; border-radius:8px;
+        padding:6px 12px; font-family:inherit; font-size:12.5px; font-weight:800; cursor:pointer;
+      }
 
       /* ─── v8 : cartes d'action à valider ─── */
       .cp-actions{ display:flex; flex-direction:column; gap:8px; margin-top:12px; }
@@ -615,12 +638,67 @@ await (async function () {
       return `
         <div class="cp-msg assistant">
           <div class="cp-avatar">${LOGO_SVG}</div>
-          <div class="cp-bubble">${renderMarkdown(clean)}${cartes}${exportBtns}</div>
+          <div class="cp-bubble">${renderMarkdown(clean)}${cartes}${exportBtns}${m.run_id ? `<div class="cp-pouces" data-run="${m.run_id}"><button class="cp-pouce" data-note="1" title="Réponse utile">👍</button><button class="cp-pouce" data-note="-1" title="Réponse fausse ou inutile">👎</button><span class="cp-pouce-merci"></span></div>` : ""}</div>
         </div>`;
     }).join("");
     bindExportButtons();
     remplirActions().catch((e) => console.warn("[delco] actions", e));
+    brancherPouces();
     scrollToBottom();
+  }
+
+  // ── v9 : pouces ──────────────────────────────────────────────────────
+  const poucesDonnes = new Map();   // run_id -> 1 | -1
+  function peindrePouces() {
+    $stream.querySelectorAll(".cp-pouces").forEach((z) => {
+      const n = poucesDonnes.get(z.dataset.run);
+      z.querySelectorAll(".cp-pouce").forEach((b) => b.classList.toggle("on", n != null && Number(b.dataset.note) === n));
+    });
+  }
+  async function chargerPouces() {
+    const ids = currentMessages.filter((m) => m.run_id).map((m) => m.run_id);
+    if (!ids.length) return;
+    const { data } = await sb.from("agent_feedback").select("run_id, note").in("run_id", ids);
+    (data || []).forEach((f) => poucesDonnes.set(f.run_id, f.note));
+    peindrePouces();
+  }
+  function brancherPouces() {
+    peindrePouces();
+    $stream.querySelectorAll(".cp-pouces").forEach((z) => {
+      z.querySelectorAll(".cp-pouce").forEach((b) => b.addEventListener("click", async () => {
+        const note = Number(b.dataset.note);
+        const merci = z.querySelector(".cp-pouce-merci");
+        let commentaire = null;
+        if (note === -1) {
+          const zone = doc.createElement("div");
+          zone.className = "cp-pouce-zone";
+          zone.innerHTML = `<input type="text" maxlength="300" placeholder="Qu'est-ce qui ne va pas ? (facultatif)"><button>Envoyer</button>`;
+          z.querySelector(".cp-pouce-zone")?.remove();
+          z.appendChild(zone);
+          const input = zone.querySelector("input");
+          input.focus();
+          await new Promise((ok) => {
+            zone.querySelector("button").addEventListener("click", ok, { once: true });
+            input.addEventListener("keydown", (e) => { if (e.key === "Enter") ok(); });
+          });
+          commentaire = input.value.trim() || null;
+          zone.remove();
+        }
+        try {
+          const { data: { session } } = await sb.auth.getSession();
+          const { error } = await sb.from("agent_feedback").upsert(
+            { run_id: z.dataset.run, user_id: session.user.id, note, commentaire },
+            { onConflict: "run_id,user_id" });
+          if (error) throw error;
+          poucesDonnes.set(z.dataset.run, note);
+          peindrePouces();
+          merci.textContent = note === 1 ? "Merci !" : "Merci, la question est transmise pour correction.";
+        } catch (e) {
+          merci.textContent = "Non enregistré.";
+          console.error("[delco] pouce", e);
+        }
+      }));
+    });
   }
 
   // ── v8 : cartes d'action ─────────────────────────────────────────────
@@ -724,12 +802,13 @@ await (async function () {
     if (!threadId) { renderEmpty(); return; }
     const { data, error } = await sb
       .from("agent_chat_messages")
-      .select("role, content, created_at")
+      .select("role, content, created_at, run_id")
       .eq("thread_id", threadId)
       .order("created_at", { ascending: true });
     if (error) { console.error("[delco] loadMessages", error); return; }
     currentMessages = data || [];
     renderMessages();
+    chargerPouces().catch(() => {});
   }
   async function deleteThread(threadId) {
     const thread = threads.find(t => t.id === threadId);
@@ -884,7 +963,7 @@ await (async function () {
         if (row) row.remove();
         hideTyping();
         if (d.threadId && d.threadId !== currentThreadId) currentThreadId = d.threadId;
-        currentMessages.push({ role: "assistant", content: d.finalText || "*(réponse vide)*" });
+        currentMessages.push({ role: "assistant", content: d.finalText || "*(réponse vide)*", run_id: d.runId || null });
         renderMessages();
         loadThreads().catch(() => {});
       } else if (nom === "erreur") {
@@ -993,7 +1072,7 @@ await (async function () {
       }
       await loadThreads();
 
-      currentMessages.push({ role: "assistant", content: j.finalText || "*(réponse vide)*" });
+      currentMessages.push({ role: "assistant", content: j.finalText || "*(réponse vide)*", run_id: j.runId || null });
       renderMessages();
     } catch (e) {
       hideTyping();
