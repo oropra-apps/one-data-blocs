@@ -1,5 +1,11 @@
 // ============================================================================
-//  DELCO — CHAT AGENT — module One Data (OD.define)  v7
+//  DELCO — CHAT AGENT — module One Data (OD.define)  v8
+//  v8 (09/10/2026) — cartes d'action (plan Delco, P3) : quand Delco propose
+//     un RDV, une relance ou un message WhatsApp, sa réponse porte
+//     [[ACTION:<id>]] ; le chat dessine une carte « Valider / Ignorer ».
+//     Valider appelle delco_action_decider : le RDV est posé dans l'agenda
+//     (mêmes contrôles que l'agenda), le message WhatsApp est copié pour
+//     l'envoyer depuis la fiche client. Rien n'est fait sans ce clic.
 //  v7 (09/10/2026) — plan d'action performance Delco :
 //   · la réponse s'affiche AU FIL DE LA RÉDACTION (agent-orchestrator v7,
 //     { stream: true } → événements meta / etape / delta / efface / fin) ;
@@ -202,6 +208,31 @@ await (async function () {
       .cp-export-btn.xlsx{ color:var(--green); }
       .cp-export-btn.xlsx:hover{ background:#ecf8f5; border-color:var(--green); }
       .cp-export-btn:disabled{ opacity:.55; cursor:wait; }
+
+      /* ─── v8 : cartes d'action à valider ─── */
+      .cp-actions{ display:flex; flex-direction:column; gap:8px; margin-top:12px; }
+      .cp-action{
+        border:1px solid var(--line); border-left:4px solid var(--orange);
+        border-radius:10px; padding:10px 12px; background:var(--soft);
+        font-size:13px; color:var(--text);
+      }
+      .cp-action.ok{ border-left-color:var(--green); background:#ecf8f5; }
+      .cp-action.off{ border-left-color:var(--lblue); opacity:.75; }
+      .cp-action.err{ border-left-color:var(--red); background:#fdf0f0; }
+      .cp-action-type{ font-size:11px; font-weight:800; letter-spacing:.04em; text-transform:uppercase; color:var(--muted); }
+      .cp-action-titre{ font-weight:800; margin:2px 0; color:var(--ink); }
+      .cp-action-detail{ color:var(--text); line-height:1.45; white-space:pre-wrap; }
+      .cp-action-etat{ margin-top:6px; font-size:12px; font-weight:700; color:var(--muted); }
+      .cp-action-btns{ display:flex; gap:8px; margin-top:8px; }
+      .cp-action-btns button{
+        border-radius:8px; padding:6px 14px; cursor:pointer;
+        font-family:inherit; font-size:12.5px; font-weight:800; transition:all .15s;
+      }
+      .cp-action-ok{ background:var(--green); color:#fff; border:1px solid var(--green); }
+      .cp-action-ok:hover{ background:#45a892; }
+      .cp-action-non{ background:#fff; color:var(--muted); border:1px solid var(--line); }
+      .cp-action-non:hover{ border-color:var(--muted); }
+      .cp-action-btns button:disabled{ opacity:.55; cursor:wait; }
 
       /* ─── Modale de confirmation chartée ─── */
       .cp-modal-overlay{
@@ -425,7 +456,11 @@ await (async function () {
       return "";
     });
 
-    return { clean: clean.trim(), exports };
+    // v8 : [[ACTION:<uuid>]] — cartes d'action à valider
+    const actions = [];
+    clean = clean.replace(/\[\[ACTION:([0-9a-f-]{36})\]\]/g, (_, id) => { actions.push(id); return ""; });
+
+    return { clean: clean.trim(), exports, actions };
   }
 
   // Génère un PDF de la synthèse via jsPDF (côté client)
@@ -573,14 +608,75 @@ await (async function () {
           return "";
         }).join("") + `</div>`;
       }
+      const { actions } = parseExports(m.content);
+      const cartes = actions.length
+        ? `<div class="cp-actions">` + actions.map((id) => `<div class="cp-action" data-action="${id}"><div class="cp-action-etat">Chargement…</div></div>`).join("") + `</div>`
+        : "";
       return `
         <div class="cp-msg assistant">
           <div class="cp-avatar">${LOGO_SVG}</div>
-          <div class="cp-bubble">${renderMarkdown(clean)}${exportBtns}</div>
+          <div class="cp-bubble">${renderMarkdown(clean)}${cartes}${exportBtns}</div>
         </div>`;
     }).join("");
     bindExportButtons();
+    remplirActions().catch((e) => console.warn("[delco] actions", e));
     scrollToBottom();
+  }
+
+  // ── v8 : cartes d'action ─────────────────────────────────────────────
+  const LIBELLE_ACTION = { rdv: "Agenda", whatsapp: "WhatsApp", email: "E-mail" };
+  function dessinerAction(el, a) {
+    const etat = a.status;
+    el.className = "cp-action" + (etat === "executed" || etat === "approved" ? " ok" : etat === "rejected" ? " off" : "");
+    const fait = etat === "executed" ? "✓ Posé dans l'agenda"
+      : etat === "approved" ? "✓ Validé — à envoyer depuis la fiche client"
+      : etat === "rejected" ? "Ignoré" : "";
+    el.innerHTML = `
+      <div class="cp-action-type">${escapeHtml(LIBELLE_ACTION[a.kind] || "Action")} · à valider</div>
+      <div class="cp-action-titre">${escapeHtml(a.title || "")}</div>
+      ${a.preview ? `<div class="cp-action-detail">${escapeHtml(a.preview)}</div>` : ""}
+      ${etat === "pending_approval"
+        ? `<div class="cp-action-btns"><button class="cp-action-ok">${a.kind === "rdv" ? "Valider et poser" : "Valider"}</button><button class="cp-action-non">Ignorer</button></div>`
+        : `<div class="cp-action-etat">${fait}</div>`}`;
+    if (etat !== "pending_approval") return;
+    const [bOk, bNon] = el.querySelectorAll("button");
+    const decider = async (decision) => {
+      bOk.disabled = true; bNon.disabled = true;
+      try {
+        const { data, error } = await sb.rpc("delco_action_decider", { p_id: a.id, p_decision: decision });
+        if (error) throw error;
+        if (data && data.erreur) {
+          el.className = "cp-action err";
+          el.querySelector(".cp-action-btns").outerHTML = `<div class="cp-action-etat">${escapeHtml(data.erreur)}</div>`;
+          return;
+        }
+        if (data && data.statut === "approved" && data.message) {
+          try { await navigator.clipboard.writeText(data.message); } catch (_) {}
+        }
+        dessinerAction(el, { ...a, status: (data && data.statut) || (decision === "ignorer" ? "rejected" : a.status) });
+        if (data && data.statut === "approved") {
+          el.querySelector(".cp-action-etat").textContent = "✓ Validé — message copié, à envoyer depuis la fiche client";
+        }
+      } catch (e) {
+        bOk.disabled = false; bNon.disabled = false;
+        console.error("[delco] décision", e);
+      }
+    };
+    bOk.addEventListener("click", () => decider("valider"));
+    bNon.addEventListener("click", () => decider("ignorer"));
+  }
+  async function remplirActions() {
+    const els = Array.from($stream.querySelectorAll("[data-action]"));
+    if (!els.length) return;
+    const ids = els.map((e) => e.dataset.action);
+    const { data, error } = await sb.from("agent_actions").select("id,kind,title,preview,status").in("id", ids);
+    if (error) throw error;
+    const parId = new Map((data || []).map((a) => [a.id, a]));
+    els.forEach((el) => {
+      const a = parId.get(el.dataset.action);
+      if (a) dessinerAction(el, a);
+      else el.innerHTML = `<div class="cp-action-etat">Action introuvable.</div>`;
+    });
   }
 
   // Branche les boutons d'export après rendu
