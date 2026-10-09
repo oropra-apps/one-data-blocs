@@ -44,6 +44,10 @@ OD.define('whatsapp', {
   if (state.loading === undefined) state.loading = false;
   if (state.error === undefined) state.error = null;
   if (state.input === undefined) state.input = '';
+  // Motif du message modèle : la raison réelle pour laquelle le vendeur écrit.
+  // Depuis le 09/10/2026 les deux modèles portent un quatrième paramètre libre,
+  // et wa-send-text refuse l'envoi s'il est vide.
+  if (state.motif === undefined) state.motif = '';
   if (state.sending === undefined) state.sending = false;
   if (state.channel === undefined) state.channel = null;
   if (state.client === undefined) state.client = null;
@@ -174,6 +178,13 @@ OD.define('whatsapp', {
     if (!state.waBusiness) { state.error = 'Numéro WhatsApp Business du site introuvable (SITE.Fax).'; render(); return; }
     const e164 = toE164(state.client && state.client.TEl_MOB);
     if (!e164) { state.error = 'Le client n\'a pas de numéro mobile.'; render(); return; }
+    // Le motif est contrôlé AVANT de créer quoi que ce soit : sans lui l'envoi
+    // du modèle échouera, et on aurait laissé derrière soi une conversation
+    // vide, rattachée à un cycle, pour rien.
+    if (!String(state.motif || '').trim()) {
+      state.error = 'Indiquez le motif de votre message avant de l’envoyer.';
+      render(); return;
+    }
     if (state.sending) return;
     state.sending = true; state.error = null; render();
     try {
@@ -195,20 +206,91 @@ OD.define('whatsapp', {
     } catch (e) { console.error('[wa] firstContact', e); state.sending = false; state.error = e.message || String(e); render(); }
   }
 
+  /* ---- les modèles -------------------------------------------------------
+     Les quatre paramètres, dans l'ordre attendu par wa-send-text :
+       1 le client, 2 le prénom du vendeur, 3 la concession, 4 LE MOTIF.
+     Le motif est écrit par le vendeur. Il est obligatoire : un modèle sans
+     raison réelle est un message creux, et wa-send-text le refuse. */
+  function paramsModele() {
+    const u = me();
+    return {
+      p1: ((state.client && (state.client.PRENOM || state.client.NOM)) || clientLabel(state.client) || 'Bonjour').toString().trim(),
+      p2: ((u.prenom || u.nomComplet || u.nom || 'votre conseiller').toString().split(' ')[0] || 'votre conseiller').trim(),
+      p3: (state.concession || 'notre concession').toString().trim(),
+      p4: String(state.motif || '').trim()
+    };
+  }
+
+  /* Texte rendu, identique AU CARACTÈRE PRÈS à celui déclaré chez Meta par
+     `wa-modeles` et reconstitué par `wa-send-text`. Il sert ici d'aperçu : le
+     vendeur lit avant d'envoyer exactement ce que le client va recevoir.
+     Toute modification des modèles doit être reportée dans les TROIS. */
+  function apercuModele(mode, p) {
+    if (mode === 'premier_contact') {
+      return 'Bonjour ' + p.p1 + ', ' + p.p2 + ' de ' + p.p3 + ' à votre service. ' + p.p4 +
+        ' Je me permets WhatsApp plutôt que le téléphone : vous me répondez quand cela vous arrange, ' +
+        'et je peux vous transmettre photos et documents directement. Si vous préférez un autre canal, ' +
+        'dites-le-moi simplement.';
+    }
+    if (mode === 're_engagement_24h') {
+      return 'Bonjour ' + p.p1 + ', ' + p.p2 + ' de ' + p.p3 + '. ' + p.p4 +
+        ' Dites-moi ce que vous en pensez, je reste à votre disposition.';
+    }
+    return '';
+  }
+
+  /* Les boutons de réponse rapide déclarés chez Meta. Affichés ici en pastilles
+     pour que le vendeur sache ce que le client aura sous le pouce. */
+  const BOUTONS_MODELE = {
+    premier_contact: ['Oui, avec plaisir', 'Non merci'],
+    re_engagement_24h: ['Je vous réponds', 'Pas maintenant']
+  };
+
+  /* Le bloc d'envoi d'un modèle : le motif, l'aperçu exact de ce que le client
+     recevra, les boutons qu'il verra, et l'envoi — bloqué tant que le motif
+     est vide. L'aperçu n'est pas un ornement : c'est le seul moyen pour le
+     vendeur de voir où sa phrase atterrit dans le modèle, et donc de l'écrire
+     pour qu'elle s'y insère. */
+  function blocModele(mode, acte, titre, libelleBouton, libelleEnvoi) {
+    const p = paramsModele();
+    const pret = !!p.p4 && !state.sending;
+    const apercu = apercuModele(mode, { p1: p.p1, p2: p.p2, p3: p.p3, p4: p.p4 || '…' });
+    const attr = acte ? ' data-act="' + acte + '"' : ' data-tpl="' + mode + '"';
+    return '<div class="wa-tpl">' +
+      '<div class="wa-tpl-t">' + esc(state.sending ? libelleEnvoi : titre) + '</div>' +
+      '<textarea class="wa-tpl-in" data-act="motif" rows="2" placeholder="Ex. : votre Yaris Cross hybride est arrivée, je peux vous la présenter cette semaine.">' + esc(state.motif) + '</textarea>' +
+      '<div class="wa-tpl-ap">' + esc(apercu) + '</div>' +
+      '<div class="wa-tpl-t" style="margin:0 0 2px">Boutons proposés au client :</div>' +
+      '<div class="wa-tpl-bt">' + (BOUTONS_MODELE[mode] || []).map(function (b) {
+        return '<span>' + esc(b) + '</span>';
+      }).join('') + '</div>' +
+      '<button class="wa-tpl-btn"' + attr + (pret ? '' : ' disabled') + '>' + esc(libelleBouton) + '</button>' +
+      '</div>';
+  }
+
   async function sendTemplate(mode) {
     if (!state.conv || state.sending) return;
-    const u = me();
-    const p1 = ((state.client && (state.client.PRENOM || state.client.NOM)) || clientLabel(state.client) || 'Bonjour').toString().trim();
-    const p2 = ((u.prenom || u.nomComplet || u.nom || 'votre conseiller').toString().split(' ')[0] || 'votre conseiller').trim();
-    const p3 = (state.concession || 'notre concession').toString().trim();
-    state.sending = true; render();
+    const p = paramsModele();
+    if (!p.p4) {
+      state.error = 'Indiquez le motif de votre message avant de l’envoyer.';
+      render();
+      return;
+    }
+    state.sending = true; state.error = null; render();
     try {
       const r = await fetch(SUPABASE_URL + '/functions/v1/wa-send-text', {
         method: 'POST', headers: { 'Content-Type': 'application/json', apikey: anonKey(), Authorization: 'Bearer ' + (await authToken()) },
-        body: JSON.stringify({ conversation_id: state.conv.id, to_phone_e164: toE164(state.client && state.client.TEl_MOB), template_mode: mode, template_param_1: p1, template_param_2: p2, template_param_3: p3 })
+        body: JSON.stringify({
+          conversation_id: state.conv.id,
+          to_phone_e164: toE164(state.client && state.client.TEl_MOB),
+          template_mode: mode,
+          template_param_1: p.p1, template_param_2: p.p2,
+          template_param_3: p.p3, template_param_4: p.p4
+        })
       });
       const j = await r.json().catch(() => ({}));
       if (!r.ok) throw new Error((j.error || '') + ' ' + JSON.stringify(j.details || ''));
+      state.motif = '';
       state.sending = false; render(); loadThread();
     } catch (e) { console.error('[wa] sendTemplate', e); state.sending = false; state.error = e.message || String(e); render(); }
   }
@@ -490,7 +572,17 @@ OD.define('whatsapp', {
     '.wa-tpl{padding:10px 12px;background:#f0f2f5}' +
     '.wa-tpl-t{font-size:12px;color:#54656f;margin-bottom:8px}' +
     '.wa-tpl-btn{width:100%;border:1px solid #c9d3d9;background:#fff;border-radius:10px;padding:9px 12px;font:inherit;font-size:13px;font-weight:600;color:#075E54;cursor:pointer;margin-bottom:7px;text-align:left}' +
-    '.wa-tpl-btn:hover{background:#f6faf9}' +
+    '.wa-tpl-btn:hover:not(:disabled){background:#f6faf9}' +
+    '.wa-tpl-btn:disabled{opacity:.45;cursor:default}' +
+    '.wa-tpl-in{width:100%;box-sizing:border-box;border:1px solid #c9d3d9;border-radius:10px;padding:8px 10px;' +
+      'font:inherit;font-size:13px;color:#374151;background:#fff;resize:vertical;min-height:54px;margin-bottom:7px}' +
+    '.wa-tpl-in:focus{outline:none;border-color:#4CAF7D}' +
+    '.wa-tpl-ap{font-size:12px;line-height:1.45;color:#54656f;background:#fff;border-left:2px solid #4CAF7D;' +
+      'border-radius:0 8px 8px 0;padding:8px 10px;margin-bottom:8px}' +
+    '.wa-tpl-ap b{color:#374151;font-weight:600}' +
+    '.wa-tpl-bt{display:flex;gap:6px;flex-wrap:wrap;margin:0 0 9px}' +
+    '.wa-tpl-bt span{font-size:11.5px;font-weight:600;color:#075E54;background:#e7f3ef;' +
+      'border:1px solid #bfe0d4;border-radius:999px;padding:3px 10px}' +
     '.wa-bar{position:fixed;left:24px;bottom:24px;width:min(300px,calc(100vw - 32px));background:#075E54;color:#fff;border-radius:12px;box-shadow:0 12px 34px rgba(0,0,0,.24);z-index:9990;display:flex;align-items:center;gap:10px;padding:10px 12px;cursor:pointer}' +
     '.wa-spin{display:inline-block;width:15px;height:15px;border:2px solid rgba(255,255,255,.5);border-top-color:#fff;border-radius:50%;animation:wa-spin .7s linear infinite}' +
     '@keyframes wa-spin{to{transform:rotate(360deg)}}' +
@@ -542,14 +634,15 @@ OD.define('whatsapp', {
         '</div>';
     } else if (!state.conv) {
       // aucune conversation -> premier contact (création + template premier_contact)
-      footHtml = '<div class="wa-tpl"><div class="wa-tpl-t">' + (state.sending ? 'Démarrage…' : 'Aucune conversation. Démarrer par un message d\'accroche :') + '</div>' +
-        '<button class="wa-tpl-btn" data-act="firstcontact">👋 Démarrer (premier contact)</button></div>';
+      footHtml = blocModele('premier_contact', 'firstcontact',
+        'Aucune conversation. Pourquoi écrivez-vous à ce client ?',
+        '👋 Envoyer le premier contact', 'Démarrage…');
     } else {
       // conversation existante mais fenêtre 24h fermée -> ré-engagement
-      footHtml = '<div class="wa-banner">Fenêtre 24h fermée — seul un message template peut être envoyé.</div>' +
-        '<div class="wa-tpl"><div class="wa-tpl-t">' + (state.sending ? 'Envoi…' : 'Réengager la conversation :') + '</div>' +
-        '<button class="wa-tpl-btn" data-tpl="re_engagement_24h">🔄 Relance (ré-engagement)</button>' +
-        '</div>';
+      footHtml = '<div class="wa-banner">Fenêtre 24h fermée — seul un message modèle peut être envoyé.</div>' +
+        blocModele('re_engagement_24h', null,
+          'Fenêtre fermée. Pourquoi relancez-vous ce client ?',
+          '🔄 Envoyer la relance', 'Envoi…');
     }
 
     const sub = open24 ? 'en ligne · WhatsApp' : (phone || 'WhatsApp');
@@ -630,6 +723,24 @@ OD.define('whatsapp', {
       else if (a === 'rec') el.onclick = toggleRecord;
       else if (a === 'dict') el.onclick = toggleDictation;
       else if (a === 'firstcontact') el.onclick = startFirstContact;
+      else if (a === 'motif') {
+        el.oninput = (e) => {
+          state.motif = e.target.value;
+          // Surtout PAS de render() ici : recréer le textarea ferait perdre le
+          // focus et la position du curseur à chaque frappe. On met l'aperçu
+          // et le bouton à jour en place, comme le fait syncSendBtn pour la
+          // zone de saisie ordinaire.
+          const bloc = el.closest('.wa-tpl');
+          if (!bloc) return;
+          const btn = bloc.querySelector('.wa-tpl-btn');
+          const ap = bloc.querySelector('.wa-tpl-ap');
+          const mode = btn && (btn.getAttribute('data-tpl') ||
+            (btn.getAttribute('data-act') === 'firstcontact' ? 'premier_contact' : ''));
+          const p = paramsModele();
+          if (ap && mode) ap.textContent = apercuModele(mode, { p1: p.p1, p2: p.p2, p3: p.p3, p4: p.p4 || '…' });
+          if (btn) btn.disabled = !p.p4 || !!state.sending;
+        };
+      }
       else if (a === 'input') {
         el.oninput = (e) => {
           state.input = e.target.value;
