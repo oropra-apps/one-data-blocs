@@ -1675,8 +1675,13 @@ OD.define('vo-liste', {
     if (r.client_nom) sub.push('Facturé à <b>' + hvEsc(hvNom(r.client_nom)) + '</b>');
     if (r.site) sub.push(hvEsc(r.site));
     if (r.num_or) sub.push('OR ' + hvEsc(r.num_or)); else if (r.num_fact) sub.push('Facture ' + hvEsc(r.num_fact));
+    if (r.date_livraison) sub.push('livré le ' + hvEsc(hvDate(r.date_livraison)));
+    var fin = [];
+    if (r.financement) fin.push('Financement : ' + hvEsc(r.financement));
+    if (r.utilisateur) fin.push('Utilisateur : <b>' + hvEsc(hvNom(r.utilisateur)) + '</b>');
     var h = '<div class="hv-t">' + hvEsc(r.titre || 'Intervention atelier') + badges + '</div>'
-      + (sub.length ? '<div class="hv-s">' + sub.join(' · ') + '</div>' : '');
+      + (sub.length ? '<div class="hv-s">' + sub.join(' · ') + '</div>' : '')
+      + (fin.length ? '<div class="hv-s">' + fin.join(' · ') + '</div>' : '');
     var ls = det && r.num_or ? (det[String(r.num_or)] || []) : [];
     if (ls.length) h += '<details class="hv-det"><summary>Détail (' + ls.length + ' ligne' + (ls.length > 1 ? 's' : '') + ')</summary>' + hvLignes(ls) + '</details>';
     else if (hvEstAtelier(r)) h += '<div class="hv-nd">Détail des opérations non transmis par le DMS.</div>';
@@ -1726,7 +1731,7 @@ OD.define('vo-liste', {
       if (!client) { st.apv = []; st.apvDet = null; }
       else {
         var res = await Promise.all([
-          client.rpc('vehicule_historique', { p_vin: vin }),
+          client.rpc('vehicule_historique_v2', { p_vin: vin }).then(function (r) { return r.error ? client.rpc('vehicule_historique', { p_vin: vin }) : r; }),
           client.rpc('apv_vehicule_detail', { p_vin: vin }).then(function (r) { return r; }, function () { return { error: true }; })
         ]);
         var h = res[0], d = res[1];
