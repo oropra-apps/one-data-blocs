@@ -10,7 +10,11 @@
 //  affiche la date estimée d'après l'immatriculation SIV (vehicule_ref.
 //  date_mec_estimee).
 //  v5 (09/10/2026) : date complète suivie d'un petit « e » ; au survol du « e »,
-//  « Date estimée en fonction de l'immat ». La date
+//  « Date estimée en fonction de l'immat ».
+//  v6 (09/10/2026) : la fenêtre « Factures APV » lit apv_vehicule : historique
+//  atelier complet du véhicule, quel que soit le site qui a facturé (la fiche
+//  client est ouverte à tout le groupe ; le site de chaque facture est affiché).
+//  La date
 //  réelle reste seule dans CLIENT_STOCK.DT_PMEC (propale, bon de commande).
 //  Locataire sans table vehicule_ref : la lecture échoue sans bruit, rien ne change.
 // ============================================================================
@@ -218,7 +222,10 @@ OD.define('vehicules', {
     ov.querySelector('.vh-ov-bg').addEventListener('click', close);
     ov.querySelector('.vh-ov-x').addEventListener('click', close);
     try {
-      var res = await sb.from('APV').select('*').eq('VIN', vin);
+      // Historique atelier du véhicule, tous sites du groupe (apv_vehicule).
+      // Locataire sans cette fonction : repli sur la vue APV (périmètre du site).
+      var res = await sb.rpc('apv_vehicule', { p_vin: vin });
+      if (res.error) res = await sb.from('APV').select('*').eq('VIN', vin);
       if (res.error) throw res.error;
       var rows = res.data || [];
       var body = ov.querySelector('.vh-ov-body');
