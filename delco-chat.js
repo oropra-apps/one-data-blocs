@@ -1,5 +1,10 @@
 // ============================================================================
-//  DELCO — CHAT AGENT — module One Data (OD.define)  v9
+//  DELCO — CHAT AGENT — module One Data (OD.define)  v10
+//  v10 (09/10/2026) — boutons du vendeur (plan Delco, P4), prêts pour
+//     l'ouverture de Delco aux vendeurs : « Mon brief », « Mes relances du
+//     jour », « Mes dossiers à signer », « Prépare mon RDV » (un tour chacun
+//     côté orchestrateur v7.8). Tant que le rôle Vendeur figure dans
+//     app_settings.delco_roles_exclus, le chat ne se dessine pas pour lui.
 //  v9 (09/10/2026) — pouce haut / bas sous chaque réponse (plan Delco, O3) :
 //     enregistré dans agent_feedback ; un pouce bas demande un mot
 //     d'explication (facultatif) et verse la question au banc d'essai.
@@ -65,10 +70,10 @@ await (async function () {
   // Le bon jeu est sélectionné après résolution du rôle (voir plus bas).
   const QUICK_BY_PROFILE = {
     vendeur: [
-      { emoji: "📋", label: "Mes leads à relancer", prompt: "Quels sont mes leads à relancer en priorité ?" },
-      { emoji: "📄", label: "Mes propales",          prompt: "Où en sont mes propositions commerciales en cours ?" },
-      { emoji: "🔍", label: "Préparer un RDV",       prompt: "Aide-moi à préparer mon prochain rendez-vous client." },
-      { emoji: "🚗", label: "Stock VO",              prompt: "Quels véhicules d'occasion peuvent intéresser mes clients en cours ?" },
+      { emoji: "🌅", label: "Mon brief",             prompt: "Fais-moi le brief du matin." },
+      { emoji: "📞", label: "Mes relances du jour",  prompt: "Quelles sont mes relances du jour ?" },
+      { emoji: "✍️", label: "Mes dossiers à signer", prompt: "Quels sont mes dossiers à signer cette semaine ?" },
+      { emoji: "🗓️", label: "Prépare mon RDV",       prompt: "Prépare mon prochain rendez-vous client." },
     ],
     manager: [
       { emoji: "🌅", label: "Brief du matin",    prompt: "Fais-moi le brief du matin." },
