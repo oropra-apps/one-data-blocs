@@ -83,6 +83,36 @@ OD.define('whatsapp', {
     return (Date.now() - t) < WINDOW_MS ? t : null;
   }
 
+  /* Combien de messages modèles sont restés sans réponse ?
+     On remonte le fil depuis la fin et on compte les envois consécutifs, en
+     s'arrêtant au premier message entrant.
+
+     Ce compteur ne bloque rien et ne décide rien : le jugement du vendeur
+     suffit presque toujours. Il rend simplement visible ce qu'il fallait
+     deviner en relisant la conversation — et ce qui est en jeu n'est pas sa
+     peine mais la note de qualité du NUMÉRO, partagée par toute la
+     concession : un client agacé bloque, et le blocage dégrade la
+     délivrabilité de tous ses collègues, pas la sienne. */
+  function relancesSansReponse() {
+    const l = state.items || [];
+    let n = 0;
+    for (let i = l.length - 1; i >= 0; i--) {
+      const it = l[i];
+      if (it.direction !== 'out') break;
+      let p = it.payload;
+      try { if (typeof p === 'string') p = JSON.parse(p); } catch (e) { p = null; }
+      if (p && p.send_mode === 'template') n++;
+    }
+    return n;
+  }
+
+  function avisSansReponse() {
+    const n = relancesSansReponse();
+    if (!n) return '';
+    return '<div class="wa-tpl-av">' + n + ' message' + (n > 1 ? 's' : '') +
+      ' déjà envoyé' + (n > 1 ? 's' : '') + ' sans réponse de sa part.</div>';
+  }
+
   /* « il y a 3 h », « il y a 12 min » — pour dire depuis quand on attend. */
   function depuis(ms) {
     const m = Math.max(0, Math.round((Date.now() - ms) / 60000));
@@ -299,6 +329,7 @@ OD.define('whatsapp', {
     const apercu = apercuModele(mode, { p1: p.p1, p2: p.p2, p3: p.p3, p4: p.p4 || '…' });
     const attr = acte ? ' data-act="' + acte + '"' : ' data-tpl="' + mode + '"';
     return '<div class="wa-tpl">' +
+      avisSansReponse() +
       '<div class="wa-tpl-t">' + esc(state.sending ? libelleEnvoi : titre) + '</div>' +
       '<textarea class="wa-tpl-in" data-act="motif" rows="2" placeholder="Ex. : votre Yaris Cross hybride est arrivée, je peux vous la présenter cette semaine.">' + esc(state.motif) + '</textarea>' +
       '<div class="wa-tpl-ap">' + esc(apercu) + '</div>' +
@@ -623,6 +654,8 @@ OD.define('whatsapp', {
       'border-radius:0 8px 8px 0;padding:8px 10px;margin-bottom:8px}' +
     '.wa-tpl-ap b{color:#374151;font-weight:600}' +
     '.wa-tpl-bt{display:flex;gap:6px;flex-wrap:wrap;margin:0 0 9px}' +
+    '.wa-tpl-av{font-size:11.5px;font-weight:600;line-height:1.4;color:#8a6d1f;background:#fdf3de;' +
+      'border:1px solid #f0d9a0;border-radius:8px;padding:6px 9px;margin-bottom:9px}' +
     '.wa-attente{padding:12px;background:#f0f2f5;border-top:1px solid #e2e8ee}' +
     '.wa-attente-t{font-size:13px;font-weight:600;color:#075E54;margin-bottom:3px}' +
     '.wa-attente-s{font-size:11.5px;line-height:1.45;color:#54656f}' +
@@ -689,6 +722,7 @@ OD.define('whatsapp', {
         // Sa réponse rouvrira la fenêtre et rendra la saisie libre.
         const ouvrable = new Date(attente + WINDOW_MS);
         footHtml = '<div class="wa-attente">' +
+          avisSansReponse() +
           '<div class="wa-attente-t">Message envoyé ' + esc(depuis(attente)) + '. En attente de sa réponse.</div>' +
           '<div class="wa-attente-s">Dès qu’il répond, vous pourrez écrire librement pendant 24 h. ' +
           'Une relance ne sera possible qu’à partir de ' +
