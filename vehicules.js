@@ -27,6 +27,10 @@
 //  v10 (09/10/2026) : ventes : financement (LOA, LLD, crédit… et organisme), utilisateur
 //  du véhicule, date de livraison (vehicule_historique_v2). Facture annulée par avoir et
 //  son avoir masqués (règle côté base).
+//  v11 (09/10/2026) : photo du véhicule = photos du stock VO, sinon visuel constructeur de la
+//  configuration commandée dans BACS (get_v_likes). Visuel affiché en entier (non rogné), avec
+//  la mention « visuel constructeur » au survol ; lien mort chez le constructeur -> icône.
+//  Historique : pied « 0 facture atelier » masqué quand il n'y a que des ventes.
 //  La date
 //  réelle reste seule dans CLIENT_STOCK.DT_PMEC (propale, bon de commande).
 //  Locataire sans table vehicule_ref : la lecture échoue sans bruit, rien ne change.
@@ -121,7 +125,10 @@ OD.define('vehicules', {
     var kmTxt = kmo ? kmo.km.toLocaleString('fr-FR') + ' km' : '';
     var kmTitle = kmo ? 'Dernier kilométrage connu (DMS)' + (kmo.le ? ', relevé le ' + fmtDate(kmo.le) : '') : '';
     var aff = r.ID_AFFAIRE != null ? state.affaires[r.ID_AFFAIRE] : '';
-    var photo = r.photo_url ? '<img class="vh-img" src="' + esc(r.photo_url) + '" loading="lazy" alt="">' : '<div class="vh-img vh-noimg">' + CAR + '</div>';
+    var cfg = r.photo_url && /images\.toyota-europe\.com/.test(r.photo_url);
+    var photo = r.photo_url
+      ? '<img class="vh-img' + (cfg ? ' vh-cfg' : '') + '" src="' + esc(r.photo_url) + '" loading="lazy" alt=""' + (cfg ? ' title="Visuel constructeur de la configuration commandée (non contractuel)"' : '') + '>'
+      : '<div class="vh-img vh-noimg">' + CAR + '</div>';
     var badges = '';
     if (r.vin_stock === 'VIN') badges += '<span class="vh-badge vh-vo">VO</span>';
     if (r.etat_cm) badges += '<span class="vh-badge vh-cm">Contremarqué</span>';
@@ -153,6 +160,7 @@ OD.define('vehicules', {
     '.vh-photo{position:relative;aspect-ratio:16/10;background:#eef2f8}' +
     '.vh-img{width:100%;height:100%;object-fit:cover;display:block}' +
     '.vh-noimg{display:flex;align-items:center;justify-content:center;color:#adc0dd}' +
+    '.vh-img.vh-cfg{object-fit:contain;padding:8px 10px;background:linear-gradient(180deg,#f7f9fc 0%,#eef2f8 100%)}' +
     '.vh-noimg svg{width:56px;height:56px}' +
     '.vh-badges{position:absolute;top:8px;left:8px;display:flex;gap:6px;flex-wrap:wrap}' +
     '.vh-badge{font-size:10.5px;font-weight:800;letter-spacing:.4px;padding:3px 9px;border-radius:20px;color:#fff;text-transform:uppercase}' +
@@ -230,6 +238,11 @@ OD.define('vehicules', {
     root.innerHTML = STYLE + section('Véhicules possédés', actifs, true) + section('Anciens véhicules', anciens, false);
     root.querySelectorAll('[data-inact]').forEach(function (b) { b.addEventListener('click', function () { toInactive(b.getAttribute('data-inact'), b); }); });
     root.querySelectorAll('[data-apv]').forEach(function (b) { b.addEventListener('click', function () { openApv(b.getAttribute('data-apv'), b.getAttribute('data-apvlabel')); }); });
+    // Photo introuvable (lien constructeur expiré, fichier supprimé) : icône à la place.
+    root.querySelectorAll('img.vh-img').forEach(function (img) {
+      var remplacer = function () { var d = doc.createElement('div'); d.className = 'vh-img vh-noimg'; d.innerHTML = CAR; if (img.parentNode) img.parentNode.replaceChild(d, img); };
+      if (img.complete && img.naturalWidth === 0 && img.getAttribute('src')) remplacer(); else img.addEventListener('error', remplacer);
+    });
   }
 
   // ---- modale factures APV du véhicule (table APV, jointée par VIN) ----
@@ -327,7 +340,7 @@ OD.define('vehicules', {
       var at = rows.filter(estAtelier);
       var total = at.reduce(function (acc, f) { return acc + (Number(f.montant_ht) || 0); }, 0);
       body.innerHTML = rows.map(function (f) { return factLine(f, parOr && f.num_or ? (parOr[String(f.num_or)] || []) : null); }).join('') +
-        '<div class="vh-total">' + at.length + ' facture' + (at.length > 1 ? 's' : '') + ' atelier · <strong>' + fmtMt(total) + '</strong></div>';
+        (at.length ? '<div class="vh-total">' + at.length + ' facture' + (at.length > 1 ? 's' : '') + ' atelier · <strong>' + fmtMt(total) + '</strong></div>' : '');
     } catch (e) {
       console.error('[vehicules] historique', e);
       var b = ov.querySelector('.vh-ov-body'); if (b) b.innerHTML = '<div class="vh-ov-msg" style="color:#e24b4a">Erreur : ' + esc(e.message || e) + '</div>';
