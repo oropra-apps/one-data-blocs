@@ -45,5 +45,18 @@ lead-mgmt     = teamcolin
 tutos         = teamcolin
 tours         = teamcolin
 
+# Fenêtre WhatsApp : depuis la v7 (09/10/2026), elle envoie un QUATRIÈME
+# paramètre de modèle — le motif écrit par le vendeur — et affiche l'aperçu du
+# message rendu. Ce quatrième paramètre n'existe que dans le `wa-send-text` et
+# les modèles Meta de Team Colin.
+#
+# Sans cette ligne, la v7 partirait en défaut de flotte : sur `oropra` (le
+# numéro de démonstration) et `test-demo`, le front réclamerait un motif, en
+# afficherait l'aperçu, et l'ancienne fonction à trois paramètres le jetterait
+# sans rien dire. Le vendeur relirait dans son fil un texte que le client
+# n'aurait jamais reçu. À retirer quand les autres locataires auront reçu
+# `wa-send-text` v24 et les modèles à quatre paramètres.
+whatsapp      = teamcolin
+
 # Module interne OROPRA : jamais de défaut de flotte.
 onboarding   = oropra
