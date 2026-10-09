@@ -24,6 +24,9 @@
 //  « Révision », « Freinage »…), détail replié derrière un « + ». Plus de kilométrage
 //  sur les factures (l'export DMS porte le kilométrage actuel du véhicule, pas celui de
 //  l'OR) : le dernier kilométrage connu est affiché sur la carte du véhicule.
+//  v10 (09/10/2026) : ventes : financement (LOA, LLD, crédit… et organisme), utilisateur
+//  du véhicule, date de livraison (vehicule_historique_v2). Facture annulée par avoir et
+//  son avoir masqués (règle côté base).
 //  La date
 //  réelle reste seule dans CLIENT_STOCK.DT_PMEC (propale, bon de commande).
 //  Locataire sans table vehicule_ref : la lecture échoue sans bruit, rien ne change.
@@ -277,12 +280,17 @@ OD.define('vehicules', {
     if (qui) sub.push('Facturé à <b>' + esc(qui) + '</b>');
     if (f.site) sub.push(esc(f.site));
     if (f.num_or) sub.push('OR ' + esc(f.num_or)); else if (f.num_fact) sub.push('Facture ' + esc(f.num_fact));
+    if (f.date_livraison) sub.push('livré le ' + esc(fmtDate(f.date_livraison)));
+    var fin = [];
+    if (f.financement) fin.push('Financement : ' + esc(f.financement));
+    if (f.utilisateur) fin.push('Utilisateur : <b>' + esc(cap(f.utilisateur)) + '</b>');
     var det = '';
     if (lignes && lignes.length) det = '<details class="vh-det"><summary>Détail (' + lignes.length + ' ligne' + (lignes.length > 1 ? 's' : '') + ')</summary>' + detailHtml(lignes) + '</details>';
     else if (estAtelier(f)) det = '<div class="vh-nodet">Détail des opérations non transmis par le DMS.</div>';
     return '<div class="vh-fact' + (estAtelier(f) ? '' : ' vh-fact-vte') + '"><div class="vh-fact-top"><div class="vh-fact-l">' +
       '<div class="vh-fact-or">' + esc(f.titre || 'Intervention atelier') + (d ? ' <span class="vh-fact-dt">' + d + '</span>' : '') + badges + '</div>' +
       (sub.length ? '<div class="vh-fact-kv">' + sub.join(' · ') + '</div>' : '') +
+      (fin.length ? '<div class="vh-fact-kv">' + fin.join(' · ') + '</div>' : '') +
       '</div>' + (mt ? '<div class="vh-fact-mt">' + mt + '</div>' : '') + '</div>' + det + '</div>';
   }
   async function openApv(vin, label) {
@@ -298,7 +306,7 @@ OD.define('vehicules', {
       // et le contenu des interventions (apv_vehicule_detail), lus en parallèle.
       // Locataire sans ces fonctions : repli sur la vue APV (périmètre du site).
       var res = await Promise.all([
-        sb.rpc('vehicule_historique', { p_vin: vin }),
+        sb.rpc('vehicule_historique_v2', { p_vin: vin }).then(function (r) { return r.error ? sb.rpc('vehicule_historique', { p_vin: vin }) : r; }),
         sb.rpc('apv_vehicule_detail', { p_vin: vin }).then(function (r) { return r; }, function () { return { error: true }; })
       ]);
       var rows, parOr = null;
