@@ -6,6 +6,12 @@
 //  Sans libelle, on montre le VIN ; la date n'est affichee que si c'est la 1re
 //  mise en circulation (DT_PMEC). Marque, modele et immatriculation sont completes
 //  par get_v_likes depuis gold.veh quand le DMS les fournit (20261008480000).
+//  v4 (09/10/2026) : sans date réelle de 1re mise en circulation, la carte
+//  affiche la date estimée d'après l'immatriculation SIV (vehicule_ref.
+//  date_mec_estimee) sous la forme « 1re MEC ≈ 03/2021 », mois et année
+//  seulement, avec une infobulle qui dit que c'est une estimation. La date
+//  réelle reste seule dans CLIENT_STOCK.DT_PMEC (propale, bon de commande).
+//  Locataire sans table vehicule_ref : la lecture échoue sans bruit, rien ne change.
 // ============================================================================
 //  FICHE CLIENT — Onglet VÉHICULES  ·  root: #oropra-vehicules-root
 //  Véhicules possédés / anciennement possédés : CLIENT_STOCK.Status = 'A' / 'I'.
@@ -25,7 +31,10 @@ OD.define('vehicules', {
 
   // self-boot/observer retiré (loader)
 
-  var state = window.__vehState || (window.__vehState = { rows: null, loading: true, err: null, idvu: null, affaires: {}, soc: false });
+  var state = window.__vehState || (window.__vehState = { rows: null, loading: true, err: null, idvu: null, affaires: {}, soc: false, mecEst: {} });
+  if (!state.mecEst) state.mecEst = {};
+  function vinKey(v) { return (v || '').toString().trim().toUpperCase(); }
+  function fmtMois(d) { if (!d) return ''; var dt = new Date(d); if (isNaN(dt)) return ''; return String(dt.getMonth() + 1).padStart(2, '0') + '/' + dt.getFullYear(); }
   function readVar(id) { try { return wwLib.wwVariable.getValue(id); } catch (e) { return null; } }
   function currentIdvu() { var c = readVar(VAR_CLIENT); return c && c.IDVu != null ? Number(c.IDVu) : null; }
   function meId() { var u = ((wwLib.getFrontWindow && wwLib.getFrontWindow()) || window).oropraUser || {}; return u.ID_User; }
@@ -47,6 +56,13 @@ OD.define('vehicules', {
         try {
           var a = await sb.from('SITE').select('ID_AFFAIRE, AFFAIRE').in('ID_AFFAIRE', affIds);
           (a.data || []).forEach(function (s) { if (s.ID_AFFAIRE != null && !state.affaires[s.ID_AFFAIRE]) state.affaires[s.ID_AFFAIRE] = s.AFFAIRE; });
+        } catch (e) {}
+      }
+      var sansMec = [...new Set(rows.filter(function (r) { return !r.DT_PMEC && r.VIN; }).map(function (r) { return vinKey(r.VIN); }))];
+      if (sansMec.length) {
+        try {
+          var m = await sb.from('vehicule_ref').select('vin, date_mec_estimee').in('vin', sansMec);
+          (m.data || []).forEach(function (x) { if (x.date_mec_estimee) state.mecEst[x.vin] = x.date_mec_estimee; });
         } catch (e) {}
       }
       state.rows = rows; state.idvu = idvu; state.loading = false;
@@ -78,7 +94,9 @@ OD.define('vehicules', {
     var titre = [r.MARQUE ? String(r.MARQUE).toUpperCase() : '', cap(r.NomModele || r.VERSION || '')].filter(Boolean).join(' ') || 'Véhicule';
     var ver = (r.NomModele && r.VERSION) ? cap(r.VERSION) : ((titre === 'Véhicule' && r.VIN) ? 'VIN ' + String(r.VIN) : '');
     var immat = r.IMMAT || '';
-    var dt = r.DT_PMEC ? '1re MEC ' + fmtDate(r.DT_PMEC) : '';
+    var est = !r.DT_PMEC && r.VIN ? state.mecEst[vinKey(r.VIN)] : null;
+    var dt = r.DT_PMEC ? '1re MEC ' + fmtDate(r.DT_PMEC) : (est ? '1re MEC ≈ ' + fmtMois(est) : '');
+    var dtTitle = est ? 'Date estimée d’après le numéro d’immatriculation (non connue du DMS)' : '';
     var aff = r.ID_AFFAIRE != null ? state.affaires[r.ID_AFFAIRE] : '';
     var photo = r.photo_url ? '<img class="vh-img" src="' + esc(r.photo_url) + '" loading="lazy" alt="">' : '<div class="vh-img vh-noimg">' + CAR + '</div>';
     var badges = '';
@@ -92,7 +110,7 @@ OD.define('vehicules', {
       '<div class="vh-body">' +
         '<div class="vh-title">' + esc(titre) + '</div>' +
         (ver ? '<div class="vh-sub">' + esc(ver) + '</div>' : '') +
-        '<div class="vh-meta">' + (immat ? '<span class="vh-immat">' + esc(immat) + '</span>' : '') + (dt ? '<span class="vh-date">' + esc(dt) + '</span>' : '') + '</div>' +
+        '<div class="vh-meta">' + (immat ? '<span class="vh-immat">' + esc(immat) + '</span>' : '') + (dt ? '<span class="vh-date' + (est ? ' vh-est' : '') + '"' + (dtTitle ? ' title="' + esc(dtTitle) + '"' : '') + '>' + esc(dt) + '</span>' : '') + '</div>' +
         (aff ? '<div class="vh-aff">' + esc(aff) + '</div>' : '') + foot +
       '</div></div>';
   }
@@ -122,6 +140,7 @@ OD.define('vehicules', {
     '.vh-meta{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:3px}' +
     '.vh-immat{font-size:11px;font-weight:800;letter-spacing:.5px;color:#2a5ea9;background:#eef4fc;border:1px solid #d6e2f2;border-radius:6px;padding:2px 7px}' +
     '.vh-date{font-size:12px;color:#7a98c5;font-weight:600}' +
+    '.vh-est{font-style:italic;cursor:help;border-bottom:1px dotted #adc0dd}' +
     '.vh-aff{font-size:12px;color:#5a7196;font-weight:600;margin-top:1px}' +
     '.vh-foot{margin-top:10px;display:flex;gap:8px;align-items:center}' +
     '.vh-apv{flex:1;font:inherit;font-size:12.5px;font-weight:700;border-radius:9px;padding:8px 10px;cursor:pointer;border:1px solid #c9dcf3;background:#eef4fc;color:#2a5ea9;transition:.15s;display:inline-flex;align-items:center;justify-content:center;gap:6px}' +
