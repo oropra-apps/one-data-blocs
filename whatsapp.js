@@ -66,6 +66,32 @@ OD.define('whatsapp', {
   function daySep(d) { const dt = new Date(d); const now = new Date(); const j = new Date(now); const diff = Math.floor((new Date(j.getFullYear(), j.getMonth(), j.getDate()) - new Date(dt.getFullYear(), dt.getMonth(), dt.getDate())) / 86400000); if (diff === 0) return "AUJOURD'HUI"; if (diff === 1) return 'HIER'; const MOIS = ['janv.', 'févr.', 'mars', 'avr.', 'mai', 'juin', 'juil.', 'août', 'sept.', 'oct.', 'nov.', 'déc.']; return dt.getDate() + ' ' + MOIS[dt.getMonth()] + ' ' + dt.getFullYear(); }
   function windowOpen() { const li = state.conv && state.conv.last_inbound_at; if (!li) return false; return (Date.now() - new Date(li).getTime()) < WINDOW_MS; }
 
+  /* La balle est-elle dans le camp du client ?
+     Fenêtre fermée ET dernier message sortant : on vient d'écrire et personne
+     n'a encore répondu. Proposer une relance dans cet état revient à proposer
+     de harceler quelqu'un qui n'a pas eu le temps de lire — en plus de coûter
+     un message facturé. On n'ouvre la relance qu'une fois la fenêtre de
+     politesse écoulée, c'est-à-dire 24 h après notre dernier message.
+     Rend null si l'on peut relancer, sinon l'instant du dernier envoi. */
+  function enAttenteDuClient() {
+    if (!state.conv || windowOpen()) return null;
+    const derniers = (state.items || []);
+    const dernier = derniers.length ? derniers[derniers.length - 1] : null;
+    if (!dernier || dernier.direction !== 'out') return null;
+    const t = new Date(dernier.created_at).getTime();
+    if (!isFinite(t)) return null;
+    return (Date.now() - t) < WINDOW_MS ? t : null;
+  }
+
+  /* « il y a 3 h », « il y a 12 min » — pour dire depuis quand on attend. */
+  function depuis(ms) {
+    const m = Math.max(0, Math.round((Date.now() - ms) / 60000));
+    if (m < 1) return 'à l’instant';
+    if (m < 60) return 'il y a ' + m + ' min';
+    const h = Math.round(m / 60);
+    return 'il y a ' + h + ' h';
+  }
+
   /* ---- résolution client -> contact -> conversation ---- */
   async function resolve(client) {
     state.contact = null; state.conv = null; state.waBusiness = null;
@@ -597,6 +623,9 @@ OD.define('whatsapp', {
       'border-radius:0 8px 8px 0;padding:8px 10px;margin-bottom:8px}' +
     '.wa-tpl-ap b{color:#374151;font-weight:600}' +
     '.wa-tpl-bt{display:flex;gap:6px;flex-wrap:wrap;margin:0 0 9px}' +
+    '.wa-attente{padding:12px;background:#f0f2f5;border-top:1px solid #e2e8ee}' +
+    '.wa-attente-t{font-size:13px;font-weight:600;color:#075E54;margin-bottom:3px}' +
+    '.wa-attente-s{font-size:11.5px;line-height:1.45;color:#54656f}' +
     '.wa-tpl-bt span{font-size:11.5px;font-weight:600;color:#075E54;background:#e7f3ef;' +
       'border:1px solid #bfe0d4;border-radius:999px;padding:3px 10px}' +
     '.wa-bar{position:fixed;left:24px;bottom:24px;width:min(300px,calc(100vw - 32px));background:#075E54;color:#fff;border-radius:12px;box-shadow:0 12px 34px rgba(0,0,0,.24);z-index:9990;display:flex;align-items:center;gap:10px;padding:10px 12px;cursor:pointer}' +
@@ -654,11 +683,24 @@ OD.define('whatsapp', {
         'Aucune conversation. Pourquoi écrivez-vous à ce client ?',
         '👋 Envoyer le premier contact', 'Démarrage…');
     } else {
-      // conversation existante mais fenêtre 24h fermée -> ré-engagement
-      footHtml = '<div class="wa-banner">Fenêtre 24h fermée — seul un message modèle peut être envoyé.</div>' +
-        blocModele('re_engagement_24h', null,
-          'Fenêtre fermée. Pourquoi relancez-vous ce client ?',
-          '🔄 Envoyer la relance', 'Envoi…');
+      const attente = enAttenteDuClient();
+      if (attente !== null) {
+        // On a écrit, le client n'a pas encore répondu : rien à composer.
+        // Sa réponse rouvrira la fenêtre et rendra la saisie libre.
+        const ouvrable = new Date(attente + WINDOW_MS);
+        footHtml = '<div class="wa-attente">' +
+          '<div class="wa-attente-t">Message envoyé ' + esc(depuis(attente)) + '. En attente de sa réponse.</div>' +
+          '<div class="wa-attente-s">Dès qu’il répond, vous pourrez écrire librement pendant 24 h. ' +
+          'Une relance ne sera possible qu’à partir de ' +
+          esc(ouvrable.toLocaleString('fr-FR', { weekday: 'long', hour: '2-digit', minute: '2-digit' })) +
+          '.</div></div>';
+      } else {
+        // Fenêtre fermée depuis assez longtemps -> relance possible.
+        footHtml = '<div class="wa-banner">Fenêtre 24h fermée — seul un message modèle peut être envoyé.</div>' +
+          blocModele('re_engagement_24h', null,
+            'Fenêtre fermée. Pourquoi relancez-vous ce client ?',
+            '🔄 Envoyer la relance', 'Envoi…');
+      }
     }
 
     const sub = open24 ? 'en ligne · WhatsApp' : (phone || 'WhatsApp');
