@@ -14,6 +14,9 @@
 //  v6 (09/10/2026) : la fenêtre « Factures APV » lit apv_vehicule : historique
 //  atelier complet du véhicule, quel que soit le site qui a facturé (la fiche
 //  client est ouverte à tout le groupe ; le site de chaque facture est affiché).
+//  v7 (09/10/2026) : contenu de l'intervention sous chaque facture (apv_vehicule_detail) :
+//  main-d'œuvre (heures) puis pièces (quantités), montant par ligne, pastille
+//  « Garantie ». Factures des exports trimestriels sans détail : mention explicite.
 //  La date
 //  réelle reste seule dans CLIENT_STOCK.DT_PMEC (propale, bon de commande).
 //  Locataire sans table vehicule_ref : la lecture échoue sans bruit, rien ne change.
@@ -158,7 +161,17 @@ OD.define('vehicules', {
     '.vh-ov-x{border:none;background:none;font-size:24px;line-height:1;color:#5a7196;cursor:pointer;padding:0 4px}' +
     '.vh-ov-body{padding:14px 18px;overflow-y:auto}' +
     '.vh-ov-msg{text-align:center;padding:34px 10px;color:#7a98c5;font-size:14px}' +
-    '.vh-fact{border:1px solid #e8eef7;border-left:3px solid #2a5ea9;border-radius:10px;padding:11px 13px;margin-bottom:10px;display:flex;align-items:flex-start;justify-content:space-between;gap:10px}' +
+    '.vh-fact{border:1px solid #e8eef7;border-left:3px solid #2a5ea9;border-radius:10px;padding:11px 13px;margin-bottom:10px}' +
+    '.vh-fact-top{display:flex;align-items:flex-start;justify-content:space-between;gap:10px}' +
+    '.vh-gar{font-size:10.5px;font-weight:800;letter-spacing:.3px;color:#a9791a;background:#fbf6ec;border:1px solid #ecdcbc;border-radius:20px;padding:1px 8px;vertical-align:1px}' +
+    '.vh-lines{margin-top:9px;padding-top:8px;border-top:1px dashed #dbe6f5}' +
+    '.vh-lg-t{font-size:10.5px;font-weight:800;letter-spacing:.4px;text-transform:uppercase;color:#7a98c5;margin:6px 0 3px}' +
+    '.vh-lg-t:first-child{margin-top:0}' +
+    '.vh-lg{display:flex;align-items:baseline;gap:10px;font-size:12.5px;color:#1F4A85;padding:2px 0}' +
+    '.vh-lg-d{flex:1;min-width:0}' +
+    '.vh-lg-q{font-size:11.5px;color:#7a98c5;font-weight:600;white-space:nowrap}' +
+    '.vh-lg-m{font-size:12px;font-weight:700;color:#2f8a76;white-space:nowrap;min-width:84px;text-align:right}' +
+    '.vh-nodet{margin-top:7px;font-size:11.5px;font-style:italic;color:#adc0dd}' +
     '.vh-fact-l{min-width:0}' +
     '.vh-fact-or{font-size:13px;font-weight:800;color:#1F4A85}' +
     '.vh-fact-sub{font-size:12px;color:#7a98c5;font-weight:600;margin-top:2px}' +
@@ -197,21 +210,55 @@ OD.define('vehicules', {
   var TVA = 1.20; // TVA 20% (APV pièces + main d'oeuvre)
   function euroNum(n) { var v = Number(n); return isNaN(v) ? '' : v.toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
   function fmtMt(ht) { var v = Number(ht); if (isNaN(v)) return ''; var ttc = !state.soc; var a = ttc ? v * TVA : v; return euroNum(a) + ' € ' + (ttc ? 'TTC' : 'HT'); }
-  function factLine(f) {
+  // Libellé DMS en majuscules -> phrase lisible ; références (chiffres) et sigles gardés.
+  var SIGLES = { MO: 1, AR: 1, AV: 1, AVG: 1, AVD: 1, ARG: 1, ARD: 1, HT: 1, CT: 1, VL: 1, ABS: 1, ESP: 1, LED: 1, ML: 1 };
+  var PROPRES = { TOYOTA: 'Toyota', LEXUS: 'Lexus', ADBLUE: 'AdBlue' };
+  function phrase(t) {
+    var i = 0;
+    return String(t || '').replace(/[A-Za-zÀ-ÿ0-9][A-Za-zÀ-ÿ0-9'.\/-]*/g, function (w) {
+      var up = w.toUpperCase(), first = (i++ === 0);
+      if (/[0-9]/.test(w) || SIGLES[up]) return up;
+      if (PROPRES[up]) return PROPRES[up];
+      var lo = w.toLowerCase();
+      return first ? lo.charAt(0).toUpperCase() + lo.slice(1) : lo;
+    });
+  }
+  function fmtQte(q, mo) {
+    var v = Number(q); if (q == null || isNaN(v) || v === 0) return '';
+    var t = v.toLocaleString('fr-FR', { maximumFractionDigits: 2 });
+    return mo ? t + ' h' : '× ' + t;
+  }
+  function detailHtml(lignes) {
+    var avec = (lignes || []).filter(function (l) { return l.description; });
+    if (!avec.length) return '<div class="vh-nodet">Détail des opérations non transmis par le DMS pour cette facture.</div>';
+    var estMo = function (l) { var t = (l.type_ligne || '').toUpperCase(); return t === 'MO' || t === 'FORFAIT'; };
+    var bloc = function (titre, ls, mo) {
+      if (!ls.length) return '';
+      return '<div class="vh-lg-t">' + titre + '</div>' + ls.map(function (l) {
+        var q = fmtQte(l.quantite, mo);
+        var m = (l.montant_ht != null && Number(l.montant_ht) !== 0) ? fmtMt(l.montant_ht) : (l.montant_ht != null ? 'offert' : '');
+        return '<div class="vh-lg"><span class="vh-lg-d">' + esc(phrase(l.description)) + '</span>' +
+          (q ? '<span class="vh-lg-q">' + esc(q) + '</span>' : '') +
+          '<span class="vh-lg-m">' + esc(m) + '</span></div>';
+      }).join('');
+    };
+    var mo = avec.filter(estMo), autres = avec.filter(function (l) { return !estMo(l); });
+    return '<div class="vh-lines">' + bloc('Main-d’œuvre', mo, true) + bloc('Pièces et fournitures', autres, false) + '</div>';
+  }
+  function factLine(f, lignes) {
     var or = f.NUM_OR ? ('OR ' + esc(f.NUM_OR)) : (f.NUM_FACT_DMS ? ('Facture ' + esc(f.NUM_FACT_DMS)) : 'Facture APV');
     var mt = f.MT_TOT_FACT_HT != null ? fmtMt(f.MT_TOT_FACT_HT) : '';
     var d = fmtDate(f.DT_FAC || f.DT_OR);
-    var cat = f.CAT_FACT ? esc(f.CAT_FACT) : '';
-    var lib = f.LIB_DESC ? esc(f.LIB_DESC) : '';
+    var garantie = (lignes || []).some(function (l) { return (l.nature || '').toUpperCase().indexOf('GARANTIE') === 0; });
     var site = f.SITE ? esc(f.SITE) : '';
     var km = (f.KM != null && f.KM !== '') ? (Number(f.KM).toLocaleString('fr-FR') + ' km') : '';
-    var line1 = [d, cat].filter(Boolean).join(' \u00b7 ');
-    var line3 = [site, km].filter(Boolean).join(' \u00b7 ');
-    return '<div class="vh-fact"><div class="vh-fact-l">' +
-      '<div class="vh-fact-or">' + or + (line1 ? ' <span class="vh-fact-dt">' + line1 + '</span>' : '') + '</div>' +
-      (lib ? '<div class="vh-fact-sub">' + lib + '</div>' : '') +
+    var line3 = [site, km].filter(Boolean).join(' · ');
+    var det = lignes ? detailHtml(lignes) : (f.LIB_DESC ? '<div class="vh-fact-sub">' + esc(f.LIB_DESC) + '</div>' : '');
+    return '<div class="vh-fact"><div class="vh-fact-top"><div class="vh-fact-l">' +
+      '<div class="vh-fact-or">' + or + (d ? ' <span class="vh-fact-dt">' + d + '</span>' : '') +
+        (garantie ? ' <span class="vh-gar">Garantie</span>' : '') + '</div>' +
       (line3 ? '<div class="vh-fact-kv">' + line3 + '</div>' : '') +
-      '</div>' + (mt ? '<div class="vh-fact-mt">' + mt + '</div>' : '') + '</div>';
+      '</div>' + (mt ? '<div class="vh-fact-mt">' + mt + '</div>' : '') + '</div>' + det + '</div>';
   }
   async function openApv(vin, label) {
     var ov = doc.getElementById('vh-modal'); if (ov) ov.remove();
@@ -224,15 +271,23 @@ OD.define('vehicules', {
     try {
       // Historique atelier du véhicule, tous sites du groupe (apv_vehicule).
       // Locataire sans cette fonction : repli sur la vue APV (périmètre du site).
+      // Contenu des interventions (apv_vehicule_detail), lu en parallèle ;
+      // sans cette fonction, la fenêtre garde l'ancien résumé (LIB_DESC).
+      var pDet = sb.rpc('apv_vehicule_detail', { p_vin: vin }).then(function (r) { return r; }, function () { return { error: true }; });
       var res = await sb.rpc('apv_vehicule', { p_vin: vin });
       if (res.error) res = await sb.from('APV').select('*').eq('VIN', vin);
       if (res.error) throw res.error;
       var rows = res.data || [];
+      var det = await pDet, parOr = null;
+      if (!det.error && Array.isArray(det.data)) {
+        parOr = {};
+        det.data.forEach(function (l) { var k = String(l.num_or || ''); (parOr[k] = parOr[k] || []).push(l); });
+      }
       var body = ov.querySelector('.vh-ov-body');
       if (!rows.length) { body.innerHTML = '<div class="vh-ov-msg">Aucune facture APV pour ce véhicule.</div>'; return; }
       rows.sort(function (a, b) { return new Date(b.DT_FAC || b.DT_OR || 0) - new Date(a.DT_FAC || a.DT_OR || 0); });
       var total = rows.reduce(function (acc, f) { return acc + (Number(f.MT_TOT_FACT_HT) || 0); }, 0);
-      body.innerHTML = rows.map(factLine).join('') +
+      body.innerHTML = rows.map(function (f) { return factLine(f, parOr ? (parOr[String(f.NUM_OR || '')] || []) : null); }).join('') +
         '<div class="vh-total">' + rows.length + ' facture' + (rows.length > 1 ? 's' : '') + ' \u00b7 <strong>' + fmtMt(total) + '</strong></div>';
     } catch (e) {
       console.error('[vehicules] APV', e);
