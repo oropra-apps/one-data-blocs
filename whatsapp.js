@@ -72,7 +72,7 @@ OD.define('whatsapp', {
     const e164 = toE164(client && client.TEl_MOB);
     if (!e164) return;
     // Site SÉLECTIONNÉ dans la topnav (essentiel pour les users multisite) :
-    // -> wa_business = SITE.Fax  et  concession = SITE.SITE (repli SITE.AFFAIRE).
+    // -> wa_business = SITE.Fax.
     state.waBusiness = null; state.concession = '';
     try {
       const site = readVar(SELECTED_SITE_VAR_ID);
@@ -84,6 +84,22 @@ OD.define('whatsapp', {
         }
       }
     } catch (e) { console.warn('[wa] site', e); }
+    // Le nom de la concession montré au client N'EST PAS le libellé du DMS.
+    // « SCEAUX TT92 » est un code interne ; ce que le client doit lire est le
+    // nom affiché du compte WhatsApp, « Lexus Sceaux », pour que le message et
+    // l'en-tête de sa conversation disent la même chose.
+    // `wa-send-text` résout ce nom côté serveur et fait autorité ; on le lit
+    // ici UNIQUEMENT pour que l'aperçu montre le vrai message. Table absente
+    // ou colonne vide : on garde le libellé du site, exactement comme le
+    // serveur retombe dessus.
+    try {
+      if (state.waBusiness) {
+        const n = await sb().from('wa_phone_number_id')
+          .select('nom_affiche').eq('wa_business', Number(state.waBusiness)).maybeSingle();
+        const nom = n.data && n.data.nom_affiche && String(n.data.nom_affiche).trim();
+        if (nom) state.concession = nom;
+      }
+    } catch (e) { console.warn('[wa] nom affiché', e); }
     try {
       const ct = await sb().from('wa_contacts').select('id, wa_phone_e164, display_name').eq('wa_phone_e164', e164).maybeSingle();
       state.contact = ct.data || null;
