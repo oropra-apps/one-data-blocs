@@ -17,6 +17,7 @@
 //  v7 (09/10/2026) : contenu de l'intervention sous chaque facture (apv_vehicule_detail) :
 //  main-d'œuvre (heures) puis pièces (quantités), montant par ligne, pastille
 //  « Garantie ». Factures des exports trimestriels sans détail : mention explicite.
+//  v8 (09/10/2026) : kilométrage à 0 non affiché (valeur absente du DMS).
 //  La date
 //  réelle reste seule dans CLIENT_STOCK.DT_PMEC (propale, bon de commande).
 //  Locataire sans table vehicule_ref : la lecture échoue sans bruit, rien ne change.
@@ -251,7 +252,7 @@ OD.define('vehicules', {
     var d = fmtDate(f.DT_FAC || f.DT_OR);
     var garantie = (lignes || []).some(function (l) { return (l.nature || '').toUpperCase().indexOf('GARANTIE') === 0; });
     var site = f.SITE ? esc(f.SITE) : '';
-    var km = (f.KM != null && f.KM !== '') ? (Number(f.KM).toLocaleString('fr-FR') + ' km') : '';
+    var km = (f.KM != null && f.KM !== '' && Number(f.KM) > 0) ? (Number(f.KM).toLocaleString('fr-FR') + ' km') : '';
     var line3 = [site, km].filter(Boolean).join(' · ');
     var det = lignes ? detailHtml(lignes) : (f.LIB_DESC ? '<div class="vh-fact-sub">' + esc(f.LIB_DESC) + '</div>' : '');
     return '<div class="vh-fact"><div class="vh-fact-top"><div class="vh-fact-l">' +
