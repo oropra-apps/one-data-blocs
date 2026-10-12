@@ -1,4 +1,7 @@
 // ============================================================================
+//  v59 (12/10/2026) : le cycle BACS ne s'applique qu'aux clients raccordés à
+//  BACS (Team Colin). Ailleurs : colonnes Simulations / Propale / BDC / Gagné /
+//  Perdu, ni pastille de statut BACS ni bouton « B », cartes déplaçables.
 //  v56 (08/10/2026) : diaporama des photos, meme correction que vo-liste v11
 //  (un seul ecouteur clavier, premier plan au-dessus de la bulle Pulse).
 //  v54 (07/10/2026) : recette Team Colin, gestion des ventes du marketing et
@@ -45,6 +48,22 @@
 // ============================================================================
 OD.define('kanban', {
   async mount(__anchor, ctx) {
+
+    // ── Profil du tenant (v59) ────────────────────────────────────────────
+    // Le cycle BACS (libellés des colonnes, pastilles de statut, bouton « B »,
+    // règles de déplacement des cartes BACS) n'a de sens que chez un client
+    // raccordé à BACS. Ailleurs — démo publique comprise — le pipeline garde
+    // ses libellés génériques et toutes les cartes se déplacent librement.
+    // Forçage manuel pour tester ailleurs : window.__OD_KANBAN_PROFILE__ = 'bacs'
+    const KAN_BACS = (function () {
+      try {
+        if (window.__OD_KANBAN_PROFILE__ === 'bacs') return true;
+        const t = ctx.tenant || {};
+        if (String(t.supabase_url || '').indexOf('ieztupavcdnubmpbjvuq') !== -1) return true;
+        const slug = String(t.slug || t.code || t.tenant_slug || t.name || '').toLowerCase().replace(/[^a-z]/g, '');
+        return slug === 'teamcolin';
+      } catch (e) { return false; }
+    })();
 
     // ── Réglage du tenant : propositions créées dans One Data ou dans BACS ──
     // app_settings.propale_creation_one_data = false chez un client qui crée
@@ -187,10 +206,10 @@ OD.define('kanban', {
     return (T[from] && T[from][to]) || null;
   }
   function canMove(from, to, bacs) { const lvl = transitionLevel(from, to, bacs); if (!lvl) return false; if (lvl === 'M' && !peutValider()) return false; return true; }
-  function estBacs(c) { return !!(c && (c.bacs_sf_id || c.id_affaire_bacs)); }
+  function estBacs(c) { return KAN_BACS && !!(c && (c.bacs_sf_id || c.id_affaire_bacs)); }
   function canArchive(status) { return status === 'draft' || status === 'propale'; }
 
-  const COLS = [
+  const COLS = KAN_BACS ? [
     // Libellé d'affichage seulement : le statut reste 'draft' en base.
     // Libellés du cycle BACS (21/09). Les codes restent en base.
     { key: 'draft', label: 'Simulations' },
@@ -198,6 +217,13 @@ OD.define('kanban', {
     { key: 'bdc', label: "Demande d'approbation" },
     { key: 'win', label: 'Transmis TFR / Validée' },
     { key: 'lose', label: 'Abandonné' }
+  ] : [
+    // Libellés génériques (tout client non raccordé à BACS).
+    { key: 'draft', label: 'Simulations' },
+    { key: 'propale', label: 'Propale' },
+    { key: 'bdc', label: 'BDC' },
+    { key: 'win', label: 'Gagné' },
+    { key: 'lose', label: 'Perdu' }
   ];
   const COL_KEYS = COLS.map(c => c.key);
 
@@ -690,7 +716,7 @@ OD.define('kanban', {
     'Delivered':         ['Livrée', '#1d6e5f', '#e1f5ee']
   };
   function pastilleBacs(c) {
-    const p = PASTILLES_BACS[c.statut_bacs];
+    const p = KAN_BACS ? PASTILLES_BACS[c.statut_bacs] : null;
     let h = '';
     if (p) h += '<span style="display:inline-block;font-size:10.5px;font-weight:800;border-radius:999px;padding:2px 9px;'
       + 'margin:0 6px 6px 0;color:' + p[1] + ';background:' + p[2] + '">' + esc(p[0]) + '</span>';
@@ -812,7 +838,7 @@ OD.define('kanban', {
          + (cmdUnitaire ? 'Abandonner la commande' : 'Archiver') + '">' + ICON_TRASH + '</button>';
     // Renvoi vers BACS : l'affaire si la carte est plurale (plusieurs documents),
     // le document lui-meme si elle est unitaire.
-    if (c.id_affaire_bacs || c.bacs_sf_id) {
+    if (KAN_BACS && (c.id_affaire_bacs || c.bacs_sf_id)) {
       const cible = vnMulti ? c.id_affaire_bacs : (c.bacs_sf_id || c.id_affaire_bacs);
       if (cible) h += '<button class="kc-ic kc-bacs" data-bacs="' + esc(cible) + '" title="Ouvrir dans BACS">B</button>';
     }
