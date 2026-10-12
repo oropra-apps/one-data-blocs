@@ -335,9 +335,10 @@ await (async function () {
       #cp-root.cp-narrow #cp-side{
         position:absolute; top:0; left:0; bottom:0; z-index:15;
         width:min(82%,300px); transform:translateX(-100%);
-        transition:transform .22s ease; box-shadow:4px 0 24px rgba(28,43,69,.18);
+        transition:transform .22s ease, box-shadow .22s ease; box-shadow:none;
       }
-      #cp-root.cp-narrow.cp-side-open #cp-side{ transform:translateX(0); }
+      /* Ombre seulement panneau ouvert : fermé, elle débordait sur la conversation */
+      #cp-root.cp-narrow.cp-side-open #cp-side{ transform:translateX(0); box-shadow:4px 0 24px rgba(28,43,69,.18); }
       #cp-root.cp-narrow.cp-side-open .cp-backdrop{ display:block; }
       #cp-root.cp-narrow .cp-side-toggle{ display:inline-flex; }
       #cp-root.cp-narrow #cp-head{ padding:12px 16px; gap:10px; }
@@ -347,6 +348,12 @@ await (async function () {
       #cp-root.cp-narrow .cp-bubble{ max-width:88%; }
       #cp-root.cp-compact #cp-head-text p{ display:none; }
       #cp-root.cp-compact .cp-q{ padding:6px 11px; font-size:11.5px; }
+      /* Téléphone : pas d'avatar, bulles pleine largeur, tableaux resserrés (rien ne déborde) */
+      #cp-root.cp-compact .cp-msg .cp-avatar{ display:none; }
+      #cp-root.cp-compact .cp-msg.assistant .cp-bubble{ max-width:100%; flex:1; min-width:0; padding:12px 12px; overflow-x:auto; overflow-y:hidden; }
+      #cp-root.cp-compact .cp-msg.user .cp-bubble{ max-width:88%; }
+      #cp-root.cp-compact .cp-bubble table{ font-size:11.5px; }
+      #cp-root.cp-compact .cp-bubble th, #cp-root.cp-compact .cp-bubble td{ padding:5px 6px; }
     `;
     doc.head.appendChild(style);
   }
