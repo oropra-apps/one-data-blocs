@@ -1,5 +1,7 @@
 // ============================================================================
-//  DELCO — CHAT AGENT — module One Data (OD.define)  v10
+//  DELCO — CHAT AGENT — module One Data (OD.define)  v11
+//  v11 (12/10/2026) — sous-titre : « Ne traite que les questions métier, mais
+//     avec des chiffres justes. » (remplace « Ton agent CRM360 »).
 //  v10 (09/10/2026) — boutons du vendeur (plan Delco, P4), prêts pour
 //     l'ouverture de Delco aux vendeurs : « Mon brief », « Mes relances du
 //     jour », « Mes dossiers à signer », « Prépare mon RDV » (un tour chacun
@@ -418,7 +420,7 @@ await (async function () {
         <div id="cp-head-icon">${LOGO_SVG}</div>
         <div id="cp-head-text">
           <h2>Delco</h2>
-          <p>Ton agent CRM360</p>
+          <p>Ne traite que les questions métier, mais avec des chiffres justes.</p>
         </div>
       </div>
       <div id="cp-stream"></div>
