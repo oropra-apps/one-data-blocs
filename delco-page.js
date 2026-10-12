@@ -1,5 +1,6 @@
 // ============================================================================
-//  DELCO — PAGE (brief + radar) — module One Data (OD.define)  v4 — rôles exclus par réglage du tenant (delco_roles_exclus)
+//  DELCO — PAGE (brief + radar) — module One Data (OD.define)  v5 — rôles exclus par réglage du tenant (delco_roles_exclus)
+//  v5 (12/10/2026) : « signaux » au pluriel (affichait « signals »).
 //  Rendu dans __anchor ; client via ctx.supabase ; création de #dp-root retirée
 //  (le loader fournit l'ancre). Navigation fiche client corrigée : préfixe /fr
 //  en prod (sans lui -> page blanche). Le CTA chat cible #cp-root sur la page.
@@ -788,7 +789,7 @@ await (async function () {
     const moreBtn = (total > BRIEF_LIMIT)
       ? `<button class="dp-brief-more" data-brief-toggle>${showAllBrief
           ? "Réduire le brief"
-          : "Voir les " + remaining + " autre" + (remaining > 1 ? "s" : "") + " signal" + (remaining > 1 ? "s" : "")}</button>`
+          : "Voir les " + remaining + " autre" + (remaining > 1 ? "s" : "") + (remaining > 1 ? " signaux" : " signal")}</button>`
       : "";
     return `
       <div class="dp-card dp-brief-card">
@@ -796,7 +797,7 @@ await (async function () {
           <h2>Brief du jour</h2>
           <span class="dp-badge-cnt">
             <span class="dp-badge-cnt-dot ${urgentCount > 0 ? "urgent" : ""}"></span>
-            ${total} signal${total > 1 ? "s" : ""}${urgentCount > 0 ? " · " + urgentCount + " urgent" + (urgentCount > 1 ? "s" : "") : ""}
+            ${total} ${total > 1 ? "signaux" : "signal"}${urgentCount > 0 ? " · " + urgentCount + " urgent" + (urgentCount > 1 ? "s" : "") : ""}
           </span>
         </div>
         <div class="dp-signals-list">
