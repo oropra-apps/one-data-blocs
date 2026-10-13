@@ -1,5 +1,6 @@
 // ============================================================================
-//  BILATÉRALES — v18 (14/10/2026, Team Colin) — v18 : périmètre sans défilement sur mobile ;
+//  BILATÉRALES — v19 (14/10/2026, Team Colin) — v19 : vue direction (sites repliés, régularité depuis le démarrage, nœuds vides masqués)
+//  v18 — v18 : périmètre sans défilement sur mobile ;
 //     priorité : retard d'objectif rapporté à l'attendu à date
 //  v17
 //   - Cadence de la direction : 1 bilatérale par semaine et par vendeur
@@ -1143,7 +1144,12 @@ function renderTree() {
   const sites = state.sites || [];
   if (!sites.length) return '<div class="bil-empty">Aucun site dans votre périmètre.</div>';
   const lvl = scopeLevel();
-  const reseaux = [...new Set(sites.map(s => s.reseau))].sort();
+  // v19 : un nœud sans aucun vendeur actif (ex. « (Sans réseau) ») est masqué,
+  // sauf s'il est la sélection en cours.
+  const plein = pred => statsNoeud(pred).total > 0;
+  let reseaux = [...new Set(sites.map(s => s.reseau))].sort();
+  const rPleins = reseaux.filter(rk => plein(s => s.reseau === rk) || (lvl !== 'racine' && state.selReseau === rk));
+  if (rPleins.length) reseaux = rPleins;
   const collapseR = reseaux.length === 1;
   let body = '';
   for (const rk of reseaux) {
@@ -1154,12 +1160,12 @@ function renderTree() {
     const affs = []; const vu = {};
     sites.filter(s => s.reseau === rk).forEach(s => { const k = String(s.id_affaire); if (!vu[k]) { vu[k] = 1; affs.push({ key: k, label: s.affaire }); } });
     const collapseA = collapseR && affs.length === 1;
-    for (const A of affs.sort((x, y) => String(x.label).localeCompare(String(y.label), 'fr'))) {
+    for (const A of affs.filter(A => plein(s => s.reseau === rk && String(s.id_affaire) === A.key) || (lvl === 'affaire' && String(state.selAffaire.key) === A.key)).sort((x, y) => String(x.label).localeCompare(String(y.label), 'fr'))) {
       const aKey = rKey + '|a:' + A.key, aOpen = !!state.expanded[aKey] || collapseA;
       const aSel = lvl === 'affaire' && state.selReseau === rk && String(state.selAffaire.key) === A.key;
       if (!collapseA) body += '<tr class="lv-affaire' + (aSel ? ' is-selected' : '') + '" data-scope="affaire:' + esc(rk) + '|' + esc(A.key) + '"><td><span data-exp="' + esc(aKey) + '">' + expIcon(aOpen) + '</span>' + esc(A.label) + '</td>' + cellulesNoeud(statsNoeud(s => s.reseau === rk && String(s.id_affaire) === A.key)) + '</tr>';
       if (!aOpen) continue;
-      for (const S of sites.filter(s => s.reseau === rk && String(s.id_affaire) === A.key).sort((x, y) => x.nom_site.localeCompare(y.nom_site, 'fr'))) {
+      for (const S of sites.filter(s => s.reseau === rk && String(s.id_affaire) === A.key && (plein(x => x.id_site === s.id_site) || (lvl === 'site' && state.selSite === s.id_site))).sort((x, y) => x.nom_site.localeCompare(y.nom_site, 'fr'))) {
         const sKey = aKey + '|s:' + S.id_site, sOpen = !!state.expanded[sKey];
         const sSel = lvl === 'site' && state.selSite === S.id_site;
         body += '<tr class="lv-site' + (sSel ? ' is-selected' : '') + (collapseA ? ' flat' : '') + '" data-scope="site:' + S.id_site + '"><td><span data-exp="' + esc(sKey) + '">' + expIcon(sOpen) + '</span>' + esc(S.nom_site) + '</td>' + cellulesNoeud(statsNoeud(s => s.id_site === S.id_site)) + '</tr>';
@@ -1205,6 +1211,17 @@ function regScaleLegend(){
     ' <span style="color:#9bb3d1">faible &#8594; élevée</span></span>'+
     '<span class="lg"><span class="sw" style="background:#eef2f8;border:1px dashed #cfd9e9"></span>aucune bilatérale</span>';
 }
+// v19 : la régularité se mesure depuis le DÉMARRAGE des bilatérales dans One
+// Data (premier mois où une bilatérale existe sur l'ensemble des chefs), pas
+// sur 6 mois pleins : sinon, au lancement, tous les chefs sont « irréguliers »
+// pendant trois mois faute d'historique. 0 = pas encore démarré.
+function regFenetre(){
+  const chefs = state.chefs || []; let first = -1;
+  for (let i = 0; i < 6 && first < 0; i++) if (chefs.some(c => Array.isArray(c.regularite) && c.regularite[i] > 0)) first = i;
+  return first < 0 ? 0 : 6 - first;
+}
+function chefActifs(c){ const w = regFenetre(); return c.regularite.slice(6 - w).filter(p => p > 0).length; }
+function chefIrregulier(c){ const w = regFenetre(); if (!w) return false; return chefActifs(c) < Math.ceil(w / 2) || c.couverture < 50; }
 function reg6Months(){ const out=[]; const d=new Date(); for(let k=5;k>=0;k--){ const m=new Date(d.getFullYear(), d.getMonth()-k, 1); out.push({ ini: MOIS_FR[m.getMonth()].charAt(0).toUpperCase(), nom: MOIS_FR[m.getMonth()] }); } return out; }
 
 // --- cellules du tableau vendeurs ---
@@ -1312,8 +1329,8 @@ function chefRegStrip(reg){
   return '<div class="reg">'+cells+'</div>';
 }
 function chefRow(c){
-  const cov=c.couverture, active=c.regularite.filter(p=>p>0).length, tp=tenuePctOf(c.eng);
-  let flag=''; if(active<=3||cov<50) flag='<span class="cflag irr">irrégulier</span>'; else if(active>=6&&cov>=90&&tp!=null&&tp>=80) flag='<span class="cflag exe">exemplaire</span>';
+  const cov=c.couverture, w=regFenetre(), active=chefActifs(c), tp=tenuePctOf(c.eng);
+  let flag=''; if(chefIrregulier(c)) flag='<span class="cflag irr">irrégulier</span>'; else if(w>=3&&active>=w&&cov>=90&&tp!=null&&tp>=80) flag='<span class="cflag exe">exemplaire</span>';
   const covCol=cov>=85?'#00997f':(cov>=60?'#8a6d1f':'#c0524f');
   const tCol=tp==null?'#8b99b0':(tp>=80?'#00997f':(tp>=60?'#8a6d1f':'#c0524f'));
   const dCol=c.delai_moyen==null?'#8b99b0':(c.delai_moyen<=BIL_CFG.cadenceJ?'#00997f':(c.delai_moyen<=BIL_CFG.retardJ?'#8a6d1f':'#c0524f'));
@@ -1350,14 +1367,16 @@ function renderChefs(){
   const list=chefsInScope(), nb=list.length;
   if(!nb) return '<div class="bil-empty">Aucun chef des ventes rattaché à ce périmètre.</div>';
   const covMoy=Math.round(list.reduce((s,c)=>s+c.couverture,0)/nb);
-  const irr=list.filter(c=>c.regularite.filter(p=>p>0).length<=3||c.couverture<50).length;
+  const fen=regFenetre(), irr=list.filter(chefIrregulier).length;
   const tenVals=list.map(c=>tenuePctOf(c.eng)).filter(x=>x!=null);
   const tenMoy=tenVals.length?Math.round(tenVals.reduce((s,x)=>s+x,0)/tenVals.length):null;
   const vol=list.reduce((s,c)=>s+c.volume,0);
   let h='<div class="prio-head">Encadrement <span class="prio-sub">'+nb+' chef'+(nb>1?'s':'')+' des ventes · '+esc(scopeLabel())+'</span></div>';
   h+='<div class="prio-kpis">';
   h+='<div class="pk"><div class="pk-v" style="color:'+(covMoy>=85?'#00997f':(covMoy>=60?'#8a6d1f':'#c0524f'))+'">'+covMoy+'%</div><div class="pk-l">couverture moyenne</div><div class="pk-s">vendeurs reçus sur la période</div></div>';
-  h+='<div class="pk"><div class="pk-v" style="color:'+(irr?'#c0524f':'#00997f')+'">'+irr+'</div><div class="pk-l">chefs irréguliers</div><div class="pk-s">≤ 3 mois actifs / 6</div></div>';
+  h+= fen
+    ? '<div class="pk"><div class="pk-v" style="color:'+(irr?'#c0524f':'#00997f')+'">'+irr+'</div><div class="pk-l">chefs irréguliers</div><div class="pk-s">depuis le démarrage ('+fen+' mois)</div></div>'
+    : '<div class="pk"><div class="pk-v" style="color:#8b99b0">—</div><div class="pk-l">chefs irréguliers</div><div class="pk-s">démarrage : aucune bilatérale encore réalisée</div></div>';
   h+='<div class="pk"><div class="pk-v" style="color:'+(tenMoy==null?'#8b99b0':(tenMoy>=80?'#00997f':(tenMoy>=60?'#8a6d1f':'#c0524f')))+'">'+(tenMoy==null?'—':tenMoy+'%')+'</div><div class="pk-l">tenue moyenne</div><div class="pk-s">engagements des équipes</div></div>';
   h+='<div class="pk"><div class="pk-v" style="color:#2a5ea9">'+vol+'</div><div class="pk-l">bilatérales</div><div class="pk-s">sur la période</div></div>';
   h+='</div>';
@@ -1369,8 +1388,8 @@ function renderChefs(){
   h+='</div></div>';
   h+='<div class="bil-legend">'+
      regScaleLegend()+
-     '<span class="lg">· <b>irrégulier</b> = ≤ 3 mois actifs / 6 ou couverture &lt; 50 %</span>'+
-     '<span class="lg">· <b>exemplaire</b> = 6 mois actifs, couverture ≥ 90 %, tenue ≥ 80 %</span>'+
+     '<span class="lg">· <b>irrégulier</b> = actif moins d’un mois sur deux depuis le démarrage des bilatérales dans One Data, ou couverture &lt; 50 % sur la période</span>'+
+     '<span class="lg">· <b>exemplaire</b> = actif chaque mois depuis au moins 3 mois, couverture ≥ 90 %, tenue ≥ 80 %</span>'+
      '<span class="lg">· délai moy. = jours entre deux bilatérales d\'un même vendeur</span></div>';
   return h;
 }
@@ -1405,7 +1424,17 @@ function renderSuivi() {
       .forEach(si => {
         const l = list.filter(v => v.id_site === si.id);
         const r = l.filter(recuPeriode).length;
-        h += '<div class="site-block"><div class="site-title">' + esc(si.nom) + '<span>' + r + '/' + l.length + ' reçus</span></div>' + renderVendeursTables(l, true) + '</div>';
+        // v19 : au-delà de 3 sites (vue direction : 20+ sites, 90+ vendeurs),
+        // chaque site est replié sur sa ligne de synthèse ; un clic le déplie.
+        const pli = sites.length > 3;
+        const repli = pli && !(state.suiviOpen || {})[si.id] && !q;
+        const jam = l.filter(v => v.jours_depuis_bilat == null).length;
+        const ret = l.filter(v => v.jours_depuis_bilat != null && v.jours_depuis_bilat > BIL_CFG.retardJ && !v.next_bilaterale_at).length;
+        const prog = l.filter(v => v.next_bilaterale_at).length;
+        const det = pli ? '<em class="st-det">' + [prog ? prog + ' programmé' + (prog > 1 ? 's' : '') : '', ret ? ret + ' en retard' : '', jam ? jam + ' jamais reçu' + (jam > 1 ? 's' : '') : ''].filter(Boolean).join(' · ') + '</em>' : '';
+        h += '<div class="site-block' + (repli ? ' repli' : '') + '"><div class="site-title' + (pli ? ' clik' : '') + '"' + (pli ? ' data-suivi-site="' + si.id + '"' : '') + '>' +
+          (pli ? '<i class="st-chev">' + (repli ? '▶' : '▼') + '</i>' : '') + esc(si.nom) + '<span>' + r + '/' + l.length + ' reçus</span>' + det + '</div>' +
+          (repli ? '' : renderVendeursTables(l, true)) + '</div>';
       });
     h += vendeursLegend();
   } else {
@@ -1770,6 +1799,8 @@ window.__bilRoute = function (e) {
   if (chefRowEl) { focusChef(Number(chefRowEl.getAttribute('data-chef'))); return; }
 
   // "toute l'équipe du site" (annule le focus chef)
+  const sst = e.target.closest('[data-suivi-site]');
+  if (sst) { state.suiviOpen = state.suiviOpen || {}; const k = sst.getAttribute('data-suivi-site'); state.suiviOpen[k] = !state.suiviOpen[k]; render(); return; }
   const all = e.target.closest('[data-suivi-all]');
   if (all) { state.chefFocus = null; render(); return; }
 
@@ -2108,6 +2139,12 @@ const STYLE = '<style>' +
 '#bil-root .hint-det b{color:#2a5ea9}' +
 '#bil-root .suivi-cov{font-size:12px;font-weight:700;color:#8b99b0;margin-left:10px}' +
 '#bil-root .site-block{margin-bottom:10px}' +
+'#bil-root .site-block.repli{margin-bottom:0;border-bottom:1px solid #eaf0f9}' +
+'#bil-root .site-block.repli .site-title{margin:0;padding:11px 4px}' +
+'#bil-root .site-title.clik{cursor:pointer;user-select:none}' +
+'#bil-root .site-title .st-chev{display:inline-flex;align-items:center;justify-content:center;width:16px;height:16px;border-radius:3px;background:#eaf0f9;font-size:9px;color:#7a9cc4;font-style:normal}' +
+'#bil-root .site-title.clik:hover{color:#2a5ea9}' +
+'#bil-root .site-title .st-det{font-style:normal;font-size:12px;font-weight:600;color:#8b99b0;background:none;padding:0}' +
 '#bil-root .site-title{font-size:15px;font-weight:800;color:#1c2b45;margin:20px 0 2px;display:flex;align-items:center;gap:10px}' +
 '#bil-root .site-title span{font-size:11.5px;font-weight:700;color:#8b99b0;background:#eef2f8;border-radius:20px;padding:2px 10px}' +
 '#bil-root .v-plan{width:28px;height:28px;border-radius:8px;border:1.5px solid #2a5ea9;background:#fff;color:#1F4A85;font-size:16px;font-weight:800;line-height:1;cursor:pointer}' +
