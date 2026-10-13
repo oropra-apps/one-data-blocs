@@ -1,4 +1,37 @@
 // ============================================================================
+//  BILATÉRALES — v6 (14/10/2026, Team Colin) — préparation de la revue du 14/10
+//
+//  1. LA FICHE A TOUJOURS SES CHIFFRES. get_vendeur_synthese dépassait le
+//     délai d'exécution : « Indicateurs indisponibles : canceling statement
+//     due to statement timeout ». Les chiffres de tête viennent désormais de
+//     dash_lire — précalculé, le même que l'accueil, donc les mêmes nombres
+//     que « L'écart le plus important est celui de … ». Le détail (pipeline,
+//     RDV, leads, clos) arrive section par section (bilat_synthese_part) ;
+//     une section lente affiche « Réessayer » sans bloquer les autres.
+//  2. PAS DE RÉALISATION DANS LE FUTUR. Une bilatérale à venir se réalise
+//     par « Réaliser maintenant » : sa date est ramenée à l'instant présent
+//     (bilat_realiser). Le serveur refuse le reste.
+//  3. LA FILE « EN PRIORITÉ » EST CLASSÉE PAR UN SCORE EXPLICABLE :
+//     40 % écart à l'objectif au prorata du mois, 25 % baisse de transfo
+//     pondérée par le volume, 20 % ancienneté de la dernière bilatérale,
+//     15 % discipline (engagements non tenus, relances et leads en retard).
+//     Chaque ligne affiche sa RAISON PRINCIPALE. Le nombre de propales ne
+//     sert plus qu'à départager. Filtre « Charge élevée » retiré (il gardait
+//     tout le monde). Transfo affichée seulement au-delà d'un volume minimal.
+//  4. PLANIFIER EN DEUX CLICS depuis chaque ligne, et « Mener maintenant ».
+//  5. LE PÉRIMÈTRE CHOISI EST CONSERVÉ au retour de la fiche d'un vendeur.
+//  6. LA FICHE OUVRE SUR LA REVUE DES ENGAGEMENTS, pré-remplit le bilan avec
+//     les constats chiffrés, propose des engagements chiffrés et datés
+//     (quoi / combien / pour quand), et le mode réunion met les chiffres en
+//     grand avec le compte rendu en panneau latéral.
+//  7. APRÈS L'ENREGISTREMENT : confirmation, prochaine bilatérale suggérée à
+//     la cadence de la direction (BIL_CFG.cadenceJ), planifiable d'un clic.
+//  Vocabulaire : « 2 derniers mois » au lieu de « Bimestre », « aucun
+//  engagement pris » au lieu de « à constituer », « Fréquence », « Engagements
+//  tenus ».
+//  Prérequis SQL : bilaterales_02_fonctions_teamcolin.sql (fonctions bilat_*).
+// ============================================================================
+// ============================================================================
 //  BILATÉRALES — module One Data (OD.define)  v1
 //  Rendu dans __anchor ; client via ctx.supabase ; attente d'ancre et filets de
 //  re-render retirés (le loader possède le cycle de vie).
@@ -25,6 +58,21 @@ __anchor.id = 'bil-root';
 // Variable WeWeb remplie par le bouton "Réaliser la Bilatérale" de l'agenda :
 // si elle contient un id au chargement, on ouvre directement le popup de réalisation.
 const VAR_ID_BILATE_REAL = '851fed59-9397-41ae-b91d-26daa2ff960a';
+
+// --- Règles d'animation (réglables par tenant) -------------------------------
+// cadenceJ : fréquence exigée par la direction entre deux bilatérales d'un même
+//            vendeur ; sert à suggérer la prochaine date.
+// retardJ  : au-delà, la cadence est « dépassée » (filtre, couleur, score).
+// minVolumeTransfo : en dessous de ce nombre de propositions sur une période,
+//            la transformation n'est pas affichée (0 % ou 100 % sur 2
+//            propositions ne veut rien dire).
+// Surcharge possible par ctx.tenant.config.bilaterales ou window.__OD_BIL_CFG.
+const BIL_CFG = (function () {
+  const base = { cadenceJ: 30, retardJ: 45, minVolumeTransfo: 8 };
+  try { Object.assign(base, (ctx && ctx.tenant && ctx.tenant.config && ctx.tenant.config.bilaterales) || {}); } catch (e) {}
+  try { Object.assign(base, window.__OD_BIL_CFG || {}); } catch (e) {}
+  return base;
+})();
 
 function ymd(d) {
   const y = d.getFullYear(), m = String(d.getMonth() + 1).padStart(2, '0'), j = String(d.getDate()).padStart(2, '0');
@@ -185,6 +233,14 @@ async function loadData() {
     const _fromD = new Date(state.period.from.slice(0, 7) + '-01T00:00:00');
     const bilFrom = ymd(new Date(_fromD.getFullYear(), _fromD.getMonth() - HISTORIQUE_MOIS, 1));
     const dir = isDirection();
+    const auj = new Date();
+    // Best effort : volumes de transfo et chiffres du tableau de bord. Leur
+    // absence (SQL non appliqué, autre tenant) ne bloque jamais la page.
+    const souple = (pr) => Promise.resolve(pr).catch(e => ({ data: null, error: e }));
+    const [rVol, rDash] = await Promise.all([
+      souple(supabase.rpc('bilat_transfo_volumes', { p_viewer_id_user: viewer, p_date_from: state.period.from, p_date_to: state.period.to })),
+      souple(lireDash(auj.getFullYear(), auj.getMonth() + 1))
+    ]);
     const [rSites, rBils, rCad, rTenue, rChefs] = await Promise.all([
       supabase.rpc('get_perimetre_sites', { p_viewer_id_user: viewer }),
       supabase.rpc('get_bilaterales', { p_viewer_id_user: viewer, p_date_from: bilFrom, p_date_to: bilTo }),
@@ -215,7 +271,20 @@ async function loadData() {
         transfo_tendance: Number(r.transfo_tendance || 0)
       }));
       state.cadenceError = null;
+      // Volumes derrière la transfo : la tendance n'est retenue que si les deux
+      // périodes ont assez de propositions (BIL_CFG.minVolumeTransfo).
+      const vol = {};
+      if (rVol && !rVol.error && Array.isArray(rVol.data)) rVol.data.forEach(v => { vol[Number(v.id_user)] = v; });
+      state.volumesOk = !!(rVol && !rVol.error);
+      state.cadence.forEach(c => {
+        const v = vol[c.id_user];
+        c.tx_tot_actuel = v ? Number(v.tot_actuel || 0) : null;
+        c.tx_tot_precedent = v ? Number(v.tot_precedent || 0) : null;
+        enrichirTransfo(c);
+      });
     }
+    // Chiffres du tableau de bord (dash_lire, mois en cours), par vendeur.
+    state.dash = (rDash && !rDash.error && rDash.data) ? indexerDash(rDash.data) : null;
     // Tenue des engagements par vendeur (toujours chargée)
     state.tenueMap = {};
     if (!rTenue.error) {
@@ -266,6 +335,64 @@ async function loadData() {
   } finally {
     state.loading = false; render();
   }
+}
+
+// --- Chiffres du tableau de bord (dash_lire) ---------------------------------
+// Même source que l'accueil : précalculée toutes les deux minutes, bornée au
+// périmètre et à l'effectif visibles. ~30 ms. On l'agrège par vendeur (un
+// vendeur présent sur deux sites n'a qu'une ligne).
+const DASH_PROD = ['cdes','loueurs','hors_loueurs','fi','loa','roole','reprise','phev','vu','acc','obj_cdes','obj_fi'];
+const DASH_ETAT = ['livr_attente','livr_retard','livr_semaine','livr_a_cloturer','pipe_affaires','pipe_fraiches',
+  'pipe_a_relancer','pipe_froides','leads_attribues','leads_jamais','leads_jamais_48h','rdv_a_venir','rdv_tenus',
+  'rdv_soldes','rapports','devis_jour','cdes_jour'];
+const DASH_CACHE = {};
+async function lireDash(annee, mois) {
+  const k = annee + '-' + mois;
+  if (DASH_CACHE[k] && Date.now() - DASH_CACHE[k].t < 120000) return { data: DASH_CACHE[k].data, error: null };
+  const r = await ctx.supabase.rpc('dash_lire', { p_annee: annee, p_mois: mois });
+  if (!r.error) DASH_CACHE[k] = { t: Date.now(), data: r.data };
+  return r;
+}
+function indexerDash(j) {
+  const n = x => (x == null || x === '' || isNaN(Number(x))) ? 0 : Number(x);
+  const m = {};
+  const prendre = (l) => { const k = Number(l.id_user); if (!m[k]) { m[k] = { id_user: k, nom: l.nom }; DASH_PROD.concat(DASH_ETAT).forEach(c => m[k][c] = 0); } return m[k]; };
+  (j.vendeurs || []).forEach(l => { const v = prendre(l); DASH_PROD.forEach(c => v[c] += n(l[c])); });
+  (j.etat || []).forEach(l => { const v = prendre(l); DASH_ETAT.forEach(c => v[c] += n(l[c])); });
+  return { parUser: m, annee: n(j.annee), mois: n(j.mois), maj: j.maj || null };
+}
+function dashOf(idUser) { return (state.dash && state.dash.parUser[Number(idUser)]) || null; }
+// Part du mois écoulée (jours calendaires) : l'objectif « attendu à date ».
+function prorataMois(d) {
+  d = d || new Date();
+  const fin = new Date(d.getFullYear(), d.getMonth() + 1, 0).getDate();
+  return Math.min(1, d.getDate() / fin);
+}
+function clamp01(x) { return Math.max(0, Math.min(1, Number(x) || 0)); }
+function fmtNb(x, dec) { if (x == null || isNaN(x)) return '—'; return Number(x).toLocaleString('fr-FR', { maximumFractionDigits: dec == null ? 1 : dec, minimumFractionDigits: 0 }); }
+
+// --- Transformation : une seule définition, une seule présentation ------------
+// Définition : affaires gagnées / propositions mises à jour sur la période,
+// comparées à la période précédente de même longueur (get_cadence_bilaterales).
+// Elle n'est montrée que si le volume est suffisant ; la baisse n'est
+// retenue qu'au-delà de 5 points.
+function enrichirTransfo(c) {
+  const min = BIL_CFG.minVolumeTransfo;
+  const volConnu = c.tx_tot_actuel != null;
+  c.tx_signif = volConnu ? (c.tx_tot_actuel >= min) : (c.transfo_actuel != null);
+  c.tx_signif_prec = volConnu ? (c.tx_tot_precedent >= min) : (c.transfo_precedent != null);
+  c.transfo_baisse = !!(c.tx_signif && c.tx_signif_prec && c.transfo_actuel != null && c.transfo_precedent != null
+                        && c.transfo_actuel < c.transfo_precedent - 5);
+  c.transfo_hausse = !!(c.tx_signif && c.tx_signif_prec && c.transfo_actuel != null && c.transfo_precedent != null
+                        && c.transfo_actuel > c.transfo_precedent + 5);
+}
+function transfoTexte(c) {
+  if (!c || c.transfo_actuel == null) return 'Transfo : pas de proposition sur la période';
+  if (!c.tx_signif) return 'Transfo : volume insuffisant' + (c.tx_tot_actuel != null ? ' (' + c.tx_tot_actuel + ' prop.)' : '');
+  let t = 'Transfo ' + fmtNb(c.transfo_actuel) + ' %';
+  if (c.tx_signif_prec && c.transfo_precedent != null) t += ' (' + fmtNb(c.transfo_precedent) + ' % avant)';
+  if (c.tx_tot_actuel != null) t += ' · ' + c.tx_tot_actuel + ' prop.';
+  return t;
 }
 
 // --- Rendu : coquille -------------------------------------------------------
@@ -501,19 +628,65 @@ function renderTabs() {
   return h;
 }
 
-// Score de priorité : cadence (jours depuis bilat) + charge (relances/propales) + tendance transfo.
-function prioScore(c) {
-  if (c.next_bilaterale_at) return -1; // RDV déjà programmé -> action prise, en bas de liste
-  let s = 0;
+// Score de priorité (0-100) — v6. Quatre composantes, chacune normalisée
+// entre 0 et 1, pondérées 40 / 25 / 20 / 15. La composante qui pèse le plus
+// devient la RAISON PRINCIPALE affichée sur la ligne : un chef doit
+// comprendre en une seconde pourquoi ce vendeur passe en premier.
+//   objectif   : retard sur l'objectif de commandes AU PRORATA du mois
+//                (dash_lire, la source de l'accueil) ;
+//   transfo    : baisse relative de la transformation, pondérée par le volume
+//                (rien sous BIL_CFG.minVolumeTransfo propositions) ;
+//   ancienneté : jours depuis la dernière bilatérale réalisée / BIL_CFG.retardJ
+//                (jamais reçu = maximum) ;
+//   discipline : le pire de — engagements non tenus, relances en retard,
+//                leads jamais contactés depuis plus de 48 h, bilatérale
+//                planifiée non tenue.
+// Le nombre de propales ouvertes ne sert plus qu'à départager deux ex aequo.
+const POIDS = { objectif: 40, transfo: 25, anciennete: 20, discipline: 15 };
+function prioDetail(c) {
+  const K = dashOf(c.id_user);
+  const r = { c, K, comps: {}, txt: {}, score: 0, main: null };
+  // Objectif
+  if (K && K.obj_cdes > 0) {
+    const att = K.obj_cdes * prorataMois();
+    r.attendu = att; r.ecart = K.cdes - att;
+    r.comps.objectif = clamp01((att - K.cdes) / K.obj_cdes);
+    r.txt.objectif = (r.ecart < 0 ? 'Retard de ' + fmtNb(-r.ecart) + ' cmd sur l’objectif' : 'En avance de ' + fmtNb(r.ecart) + ' cmd') +
+      ' (' + fmtNb(K.cdes, 0) + ' / ' + fmtNb(K.obj_cdes, 0) + ', attendu à date ' + fmtNb(att) + ')';
+  } else { r.comps.objectif = 0; }
+  // Transfo
+  if (c.transfo_baisse && c.transfo_precedent > 0) {
+    const poidsVol = Math.min(1, (c.tx_tot_actuel != null ? c.tx_tot_actuel : BIL_CFG.minVolumeTransfo) / 20);
+    r.comps.transfo = clamp01((c.transfo_precedent - c.transfo_actuel) / c.transfo_precedent) * poidsVol;
+    r.txt.transfo = 'Transfo ' + fmtNb(c.transfo_precedent) + ' % → ' + fmtNb(c.transfo_actuel) + ' %';
+  } else { r.comps.transfo = 0; }
+  // Ancienneté
   const j = c.jours_depuis_bilat;
-  if (j == null) s += 120;                  // jamais reçu = priorité maximale
-  else s += Math.min(j, 120);               // 1 pt / jour, plafonné
-  s += (c.nb_retard || 0) * 25;             // bilatérales planifiées non réalisées
-  s += (c.rpv_en_retard || 0) * 6;          // relances / RDV en retard
-  s += (c.nb_propales_ouvertes || 0) * 3;   // pipeline à challenger
-  if (c.transfo_tendance < 0) s += 40;      // performance en baisse
-  return s;
+  r.comps.anciennete = j == null ? 1 : clamp01(j / BIL_CFG.retardJ);
+  r.txt.anciennete = j == null ? 'Jamais reçu en bilatérale' : (j === 0 ? 'Reçu aujourd’hui' : j + ' j sans bilatérale');
+  // Discipline
+  const e = (state.tenueMap || {})[c.id_user];
+  const pointes = e ? (e.tenu + e.partiel + e.non_tenu) : 0;
+  const dis = [
+    { v: pointes ? (e.non_tenu + 0.5 * e.partiel) / pointes : 0, t: e && e.non_tenu ? e.non_tenu + ' engagement' + (e.non_tenu > 1 ? 's' : '') + ' non tenu' + (e.non_tenu > 1 ? 's' : '') : '' },
+    { v: (c.rpv_en_retard || 0) / 10, t: c.rpv_en_retard ? c.rpv_en_retard + ' relance' + (c.rpv_en_retard > 1 ? 's' : '') + ' en retard' : '' },
+    { v: ((K && K.leads_jamais_48h) || 0) / 10, t: K && K.leads_jamais_48h ? K.leads_jamais_48h + ' lead' + (K.leads_jamais_48h > 1 ? 's' : '') + ' non contacté' + (K.leads_jamais_48h > 1 ? 's' : '') + ' > 48 h' : '' },
+    { v: (c.nb_retard || 0) > 0 ? 1 : 0, t: c.nb_retard ? c.nb_retard + ' bilatérale' + (c.nb_retard > 1 ? 's' : '') + ' planifiée' + (c.nb_retard > 1 ? 's' : '') + ' non tenue' + (c.nb_retard > 1 ? 's' : '') : '' }
+  ].sort((a, b) => b.v - a.v);
+  r.comps.discipline = clamp01(dis[0].v);
+  r.txt.discipline = dis[0].t;
+  r.disAutres = dis.slice(1).filter(x => x.v > 0 && x.t).map(x => x.t);
+  // Score et raison principale
+  let best = null, bestV = 0;
+  Object.keys(POIDS).forEach(k => {
+    const v = POIDS[k] * (r.comps[k] || 0); r.score += v;
+    if (v > bestV && r.txt[k]) { bestV = v; best = k; }
+  });
+  r.score = Math.round(r.score);
+  r.main = best;
+  return r;
 }
+function prioScore(c) { return prioDetail(c).score; }
 
 // ÉTAPE 0 (landing) — file de priorité "qui recevoir"
 // "En priorité" : direction -> classement des entités-filles du périmètre, des
@@ -610,90 +783,99 @@ function renderPrioLeaderboard() {
   return h;
 }
 
-  // "En priorité" — rôle chef : file de cadence de SES vendeurs.
+  // "En priorité" — rôle chef : file de SES vendeurs, classée par le score v6.
 function renderPrioVendeurs() {
-    if (state.cadence === null) return '<div class="bil-empty">Chargement de la file de priorité…</div>';
+  if (state.cadence === null) return '<div class="bil-empty">Chargement de la file de priorité…</div>';
   if (state.cadenceError) return '<div class="bil-empty">File de priorité indisponible : ' + esc(state.cadenceError) + '</div>';
   const cad = cadInScope();
   if (!cad.length) return '<div class="bil-empty">Aucun vendeur actif dans ce périmètre sur la période.</div>';
 
   const isPlanifie = (c) => c.next_bilaterale_at != null;
   const isJamais = (c) => c.jours_depuis_bilat == null && !isPlanifie(c);
-  // Cadence dépassée = déjà reçu mais trop ancien (>45 j) OU bilatérale planifiée non réalisée,
-  // et sans RDV déjà programmé. Les "jamais reçus" et les "planifiés" ont leur propre bucket.
-  const isCadenceLate = (c) => !isPlanifie(c) && c.jours_depuis_bilat != null && (c.jours_depuis_bilat > 45 || c.nb_retard > 0);
-  const isCharge = (c) => (c.rpv_en_retard || 0) + (c.nb_propales_ouvertes || 0) > 0;
+  // Cadence dépassée = déjà reçu mais trop ancien (> BIL_CFG.retardJ) OU bilatérale
+  // planifiée non réalisée, et sans RDV déjà programmé.
+  const isCadenceLate = (c) => !isPlanifie(c) && c.jours_depuis_bilat != null && (c.jours_depuis_bilat > BIL_CFG.retardJ || c.nb_retard > 0);
 
+  const det = cad.map(prioDetail);
+  const sousObj = (d) => (d.comps.objectif || 0) > 0.1;
   const total = cad.length;
   const vus = cad.filter(c => c.nb_bilaterales_periode > 0).length;
   const jamais = cad.filter(isJamais).length;
   const retardCad = cad.filter(isCadenceLate).length;
-  const baisse = cad.filter(c => c.transfo_tendance < 0).length;
+  const baisse = cad.filter(c => c.transfo_baisse).length;
   const planifieN = cad.filter(isPlanifie).length;
+  const sousObjN = det.filter(sousObj).length;
   const pctVus = total ? Math.round(100 * vus / total) : 0;
 
-  const scored = cad.map(c => ({ c, s: prioScore(c) })).sort((a, b) => b.s - a.s);
-  const f = state.prioFocus || 'tous';
-  const cadenceN = retardCad;
-  const chargeN  = cad.filter(isCharge).length;
-  // "En retard" = vendeurs (du périmètre courant) ayant au moins une bilatérale en retard
-  // ouverte (passée, non renseignée, non soldée par une réalisée) sur la période.
+  // Les vendeurs dont la bilatérale est déjà programmée passent en bas :
+  // l'action est prise. Entre eux et entre les autres : score décroissant,
+  // puis propales ouvertes.
+  const sorted = det.slice().sort((a, b) => (isPlanifie(a.c) - isPlanifie(b.c)) || (b.score - a.score) || ((b.c.nb_propales_ouvertes || 0) - (a.c.nb_propales_ouvertes || 0)));
+  const f = state.prioFocus === 'charge' ? 'tous' : (state.prioFocus || 'tous');
   const retardSet = new Set(retardsOuvertsPeriode().map(b => b.id_user));
   const retardN = cad.filter(c => retardSet.has(c.id_user)).length;
-  const pass = (c) => f === 'tous' ? true
+  const pass = (d) => { const c = d.c; return f === 'tous' ? true
     : f === 'jamais'   ? isJamais(c)
     : f === 'retard'   ? retardSet.has(c.id_user)
     : f === 'cadence'  ? isCadenceLate(c)
-    : f === 'charge'   ? isCharge(c)
-    : f === 'perf'     ? (c.transfo_tendance < 0)
+    : f === 'objectif' ? sousObj(d)
+    : f === 'perf'     ? c.transfo_baisse
     : f === 'planifie' ? isPlanifie(c)
-    : true;
+    : true; };
 
   let h = '<div class="prio-head">À recevoir en priorité <span class="prio-sub">' + esc(scopeLabel()) + ' · ' + total + ' vendeur' + (total > 1 ? 's' : '') + ' actif' + (total > 1 ? 's' : '') + '</span></div>';
   h += '<div class="prio-kpis">';
-  h += '<div class="pk"><div class="pk-v" style="color:' + (pctVus >= 70 ? '#2c7a68' : (pctVus >= 40 ? '#8a6410' : '#b23433')) + '">' + pctVus + '%</div><div class="pk-l">équipe vue ce mois</div><div class="pk-s">' + vus + '/' + total + ' vendeurs</div></div>';
+  h += '<div class="pk"><div class="pk-v" style="color:' + (pctVus >= 70 ? '#2c7a68' : (pctVus >= 40 ? '#8a6410' : '#b23433')) + '">' + pctVus + '%</div><div class="pk-l">équipe reçue sur la période</div><div class="pk-s">' + vus + '/' + total + ' vendeurs</div></div>';
   h += '<div class="pk"><div class="pk-v" style="color:' + (jamais ? '#b23433' : '#2c7a68') + '">' + jamais + '</div><div class="pk-l">jamais reçus</div><div class="pk-s">aucune bilatérale</div></div>';
-  h += '<div class="pk"><div class="pk-v" style="color:' + (retardCad ? '#8a6410' : '#2c7a68') + '">' + retardCad + '</div><div class="pk-l">cadence dépassée</div><div class="pk-s">+45 j sans entretien</div></div>';
-  h += '<div class="pk"><div class="pk-v" style="color:' + (baisse ? '#b23433' : '#2c7a68') + '">' + baisse + '</div><div class="pk-l">transfo en baisse</div><div class="pk-s">vs période précédente</div></div>';
+  h += '<div class="pk"><div class="pk-v" style="color:' + (retardCad ? '#8a6410' : '#2c7a68') + '">' + retardCad + '</div><div class="pk-l">cadence dépassée</div><div class="pk-s">plus de ' + BIL_CFG.retardJ + ' j sans bilatérale</div></div>';
+  if (state.dash) h += '<div class="pk"><div class="pk-v" style="color:' + (sousObjN ? '#b23433' : '#2c7a68') + '">' + sousObjN + '</div><div class="pk-l">en retard sur l’objectif</div><div class="pk-s">commandes, au prorata du mois</div></div>';
+  else h += '<div class="pk"><div class="pk-v" style="color:' + (baisse ? '#b23433' : '#2c7a68') + '">' + baisse + '</div><div class="pk-l">transfo en baisse</div><div class="pk-s">vs période précédente</div></div>';
   h += '</div>';
 
-  const fchips = [['tous', 'Tous', total], ['retard', 'En retard', retardN], ['jamais', 'Jamais reçus', jamais], ['cadence', 'Cadence dépassée', cadenceN], ['charge', 'Charge élevée', chargeN], ['perf', 'Transfo en baisse', baisse], ['planifie', 'RDV à venir', planifieN]];
+  const fchips = [['tous', 'Tous', total], ['objectif', 'Retard objectif', sousObjN], ['retard', 'Bilat. en retard', retardN], ['jamais', 'Jamais reçus', jamais], ['cadence', 'Cadence dépassée', retardCad], ['perf', 'Transfo en baisse', baisse], ['planifie', 'Bilat. programmée', planifieN]];
   h += '<div class="prio-chips">';
   fchips.forEach(([k, l, n]) => { if (n === 0 && k !== 'tous') return; const extra = (k === 'retard' ? ' retard' : ''); h += '<span class="prio-chip' + extra + (f === k ? ' on' : '') + '" data-priofilter="' + k + '">' + l + '<span class="pc-n">' + n + '</span></span>'; });
   h += '</div>';
+  h += '<div class="hint-line">Classement : 40 % retard sur l’objectif · 25 % baisse de transfo · 20 % ancienneté de la dernière bilatérale · 15 % discipline (engagements, relances, leads). La raison principale est en tête de chaque ligne.</div>';
 
   h += '<div class="prio-list">';
-  const shown = scored.filter(o => pass(o.c));
+  const shown = sorted.filter(pass);
   if (!shown.length) h += '<div class="bil-empty">Aucun vendeur pour ce filtre.</div>';
-  shown.forEach(({ c }) => {
-    const planifie = c.next_bilaterale_at != null;
+  shown.forEach(d => {
+    const c = d.c;
+    const planifie = isPlanifie(c);
     let cadBadge, cadCls;
-    if (planifie) { cadBadge = 'RDV'; cadCls = 'planif'; }
+    if (planifie) { cadBadge = 'RDV<small>' + esc(fmtJJMM(c.next_bilaterale_at)) + '</small>'; cadCls = 'planif'; }
     else if (c.jours_depuis_bilat == null) { cadBadge = 'Jamais'; cadCls = 'never'; }
-    else if (c.jours_depuis_bilat > 45) { cadBadge = c.jours_depuis_bilat + ' j'; cadCls = 'late'; }
-    else if (c.jours_depuis_bilat > 30) { cadBadge = c.jours_depuis_bilat + ' j'; cadCls = 'warn'; }
-    else { cadBadge = c.jours_depuis_bilat + ' j'; cadCls = 'ok'; }
+    else if (c.jours_depuis_bilat > BIL_CFG.retardJ) { cadBadge = c.jours_depuis_bilat + ' j'; cadCls = 'late'; }
+    else if (c.jours_depuis_bilat > BIL_CFG.cadenceJ) { cadBadge = c.jours_depuis_bilat + ' j'; cadCls = 'warn'; }
+    else { cadBadge = c.jours_depuis_bilat === 0 ? 'Auj.' : c.jours_depuis_bilat + ' j'; cadCls = 'ok'; }
     const raisons = [];
-    if (planifie) raisons.push('<span class="rsn rsn-green">RDV programmé le ' + esc(fmtDate(c.next_bilaterale_at)) + '</span>');
-    if (!planifie && c.jours_depuis_bilat == null) raisons.push('<span class="rsn rsn-red">Jamais de bilatérale</span>');
-    else if (!planifie && c.jours_depuis_bilat > 45) raisons.push('<span class="rsn rsn-red">' + c.jours_depuis_bilat + ' j sans entretien</span>');
-    else if (!planifie && c.jours_depuis_bilat > 30) raisons.push('<span class="rsn rsn-amber">' + c.jours_depuis_bilat + ' j sans entretien</span>');
-    if (c.nb_retard > 0) raisons.push('<span class="rsn rsn-red">' + c.nb_retard + ' bilat. en retard</span>');
-    if (c.rpv_en_retard > 0) raisons.push('<span class="rsn rsn-amber">' + c.rpv_en_retard + ' relance' + (c.rpv_en_retard > 1 ? 's' : '') + ' en retard</span>');
-    if (c.transfo_tendance < 0) raisons.push('<span class="rsn rsn-red">transfo ' + (c.transfo_precedent != null ? c.transfo_precedent + '% → ' + (c.transfo_actuel != null ? c.transfo_actuel + '%' : '?') : 'en baisse') + '</span>');
+    if (d.main) raisons.push('<span class="rsn rsn-main">' + esc(d.txt[d.main]) + '</span>');
+    else raisons.push('<span class="rsn rsn-green">À jour</span>');
+    ['objectif', 'transfo', 'anciennete', 'discipline'].forEach(k => {
+      if (k === d.main || !(d.comps[k] > 0.15) || !d.txt[k]) return;
+      raisons.push('<span class="rsn ' + (k === 'anciennete' ? 'rsn-amber' : 'rsn-red') + '">' + esc(d.txt[k]) + '</span>');
+    });
+    (d.disAutres || []).slice(0, 2).forEach(t => raisons.push('<span class="rsn rsn-amber">' + esc(t) + '</span>'));
     if (c.nb_propales_ouvertes > 0) raisons.push('<span class="rsn rsn-blue">' + c.nb_propales_ouvertes + ' propale' + (c.nb_propales_ouvertes > 1 ? 's' : '') + ' ouverte' + (c.nb_propales_ouvertes > 1 ? 's' : '') + '</span>');
-    if (!raisons.length) raisons.push('<span class="rsn rsn-green">à jour</span>');
+    const sc = d.score, scCol = sc >= 50 ? '#b23433' : (sc >= 25 ? '#8a6410' : '#2c7a68');
     h += '<div class="prio-row" data-prio-vend="' + c.id_user + '|' + c.id_site + '">' +
       '<div class="pr-cad ' + cadCls + '">' + cadBadge + '</div>' +
       '<div class="pr-main"><div class="pr-name">' + esc(c.nom_vendeur) + (c.vn_vo ? ' <span class="pr-cat">' + esc(c.vn_vo) + '</span>' : '') + '</div>' +
         '<div class="pr-site">' + esc(c.nom_site) + ' · ' + esc(c.affaire) + '</div>' +
         '<div class="pr-raisons">' + raisons.join('') + '</div></div>' +
+      '<div class="pr-score" title="Score de priorité sur 100" style="color:' + scCol + '">' + sc + '<small>/100</small></div>' +
+      (planifie
+        ? '<button class="pr-plan done" data-plan-vend="' + c.id_user + '|' + c.id_site + '" title="Une bilatérale est déjà programmée">Programmée</button>'
+        : '<button class="pr-plan" data-plan-vend="' + c.id_user + '|' + c.id_site + '">Planifier</button>') +
       '<div class="pr-go">›</div>' +
     '</div>';
   });
   h += '</div>';
   return h;
 }
+function fmtJJMM(ts) { const t = String(ts || ''); return t.length >= 10 ? t.slice(8, 10) + '/' + t.slice(5, 7) : ''; }
 
 // Auto-ciblage du périmètre à l'arrivée : si l'utilisateur n'a qu'un réseau
 // (et/ou une affaire, un site), on déplie directement jusqu'au niveau pertinent.
@@ -827,13 +1009,13 @@ function reg6Months(){ const out=[]; const d=new Date(); for(let k=5;k>=0;k--){ 
 function vendeurRythmeCell(c){
   const jd=c.jours_depuis_bilat, planif=c.next_bilaterale_at!=null;
   let dotCls='none', dLabel='<span class="d">Jamais reçu</span>';
-  if(jd!=null){ dotCls=jd<=14?'ok':(jd<=45?'warn':'late'); dLabel='<span class="d">'+esc(fmtDate(c.last_bilaterale_at))+'</span> <span class="k">· il y a '+jd+' j</span>'; }
+  if(jd!=null){ dotCls=jd<=BIL_CFG.cadenceJ?'ok':(jd<=BIL_CFG.retardJ?'warn':'late'); dLabel='<span class="d">'+esc(fmtDate(c.last_bilaterale_at))+'</span> <span class="k">· '+(jd===0?'aujourd’hui':'il y a '+jd+' j')+'</span>'; }
   const next=planif?'<span class="rnext">RDV '+esc(fmtDate(c.next_bilaterale_at))+'</span>':'<span class="rnext todo">à planifier</span>';
   return '<div class="rythme"><div><span class="rdot '+dotCls+'"></span>'+dLabel+'</div><div>'+next+'</div></div>';
 }
 function vendeurTenueCell(c){
   const e=c.eng||{}; const d=(e.tenu||0)+(e.partiel||0)+(e.non_tenu||0); const pct=tenuePctOf(e);
-  if(d===0 && (e.en_cours||0)===0) return '<div class="tcell empty"><span class="acons"><span class="ph"></span> à constituer</span></div>';
+  if(d===0 && (e.en_cours||0)===0) return '<div class="tcell empty"><span class="acons"><span class="ph"></span> aucun engagement pris</span></div>';
   const tot=(d+(e.en_cours||0))||1, w=k=>Math.round(100*k/tot)+'%';
   const bar='<div class="tbar">'+
     (e.tenu?'<i class="seg-t" style="width:'+w(e.tenu)+'"></i>':'')+
@@ -845,9 +1027,11 @@ function vendeurTenueCell(c){
   return '<div class="tcell"><div class="ttop">'+bar+'<span class="tpct" style="color:'+col+'">'+(pct==null?'—':pct+'%')+'</span></div><div class="tdet">'+det.join(' · ')+'</div></div>';
 }
 function vendeurTransfoCell(c){
-  if(c.transfo_actuel==null) return '<div class="vtf na">—</div>';
-  const cls=c.transfo_tendance>0?'up':(c.transfo_tendance<0?'down':'flat'), ar=c.transfo_tendance>0?'↗':(c.transfo_tendance<0?'↘':'→');
-  return '<div class="vtf '+cls+'">'+c.transfo_actuel+'% '+ar+'</div>';
+  if(c.transfo_actuel==null) return '<div class="vtf na" title="Aucune proposition sur la période">—</div>';
+  if(!c.tx_signif) return '<div class="vtf na" title="'+esc(transfoTexte(c))+'">trop peu'+(c.tx_tot_actuel!=null?'<span class="vtf-n">'+c.tx_tot_actuel+' prop.</span>':'')+'</div>';
+  const cls=c.transfo_hausse?'up':(c.transfo_baisse?'down':'flat'), ar=c.transfo_hausse?'↗':(c.transfo_baisse?'↘':'→');
+  return '<div class="vtf '+cls+'" title="'+esc(transfoTexte(c))+'">'+fmtNb(c.transfo_actuel)+' % '+ar+
+    (c.tx_signif_prec&&c.transfo_precedent!=null?'<span class="vtf-n">'+fmtNb(c.transfo_precedent)+' % avant</span>':'')+'</div>';
 }
 function vendeurRows(pred){
   const tmap=state.tenueMap||{};
@@ -860,13 +1044,13 @@ function sortVendeurs(list){
   const s=state.suiviSort||'tenue', arr=list.slice();
   if(s==='tenue') arr.sort((a,b)=>{ const pa=tenuePctOf(a.eng), pb=tenuePctOf(b.eng); if(pa==null&&pb==null) return (a.nom_vendeur||'').localeCompare(b.nom_vendeur||''); if(pa==null) return 1; if(pb==null) return -1; return pa-pb; });
   else if(s==='recence') arr.sort((a,b)=>{ const ja=a.jours_depuis_bilat, jb=b.jours_depuis_bilat; if(ja==null&&jb==null) return 0; if(ja==null) return -1; if(jb==null) return 1; return jb-ja; });
-  else if(s==='transfo') arr.sort((a,b)=> (a.transfo_tendance-b.transfo_tendance) || ((a.transfo_actuel==null?999:a.transfo_actuel)-(b.transfo_actuel==null?999:b.transfo_actuel)) );
+  else if(s==='transfo') arr.sort((a,b)=> ((b.transfo_baisse?1:0)-(a.transfo_baisse?1:0)) || ((a.tx_signif&&a.transfo_actuel!=null?a.transfo_actuel:999)-(b.tx_signif&&b.transfo_actuel!=null?b.transfo_actuel:999)) );
   return arr;
 }
 function vendeurTable(titre, couleur, vlist){
   if(!vlist.length) return '';
   let t='<div class="bil-cat-title" style="color:'+couleur+'">'+titre+' <span class="bil-cat-n">'+vlist.length+' vendeur'+(vlist.length>1?'s':'')+'</span></div>';
-  t+='<div class="bil-hscroll"><div class="vtbl"><div class="vrow vthead"><div class="vth">Vendeur</div><div class="vth c-ryt">Rythme · dernière / prochaine</div><div class="vth">Tenue des engagements</div><div class="vth c-tf">Transfo</div><div class="vth"></div></div>';
+  t+='<div class="bil-hscroll"><div class="vtbl"><div class="vrow vthead"><div class="vth">Vendeur</div><div class="vth c-ryt">Fréquence · dernière / prochaine</div><div class="vth">Engagements tenus · 6 mois</div><div class="vth c-tf">Transformation</div><div class="vth"></div></div>';
   vlist.forEach(c=>{
     t+='<div class="vrow" data-vbil="'+c.id_user+'|'+c.id_site+'">'+
       '<div class="vname">'+esc(c.nom_vendeur)+(c.vn_vo?'<span class="vcat">'+esc(c.vn_vo)+'</span>':'')+'</div>'+
@@ -884,12 +1068,13 @@ function vendeursLegend(){
     '<span class="lg"><span class="sw" style="background:#fac055"></span>Partiel</span>'+
     '<span class="lg"><span class="sw" style="background:#e24b4a"></span>Non tenu</span>'+
     '<span class="lg"><span class="sw" style="background:#d8dfe9"></span>En cours (pas encore pointé)</span>'+
-    '<span class="lg">· Taux de tenue = (tenus + ½ partiels) / engagements pointés, sur 6 mois</span></div>';
+    '<span class="lg">· Engagements tenus = (tenus + ½ partiels) / engagements pointés, sur 6 mois</span>'+
+    '<span class="lg">· Transformation = affaires gagnées / propositions de la période, affichée à partir de '+BIL_CFG.minVolumeTransfo+' propositions</span></div>';
 }
 function suiviSortBar(){
   const s=state.suiviSort||'tenue';
   const c=(k,l)=>'<span class="ssort'+(s===k?' on':'')+'" data-suivisort="'+k+'">'+l+'</span>';
-  return '<div class="suivi-sort">'+c('tenue','Tenue ↑')+c('recence','Dernière reçue')+c('transfo','Transfo (baisse)')+'</div>';
+  return '<div class="suivi-sort"><span class="sort-lbl">Trier par</span>'+c('tenue','Engagements les moins tenus')+c('recence','Plus longtemps sans bilatérale')+c('transfo','Transfo en baisse')+'</div>';
 }
 function renderVendeursTables(list){
   const sorted=sortVendeurs(list);
@@ -996,7 +1181,7 @@ function renderSuivi() {
 }
 
 // ÉTAPE 3 — timeline (profondeur = nb de mois en arrière depuis le mois ancre)
-const DEPTHS = [{n:1,l:'Ce mois'},{n:2,l:'Bimestre'},{n:3,l:'Trimestre'},{n:4,l:'Quadrimestre'},{n:6,l:'Semestre'}];
+const DEPTHS = [{n:1,l:'Ce mois'},{n:2,l:'2 derniers mois'},{n:3,l:'3 derniers mois'},{n:4,l:'4 derniers mois'},{n:6,l:'6 derniers mois'}];
 function monthMinus(key, k){ // 'YYYY-MM' moins k mois
   const [y,m]=key.split('-').map(Number); const d=new Date(y, m-1-k, 1); return ymd(d).slice(0,7);
 }
@@ -1016,13 +1201,25 @@ function renderTimeline() {
   const _now = new Date();
   const estProgFutur = b => b.statut === 'programmee' && b.start_date &&
     new Date(String(b.start_date).replace(' ', 'T')) > _now;
-  const list = (state.bils||[]).filter(b => b.id_user===vend && b.id_site===state.selSite &&
+  const tlSite = state.tlSite != null ? state.tlSite : state.selSite;
+  const list = (state.bils||[]).filter(b => b.id_user===vend && b.id_site===tlSite &&
                 (moisInclus.includes(b.mois) || estProgFutur(b)))
                 .sort((a,b)=> (b.start_date||'').localeCompare(a.start_date||''));
   const depthLbl = DEPTHS.find(d=>d.n===depth).l;
+  const cv = (state.cadence||[]).find(x => x.id_user===vend);
   let h = '<div class="tl-head"><div class="h-t">' + esc(vname) + ' · ' +
-          (depth===1 ? (monthLabel(anchor)+' '+anchor.slice(0,4)) : depthLbl+' (jusqu’à '+monthLabel(anchor)+')') +
-          '</div><button class="h-back" data-tlback="1">← retour au tableau</button></div>';
+          (depth===1 ? (monthLabel(anchor)+' '+anchor.slice(0,4)) : depthLbl) +
+          '</div><div class="h-acts">' +
+          (cv && !cv.next_bilaterale_at ? '<button class="h-plan" data-plan-vend="'+vend+'|'+tlSite+'">Planifier une bilatérale</button>' : '') +
+          '<button class="h-back" data-tlback="1">← retour</button></div></div>';
+  if (cv) {
+    const d = prioDetail(cv);
+    const bits = [];
+    if (d.txt.objectif) bits.push(d.txt.objectif);
+    bits.push(transfoTexte(cv));
+    bits.push(d.txt.anciennete);
+    h += '<div class="tl-ctx">' + bits.map(b => '<span>' + esc(b) + '</span>').join('') + '</div>';
+  }
   h += '<div class="tl-depth">';
   DEPTHS.forEach(d => h += '<span class="d-opt'+(d.n===depth?' on':'')+'" data-depth="'+d.n+'">'+d.l+'</span>');
   h += '</div>';
@@ -1030,12 +1227,14 @@ function renderTimeline() {
   if (!list.length) h += '<div class="bil-empty">Aucune bilatérale sur cette période.</div>';
   // Rendu d'une carte (réutilisé pour les deux sections "À venir" / "Historique").
   const carte = (b, side) => {
-    const stTxt = b.statut==='realisee' ? '✓ Réalisée' : (b.statut==='programmee' ? '🗓 Programmée' : '⚠ En retard');
+    const stTxt = b.statut==='realisee' ? '✓ Réalisée' : (b.statut==='programmee' ? '🗓 Programmée' : '⚠ Compte rendu manquant');
     const dm = dureeMin(b);
     const meta = fmtHeure(b.start_date) + (b.end_date?' → '+fmtHeure(b.end_date):'') + (dm?' · '+dm+' min':(b.duree?' · '+esc(b.duree):''));
     const prev = b.statut==='realisee'
       ? esc((b.resultat||'').slice(0,160))
-      : '<i style="color:#888780">Entretien non encore réalisé — cliquez pour le renseigner.</i>';
+      : (b.statut==='programmee'
+          ? '<i style="color:#888780">Entretien à venir — cliquez pour le préparer ou le mener maintenant.</i>'
+          : '<i style="color:#b23433">Compte rendu à saisir — cliquez pour le renseigner.</i>');
     return '<div class="tl-row '+side+'">' +
          '<div class="tl-dot '+b.statut+'"></div>' +
          '<div class="tl-date">'+fmtDate(b.start_date)+'</div>' +
@@ -1087,10 +1286,114 @@ function openBil(id) {
 }
 function closeModal(){ const ov = doc.getElementById('bil-ov'); if (ov) ov.remove(); }
 
+// --- Toast (confirmation / erreur) -------------------------------------------
+function bilToast(msg, kind) {
+  try {
+    let t = doc.getElementById('bil-toast');
+    if (!t) { t = doc.createElement('div'); t.id = 'bil-toast'; (doc.body || doc.documentElement).appendChild(t); }
+    const ok = kind !== 'err';
+    t.style.cssText = 'position:fixed;bottom:24px;left:50%;transform:translateX(-50%);z-index:90;color:#fff;font-family:"Nunito Sans",sans-serif;font-size:13px;font-weight:700;padding:11px 18px;border-radius:10px;max-width:86vw;'
+      + (ok ? 'background:#2c7a68;box-shadow:0 6px 24px rgba(44,122,104,.35)' : 'background:#a32d2d;box-shadow:0 6px 24px rgba(163,45,45,.35)');
+    t.textContent = (ok ? '✓ ' : '') + msg; t.style.display = 'block';
+    clearTimeout(window.__bilToastT); window.__bilToastT = setTimeout(() => { try { t.style.display = 'none'; } catch (x) {} }, 5000);
+  } catch (e) {}
+}
+function libQuand(dateStr, heure) {
+  const d = new Date(dateStr + 'T12:00:00');
+  return d.toLocaleDateString('fr-FR', { weekday: 'short', day: '2-digit', month: '2-digit' }) + ' à ' + String(heure || '').replace(':', 'h');
+}
+// Prochain jour ouvré (lundi → samedi) après une date, ou après n jours.
+function jourOuvre(base, n) {
+  const d = new Date(base.getFullYear(), base.getMonth(), base.getDate() + (n || 0));
+  while (d.getDay() === 0) d.setDate(d.getDate() + 1);
+  return d;
+}
+function plus(min, hhmm) { const [h, m] = String(hhmm).split(':').map(Number); const t = h * 60 + m + Number(min); return String(Math.floor(t / 60)).padStart(2, '0') + ':' + String(t % 60).padStart(2, '0'); }
+function messageErreur(e) {
+  const m = (e && e.message) ? e.message : String(e || '');
+  if (/Could not find the function|does not exist|PGRST202/i.test(m)) return 'Fonction indisponible : le script SQL des bilatérales v6 n’est pas encore appliqué.';
+  if (/Date passee non autorisee/i.test(m)) return 'Cette date est déjà passée : choisis un créneau à venir.';
+  return m.replace(/^BILAT_FUTURE\s*:\s*/, '');
+}
+
+// ============================================================================
+//  PLANIFIER UNE BILATÉRALE (depuis la file de priorité ou la timeline)
+//  Deux clics : la date proposée est le prochain jour ouvré, 9 h, 30 min.
+//  « Mener maintenant » crée la bilatérale à l'instant présent et ouvre la
+//  fiche de réalisation.
+// ============================================================================
+const P = { idUser: null, idSite: null, nom: '', date: '', heure: '09:00', dur: 30, saving: false, err: '' };
+function P_open(idUser, idSite) {
+  const c = (state.cadence || []).find(x => x.id_user === idUser);
+  P.idUser = idUser; P.idSite = idSite; P.nom = c ? c.nom_vendeur : ('Vendeur ' + idUser);
+  P.date = ymd(jourOuvre(new Date(), 1)); P.heure = '09:00'; P.dur = 30; P.saving = false; P.err = '';
+  P.contexte = c ? prioDetail(c) : null;
+  P_render();
+}
+function P_render() {
+  closeModal();
+  const d = P.contexte;
+  const ctxTxt = d ? [d.main ? d.txt[d.main] : null, d.txt.anciennete].filter((x, i, a) => x && a.indexOf(x) === i).join(' · ') : '';
+  const ov = doc.createElement('div'); ov.className = 'bil-ov'; ov.id = 'bil-ov';
+  ov.innerHTML = '<div class="bil-modal pl-modal"><div class="m-head"><div><div class="m-vend">Planifier une bilatérale</div>' +
+    '<div class="m-meta">avec <b>' + esc(P.nom) + '</b>' + (ctxTxt ? ' · ' + esc(ctxTxt) : '') + '</div></div><button class="m-close" data-close="1">×</button></div>' +
+    '<div class="m-body">' +
+      '<div class="pl-row"><label>Date<input type="date" id="pl-date" min="' + ymd(new Date()) + '" value="' + esc(P.date) + '"></label>' +
+      '<label>Heure<input type="time" id="pl-heure" step="900" value="' + esc(P.heure) + '"></label>' +
+      '<label>Durée<select id="pl-dur">' + [15, 30, 45, 60, 90].map(m => '<option value="' + m + '"' + (m === P.dur ? ' selected' : '') + '>' + m + ' min</option>').join('') + '</select></label></div>' +
+      '<div class="pl-quick">' + [1, 2, 3, 7].map(n => { const dd = jourOuvre(new Date(), n); return '<button data-pact="jour:' + ymd(dd) + '">' + esc(dd.toLocaleDateString('fr-FR', { weekday: 'short', day: '2-digit', month: '2-digit' })) + '</button>'; }).join('') + '</div>' +
+      (P.err ? '<div class="pl-err">' + esc(P.err) + '</div>' : '') +
+      '<div class="pl-acts"><button class="pl-go" data-pact="planifier"' + (P.saving ? ' disabled' : '') + '>' + (P.saving ? 'Enregistrement…' : '📅 Planifier') + '</button>' +
+      '<button class="pl-now" data-pact="maintenant"' + (P.saving ? ' disabled' : '') + '>▶ Mener l’entretien maintenant</button></div>' +
+    '</div></div>';
+  getRoot().appendChild(ov);
+}
+function P_sync() {
+  const g = id => doc.getElementById(id);
+  if (g('pl-date')) P.date = g('pl-date').value;
+  if (g('pl-heure')) P.heure = g('pl-heure').value;
+  if (g('pl-dur')) P.dur = Number(g('pl-dur').value) || 30;
+}
+async function P_planifier() {
+  P_sync(); P.err = '';
+  if (!P.date || !P.heure) { P.err = 'Date et heure requises.'; return P_render(); }
+  P.saving = true; P_render();
+  try {
+    const start = P.date + ' ' + P.heure + ':00', end = P.date + ' ' + plus(P.dur, P.heure) + ':00';
+    const r = await ctx.supabase.rpc('create_bilaterale', { p_id_user: P.idUser, p_id_manager: getViewerId(), p_id_site: P.idSite, p_start: start, p_end: end, p_duree: P.dur + ' min' });
+    if (r.error) throw r.error;
+    closeModal();
+    bilToast('Bilatérale planifiée avec ' + P.nom + ' · ' + libQuand(P.date, P.heure));
+    rechargerBil();
+  } catch (e) { console.error('[bilaterales] planifier', e); P.saving = false; P.err = messageErreur(e); P_render(); }
+}
+async function P_maintenant() {
+  P_sync(); P.err = ''; P.saving = true; P_render();
+  try {
+    const r = await ctx.supabase.rpc('bilat_creer_maintenant', { p_id_user: P.idUser, p_id_site: P.idSite, p_duree_min: P.dur });
+    if (r.error) throw r.error;
+    closeModal();
+    rechargerBil();
+    R_open(Number(r.data));
+  } catch (e) { console.error('[bilaterales] maintenant', e); P.saving = false; P.err = messageErreur(e); P_render(); }
+}
+function P_route(e) {
+  const a = e.target.closest('[data-pact]'); if (!a) return false;
+  const v = a.getAttribute('data-pact');
+  if (v === 'planifier') { P_planifier(); return true; }
+  if (v === 'maintenant') { P_maintenant(); return true; }
+  if (v.indexOf('jour:') === 0) { P_sync(); P.date = v.slice(5); P_render(); return true; }
+  return true;
+}
+function rechargerBil() {
+  if (window.__bilLoadData) { state.sites = null; state.bils = null; state.cadence = null; window.__bilLoadData(); }
+}
+
 // --- Délégation des clics (routeur réassignable, comme le dashboard) --------
 // Sélection du périmètre (depuis le fil d'Ariane, l'arbre ou le classement).
 function setScope(str) {
   state.chefFocus = null;
+  state.view = 'main'; state.prevScope = null;
   if (str === 'racine') { state.selReseau = null; state.selAffaire = null; state.selSite = null; }
   else if (str.indexOf('reseau:') === 0) {
     const rk = str.slice(7);
@@ -1128,6 +1431,9 @@ window.__bilRoute = function (e) {
   e.__bilDone = true;
   // Modale : fermeture
   if (e.target.closest('[data-close]') || (e.target.id === 'bil-ov')) { closeModal(); return; }
+  // Fenêtre « Planifier »
+  if (e.target.closest('.pl-modal') && P_route(e)) return;
+  if (e.target.closest('.pl-modal')) return;
 
   // Onglets contextuels
   const tab = e.target.closest('[data-tab]');
@@ -1168,14 +1474,24 @@ window.__bilRoute = function (e) {
   const all = e.target.closest('[data-suivi-all]');
   if (all) { state.chefFocus = null; render(); return; }
 
+  // Bouton « Planifier » (ligne de la file ou en-tête de la timeline)
+  const plan = e.target.closest('[data-plan-vend]');
+  if (plan) {
+    if (plan.classList.contains('done')) return;
+    const [pvid, psid] = plan.getAttribute('data-plan-vend').split('|');
+    P_open(Number(pvid), Number(psid));
+    return;
+  }
+
   // Clic vendeur (file de priorité chef OU tableau du site) -> sa timeline
   const pv = e.target.closest('[data-prio-vend]') || e.target.closest('[data-vbil]');
   if (pv) {
     const raw = pv.getAttribute('data-prio-vend') || pv.getAttribute('data-vbil');
     const [vid, sid] = raw.split('|');
-    state.selSite = Number(sid);
-    const s = siteOf(Number(sid));
-    if (s) { state.selReseau = s.reseau; state.selAffaire = { key: String(s.id_affaire), label: s.affaire }; }
+    // Le périmètre choisi (ex. COLIN TEAM TOY) est MÉMORISÉ et rendu au
+    // retour : il basculait sur le site du vendeur (recette du 13/10/2026).
+    state.prevScope = { selSite: state.selSite, selReseau: state.selReseau, selAffaire: state.selAffaire, tab: state.tab, scroll: (doc.defaultView || window).scrollY || 0 };
+    state.tlSite = Number(sid);
     state.tlVend = Number(vid); state.tlMonth = state.period.to.slice(0, 7); state.tlDepth = 2;
     const cv = (state.cadence || []).find(x => x.id_user === Number(vid));
     state.tlVendName = cv ? cv.nom_vendeur : null;
@@ -1184,7 +1500,13 @@ window.__bilRoute = function (e) {
 
   // Timeline : retour au tableau
   const tlb = e.target.closest('[data-tlback]');
-  if (tlb) { state.view = 'main'; render(); return; }
+  if (tlb) {
+    const ps = state.prevScope;
+    if (ps) { state.selSite = ps.selSite; state.selReseau = ps.selReseau; state.selAffaire = ps.selAffaire; state.tab = ps.tab; }
+    state.view = 'main'; state.prevScope = null; render();
+    if (ps && ps.scroll) { try { (doc.defaultView || window).scrollTo(0, ps.scroll); } catch (x) {} }
+    return;
+  }
 
   // Timeline : profondeur
   const dpt = e.target.closest('[data-depth]');
@@ -1387,6 +1709,33 @@ const STYLE = '<style>' +
 '#bil-root .rsn-blue{background:rgba(42,94,169,.10);color:#2a5ea9}' +
 '#bil-root .rsn-green{background:rgba(83,189,167,.16);color:#2c7a68}' +
 '#bil-root .pr-go{flex-shrink:0;color:#b4b2a9;font-size:22px;font-weight:700}' +
+/* --- v6 --- */
+'#bil-root .pr-cad small{display:block;font-size:10px;font-weight:700;margin-top:2px}' +
+'#bil-root .rsn-main{background:#2a5ea9;color:#fff;font-weight:800}' +
+'#bil-root .pr-score{flex-shrink:0;width:54px;text-align:center;font-size:18px;font-weight:800;line-height:1}' +
+'#bil-root .pr-score small{display:block;font-size:9.5px;font-weight:700;color:#b4b2a9;margin-top:2px}' +
+'#bil-root .pr-plan{flex-shrink:0;border:1.5px solid #7e57c2;background:#fff;color:#5b3a9e;font-family:inherit;font-size:12px;font-weight:800;border-radius:9px;padding:7px 12px;cursor:pointer}' +
+'#bil-root .pr-plan:hover{background:rgba(126,87,194,.08)}' +
+'#bil-root .pr-plan.done{border-color:#ece9e1;color:#888780;cursor:default;font-weight:700}' +
+'#bil-root .pr-plan.done:hover{background:#fff}' +
+'#bil-root .tl-head .h-acts{display:flex;gap:8px;flex-wrap:wrap}' +
+'#bil-root .tl-head .h-plan{font-size:13px;color:#fff;background:#7e57c2;border:1px solid #7e57c2;border-radius:8px;padding:5px 12px;cursor:pointer;font-weight:700}' +
+'#bil-root .tl-ctx{display:flex;flex-wrap:wrap;gap:6px;margin:0 0 12px}' +
+'#bil-root .tl-ctx span{font-size:12px;font-weight:600;color:#2a5ea9;background:rgba(42,94,169,.08);border-radius:7px;padding:3px 9px}' +
+'#bil-root .vtf-n{display:block;font-size:10.5px;font-weight:600;color:#888780;font-style:normal}' +
+'#bil-root .pl-modal{max-width:520px}' +
+'#bil-root .pl-row{display:flex;gap:10px;flex-wrap:wrap}' +
+'#bil-root .pl-row label{display:flex;flex-direction:column;gap:4px;font-size:11px;font-weight:800;color:#888780;text-transform:uppercase;letter-spacing:.04em;flex:1 1 120px}' +
+'#bil-root .pl-row input,#bil-root .pl-row select{border:1px solid #ece9e1;border-radius:9px;padding:9px 10px;font-family:inherit;font-size:14px;color:#3a3a38;font-weight:600;text-transform:none;letter-spacing:0;background:#fff}' +
+'#bil-root .pl-quick{display:flex;gap:6px;flex-wrap:wrap;margin:12px 0 4px}' +
+'#bil-root .pl-quick button{border:1px solid #ece9e1;background:#fff;color:#2a5ea9;border-radius:16px;padding:5px 11px;font-family:inherit;font-size:12px;font-weight:700;cursor:pointer;text-transform:capitalize}' +
+'#bil-root .pl-quick button:hover{background:rgba(172,197,228,.16)}' +
+'#bil-root .pl-err{color:#a32d2d;font-size:12.5px;font-weight:700;margin-top:10px}' +
+'#bil-root .pl-acts{display:flex;flex-direction:column;gap:8px;margin-top:16px}' +
+'#bil-root .pl-go{border:none;border-radius:10px;padding:12px;background:#53bda7;color:#fff;font-family:inherit;font-weight:800;font-size:14px;cursor:pointer}' +
+'#bil-root .pl-go:disabled,#bil-root .pl-now:disabled{opacity:.55;cursor:default}' +
+'#bil-root .pl-now{border:1.5px solid #7e57c2;border-radius:10px;padding:11px;background:#fff;color:#5b3a9e;font-family:inherit;font-weight:800;font-size:13.5px;cursor:pointer}' +
+'@media (max-width:760px){#bil-root .prio-row{flex-wrap:wrap}#bil-root .pr-main{flex:1 1 calc(100% - 80px)}#bil-root .pr-score{width:auto}}' +
 '#bil-root .suivi-filters{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:14px}' +
 '#bil-root .suivi-search{flex:0 0 240px;max-width:240px;border:1px solid #ece9e1;border-radius:9px;padding:8px 12px;font-family:inherit;font-size:13px;color:#3a3a38;background:#fff}' +
 '#bil-root .suivi-search:focus{outline:none;border-color:#2a5ea9}' +
@@ -1550,8 +1899,9 @@ render(); loadData();
 //  Ouvre un grand popup #real-ov avec tout le contexte vendeur + saisie + histo.
 //  Sous-état R isolé. Fonctions préfixées R_. Réutilise esc/fmtDate/fmtHeure du suivi.
 // ============================================================================
-const R = { bilId:null, detail:null, synth:null, hist:null, loading:false, error:null, kpi:'cmd_vn', histIdx:0, saving:false, b2filter:'tous',
-  engagements:[], ouverts:[], revues:{}, engLoaded:false, reunion:false, _draftApplied:false };
+const R = { bilId:null, detail:null, hist:null, loading:false, error:null, kpi:'cmd', histIdx:0, saving:false, b2filter:'tous',
+  engagements:[], ouverts:[], revues:{}, engLoaded:false, reunion:false, _draftApplied:false,
+  K:null, Kp:null, kLoaded:false, dashErr:null, cad:null, parts:{}, legacy:false, future:false, done:null };
 
 const R_WF_GET_FICHE  = '53250f54-d14c-4622-baf4-0b89064316b6';
 const R_PAGE_FICHE_ID = '259f1951-a2d4-4b90-ac83-0b3febe1d4ec';
@@ -1661,7 +2011,7 @@ function R_saveDraft(){
   R_draftTimer=setTimeout(()=>{
     try {
       const payload={ resultat:(R.detail&&R.detail.resultat)||'', actions:(R.detail&&R.detail.actions)||'',
-        engagements:(R.engagements||[]).map(e=>({libelle:e.libelle,ordre:e.ordre})), revues:R.revues||{}, ts:Date.now() };
+        engagements:(R.engagements||[]).map(e=>({libelle:e.libelle,ordre:e.ordre,cible:e.cible,echeance:e.echeance})), revues:R.revues||{}, ts:Date.now() };
       R_LS().setItem('bil_draft_'+R.bilId, JSON.stringify(payload));
       const ind=doc.getElementById('r-draft-ind'); if(ind){ ind.textContent='brouillon enregistré'; ind.style.opacity='1'; setTimeout(()=>{ if(ind) ind.style.opacity='.5'; },1200); }
     } catch(e){}
@@ -1673,23 +2023,39 @@ function R_applyDraft(){
   try {
     const raw=R_LS().getItem('bil_draft_'+R.bilId); if(!raw) return;
     const d=JSON.parse(raw); if(!d) return;
-    if(R.detail){ if(d.resultat) R.detail.resultat=d.resultat; if(d.actions) R.detail.actions=d.actions; }
-    if(Array.isArray(d.engagements) && d.engagements.length) R.engagements=d.engagements.map((e,i)=>({ libelle:e.libelle||'', ordre:e.ordre!=null?e.ordre:i }));
+    if(R.detail){ if(d.resultat){ R.detail.resultat=d.resultat; R.fromDraft=true; } if(d.actions) R.detail.actions=d.actions; }
+    if(Array.isArray(d.engagements) && d.engagements.length) R.engagements=d.engagements.map((e,i)=>({ libelle:e.libelle||'', ordre:e.ordre!=null?e.ordre:i, cible:(e.cible!=null?e.cible:''), echeance:e.echeance||'' }));
     if(d.revues && typeof d.revues==='object') R.revues=d.revues;
   } catch(e){}
 }
 window.__bilDraftField=function(which,val){ if(!R.detail) return; if(which==='res') R.detail.resultat=val; if(which==='act') R.detail.actions=val; R_saveDraft(); };
-window.__bilEngInput=function(i,val){ if(R.engagements && R.engagements[i]){ R.engagements[i].libelle=val; R_saveDraft(); } };
+window.__bilEngInput=function(i,field,val){
+  if(!(R.engagements && R.engagements[i])) return;
+  if(field==='cible') R.engagements[i].cible=val;
+  else if(field==='echeance') R.engagements[i].echeance=val;
+  else R.engagements[i].libelle=val;
+  R_saveDraft();
+};
+function R_lireSaisie(){
+  const res=doc.getElementById('rf-res'), act=doc.getElementById('rf-act');
+  if(R.detail){ if(res) R.detail.resultat=res.value; if(act) R.detail.actions=act.value; }
+  const rows=doc.querySelectorAll('#real-ov .eng-item');
+  (R.engagements||[]).forEach((e,i)=>{ const r=rows[i]; if(!r) return;
+    const l=r.querySelector('.eng-inp'), c=r.querySelector('.eng-cible'), d=r.querySelector('.eng-ech');
+    if(l) e.libelle=l.value; if(c) e.cible=c.value; if(d) e.echeance=d.value; });
+}
+function R_fmtJour(dstr){ if(!dstr) return ''; const d=new Date(String(dstr).slice(0,10)+'T12:00:00'); if(isNaN(d)) return ''; return d.toLocaleDateString('fr-FR',{day:'2-digit',month:'2-digit'}); }
+function R_engTexte(e){
+  return (e.libelle||'').trim()+((e.cible!==''&&e.cible!=null)?' — objectif '+e.cible:'')+(e.echeance?' — pour le '+R_fmtJour(e.echeance):'');
+}
 
 function R_print(){
   const d=R.detail; if(!d) return;
-  const res=(doc.getElementById('rf-res')&&doc.getElementById('rf-res').value) || d.resultat || '';
-  const act=(doc.getElementById('rf-act')&&doc.getElementById('rf-act').value) || d.actions || '';
-  const inps=doc.querySelectorAll('#real-ov .eng-inp');
-  (R.engagements||[]).forEach((e,i)=>{ if(inps[i]) e.libelle=inps[i].value; });
-  const engs=(R.engagements||[]).map(e=>(e.libelle||'').trim()).filter(Boolean);
-  const stLbl=(st)=> st==='tenu'?'Tenu':st==='partiel'?'Partiel':st==='non_tenu'?'Non tenu':'En cours';
-  const ouvertsHtml=(R.ouverts||[]).map(o=>'<li>'+esc(o.libelle)+' — <b>'+stLbl(R.revues[o.id])+'</b></li>').join('');
+  R_lireSaisie();
+  const res=d.resultat||'', act=d.actions||'';
+  const engs=(R.engagements||[]).filter(e=>(e.libelle||'').trim()).map(R_engTexte);
+  const stLbl=(st)=> st==='tenu'?'Tenu':st==='partiel'?'Partiel':st==='non_tenu'?'Non tenu':'Non pointé';
+  const ouvertsHtml=(R.ouverts||[]).map(o=>'<li>'+esc(R_engTexte(o))+' — <b>'+stLbl(R.revues[o.id])+'</b></li>').join('');
   const today=new Date(); const todayStr=today.getDate()+' '+MOIS_FR[today.getMonth()]+' '+today.getFullYear();
   const html='<!doctype html><html lang="fr"><head><meta charset="utf-8"><title>Bilatérale '+esc(d.nom_vendeur)+'</title>'+
     '<style>body{font-family:Arial,Helvetica,sans-serif;color:#1c2b45;max-width:720px;margin:30px auto;padding:0 24px;line-height:1.5}'+
@@ -1701,10 +2067,10 @@ function R_print(){
     '<h1>Compte-rendu de bilatérale</h1>'+
     '<div class="sub">'+esc(d.nom_vendeur)+(d.vn_vo?(' · '+esc(d.vn_vo)):'')+' · '+esc(d.nom_site||'')+'<br>'+esc(fmtDate(d.start_date))+' · avec '+esc(d.nom_chef||'')+'</div>'+
     (ouvertsHtml?'<h2>Suivi des engagements précédents</h2><ul>'+ouvertsHtml+'</ul>':'')+
-    '<h2>Résultat</h2><div class="txt">'+esc(res||'—')+'</div>'+
-    '<h2>Actions</h2><div class="txt">'+esc(act||'—')+'</div>'+
+    '<h2>Bilan</h2><div class="txt">'+esc(res||'—')+'</div>'+
+    '<h2>Actions décidées</h2><div class="txt">'+esc(act||'—')+'</div>'+
     '<h2>Engagements pris</h2>'+(engs.length?('<ul>'+engs.map(e=>'<li>'+esc(e)+'</li>').join('')+'</ul>'):'<div class="txt">—</div>')+
-    '<div class="foot">Édité le '+todayStr+' depuis CRM360</div>'+
+    '<div class="foot">Édité le '+todayStr+' depuis One Data</div>'+
     '<scr'+'ipt>window.onload=function(){setTimeout(function(){window.print();},250);};</scr'+'ipt>'+
     '</body></html>';
   let w; try { w=wwLib.getFrontWindow().open('','_blank'); } catch(e){ w=window.open('','_blank'); }
@@ -1712,11 +2078,14 @@ function R_print(){
   w.document.open(); w.document.write(html); w.document.close();
 }
 
+const R_PARTS = ['pipeline','rdv','cycles','clos'];
 function R_open(bilId){
-  R.bilId = Number(bilId); R.detail=null; R.synth=null; R.hist=null;
-  R.error=null; R.kpi='cmd_vn'; R.histIdx=0; R.saving=false;
-  R.synthLoading=false; R.histLoading=false; R.synthError=null;
+  R.bilId = Number(bilId); R.detail=null; R.hist=null;
+  R.error=null; R.kpi='cmd'; R.histIdx=0; R.saving=false;
+  R.histLoading=false; R.b2filter='tous';
   R.engagements=[]; R.ouverts=[]; R.revues={}; R.engLoaded=false; R.reunion=false; R._draftApplied=false;
+  R.K=null; R.Kp=null; R.kLoaded=false; R.dashErr=null; R.cad=null; R.parts={}; R.legacy=false;
+  R.future=false; R.done=null; R.prefilled=false; R.fromDraft=false; R.saveErr=''; R.nextDate=''; R.nextHeure=''; R.nextMsg='';
   R_ensureOverlay();
   R_render();
   R_load();
@@ -1739,29 +2108,26 @@ async function R_load(){
     R.detail = rDet.data || null;
     if(!R.detail || R.detail.id_user==null){ R.error='Bilatérale introuvable.'; R.loading=false; R_render(); return; }
     R.loading=false;
-    R.synthLoading=true; R.histLoading=true;
+    const sd = R.detail.start_date ? new Date(String(R.detail.start_date).replace(' ','T')) : null;
+    const filled = !!((R.detail.resultat||'').trim() || (R.detail.actions||'').trim() || (R.detail.engagement||'').trim());
+    R.future = !!(sd && sd > new Date() && !filled);
+    R.histLoading=true;
     R_render();
     const idUser = Number(R.detail.id_user);
-    const sd = R.detail.start_date ? new Date(String(R.detail.start_date).replace(' ','T')) : new Date();
-    const now = new Date();
-    const from = new Date(sd.getFullYear(), sd.getMonth(), 1);
-    const finMois = new Date(sd.getFullYear(), sd.getMonth()+1, 0);
-    const to = (now < finMois) ? now : finMois;
-    const ymd = d => d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
-    supabase.rpc('get_vendeur_synthese', { p_id_user: idUser, p_date_from: ymd(from), p_date_to: ymd(to) })
-      .then(r=>{ if(r.error) throw r.error; R.synth=r.data||{}; })
-      .catch(e=>{ console.error('[real] synthese', e); R.synth={}; R.synthError=(e&&e.message)?e.message:String(e); })
-      .finally(()=>{ R.synthLoading=false; R_render(); });
+    R.cad = (state.cadence||[]).find(x=>x.id_user===idUser) || null;
+    R_loadDash();
+    R_PARTS.forEach(R_loadPart);
     supabase.rpc('get_bilaterales_historique', { p_id_user: idUser, p_exclure_id: id })
       .then(r=>{ if(r.error) throw r.error; R.hist=r.data||[]; })
       .catch(e=>{ console.error('[real] historique', e); R.hist=[]; })
       .finally(()=>{ R.histLoading=false; R_render(); });
-    supabase.rpc('get_bilaterale_engagements', { p_id_bilaterales: id })
-      .then(r=>{ if(r.error) throw r.error; R.engagements=(r.data||[]).map(x=>({ id:x.id, libelle:x.libelle, ordre:x.ordre })); })
+    // Engagements : nouvelles fonctions (cible, échéance), repli sur les anciennes.
+    R_rpcRepli('bilat_engagements', { p_id_bilaterales: id }, 'get_bilaterale_engagements', { p_id_bilaterales: id })
+      .then(r=>{ if(r.error) throw r.error; R.engagements=(r.data||[]).map(x=>({ id:x.id, libelle:x.libelle, ordre:x.ordre, cible:(x.cible!=null?x.cible:''), echeance:x.echeance||'' })); })
       .catch(e=>{ console.error('[real] engagements', e); R.engagements=[]; })
-      .finally(()=>{ R.engLoaded=true; R_applyDraft(); R_render(); });
-    supabase.rpc('get_engagements_ouverts', { p_id_user: idUser, p_exclure_bilaterale: id })
-      .then(r=>{ if(r.error) throw r.error; R.ouverts=(r.data||[]).map(x=>({ id:x.id, libelle:x.libelle, statut_suivi:x.statut_suivi, id_bilaterales:x.id_bilaterales, bilaterale_date:x.bilaterale_date })); })
+      .finally(()=>{ R.engLoaded=true; R_applyDraft(); R_prefillConstats(); R_render(); });
+    R_rpcRepli('bilat_engagements_ouverts', { p_id_user: idUser, p_exclure_bilaterale: id }, 'get_engagements_ouverts', { p_id_user: idUser, p_exclure_bilaterale: id })
+      .then(r=>{ if(r.error) throw r.error; R.ouverts=(r.data||[]).map(x=>({ id:x.id, libelle:x.libelle, statut_suivi:x.statut_suivi, id_bilaterales:x.id_bilaterales, bilaterale_date:x.bilaterale_date, cible:(x.cible!=null?x.cible:''), echeance:x.echeance||'' })); })
       .catch(e=>{ console.error('[real] ouverts', e); R.ouverts=[]; })
       .finally(()=>{ R_render(); });
   } catch(e){
@@ -1770,39 +2136,102 @@ async function R_load(){
     R.loading=false; R_render();
   }
 }
+function R_fonctionAbsente(err){ const m=(err&&(err.message||err.code))||''; return /PGRST202|Could not find the function|does not exist/i.test(String(m)) || (err&&err.code==='PGRST202'); }
+async function R_rpcRepli(fn, args, fnRepli, argsRepli){
+  const r = await ctx.supabase.rpc(fn, args);
+  if(r.error && R_fonctionAbsente(r.error) && fnRepli) return ctx.supabase.rpc(fnRepli, argsRepli);
+  return r;
+}
+// Chiffres de tête : dash_lire, mois en cours + mois précédent (comparaison).
+function R_loadDash(){
+  const idUser = Number(R.detail.id_user);
+  const a = new Date(); const p = new Date(a.getFullYear(), a.getMonth()-1, 1);
+  R.kLoaded=false; R.dashErr=null;
+  Promise.all([lireDash(a.getFullYear(), a.getMonth()+1), lireDash(p.getFullYear(), p.getMonth()+1).catch(e=>({ error:e }))])
+    .then(([cur, prev])=>{
+      if(cur.error) throw cur.error;
+      const ix = indexerDash(cur.data);
+      R.K = ix.parUser[idUser] || null;
+      R.majDash = ix.maj;
+      if(prev && !prev.error && prev.data){ const ip=indexerDash(prev.data); R.Kp = ip.parUser[idUser] || null; }
+    })
+    .catch(e=>{ console.error('[real] dash_lire', e); R.dashErr = messageErreur(e); })
+    .finally(()=>{ R.kLoaded=true; R_prefillConstats(); R_render(); });
+}
+// Détail par section. Une section lente ou en erreur n'empêche pas les autres.
+function R_loadPart(part){
+  const idUser = Number(R.detail.id_user);
+  R.parts[part] = { st:'load' };
+  if(R.legacy){ R_loadLegacy(); return; }
+  Promise.resolve(ctx.supabase.rpc('bilat_synthese_part', { p_id_user: idUser, p_part: part }))
+    .then(r=>{
+      if(r.error){
+        if(R_fonctionAbsente(r.error)){ R.legacy=true; R_loadLegacy(); return; }
+        throw r.error;
+      }
+      R.parts[part] = { st:'ok', data: Array.isArray(r.data) ? r.data : [] };
+      R_render();
+    })
+    .catch(e=>{ console.error('[real] section '+part, e); R.parts[part] = { st:'err', err: messageErreur(e) }; R_render(); });
+}
+// Repli (fonction bilat_synthese_part absente) : l'ancienne synthèse d'un bloc.
+let R_legacyEnVol=false;
+function R_loadLegacy(){
+  if(R_legacyEnVol) return; R_legacyEnVol=true;
+  const idUser = Number(R.detail.id_user);
+  const a = new Date(); const from = ymd(new Date(a.getFullYear(), a.getMonth(), 1));
+  Promise.resolve(ctx.supabase.rpc('get_vendeur_synthese', { p_id_user: idUser, p_date_from: from, p_date_to: ymd(a) }))
+    .then(r=>{ if(r.error) throw r.error; const s=r.data||{}; R_PARTS.forEach(p=>{ R.parts[p]={ st:'ok', data: s[p]||[] }; }); })
+    .catch(e=>{ const m=messageErreur(e); R_PARTS.forEach(p=>{ R.parts[p]={ st:'err', err:m }; }); })
+    .finally(()=>{ R_legacyEnVol=false; R_render(); });
+}
 
 function R_kpiData(){
-  const k=(R.synth&&R.synth.kpi)||{};
-  const cycles=(R.synth&&R.synth.cycles)||[];
-  const clos=(R.synth&&R.synth.clos)||[];
-  const pipeline=(R.synth&&R.synth.pipeline)||[];
-  const rdv=(R.synth&&R.synth.rdv)||[];
+  const part = p => (R.parts[p] && R.parts[p].st==='ok') ? R.parts[p].data : [];
+  const cycles=part('cycles'), clos=part('clos'), pipeline=part('pipeline'), rdv=part('rdv');
   const atraiter=cycles.filter(c=>c.categorie==='retard'||c.categorie==='urgent');
   const nbRetardRdv=rdv.filter(r=>r.en_retard===true).length;
   const nbAvenirRdv=rdv.filter(r=>r.categorie==='avenir').length;
   const wins=clos.filter(c=>c.type_cloture==='win').length;
   const abandons=clos.filter(c=>c.type_cloture==='abandon').length;
-  return {k,cycles,clos,pipeline,rdv,atraiter,nbRetardRdv,nbAvenirRdv,wins,abandons};
+  return {cycles,clos,pipeline,rdv,atraiter,nbRetardRdv,nbAvenirRdv,wins,abandons};
 }
+// Objectif attendu à la date du jour (prorata calendaire du mois).
+function R_objectif(rea, obj){
+  rea=Number(rea)||0; obj=Number(obj)||0;
+  if(obj<=0) return { obj:0, rea, att:null, ecart:null };
+  const att=obj*prorataMois(); return { obj, rea, att, ecart: rea-att };
+}
+function R_transfoSous(c){
+  if(!c) return 'période en cours';
+  if(c.transfo_actuel==null) return 'aucune proposition sur la période';
+  if(!c.tx_signif) return 'volume insuffisant'+(c.tx_tot_actuel!=null?' ('+c.tx_tot_actuel+' prop.)':'');
+  return (c.tx_signif_prec&&c.transfo_precedent!=null?fmtNb(c.transfo_precedent)+' % la période précédente':'gagnées / propositions')+(c.tx_tot_actuel!=null?' · '+c.tx_tot_actuel+' prop.':'');
+}
+function R_partEtat(p){ const x=R.parts[p]; return !x ? 'load' : x.st; }
 function R_kpis(){
-  const D=R_kpiData(); const k=D.k;
-  const pctK=(rea,obj)=>{ rea=rea||0; obj=obj||0; if(obj>0) return Math.round(100*rea/obj); if(rea>0) return 100; return 0; };
-  const cmdVN=(k.commandes_realisees_vn!=null?k.commandes_realisees_vn:0)+' / '+(k.objectif_commandes_vn!=null?k.objectif_commandes_vn:0);
-  const cmdVO=(k.commandes_realisees_vo!=null?k.commandes_realisees_vo:0)+' / '+(k.objectif_commandes_vo!=null?k.objectif_commandes_vo:0);
-  const pctVN=pctK(k.commandes_realisees_vn,k.objectif_commandes_vn);
-  const pctVO=pctK(k.commandes_realisees_vo,k.objectif_commandes_vo);
-  const tr=(R.synth&&R.synth.transfo)||{};
-  const transfo = (tr.taux!=null) ? tr.taux : null;
-  const on=s=>R.kpi===s?' on':'';
-  let h='<div class="kpis">';
-  h+='<div class="kpi clik kvn'+on('cmd_vn')+'" data-rkpi="cmd_vn"><div class="k-l">Commandes VN</div><div class="k-v" style="color:#53bda7">'+cmdVN+'</div><div class="k-s">'+pctVN+'%</div></div>';
-  h+='<div class="kpi clik kvo'+on('cmd_vo')+'" data-rkpi="cmd_vo"><div class="k-l">Commandes VO</div><div class="k-v" style="color:#d9892a">'+cmdVO+'</div><div class="k-s">'+pctVO+'%</div></div>';
-  h+='<div class="kpi mute" data-rkpi="transfo"><div class="k-l">Transfo</div><div class="k-v" style="color:#53bda7">'+(transfo!=null?transfo+'%':'—')+'</div><div class="k-s">wins / propales</div></div>';
-  h+='<div class="kpi clik'+on('cycles')+'" data-rkpi="cycles"><div class="k-l">Cycles ouverts</div><div class="k-v" style="color:#2a5ea9">'+D.cycles.length+'</div><div class="k-s">au total</div></div>';
-  h+='<div class="kpi clik'+on('atraiter')+'" data-rkpi="atraiter"><div class="k-l">À traiter</div><div class="k-v" style="color:#8a6410">'+D.atraiter.length+'</div><div class="k-s">retard + urgents</div></div>';
-  h+='<div class="kpi clik'+on('pipeline')+'" data-rkpi="pipeline"><div class="k-l">Pipeline</div><div class="k-v" style="color:#53bda7">'+D.pipeline.length+'</div><div class="k-s">propales/BDC</div></div>';
-  h+='<div class="kpi clik'+on('rdv')+'" data-rkpi="rdv"><div class="k-l">RDV</div><div class="k-v" style="color:#2a5ea9">'+D.nbAvenirRdv+(D.nbRetardRdv>0?' <span style="font-size:12px;color:#e24b4a;font-weight:800">⚠'+D.nbRetardRdv+'</span>':'')+'</div><div class="k-s">à venir'+(D.nbRetardRdv>0?' · '+D.nbRetardRdv+' sans CR':'')+'</div></div>';
-  h+='<div class="kpi clik'+on('clos')+'" data-rkpi="clos"><div class="k-l">Clos 30j</div><div class="k-v" style="color:#888780">'+D.clos.length+'</div><div class="k-s">'+D.wins+' wins · '+D.abandons+' abandons</div></div>';
+  const K=R.K||{}, Kp=R.Kp||null, D=R_kpiData(), on=s=>R.kpi===s?' on':'';
+  const dashOk = !!R.K;
+  const v = (x)=> dashOk ? fmtNb(x,0) : '—';
+  const cmd = R_objectif(K.cdes, K.obj_cdes), fi = R_objectif(K.fi, K.obj_fi);
+  const colObj = o => o.ecart==null ? '#2a5ea9' : (o.ecart < -0.5 ? '#b23433' : '#2c7a68');
+  const subObj = (o, unite) => o.att==null ? 'pas d’objectif saisi' : ('attendu à date '+fmtNb(o.att)+' · '+(o.ecart<0?'retard ':'avance +')+fmtNb(Math.abs(o.ecart))+' '+unite);
+  let h='';
+  if(!R.kLoaded) h+='<div class="r-load-inline" style="padding:6px">Chargement des chiffres…</div>';
+  else if(R.dashErr) h+='<div class="r-warn">Chiffres du tableau de bord indisponibles ('+esc(R.dashErr)+'). <button class="lnk" data-ract="retry:dash">Réessayer</button></div>';
+  else if(!R.K) h+='<div class="r-warn">Aucun chiffre ce mois-ci pour ce vendeur dans le tableau de bord.</div>';
+  h+='<div class="kpis">';
+  h+='<div class="kpi clik big'+on('cmd')+'" data-rkpi="cmd"><div class="k-l">Commandes du mois</div><div class="k-v" style="color:'+colObj(cmd)+'">'+v(K.cdes)+(cmd.obj?'<span class="k-of"> / '+fmtNb(cmd.obj,0)+'</span>':'')+'</div><div class="k-s">'+(dashOk?subObj(cmd,'cmd'):'')+'</div>'+(Kp?'<div class="k-p">mois dernier : '+fmtNb(Kp.cdes,0)+(Kp.obj_cdes?' / '+fmtNb(Kp.obj_cdes,0):'')+'</div>':'')+'</div>';
+  h+='<div class="kpi clik'+on('fi')+'" data-rkpi="fi"><div class="k-l">Financements</div><div class="k-v" style="color:'+colObj(fi)+'">'+v(K.fi)+(fi.obj?'<span class="k-of"> / '+fmtNb(fi.obj,0)+'</span>':'')+'</div><div class="k-s">'+(dashOk?(fi.att==null?'pas d’objectif saisi':'attendu à date '+fmtNb(fi.att)):'')+'</div></div>';
+  const c=R.cad;
+  const txCol = !c||!c.tx_signif ? '#888780' : (c.transfo_baisse?'#b23433':(c.transfo_hausse?'#2c7a68':'#2a5ea9'));
+  h+='<div class="kpi mute"><div class="k-l">Transformation</div><div class="k-v" style="color:'+txCol+'">'+(c&&c.tx_signif&&c.transfo_actuel!=null?fmtNb(c.transfo_actuel)+' %':'—')+'</div><div class="k-s">'+esc(R_transfoSous(c))+'</div></div>';
+  h+='<div class="kpi clik'+on('pipeline')+'" data-rkpi="pipeline"><div class="k-l">Affaires en cours</div><div class="k-v" style="color:#2a5ea9">'+v(K.pipe_affaires)+'</div><div class="k-s">'+(dashOk?fmtNb(K.pipe_a_relancer,0)+' à relancer (> 30 j)':'')+'</div></div>';
+  h+='<div class="kpi clik'+on('leads')+'" data-rkpi="leads"><div class="k-l">Leads jamais contactés</div><div class="k-v" style="color:'+((K.leads_jamais||0)>0?'#b23433':'#2c7a68')+'">'+v(K.leads_jamais)+'</div><div class="k-s">'+(dashOk?'dont '+fmtNb(K.leads_jamais_48h,0)+' depuis plus de 48 h':'')+'</div></div>';
+  h+='<div class="kpi clik'+on('rdv')+'" data-rkpi="rdv"><div class="k-l">RDV à venir</div><div class="k-v" style="color:#2a5ea9">'+v(K.rdv_a_venir)+(D.nbRetardRdv>0?' <span class="k-alert">⚠ '+D.nbRetardRdv+'</span>':'')+'</div><div class="k-s">'+(dashOk?fmtNb(K.rdv_tenus,0)+' tenus ce mois':'')+(D.nbRetardRdv>0?' · '+D.nbRetardRdv+' sans compte rendu':'')+'</div></div>';
+  h+='<div class="kpi mute"><div class="k-l">Livraisons en retard</div><div class="k-v" style="color:'+((K.livr_retard||0)>0?'#b23433':'#2c7a68')+'">'+v(K.livr_retard)+'</div><div class="k-s">'+(dashOk?fmtNb(K.livr_attente,0)+' en attente':'')+'</div></div>';
+  const closSt=R_partEtat('clos');
+  h+='<div class="kpi clik'+on('clos')+'" data-rkpi="clos"><div class="k-l">Clos sur 30 j</div><div class="k-v" style="color:#888780">'+(closSt==='ok'?D.clos.length:(closSt==='err'?'!':'…'))+'</div><div class="k-s">'+(closSt==='ok'?D.wins+' gagnés · '+D.abandons+' abandons':(closSt==='err'?'indisponible':'chargement'))+'</div></div>';
   h+='</div>';
   return h;
 }
@@ -1840,50 +2269,52 @@ function R_chips(cats){
   h+='</div>';
   return h;
 }
+function R_partMsg(part){
+  const x=R.parts[part];
+  if(!x || x.st==='load') return '<div class="b2-empty">Chargement…</div>';
+  if(x.st==='err') return '<div class="b2-empty">Détail indisponible ('+esc(x.err||'erreur')+'). <button class="lnk" data-ract="retry:'+part+'">Réessayer</button></div>';
+  return null;
+}
 function R_bloc2(){
   const D=R_kpiData(); const k=R.kpi;
-  if(k==='cmd_vn' || k==='cmd_vo'){
-    const x=D.k; const isVN=(k==='cmd_vn');
-    const col=isVN?'#53bda7':'#d9892a';
-    const sfx=isVN?'_vn':'_vo';
-    const g=(base)=>x[base+sfx];
-    const pct=(rea,obj)=>{ rea=rea||0; obj=obj||0; if(obj>0) return Math.round(100*rea/obj); if(rea>0) return 100; return null; };
-    const cell=(lbl,rea,obj,cc)=>{
-      rea=rea||0; obj=obj||0; const p=pct(rea,obj);
-      if(p===null) return '';
-      const barCol = p>=100?'#53bda7':(p>=60?cc:'#d9892a');
+  if(k==='cmd' || k==='fi'){
+    const K=R.K, Kp=R.Kp;
+    if(!K) return '<div class="b2-empty">'+(R.kLoaded?'Pas de chiffres du tableau de bord pour ce vendeur ce mois-ci.':'Chargement…')+'</div>';
+    const ligne=(lbl,rea,obj,prev,prevObj)=>{
+      const o=R_objectif(rea,obj); const p=o.obj>0?Math.round(100*o.rea/o.obj):null;
+      const barCol = p==null?'#acc5e4':(o.ecart<-0.5?'#e24b4a':'#53bda7');
+      const attW = o.obj>0?Math.min(100, 100*o.att/o.obj):0;
       return '<div class="perf-row"><div class="p-l">'+lbl+'</div>'+
-        '<div class="p-v"'+(cc?' style="color:'+cc+'"':'')+'>'+rea+' / '+obj+'</div>'+
-        '<div class="perf-bar"><i style="width:'+Math.min(p,100)+'%;background:'+barCol+'"></i></div>'+
-        '<div class="perf-pct">'+p+'% de l\'objectif</div></div>';
+        '<div class="p-v">'+fmtNb(o.rea,0)+(o.obj?' / '+fmtNb(o.obj,0):'')+'</div>'+
+        (o.obj?'<div class="perf-bar"><i style="width:'+Math.min(p,100)+'%;background:'+barCol+'"></i><b style="left:'+attW+'%" title="attendu à date"></b></div>'+
+          '<div class="perf-pct">'+p+' % de l’objectif · attendu à date '+fmtNb(o.att)+'</div>':'<div class="perf-pct">pas d’objectif</div>')+
+        (prev!=null?'<div class="perf-prev">mois dernier : '+fmtNb(prev,0)+(prevObj?' / '+fmtNb(prevObj,0):'')+'</div>':'')+
+      '</div>';
     };
     let cells='';
-    cells+=cell('Commandes '+(isVN?'VN':'VO'),g('commandes_realisees'),g('objectif_commandes'),col);
-    cells+=cell('Financements',g('financements_realises'),g('objectif_financements'),'#2a5ea9');
-    cells+=cell('Contrats service',g('contrats_realises'),g('objectif_contrat_service'),'#2a5ea9');
-    cells+=cell('Gravages',g('gravages_realises'),g('objectif_gravage'),'#2a5ea9');
-    cells+=cell('Waxoyl',g('waxoyls_realises'),g('objectif_waxoyl'),'#2a5ea9');
-    return '<div class="b2-title">Détail des performances '+(isVN?'VN (véhicules neufs)':'VO (véhicules d\'occasion)')+'</div><div class="perf-grid">'+cells+'</div>';
+    cells+=ligne('Commandes',K.cdes,K.obj_cdes,Kp?Kp.cdes:null,Kp?Kp.obj_cdes:null);
+    cells+=ligne('Financements',K.fi,K.obj_fi,Kp?Kp.fi:null,Kp?Kp.obj_fi:null);
+    cells+=ligne('Hors loueurs',K.hors_loueurs,0,Kp?Kp.hors_loueurs:null,0);
+    cells+=ligne('Reprises',K.reprise,0,Kp?Kp.reprise:null,0);
+    cells+=ligne('LOA',K.loa,0,Kp?Kp.loa:null,0);
+    return '<div class="b2-title">Production du mois — même source que l’accueil'+(R.majDash?' · à jour à '+esc(String(R.majDash).slice(11,16)):'')+'</div><div class="perf-grid">'+cells+'</div>'+
+      '<div class="b2-note">Le trait vertical marque l’attendu à date : l’objectif du mois au prorata des jours écoulés.</div>';
   }
-  if(k==='cycles'){
-    const cats=[['tous','Tous',D.cycles.length],['retard','En retard',D.cycles.filter(c=>c.categorie==='retard').length],['urgent','Urgents',D.cycles.filter(c=>c.categorie==='urgent').length],['cours','En cours',D.cycles.filter(c=>c.categorie==='cours').length]];
-    let h='<div class="b2-title">'+D.cycles.length+' cycles ouverts</div>'+R_chips(cats);
+  if(k==='leads'){
+    const m=R_partMsg('cycles'); if(m) return '<div class="b2-title">Leads et cycles ouverts</div>'+m;
+    const cats=[['tous','Tous',D.cycles.length],['retard','En retard',D.cycles.filter(c=>c.categorie==='retard').length],['urgent','À traiter',D.cycles.filter(c=>c.categorie==='urgent').length],['cours','En cours',D.cycles.filter(c=>c.categorie==='cours').length]];
+    let h='<div class="b2-title">'+D.cycles.length+' cycles ouverts · '+D.atraiter.length+' à traiter maintenant</div>'+R_chips(cats);
     const grp=(titre,cls,cat)=>{ if(R.b2filter!=='tous'&&R.b2filter!==cat) return ''; const list=D.cycles.filter(c=>c.categorie===cat); if(!list.length) return '';
       let s='<div class="pipe-group"><div class="pipe-gt '+cls+'">'+titre+' <span class="gn">'+list.length+'</span></div>';
-      list.slice(0,12).forEach(c=> s+=R_row(c.client,(c.temperature||'')+(c.heures_inactivite!=null?' · inactif '+Math.round(c.heures_inactivite/24)+'j':''),'','cycle:'+(c.id_cycle_com||'')+':'+c.id_client));
+      list.slice(0,12).forEach(c=> s+=R_row(c.client,[c.source_lead,c.canal_lead].filter(Boolean).join(' · ')+(c.heures_inactivite!=null?' · sans activité depuis '+Math.round(c.heures_inactivite/24)+' j':''),'','cycle:'+(c.id_cycle_com||'')+':'+c.id_client));
       if(list.length>12) s+='<div class="b2-empty">+ '+(list.length-12)+' autres</div>'; return s+'</div>'; };
-    return h+grp('En retard','retard','retard')+grp('Urgents','urgent','urgent')+grp('En cours','cours','cours');
-  }
-  if(k==='atraiter'){
-    if(!D.atraiter.length) return '<div class="b2-empty">Aucun lead à traiter.</div>';
-    let s='<div class="b2-title">'+D.atraiter.length+' à traiter (retard + urgents)</div>';
-    D.atraiter.forEach(c=> s+=R_row(c.client,[c.source_lead,c.canal_lead,c.message_lead].filter(Boolean).join(' · '),'','cycle:'+(c.id_cycle_com||'')+':'+c.id_client));
-    return s;
+    return h+grp('En retard','retard','retard')+grp('À traiter','urgent','urgent')+grp('En cours','cours','cours');
   }
   if(k==='pipeline'){
-    if(!D.pipeline.length) return '<div class="b2-empty">Aucune propale/BDC en cours.</div>';
-    const cats=[['tous','Tous',D.pipeline.length],['propale','Propales',D.pipeline.filter(p=>p.status==='propale').length],['bdc','BDC',D.pipeline.filter(p=>p.status==='bdc').length],['win','Wins',D.pipeline.filter(p=>p.status==='win').length],['lose','Abandons',D.pipeline.filter(p=>p.status==='lose').length]];
-    let h='<div class="b2-title">Pipeline commercial — '+D.pipeline.length+' documents</div>'+R_chips(cats);
+    const m=R_partMsg('pipeline'); if(m) return '<div class="b2-title">Affaires en cours</div>'+m;
+    if(!D.pipeline.length) return '<div class="b2-empty">Aucune proposition ni bon de commande en cours.</div>';
+    const cats=[['tous','Tous',D.pipeline.length],['propale','Propositions',D.pipeline.filter(p=>p.status==='propale').length],['bdc','Bons de commande',D.pipeline.filter(p=>p.status==='bdc').length],['win','Gagnées',D.pipeline.filter(p=>p.status==='win').length],['lose','Perdues',D.pipeline.filter(p=>p.status==='lose').length]];
+    let h='<div class="b2-title">Affaires en cours — '+D.pipeline.length+' documents</div>'+R_chips(cats);
     const filtered = R.b2filter==='tous' ? D.pipeline : D.pipeline.filter(p=>p.status===R.b2filter);
     const sect=(label,cls,vnvo)=>{
       const list=filtered.filter(p=>(p.vn_vo||'').toUpperCase()===vnvo);
@@ -1899,61 +2330,140 @@ function R_bloc2(){
     return h+body;
   }
   if(k==='rdv'){
+    const m=R_partMsg('rdv'); if(m) return '<div class="b2-title">Rendez-vous</div>'+m;
     const retards=D.rdv.filter(r=>r.en_retard===true); const avenir=D.rdv.filter(r=>r.categorie==='avenir');
     let s='<div class="b2-title">Rendez-vous</div>';
-    if(retards.length){ s+='<div class="pipe-group"><div class="pipe-gt aband">En retard — compte-rendu manquant <span class="gn">'+retards.length+'</span></div>';
+    if(retards.length){ s+='<div class="pipe-group"><div class="pipe-gt aband">Compte rendu manquant <span class="gn">'+retards.length+'</span></div>';
       retards.forEach(r=> s+=R_row(r.client,fmtDate(r.start_date)+' · '+(r.commentaire||''),'','cycle:'+(r.id_cycle_com||'')+':'+r.id_client)); s+='</div>'; }
     if(avenir.length){ s+='<div class="pipe-group"><div class="pipe-gt cours">À venir <span class="gn">'+avenir.length+'</span></div>';
       avenir.slice(0,10).forEach(r=> s+=R_row(r.client,fmtDate(r.start_date)+' '+fmtHeure(r.start_date)+' · '+(r.commentaire||''),'','cycle:'+(r.id_cycle_com||'')+':'+r.id_client));
       if(avenir.length>10) s+='<div class="b2-empty">+ '+(avenir.length-10)+' autres RDV</div>'; s+='</div>'; }
-    if(!retards.length&&!avenir.length) s+='<div class="b2-empty">Aucun RDV.</div>';
+    if(!retards.length&&!avenir.length) s+='<div class="b2-empty">Aucun RDV à venir ni en retard.</div>';
     return s;
   }
   if(k==='clos'){
-    const cats=[['tous','Tous',D.clos.length],['win','Wins',D.clos.filter(c=>c.type_cloture==='win').length],['abandon','Abandons',D.clos.filter(c=>c.type_cloture==='abandon').length],['autre','Autres',D.clos.filter(c=>c.type_cloture==='autre').length]];
+    const m=R_partMsg('clos'); if(m) return '<div class="b2-title">Cycles clos sur 30 jours</div>'+m;
+    const cats=[['tous','Tous',D.clos.length],['win','Gagnés',D.clos.filter(c=>c.type_cloture==='win').length],['abandon','Abandons',D.clos.filter(c=>c.type_cloture==='abandon').length],['autre','Autres',D.clos.filter(c=>c.type_cloture==='autre').length]];
     let h='<div class="b2-title">'+D.clos.length+' cycles clos sur 30 jours</div>'+R_chips(cats);
     const grp=(titre,cls,type)=>{ if(R.b2filter!=='tous'&&R.b2filter!==type) return ''; const list=D.clos.filter(c=>c.type_cloture===type); if(!list.length) return '';
       let s='<div class="pipe-group"><div class="pipe-gt '+cls+'">'+titre+' <span class="gn">'+list.length+'</span></div>';
-      list.forEach(c=> s+=R_row(c.client,'clôturé il y a '+(c.jours_depuis_cloture!=null?c.jours_depuis_cloture:'?')+'j','','cycle:'+(c.id_cycle_com||'')+':'+c.id_client));
+      list.forEach(c=> s+=R_row(c.client,'clôturé il y a '+(c.jours_depuis_cloture!=null?c.jours_depuis_cloture:'?')+' j','','cycle:'+(c.id_cycle_com||'')+':'+c.id_client));
       return s+'</div>'; };
-    return h+grp('Wins','win','win')+grp('Abandons','aband','abandon')+grp('Autres','cours','autre');
+    return h+grp('Gagnés','win','win')+grp('Abandons','aband','abandon')+grp('Autres','cours','autre');
   }
   return '';
 }
+
+// --- Constats chiffrés (pré-remplissage du bilan) ----------------------------
+function R_constats(){
+  const out=[]; const K=R.K, Kp=R.Kp, c=R.cad;
+  if(K){
+    const o=R_objectif(K.cdes,K.obj_cdes);
+    if(o.obj) out.push('Commandes : '+fmtNb(o.rea,0)+' sur un objectif de '+fmtNb(o.obj,0)+' — attendu à date '+fmtNb(o.att)+', soit '+(o.ecart<0?'un retard de '+fmtNb(-o.ecart):'une avance de '+fmtNb(o.ecart))+' commande'+(Math.abs(o.ecart)>=2?'s':'')+(Kp&&Kp.obj_cdes?' (mois dernier : '+fmtNb(Kp.cdes,0)+' / '+fmtNb(Kp.obj_cdes,0)+')':'')+'.');
+    else out.push('Commandes : '+fmtNb(K.cdes,0)+' ce mois-ci (pas d’objectif saisi).');
+    const fi=R_objectif(K.fi,K.obj_fi);
+    if(fi.obj) out.push('Financements : '+fmtNb(fi.rea,0)+' sur '+fmtNb(fi.obj,0)+' (attendu à date '+fmtNb(fi.att)+').');
+  }
+  if(c && c.tx_signif && c.transfo_actuel!=null) out.push('Transformation : '+fmtNb(c.transfo_actuel)+' %'+(c.tx_signif_prec&&c.transfo_precedent!=null?' contre '+fmtNb(c.transfo_precedent)+' % la période précédente':'')+(c.tx_tot_actuel!=null?', sur '+c.tx_tot_actuel+' propositions':'')+'.');
+  if(K){
+    const bits=[];
+    bits.push(fmtNb(K.pipe_affaires,0)+' affaires en cours dont '+fmtNb(K.pipe_a_relancer,0)+' à relancer (plus de 30 j)');
+    if(K.leads_jamais) bits.push(fmtNb(K.leads_jamais,0)+' lead'+(K.leads_jamais>1?'s':'')+' jamais contacté'+(K.leads_jamais>1?'s':'')+(K.leads_jamais_48h?' dont '+fmtNb(K.leads_jamais_48h,0)+' depuis plus de 48 h':''));
+    if(K.livr_retard) bits.push(fmtNb(K.livr_retard,0)+' livraison'+(K.livr_retard>1?'s':'')+' en retard');
+    out.push('Activité : '+bits.join(' · ')+'.');
+  }
+  const e=(state.tenueMap||{})[Number(R.detail&&R.detail.id_user)];
+  if(e && (e.tenu+e.partiel+e.non_tenu)>0) out.push('Engagements des 6 derniers mois : '+e.tenu+' tenu'+(e.tenu>1?'s':'')+', '+e.partiel+' partiel'+(e.partiel>1?'s':'')+', '+e.non_tenu+' non tenu'+(e.non_tenu>1?'s':'')+'.');
+  return out;
+}
+function R_constatsTexte(){
+  const l=R_constats(); if(!l.length) return '';
+  const a=new Date();
+  return 'Constats au '+String(a.getDate()).padStart(2,'0')+'/'+String(a.getMonth()+1).padStart(2,'0')+' (chiffres One Data) :\n'+l.map(x=>'• '+x).join('\n')+'\n\nAnalyse et points d’appui :\n';
+}
+// Pré-remplissage UNE fois, quand les chiffres sont là, si le bilan est vide
+// et qu'aucun brouillon ne l'a déjà rempli. Le chef corrige ou complète.
+function R_prefillConstats(){
+  if(R.prefilled || !R.detail || !R.kLoaded || !R.engLoaded) return;
+  R.prefilled=true;
+  const filled=(R.detail.resultat||'').trim();
+  if(filled || R.fromDraft) return;
+  const t=R_constatsTexte(); if(!t) return;
+  R.detail.resultat=t; R.constatsAuto=true;
+}
+
+// --- Engagements proposés à partir des chiffres ------------------------------
+function R_addJours(n){ const d=new Date(); d.setDate(d.getDate()+n); while(d.getDay()===0) d.setDate(d.getDate()+1); return ymd(d); }
+function R_finMois(){ const a=new Date(); return ymd(new Date(a.getFullYear(), a.getMonth()+1, 0)); }
+function R_suggestions(){
+  const K=R.K; if(!K) return [];
+  const s=[];
+  if(K.leads_jamais>0) s.push({ libelle:'Contacter tous les leads jamais contactés', cible:K.leads_jamais, echeance:R_addJours(2) });
+  if(K.pipe_a_relancer>0) s.push({ libelle:'Relancer les affaires sans contact depuis plus de 30 jours', cible:K.pipe_a_relancer, echeance:R_addJours(7) });
+  const o=R_objectif(K.cdes,K.obj_cdes);
+  if(o.obj && o.rea<o.obj) s.push({ libelle:'Signer des commandes d’ici la fin du mois', cible:Math.ceil(o.obj-o.rea), echeance:R_finMois() });
+  const fi=R_objectif(K.fi,K.obj_fi);
+  if(fi.obj && fi.rea<fi.obj) s.push({ libelle:'Placer des financements d’ici la fin du mois', cible:Math.ceil(fi.obj-fi.rea), echeance:R_finMois() });
+  if(K.livr_retard>0) s.push({ libelle:'Solder les livraisons en retard', cible:K.livr_retard, echeance:R_addJours(7) });
+  if((K.rdv_a_venir||0)<3) s.push({ libelle:'Poser des rendez-vous physiques en concession', cible:5, echeance:R_addJours(7) });
+  const deja=new Set((R.engagements||[]).map(e=>(e.libelle||'').trim()));
+  return s.filter(x=>!deja.has(x.libelle)).slice(0,5);
+}
+
 function R_engStatutBtns(o){
   const cur=R.revues[o.id];
   const opt=(val,lbl,cls)=> '<button class="rev-b '+cls+(cur===val?' on':'')+'" data-ract="rev:'+o.id+':'+val+'">'+lbl+'</button>';
   return '<div class="rev-btns">'+opt('tenu','Tenu','t')+opt('partiel','Partiel','p')+opt('non_tenu','Non tenu','n')+'</div>';
 }
+// Premier temps de l'entretien : on pointe ce qui avait été promis.
+function R_revue(){
+  const list=R.ouverts||[];
+  let h='<div class="sec sec-rev"><div class="sec-t">1 · Engagements de la dernière fois <span class="pill">'+(list.length?'à pointer avant tout':'rien à pointer')+'</span></div>';
+  if(!list.length){ h+='<div class="eng-empty">Aucun engagement ouvert pour ce vendeur.</div></div>'; return h; }
+  const auj=ymd(new Date());
+  list.forEach(o=>{
+    const echu = o.echeance && String(o.echeance).slice(0,10) < auj;
+    const meta=[];
+    if(o.cible!==''&&o.cible!=null) meta.push('objectif '+o.cible);
+    if(o.echeance) meta.push((echu?'échéance dépassée le ':'pour le ')+R_fmtJour(o.echeance));
+    if(o.bilaterale_date) meta.push('pris le '+fmtDate(String(o.bilaterale_date)));
+    h+='<div class="rev-row"><div class="rev-lib">'+esc(o.libelle)+'<span class="rev-date'+(echu?' echu':'')+'">'+esc(meta.join(' · '))+'</span></div>'+R_engStatutBtns(o)+'</div>';
+  });
+  const n=Object.keys(R.revues||{}).length;
+  h+='<div class="rev-foot">'+n+' / '+list.length+' pointé'+(n>1?'s':'')+'</div></div>';
+  return h;
+}
 function R_saisie(){
   const d=R.detail;
-  let h='<div class="sec"><div class="sec-t">Compte-rendu de l\'entretien <span id="r-draft-ind" class="draft-ind">brouillon auto</span></div>';
-  if(R.ouverts && R.ouverts.length){
-    h+='<div class="rev-block"><div class="rev-title">Engagements de la dernière fois <span class="pill">à pointer</span></div>';
-    R.ouverts.forEach(o=>{
-      h+='<div class="rev-row"><div class="rev-lib">'+esc(o.libelle)+(o.bilaterale_date?'<span class="rev-date">pris le '+fmtDate(o.bilaterale_date)+'</span>':'')+'</div>'+R_engStatutBtns(o)+'</div>';
-    });
-    h+='</div>';
-  }
-  h+='<div class="field res"><label>Résultat</label><textarea id="rf-res" oninput="window.__bilDraftField(\'res\',this.value)" placeholder="Bilan de la période…">'+esc(d.resultat||'')+'</textarea></div>'+
-     '<div class="field act"><label>Actions</label><textarea id="rf-act" oninput="window.__bilDraftField(\'act\',this.value)" placeholder="Actions décidées, accompagnement…">'+esc(d.actions||'')+'</textarea></div>';
-  h+='<div class="eng-block"><label class="eng-lbl">Engagements pris</label>';
+  let h='<div class="sec sec-cr"><div class="sec-t">3 · Compte rendu de l\'entretien <span id="r-draft-ind" class="draft-ind">brouillon auto</span></div>';
+  h+='<div class="field res"><label>Bilan'+(R.constatsAuto?' <span class="lbl-note">pré-rempli avec les chiffres — à corriger et compléter</span>':'')+'<button class="lnk lbl-act" data-ract="constats" title="Ajouter les constats chiffrés au bilan">↻ insérer les constats chiffrés</button></label>'+
+     '<textarea id="rf-res" oninput="window.__bilDraftField(\'res\',this.value)" placeholder="Bilan de la période…">'+esc(d.resultat||'')+'</textarea></div>'+
+     '<div class="field act"><label>Actions décidées</label><textarea id="rf-act" oninput="window.__bilDraftField(\'act\',this.value)" placeholder="Accompagnement, formation, prise de rendez-vous commune…">'+esc(d.actions||'')+'</textarea></div>';
+  h+='<div class="eng-block"><label class="eng-lbl">Engagements pris <span class="lbl-note">quoi · combien · pour quand</span></label>';
   if(!R.engLoaded){ h+='<div class="r-load-inline">Chargement…</div>'; }
   else {
     const list=R.engagements||[];
-    if(!list.length){ h+='<div class="eng-empty">Aucun engagement saisi pour l\'instant.</div>'; }
+    if(!list.length){ h+='<div class="eng-empty">Aucun engagement pour l\'instant. Choisissez une proposition ci-dessous ou ajoutez le vôtre.</div>'; }
     list.forEach((e,i)=>{
       h+='<div class="eng-item"><span class="eng-h">'+(i+1)+'</span>'+
-        '<input class="eng-inp" value="'+esc(e.libelle||'')+'" oninput="window.__bilEngInput('+i+',this.value)" placeholder="Engagement pris par le vendeur…">'+
+        '<input class="eng-inp" value="'+esc(e.libelle||'')+'" oninput="window.__bilEngInput('+i+',\'libelle\',this.value)" placeholder="Quoi : l’engagement du vendeur…">'+
+        '<input class="eng-cible" type="number" min="0" step="1" value="'+esc(e.cible!=null?e.cible:'')+'" oninput="window.__bilEngInput('+i+',\'cible\',this.value)" placeholder="Combien" title="Combien">'+
+        '<input class="eng-ech" type="date" value="'+esc(e.echeance?String(e.echeance).slice(0,10):'')+'" oninput="window.__bilEngInput('+i+',\'echeance\',this.value)" title="Pour quand">'+
         '<button class="eng-del" data-ract="eng_del:'+i+'" title="Supprimer">×</button></div>';
     });
+    const sug=R_suggestions();
+    if(sug.length){
+      h+='<div class="sug-t">Proposés à partir des chiffres :</div><div class="sug-list">'+
+        sug.map((x,i)=>'<button class="sug" data-ract="sug:'+i+'">+ '+esc(x.libelle)+' <b>'+esc(String(x.cible))+'</b> <span>· '+esc(R_fmtJour(x.echeance))+'</span></button>').join('')+'</div>';
+    }
     h+='<button class="eng-add" data-ract="eng_add">+ Ajouter un engagement</button>';
   }
   h+='</div>';
-  h+='<div class="save-bar"><span id="r-save-msg" class="save-msg"></span>'+
+  const libSave = R.saving ? 'Enregistrement…' : (R.future ? '▶ Réaliser maintenant' : 'Enregistrer la bilatérale');
+  h+='<div class="save-bar"><span id="r-save-msg" class="save-msg">'+esc(R.saveErr||'')+'</span>'+
     '<button class="btn btn-ghost" data-ract="print">Imprimer / PDF</button>'+
-    '<button class="btn btn-sec" data-ract="annuler">Annuler</button>'+
-    '<button class="btn btn-prim" data-ract="save"'+(R.saving?' disabled':'')+'>'+(R.saving?'Enregistrement…':'Enregistrer la bilatérale')+'</button></div></div>';
+    '<button class="btn btn-sec" data-ract="annuler">Fermer</button>'+
+    '<button class="btn btn-prim" data-ract="save"'+(R.saving?' disabled':'')+'>'+libSave+'</button></div></div>';
   return h;
 }
 function R_histo(){
@@ -1996,59 +2506,124 @@ function R_histo(){
 }
 function R_render(){
   const ov=doc.getElementById('real-ov'); if(!ov) return;
+  // Fiche ouverte depuis l'agenda avant le chargement de la page : la ligne
+  // de cadence (transfo) arrive après coup.
+  if(R.detail && !R.cad && state.cadence){ R.cad=(state.cadence||[]).find(x=>x.id_user===Number(R.detail.id_user))||null; }
   let body='';
   if(R.detail===null && !R.error){ body='<div class="r-load">Chargement…</div>'; }
   else if(R.error){ body='<div class="r-err">Erreur : '+esc(R.error)+'</div>'; }
+  else if(R.done){ body=R_doneView(); }
   else {
     const d=R.detail;
     body+='<div class="r-head"><div><div class="r-vend">'+esc(d.nom_vendeur)+'</div>'+
       '<div class="r-sub">'+(d.vn_vo?('Vendeur '+esc(d.vn_vo)+' · '):'')+esc(d.nom_site)+'</div></div>'+
       '<div class="r-meta">Bilatérale du <b>'+fmtDate(d.start_date)+'</b><br>avec '+esc(d.nom_chef)+
       (d.start_date?(' · '+fmtHeure(d.start_date)+(d.end_date?' → '+fmtHeure(d.end_date):'')):'')+'</div></div>';
-    body+='<div class="sec"><div class="sec-t">Performance &amp; activité <span class="pill">cliquez un indicateur pour le détail</span></div>';
-    if(R.synthLoading || R.synth===null){
-      body+='<div class="r-load-inline">Chargement des indicateurs…</div>';
-    } else if(R.synthError){
-      body+='<div class="r-err" style="padding:14px">Indicateurs indisponibles : '+esc(R.synthError)+'</div>';
-    } else {
-      body+=R_kpis();
-      body+='<div class="bloc2">'+R_bloc2()+'</div>';
+    if(R.future){
+      const a=new Date();
+      body+='<div class="r-future">Prévue le <b>'+esc(fmtDate(d.start_date))+' à '+esc(fmtHeure(d.start_date))+'</b>. Vous pouvez la mener dès maintenant : à l’enregistrement, sa date sera ramenée à aujourd’hui, '+String(a.getHours()).padStart(2,'0')+'h'+String(a.getMinutes()).padStart(2,'0')+'.</div>';
     }
-    body+='</div>';
-    body+=R_saisie();
-    if(R.histLoading || R.hist===null){
-      body+='<div class="sec"><div class="sec-t">Bilatérales précédentes</div><div class="r-load-inline">Chargement de l\'historique…</div></div>';
+    let perf='<div class="sec sec-perf"><div class="sec-t">2 · Chiffres du vendeur <span class="pill">cliquez un indicateur pour le détail</span></div>';
+    perf+=R_kpis();
+    perf+='<div class="bloc2">'+R_bloc2()+'</div></div>';
+    const histo=(R.histLoading || R.hist===null)
+      ? '<div class="sec"><div class="sec-t">Bilatérales précédentes</div><div class="r-load-inline">Chargement de l\'historique…</div></div>'
+      : R_histo();
+    if(R.reunion){
+      // Mode réunion : les chiffres en grand à gauche (c'est l'écran qu'on
+      // tourne vers le vendeur), le compte rendu en panneau latéral.
+      body+='<div class="r-cols"><div class="r-left">'+perf+histo+'</div><div class="r-right">'+R_revue()+R_saisie()+'</div></div>';
     } else {
-      body+=R_histo();
+      body+=R_revue()+perf+R_saisie()+histo;
     }
   }
+  const scrollPrec = ov.scrollTop;
   ov.innerHTML = R_STYLE + '<div class="real-modal'+(R.reunion?' reunion':'')+'">'+
-    '<div class="real-toolbar"><button class="real-mode" data-ract="reunion">'+(R.reunion?'↙ Quitter le mode réunion':'⤢ Mode réunion')+'</button></div>'+
+    '<div class="real-toolbar">'+(R.done?'':'<button class="real-mode" data-ract="reunion">'+(R.reunion?'↙ Quitter le mode réunion':'⤢ Mode réunion')+'</button>')+'</div>'+
     '<button class="real-close" data-ract="annuler" title="Fermer">×</button>'+body+'</div>';
+  ov.scrollTop = scrollPrec;
+}
+
+// --- Après l'enregistrement ----------------------------------------------------
+function R_suggestionSuivante(){
+  const base = R.done && R.done.start ? new Date(String(R.done.start).replace(' ','T')) : new Date();
+  const d = new Date(base.getFullYear(), base.getMonth(), base.getDate() + BIL_CFG.cadenceJ);
+  while(d.getDay()===0) d.setDate(d.getDate()+1);
+  const h = isNaN(base) ? '09:00' : String(base.getHours()).padStart(2,'0')+':'+String(base.getMinutes()).padStart(2,'0');
+  return { date: ymd(d), heure: (h<'08:00'||h>'19:00') ? '09:00' : h };
+}
+function R_doneView(){
+  const d=R.detail, x=R.done;
+  if(!R.nextDate){ const s=R_suggestionSuivante(); R.nextDate=s.date; R.nextHeure=s.heure; }
+  let h='<div class="done-card"><div class="done-ic">✓</div><div class="done-t">Bilatérale enregistrée</div>'+
+    '<div class="done-s">'+esc(d.nom_vendeur)+' · '+esc(fmtDate(String(x.start||d.start_date)))+'</div>'+
+    '<ul class="done-list">'+
+      '<li>'+x.nbEng+' engagement'+(x.nbEng>1?'s':'')+' pris'+(x.nbEng?' (chiffrés et datés)':'')+'</li>'+
+      (x.nbRev?'<li>'+x.nbRev+' engagement'+(x.nbRev>1?'s':'')+' précédent'+(x.nbRev>1?'s':'')+' pointé'+(x.nbRev>1?'s':'')+'</li>':'')+
+      (x.ramenee?'<li>Date ramenée à aujourd’hui, '+esc(fmtHeure(String(x.start)))+' (elle était prévue plus tard)</li>':'')+
+    '</ul></div>';
+  if(R.nextMsg){
+    h+='<div class="done-next ok">'+esc(R.nextMsg)+'</div>';
+  } else {
+    h+='<div class="done-next"><div class="dn-t">Prochaine bilatérale suggérée <span>cadence de '+BIL_CFG.cadenceJ+' jours</span></div>'+
+      '<div class="dn-row"><input type="date" id="rd-date" min="'+ymd(new Date())+'" value="'+esc(R.nextDate)+'"><input type="time" id="rd-heure" step="900" value="'+esc(R.nextHeure)+'">'+
+      '<button class="btn btn-prim" data-ract="done_plan"'+(R.saving?' disabled':'')+'>'+(R.saving?'Enregistrement…':'📅 Planifier')+'</button></div>'+
+      (R.saveErr?'<div class="dn-err">'+esc(R.saveErr)+'</div>':'')+'</div>';
+  }
+  h+='<div class="save-bar"><button class="btn btn-ghost" data-ract="print">Imprimer / PDF</button><button class="btn btn-sec" data-ract="annuler">Fermer</button></div>';
+  return h;
+}
+async function R_planifierSuivante(){
+  const di=doc.getElementById('rd-date'), hi=doc.getElementById('rd-heure');
+  if(di) R.nextDate=di.value; if(hi) R.nextHeure=hi.value;
+  if(!R.nextDate||!R.nextHeure){ R.saveErr='Date et heure requises.'; return R_render(); }
+  R.saving=true; R.saveErr=''; R_render();
+  try {
+    const d=R.detail;
+    const r=await ctx.supabase.rpc('create_bilaterale',{ p_id_user:Number(d.id_user), p_id_manager:getViewerId(), p_id_site:d.id_site!=null?Number(d.id_site):null,
+      p_start:R.nextDate+' '+R.nextHeure+':00', p_end:R.nextDate+' '+plus(30,R.nextHeure)+':00', p_duree:'30 min' });
+    if(r.error) throw r.error;
+    R.saving=false; R.nextMsg='Prochaine bilatérale planifiée le '+libQuand(R.nextDate,R.nextHeure)+'.';
+    R_render(); rechargerBil();
+  } catch(e){ console.error('[real] prochaine', e); R.saving=false; R.saveErr=messageErreur(e); R_render(); }
 }
 
 async function R_save(){
   if(R.saving) return;
-  const res=(doc.getElementById('rf-res')&&doc.getElementById('rf-res').value)||'';
-  const act=(doc.getElementById('rf-act')&&doc.getElementById('rf-act').value)||'';
-  const inps=doc.querySelectorAll('#real-ov .eng-inp');
-  (R.engagements||[]).forEach((e,i)=>{ if(inps[i]) e.libelle=inps[i].value; });
-  const nouveaux=(R.engagements||[]).map((e,i)=>({ libelle:(e.libelle||'').trim(), ordre:i })).filter(e=>e.libelle);
+  R_lireSaisie();
+  const res=(R.detail.resultat||''), act=(R.detail.actions||'');
+  const nouveaux=(R.engagements||[]).map((e,i)=>({
+    libelle:(e.libelle||'').trim(), ordre:i,
+    cible:(e.cible===''||e.cible==null||isNaN(Number(e.cible)))?null:Number(e.cible),
+    echeance:e.echeance?String(e.echeance).slice(0,10):null
+  })).filter(e=>e.libelle);
+  if(!res.trim() && !act.trim() && !nouveaux.length){ R.saveErr='Renseignez au moins le bilan ou un engagement.'; R_render(); return; }
   const revues=Object.keys(R.revues||{}).map(id=>({ id:Number(id), statut_suivi:R.revues[id] }));
-  const engResume=nouveaux.map((e,i)=>(i+1)+'. '+e.libelle).join('\n');
-  R.saving=true; R_render();
+  const engResume=nouveaux.map((e,i)=>(i+1)+'. '+R_engTexte(e)).join('\n');
+  R.saving=true; R.saveErr=''; R_render();
   try {
     const supabase=ctx.supabase;
-    const r=await supabase.rpc('realiser_bilaterale_complet',{ p_id:R.bilId, p_resultat:res, p_actions:act, p_engagement:engResume, p_nouveaux:nouveaux, p_revues:revues });
+    let r=await supabase.rpc('bilat_realiser',{ p_id:R.bilId, p_resultat:res, p_actions:act, p_engagement:engResume, p_nouveaux:nouveaux, p_revues:revues, p_maintenant:!!R.future });
+    let out=r.data||null;
+    if(r.error && R_fonctionAbsente(r.error)){
+      // SQL v6 pas encore appliqué : l'ancienne fonction, sauf pour une
+      // bilatérale future (elle l'aurait réalisée dans le futur).
+      if(R.future) throw new Error('Fonction indisponible : le script SQL des bilatérales v6 n’est pas encore appliqué.');
+      r=await supabase.rpc('realiser_bilaterale_complet',{ p_id:R.bilId, p_resultat:res, p_actions:act, p_engagement:engResume,
+        p_nouveaux:nouveaux.map(e=>({ libelle:e.libelle, ordre:e.ordre })), p_revues:revues });
+      out=null;
+    }
     if(r.error) throw r.error;
     R.saving=false;
     R_clearDraft();
-    R_close();
-    if(window.__bilLoadData){ state.sites=null; state.bils=null; state.cadence=null; window.__bilLoadData(); }
+    R.done={ start:(out&&out.start_date)||R.detail.start_date, ramenee:!!(out&&out.date_ramenee), nbEng:nouveaux.length, nbRev:revues.length };
+    R.nextDate=''; R.nextMsg='';
+    R_render();
+    try { (doc.getElementById('real-ov')||{}).scrollTop=0; } catch(x){}
+    rechargerBil();
   } catch(e){
     console.error('[real] save', e);
-    R.saving=false; R_render();
-    const m=doc.getElementById('r-save-msg'); if(m){ m.textContent='Erreur : '+(e.message||e); m.style.color='#a32d2d'; }
+    R.saving=false; R.saveErr='Erreur : '+messageErreur(e); R_render();
   }
 }
 
@@ -2058,9 +2633,9 @@ window.__realRoute2 = function(e){
   if(e.target.closest('#real-contacts-ov')){ e.__realDone = true; RC_route(e); return; }
   const ov = e.target.closest('#real-ov'); if(!ov) return;
   e.__realDone = true;
-  if(e.target.id==='real-ov'){ R_close(); return; }
+  if(e.target.id==='real-ov'){ if(!R.done) R_lireSaisie(); R_close(); return; }
   const kpi=e.target.closest('[data-rkpi]');
-  if(kpi){ const k=kpi.getAttribute('data-rkpi'); if(k==='transfo') return; R.kpi=k; R.b2filter='tous'; R_render(); return; }
+  if(kpi){ const k=kpi.getAttribute('data-rkpi'); if(k==='transfo') return; R_lireSaisie(); R.kpi=k; R.b2filter='tous'; R_render(); return; }
   const chip=e.target.closest('[data-rchip]');
   if(chip){ R.b2filter=chip.getAttribute('data-rchip');
     const b2=ov.querySelector('.bloc2'); if(b2){ b2.innerHTML=R_bloc2(); } return; }
@@ -2074,25 +2649,42 @@ window.__realRoute2 = function(e){
     if(type==='client'){ R_openClientFiche(Number(parts[1])); return; }
     return; }
   const hn=e.target.closest('[data-rhistnav]');
-  if(hn){ const n=(R.hist||[]).length; const dir=hn.getAttribute('data-rhistnav');
+  if(hn){ R_lireSaisie(); const n=(R.hist||[]).length; const dir=hn.getAttribute('data-rhistnav');
     if(dir==='prev') R.histIdx=Math.min((R.histIdx||0)+1, n-1); else R.histIdx=Math.max((R.histIdx||0)-1, 0);
     R_render(); return; }
   const hd=e.target.closest('[data-rhistdot]');
-  if(hd){ R.histIdx=Number(hd.getAttribute('data-rhistdot')); R_render(); return; }
+  if(hd){ R_lireSaisie(); R.histIdx=Number(hd.getAttribute('data-rhistdot')); R_render(); return; }
   const act=e.target.closest('[data-ract]');
   if(act){ const a=act.getAttribute('data-ract');
     if(a==='save'){ R_save(); return; }
-    if(a==='annuler'){ R_close(); return; }
-    if(a==='reunion'){ R.reunion=!R.reunion; R_render(); return; }
+    if(a==='annuler'){ if(!R.done) R_lireSaisie(); R_close(); return; }
+    if(a==='reunion'){ R_lireSaisie(); R.reunion=!R.reunion; R_render(); return; }
+    if(a==='done_plan'){ R_planifierSuivante(); return; }
+    if(a==='retry:dash'){ R_loadDash(); R_render(); return; }
+    if(a.indexOf('retry:')===0){ R_loadPart(a.slice(6)); R_render(); return; }
+    if(a==='constats'){
+      R_lireSaisie();
+      const t=R_constatsTexte(); if(!t) return;
+      R.detail.resultat = (R.detail.resultat||'').trim() ? (t+'\n'+R.detail.resultat) : t;
+      R_saveDraft(); R_render(); return;
+    }
+    if(a.indexOf('sug:')===0){
+      R_lireSaisie();
+      const sug=R_suggestions()[Number(a.slice(4))]; if(!sug) return;
+      if(!R.engagements) R.engagements=[];
+      R.engagements.push({ libelle:sug.libelle, cible:sug.cible, echeance:sug.echeance, ordre:R.engagements.length });
+      R_saveDraft(); R_render(); return;
+    }
     if(a==='print'){ R_print(); return; }
     if(a==='eng_add'){
+      R_lireSaisie();
       if(!R.engagements) R.engagements=[];
-      R.engagements.push({ libelle:'', ordre:R.engagements.length }); R_saveDraft(); R_render();
+      R.engagements.push({ libelle:'', cible:'', echeance:R_addJours(7), ordre:R.engagements.length }); R_saveDraft(); R_render();
       setTimeout(()=>{ const ins=doc.querySelectorAll('#real-ov .eng-inp'); if(ins.length) ins[ins.length-1].focus(); }, 20);
       return;
     }
-    if(a.indexOf('eng_del:')===0){ const i=Number(a.split(':')[1]); if(R.engagements){ R.engagements.splice(i,1); R_saveDraft(); R_render(); } return; }
-    if(a.indexOf('rev:')===0){ const p=a.split(':'); const id=p[1], st=p[2]; if(!R.revues) R.revues={};
+    if(a.indexOf('eng_del:')===0){ R_lireSaisie(); const i=Number(a.split(':')[1]); if(R.engagements){ R.engagements.splice(i,1); R_saveDraft(); R_render(); } return; }
+    if(a.indexOf('rev:')===0){ R_lireSaisie(); const p=a.split(':'); const id=p[1], st=p[2]; if(!R.revues) R.revues={};
       if(R.revues[id]===st) delete R.revues[id]; else R.revues[id]=st; R_saveDraft(); R_render(); return; }
     return;
   }
@@ -2251,6 +2843,58 @@ const R_STYLE = '<style>'+
 '#real-ov .hist-sec .h-l{font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:.04em;margin-bottom:4px}'+
 '#real-ov .hist-sec.res .h-l{color:#2a5ea9}#real-ov .hist-sec.act .h-l{color:#8a6410}#real-ov .hist-sec.eng .h-l{color:#2c7a68}'+
 '#real-ov .hist-sec .h-t{font-size:13px;line-height:1.5;white-space:pre-wrap}'+
+/* --- v6 --- */
+'#real-ov .r-future{background:rgba(126,87,194,.08);border:1px solid rgba(126,87,194,.35);color:#4f3590;border-radius:12px;padding:11px 14px;font-size:13px;font-weight:600;margin-bottom:14px;line-height:1.45}'+
+'#real-ov .r-future b{color:#3d2777}'+
+'#real-ov .r-warn{font-size:12.5px;color:#8a6410;background:rgba(250,192,85,.14);border:1px solid rgba(250,192,85,.45);border-radius:10px;padding:8px 12px;margin-bottom:12px;font-weight:600}'+
+'#real-ov .lnk{background:none;border:none;color:#2a5ea9;font-family:inherit;font-size:12px;font-weight:800;text-decoration:underline;cursor:pointer;padding:0 2px}'+
+'#real-ov .kpi.big{grid-column:span 2}'+
+'#real-ov .kpi .k-of{font-size:14px;font-weight:700;color:#888780}'+
+'#real-ov .kpi .k-p{font-size:11px;color:#888780;margin-top:4px;font-weight:600}'+
+'#real-ov .kpi .k-alert{font-size:12px;color:#e24b4a;font-weight:800}'+
+'#real-ov .perf-bar{position:relative}'+
+'#real-ov .perf-bar b{position:absolute;top:-2px;width:2px;height:11px;background:#2a5ea9;border-radius:1px}'+
+'#real-ov .perf-prev{font-size:11px;color:#888780;margin-top:3px}'+
+'#real-ov .b2-note{font-size:11px;color:#888780;margin-top:10px}'+
+'#real-ov .sec-rev{border-color:rgba(250,192,85,.55);background:#fffcf4}'+
+'#real-ov .sec-rev .sec-t{color:#8a6410}'+
+'#real-ov .sec-rev .sec-t .pill{background:rgba(250,192,85,.30);color:#8a6410}'+
+'#real-ov .rev-date.echu{color:#b23433;font-weight:700}'+
+'#real-ov .rev-foot{font-size:11px;color:#a78a4a;font-weight:700;text-align:right;margin-top:6px}'+
+'#real-ov .field label{display:flex;align-items:center;gap:8px;flex-wrap:wrap}'+
+'#real-ov .lbl-note{font-size:11px;font-weight:600;text-transform:none;letter-spacing:0;color:#888780}'+
+'#real-ov .lbl-act{margin-left:auto;text-transform:none;letter-spacing:0}'+
+'#real-ov .eng-cible{width:84px;flex-shrink:0;border:1px solid #ece9e1;border-radius:9px;padding:9px 8px;font-family:inherit;font-size:14px;color:#3a3a38;background:rgba(83,189,167,.06);text-align:center}'+
+'#real-ov .eng-ech{width:142px;flex-shrink:0;border:1px solid #ece9e1;border-radius:9px;padding:8px 8px;font-family:inherit;font-size:13px;color:#3a3a38;background:rgba(83,189,167,.06)}'+
+'#real-ov .eng-cible:focus,#real-ov .eng-ech:focus{outline:none;border-color:#53bda7;background:#fff}'+
+'#real-ov .sug-t{font-size:11px;font-weight:800;color:#888780;text-transform:uppercase;letter-spacing:.04em;margin:10px 0 6px}'+
+'#real-ov .sug-list{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:8px}'+
+'#real-ov .sug{border:1px dashed #53bda7;background:#fff;color:#2c7a68;border-radius:16px;padding:5px 11px;font-family:inherit;font-size:12px;font-weight:700;cursor:pointer;text-align:left}'+
+'#real-ov .sug:hover{background:rgba(83,189,167,.10)}'+
+'#real-ov .sug b{color:#1f5a4c}#real-ov .sug span{color:#888780;font-weight:600}'+
+'#real-ov .r-cols{display:grid;grid-template-columns:minmax(0,1.3fr) minmax(0,1fr);gap:18px;align-items:start}'+
+'#real-ov .r-right{position:sticky;top:0}'+
+'#real-ov .real-modal.reunion .kpi .k-v{font-size:30px}'+
+'#real-ov .real-modal.reunion .kpi .k-l{font-size:12.5px}'+
+'#real-ov .real-modal.reunion .kpi .k-s{font-size:12px}'+
+'#real-ov .real-modal.reunion .r-right .field textarea{min-height:110px}'+
+'#real-ov .real-modal.reunion .eng-item{flex-wrap:wrap}'+
+'#real-ov .real-modal.reunion .eng-inp{flex:1 1 100%}'+
+'#real-ov .done-card{background:#fff;border:1px solid #ece9e1;border-radius:16px;padding:26px 22px;text-align:center;margin-bottom:16px}'+
+'#real-ov .done-ic{width:52px;height:52px;border-radius:50%;background:#53bda7;color:#fff;font-size:28px;font-weight:800;display:flex;align-items:center;justify-content:center;margin:0 auto 10px}'+
+'#real-ov .done-t{font-size:20px;font-weight:800;color:#2a5ea9}'+
+'#real-ov .done-s{font-size:13px;color:#888780;margin-top:2px}'+
+'#real-ov .done-list{list-style:none;padding:0;margin:14px 0 0;font-size:13.5px;color:#3a3a38}'+
+'#real-ov .done-list li{margin:4px 0}'+
+'#real-ov .done-next{background:#fff;border:1px solid #ece9e1;border-radius:14px;padding:16px 18px;margin-bottom:16px}'+
+'#real-ov .done-next.ok{background:rgba(83,189,167,.12);border-color:#9ed8c9;color:#1f5a4c;font-weight:700;font-size:14px}'+
+'#real-ov .dn-t{font-size:14px;font-weight:800;color:#2a5ea9;margin-bottom:10px}'+
+'#real-ov .dn-t span{font-size:11px;font-weight:600;color:#888780;margin-left:6px}'+
+'#real-ov .dn-row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}'+
+'#real-ov .dn-row input{border:1px solid #ece9e1;border-radius:9px;padding:9px 10px;font-family:inherit;font-size:14px;color:#3a3a38}'+
+'#real-ov .dn-err{color:#a32d2d;font-size:12.5px;font-weight:700;margin-top:8px}'+
+'@media (max-width:900px){#real-ov .r-cols{grid-template-columns:1fr}#real-ov .r-right{position:static}}'+
+'@media (max-width:760px){#real-ov .kpi.big{grid-column:auto}#real-ov .eng-item{flex-wrap:wrap}#real-ov .eng-inp{flex:1 1 100%}}'+
 '@media (max-width:760px){'+
 '#real-ov{padding:10px}'+
 '#real-ov .real-modal{padding:16px;border-radius:14px}'+
@@ -2596,6 +3240,17 @@ const RC_STYLE = '<style>'+
 // ============================================================================
 (function bilAutoOpenFromAgenda(){
   function tryOpen(){
+    // v6 : l'agenda dépose l'id dans sessionStorage (fiable en navigation SPA).
+    try {
+      const W = (wwLib.getFrontWindow && wwLib.getFrontWindow()) || window;
+      const raw = W.sessionStorage.getItem('od_bil_open');
+      if (raw) {
+        W.sessionStorage.removeItem('od_bil_open');
+        const o = JSON.parse(raw);
+        try { wwLib.wwVariable.updateValue(VAR_ID_BILATE_REAL, null); } catch(e){}
+        if (o && o.id && (Date.now() - (o.t || 0)) < 120000) { R_open(Number(o.id)); return true; }
+      }
+    } catch(e){}
     try {
       const v = wwLib.wwVariable.getValue(VAR_ID_BILATE_REAL);
       if (v != null && v !== '' && !Number.isNaN(Number(v))) {
