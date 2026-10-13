@@ -466,7 +466,6 @@ function scopeLevel() {
 // pour le périmètre / le rôle.
 function activeTab() {
   let t = state.tab || 'prio';
-  if (t === 'site' && scopeLevel() !== 'site') t = 'prio';
   if (t === 'enc' && !isDirection()) t = 'prio';
   return t;
 }
@@ -610,7 +609,7 @@ function scopeLabel() {
         '</div>';
     }
     return '<div class="bil-period">' +
-      '<span class="bp-lbl">Période</span>' +
+      '<span class="bp-lbl">Période analysée</span>' +
       '<div class="bp-wrap">' + trig + pop + '</div>' +
     '</div>';
   }
@@ -651,16 +650,19 @@ function scopeLabel() {
   }
 
   function renderPerimPanel() {
-  return renderDatePicker() + '<div class="bil-perim"><div class="perim-title">Périmètre</div>' + renderTree() + '</div>';
+  return renderDatePicker() + '<div class="bil-perim"><div class="perim-title">Périmètre <span class="perim-help">« 3/11 reçus » = vendeurs reçus en bilatérale sur la période / vendeurs actifs</span></div>' + renderTree() + '</div>';
 }
 
 // Onglets contextuels : En priorité (toujours), Bilatérales du site (si scope=site),
 // Encadrement (directeurs+).
 function renderTabs() {
+  // v11 : « Suivi de l'équipe » est disponible à tous les niveaux du
+  // périmètre. Il n'apparaissait qu'une fois un SITE choisi : au niveau
+  // de l'affaire, le tableau semblait avoir disparu (14/10/2026).
   const t = activeTab();
   let h = '<div class="bil-tabs">';
-  h += '<span class="bil-tab' + (t === 'prio' ? ' on' : '') + '" data-tab="prio">En priorité</span>';
-  if (scopeLevel() === 'site') h += '<span class="bil-tab' + (t === 'site' ? ' on' : '') + '" data-tab="site">Bilatérales du site</span>';
+  h += '<span class="bil-tab' + (t === 'prio' ? ' on' : '') + '" data-tab="prio">À recevoir en priorité</span>';
+  h += '<span class="bil-tab' + (t === 'site' ? ' on' : '') + '" data-tab="site">Suivi de l’équipe</span>';
   if (isDirection()) h += '<span class="bil-tab' + (t === 'enc' ? ' on' : '') + '" data-tab="enc">Encadrement</span>';
   h += '</div>';
   return h;
@@ -880,9 +882,9 @@ function renderPrioVendeurs() {
   let h = '<div class="prio-head">À recevoir en priorité <span class="prio-sub">' + esc(scopeLabel()) + ' · ' + total + ' vendeur' + (total > 1 ? 's' : '') + ' actif' + (total > 1 ? 's' : '') + '</span></div>';
   h += '<div class="prio-kpis">';
   h += '<div class="pk"><div class="pk-v" style="color:' + (pctVus >= 70 ? '#2c7a68' : (pctVus >= 40 ? '#8a6410' : '#b23433')) + '">' + pctVus + '%</div><div class="pk-l">équipe reçue sur la période</div><div class="pk-s">' + vus + '/' + total + ' vendeurs</div></div>';
-  h += '<div class="pk"><div class="pk-v" style="color:' + (jamais ? '#b23433' : '#2c7a68') + '">' + jamais + '</div><div class="pk-l">jamais reçus</div><div class="pk-s">aucune bilatérale</div></div>';
-  h += '<div class="pk"><div class="pk-v" style="color:' + (retardCad ? '#8a6410' : '#2c7a68') + '">' + retardCad + '</div><div class="pk-l">cadence dépassée</div><div class="pk-s">plus de ' + BIL_CFG.retardJ + ' j sans bilatérale</div></div>';
-  if (state.dash) h += '<div class="pk"><div class="pk-v" style="color:' + (sousObjN ? '#b23433' : '#2c7a68') + '">' + sousObjN + '</div><div class="pk-l">en retard sur l’objectif</div><div class="pk-s">commandes, au prorata du mois</div></div>';
+  h += '<div class="pk clik' + (f === 'jamais' ? ' on' : '') + '" data-priofilter="jamais"><div class="pk-v" style="color:' + (jamais ? '#b23433' : '#2c7a68') + '">' + jamais + '</div><div class="pk-l">jamais reçus</div><div class="pk-s">aucune bilatérale</div></div>';
+  h += '<div class="pk clik' + (f === 'cadence' ? ' on' : '') + '" data-priofilter="cadence"><div class="pk-v" style="color:' + (retardCad ? '#8a6410' : '#2c7a68') + '">' + retardCad + '</div><div class="pk-l">cadence dépassée</div><div class="pk-s">plus de ' + BIL_CFG.retardJ + ' j sans bilatérale</div></div>';
+  if (state.dash) h += '<div class="pk clik' + (f === 'objectif' ? ' on' : '') + '" data-priofilter="objectif"><div class="pk-v" style="color:' + (sousObjN ? '#b23433' : '#2c7a68') + '">' + sousObjN + '</div><div class="pk-l">en retard sur l’objectif</div><div class="pk-s">commandes, au prorata du mois</div></div>';
   else h += '<div class="pk"><div class="pk-v" style="color:' + (baisse ? '#b23433' : '#2c7a68') + '">' + baisse + '</div><div class="pk-l">transfo en baisse</div><div class="pk-s">vs période précédente</div></div>';
   h += '</div>';
 
@@ -890,7 +892,20 @@ function renderPrioVendeurs() {
   h += '<div class="prio-chips">';
   fchips.forEach(([k, l, n]) => { if (n === 0 && k !== 'tous') return; const extra = (k === 'retard' ? ' retard' : ''); h += '<span class="prio-chip' + extra + (f === k ? ' on' : '') + '" data-priofilter="' + k + '">' + l + '<span class="pc-n">' + n + '</span></span>'; });
   h += '</div>';
-  h += '<div class="hint-line">Classement : 40 % retard sur l’objectif · 25 % ' + (state.txMesurable === false ? 'part du portefeuille à relancer (la transfo n’est pas mesurable tant que les affaires perdues ne sont pas enregistrées)' : 'baisse de transfo') + ' · 20 % ancienneté de la dernière bilatérale · 15 % discipline (engagements, relances, leads). La raison principale est en tête de chaque ligne.</div>';
+  // Action immédiate : le premier vendeur à recevoir, et la semaine à planifier.
+  const aFaire = sorted.filter(d => !isPlanifie(d.c));
+  state.prioOrdre = aFaire.map(d => d.c);
+  if (aFaire.length) {
+    const d0 = aFaire[0];
+    h += '<div class="next-box"><div class="nb-l">À recevoir en premier</div>' +
+      '<div class="nb-main"><div><div class="nb-nom">' + esc(d0.c.nom_vendeur) + ' <span>' + esc(d0.c.nom_site) + '</span></div>' +
+      '<div class="nb-why">' + esc([d0.main ? d0.txt[d0.main] : '', ...['objectif', 'transfo', 'discipline'].filter(k => k !== d0.main && d0.comps[k] > 0.15 && d0.txt[k]).map(k => d0.txt[k])].filter(Boolean).join(' · ')) + '</div></div>' +
+      '<div class="nb-acts"><button class="pr-plan" data-plan-vend="' + d0.c.id_user + '|' + d0.c.id_site + '">Planifier</button>' +
+      (aFaire.length > 1 ? '<button class="nb-batch" data-batch="1">📅 Planifier les ' + Math.min(5, aFaire.length) + ' premiers</button>' : '') + '</div></div></div>';
+  }
+  h += '<details class="hint-det"><summary>Comment est calculé le classement ?</summary><div>Score sur 100 : <b>40</b> retard sur l’objectif de commandes au prorata du mois · <b>25</b> ' +
+    (state.txMesurable === false ? 'part du portefeuille à relancer (> 30 j) — la transformation n’est pas mesurable tant que les affaires perdues ne sont pas enregistrées' : 'baisse de la transformation sur ' + BIL_CFG.transfoJours + ' jours') +
+    ' · <b>20</b> ancienneté de la dernière bilatérale (plafond ' + BIL_CFG.retardJ + ' j) · <b>15</b> discipline : engagements non tenus, relances en retard, leads non contactés depuis 48 h. Les vendeurs dont la bilatérale est déjà programmée passent en bas de liste. La raison qui pèse le plus est affichée en bleu.</div></details>';
 
   h += '<div class="prio-list">';
   const shown = sorted.filter(pass);
@@ -981,48 +996,55 @@ function autoTargetPerimetre() {
 }
 
 // ÉTAPE 1 — arbre périmètre (réseau > affaire > site), avec compteur de bilatérales
+// v11 : chaque nœud du périmètre affiche « X/Y reçus » — vendeurs ayant eu
+// une bilatérale RÉALISÉE sur la période / vendeurs actifs — et, en rouge,
+// le nombre de comptes rendus en retard. L'ancien « N bilat. » comptait des
+// bilatérales de toute nature et ne disait rien de la couverture.
+function couvertureNoeud(pred) {
+  const vs = (state.cadence || []).filter(c => { const s = siteOf(c.id_site); return s && pred(s); });
+  const ids = new Set(vs.map(v => v.id_user));
+  const recus = new Set(vs.filter(recuPeriode).map(v => v.id_user));
+  return { total: ids.size, recus: recus.size };
+}
+function badgeCouverture(cov, retard) {
+  if (!cov.total) return '<span class="badge-n vide">aucun vendeur actif</span>';
+  const p = cov.recus / cov.total;
+  const cls = p >= 0.8 ? 'ok' : (p >= 0.4 ? 'moyen' : 'faible');
+  return '<span class="badge-cov ' + cls + '" title="Vendeurs reçus en bilatérale sur la période / vendeurs actifs">' + cov.recus + '/' + cov.total + ' reçus</span>' +
+    (retard ? '<span class="badge-r" title="Bilatérales passées sans compte rendu">' + retard + ' CR en retard</span>' : '');
+}
 function renderTree() {
   const sites = state.sites || [];
-  const bils = state.bils || [];
-  // Le badge "X bilat." reste fidèle à la PÉRIODE analysée : on borne le comptage
-  // à [period.from, period.to]. L'historique élargi (chargé pour la timeline) et les
-  // programmées des mois futurs n'y sont donc PAS comptés.
-  const finPeriodeMois = state.period.to.slice(0, 7);
-  const debPeriodeMois = state.period.from.slice(0, 7);
-  const cntBySite = {};
-  for (const b of bils) if (b.mois && b.mois >= debPeriodeMois && b.mois <= finPeriodeMois) cntBySite[b.id_site] = (cntBySite[b.id_site]||0) + 1;
   const retardBySite = {};
   retardsOuvertsPeriode().forEach(b => { retardBySite[b.id_site] = (retardBySite[b.id_site] || 0) + 1; });
-
-  // arbre
   const tree = {};
   for (const s of sites) {
-    if (!tree[s.reseau]) tree[s.reseau] = { label: s.reseau, affaires: {}, n: 0 };
+    if (!tree[s.reseau]) tree[s.reseau] = { label: s.reseau, affaires: {}, retard: 0 };
     const ak = String(s.id_affaire);
-    if (!tree[s.reseau].affaires[ak]) tree[s.reseau].affaires[ak] = { label: s.affaire, sites: [], n: 0 };
-    const nb = cntBySite[s.id_site] || 0;
-    tree[s.reseau].affaires[ak].sites.push({ ...s, nb, retard: retardBySite[s.id_site]||0 });
-    tree[s.reseau].affaires[ak].n += nb; tree[s.reseau].n += nb;
+    if (!tree[s.reseau].affaires[ak]) tree[s.reseau].affaires[ak] = { label: s.affaire, sites: [], retard: 0 };
+    const rt = retardBySite[s.id_site] || 0;
+    tree[s.reseau].affaires[ak].sites.push({ ...s, retard: rt });
+    tree[s.reseau].affaires[ak].retard += rt; tree[s.reseau].retard += rt;
   }
   let h = '<div class="bil-tree">';
   const lvl = scopeLevel();
-  h += '<div class="tree-row lv-root' + (lvl === 'racine' ? ' sel' : '') + '" data-scope="racine"><span class="exp"></span><span class="ico">◆</span> Tout mon périmètre</div>';
+  const covAll = couvertureNoeud(() => true);
+  h += '<div class="tree-row lv-root' + (lvl === 'racine' ? ' sel' : '') + '" data-scope="racine"><span class="exp"></span><span class="ico">◆</span> Tout mon périmètre' + badgeCouverture(covAll, retardsOuvertsPeriode().length) + '</div>';
   const reseaux = Object.keys(tree).sort();
   if (!reseaux.length) h += '<div class="bil-empty">Aucun site dans votre périmètre.</div>';
   for (const rk of reseaux) {
-    const R = tree[rk]; const rOpen = !!state.expanded['r:'+rk];
+    const Rn = tree[rk]; const rOpen = !!state.expanded['r:'+rk];
     const rSel = lvl === 'reseau' && state.selReseau === rk;
-    h += '<div class="tree-row lv-reseau' + (rSel ? ' sel' : '') + '" data-scope="reseau:'+esc(rk)+'"><span class="exp" data-exp="r:'+esc(rk)+'">'+(rOpen?'▾':'▸')+'</span>'+esc(R.label)+'<span class="badge-n">'+R.n+' bilat.</span></div>';
+    h += '<div class="tree-row lv-reseau' + (rSel ? ' sel' : '') + '" data-scope="reseau:'+esc(rk)+'"><span class="exp" data-exp="r:'+esc(rk)+'">'+(rOpen?'▾':'▸')+'</span>'+esc(Rn.label)+badgeCouverture(couvertureNoeud(s => s.reseau === rk), Rn.retard)+'</div>';
     if (!rOpen) continue;
-    for (const ak of Object.keys(R.affaires)) {
-      const A = R.affaires[ak]; const aOpen = !!state.expanded['r:'+rk+'|a:'+ak];
+    for (const ak of Object.keys(Rn.affaires)) {
+      const A = Rn.affaires[ak]; const aOpen = !!state.expanded['r:'+rk+'|a:'+ak];
       const aSel = lvl === 'affaire' && state.selReseau === rk && String(state.selAffaire.key) === ak;
-      h += '<div class="tree-row lv-affaire' + (aSel ? ' sel' : '') + '" data-scope="affaire:'+esc(rk)+'|'+esc(ak)+'"><span class="exp" data-exp="r:'+esc(rk)+'|a:'+esc(ak)+'">'+(aOpen?'▾':'▸')+'</span>'+esc(A.label)+'<span class="badge-n">'+A.n+' bilat.</span></div>';
+      h += '<div class="tree-row lv-affaire' + (aSel ? ' sel' : '') + '" data-scope="affaire:'+esc(rk)+'|'+esc(ak)+'"><span class="exp" data-exp="r:'+esc(rk)+'|a:'+esc(ak)+'">'+(aOpen?'▾':'▸')+'</span>'+esc(A.label)+badgeCouverture(couvertureNoeud(s => s.reseau === rk && String(s.id_affaire) === ak), A.retard)+'</div>';
       if (!aOpen) continue;
-      for (const s of A.sites.sort((x,y)=>x.nom_site.localeCompare(y.nom_site))) {
-        const sSel = lvl === 'site' && state.selSite === s.id_site;
-        h += '<div class="tree-row lv-site' + (sSel ? ' sel' : '') + '" data-scope="site:'+s.id_site+'"><span class="exp"></span><span class="ico">●</span> '+esc(s.nom_site)+
-             '<span class="badge-n">'+s.nb+' bilat.'+(s.retard?' <span class="badge-r">'+s.retard+'</span>':'')+'</span></div>';
+      for (const st of A.sites.sort((x,y)=>x.nom_site.localeCompare(y.nom_site))) {
+        const sSel = lvl === 'site' && state.selSite === st.id_site;
+        h += '<div class="tree-row lv-site' + (sSel ? ' sel' : '') + '" data-scope="site:'+st.id_site+'"><span class="exp"></span><span class="ico">●</span> '+esc(st.nom_site)+badgeCouverture(couvertureNoeud(s => s.id_site === st.id_site), st.retard)+'</div>';
       }
     }
   }
@@ -1080,8 +1102,18 @@ function vendeurTenueCell(c){
   const det=[]; if(e.tenu)det.push(e.tenu+' tenus'); if(e.partiel)det.push(e.partiel+' partiel'+(e.partiel>1?'s':'')); if(e.non_tenu)det.push(e.non_tenu+' non tenu'+(e.non_tenu>1?'s':'')); if(e.en_cours)det.push(e.en_cours+' en cours');
   return '<div class="tcell"><div class="ttop">'+bar+'<span class="tpct" style="color:'+col+'">'+(pct==null?'—':pct+'%')+'</span></div><div class="tdet">'+det.join(' · ')+'</div></div>';
 }
+// Quand la transfo n'est pas mesurable, la 4e colonne montre la production :
+// commandes du mois contre l'attendu à date (même source que l'accueil).
+function vendeurObjectifCell(c){
+  const K=dashOf(c.id_user);
+  if(!K) return '<div class="vtf na">—</div>';
+  if(!(K.obj_cdes>0)) return '<div class="vtf flat">'+fmtNb(K.cdes,0)+' cmd<span class="vtf-n">pas d’objectif</span></div>';
+  const att=K.obj_cdes*prorataMois(), ec=K.cdes-att;
+  return '<div class="vtf '+(ec< -0.5?'down':'up')+'" title="Commandes du mois / objectif · attendu à date '+fmtNb(att)+'">'+fmtNb(K.cdes,0)+' / '+fmtNb(K.obj_cdes,0)+
+    '<span class="vtf-n">'+(ec<0?'retard '+fmtNb(-ec):'avance +'+fmtNb(ec))+' à date</span></div>';
+}
 function vendeurTransfoCell(c){
-  if(state.txMesurable===false) return '<div class="vtf na" title="'+esc(transfoTexte(c))+'">non mesurable</div>';
+  if(state.txMesurable===false) return vendeurObjectifCell(c);
   if(c.transfo_actuel==null) return '<div class="vtf na" title="Aucune proposition sur la période">—</div>';
   if(!c.tx_signif) return '<div class="vtf na" title="'+esc(transfoTexte(c))+'">trop peu'+(c.tx_tot_actuel!=null?'<span class="vtf-n">'+c.tx_tot_actuel+' '+(state.transfoStable?'tranchées':'prop.')+'</span>':'')+'</div>';
   const cls=c.transfo_hausse?'up':(c.transfo_baisse?'down':'flat'), ar=c.transfo_hausse?'↗':(c.transfo_baisse?'↘':'→');
@@ -1099,20 +1131,21 @@ function sortVendeurs(list){
   const s=state.suiviSort||'tenue', arr=list.slice();
   if(s==='tenue') arr.sort((a,b)=>{ const pa=tenuePctOf(a.eng), pb=tenuePctOf(b.eng); if(pa==null&&pb==null) return (a.nom_vendeur||'').localeCompare(b.nom_vendeur||''); if(pa==null) return 1; if(pb==null) return -1; return pa-pb; });
   else if(s==='recence') arr.sort((a,b)=>{ const ja=a.jours_depuis_bilat, jb=b.jours_depuis_bilat; if(ja==null&&jb==null) return 0; if(ja==null) return -1; if(jb==null) return 1; return jb-ja; });
+  else if(s==='transfo' && state.txMesurable===false) arr.sort((a,b)=>{ const e=x=>{ const K=dashOf(x.id_user); return K&&K.obj_cdes>0 ? K.cdes-K.obj_cdes*prorataMois() : 999; }; return e(a)-e(b); });
   else if(s==='transfo') arr.sort((a,b)=> ((b.transfo_baisse?1:0)-(a.transfo_baisse?1:0)) || ((a.tx_signif&&a.transfo_actuel!=null?a.transfo_actuel:999)-(b.tx_signif&&b.transfo_actuel!=null?b.transfo_actuel:999)) );
   return arr;
 }
 function vendeurTable(titre, couleur, vlist){
   if(!vlist.length) return '';
   let t='<div class="bil-cat-title" style="color:'+couleur+'">'+titre+' <span class="bil-cat-n">'+vlist.length+' vendeur'+(vlist.length>1?'s':'')+'</span></div>';
-  t+='<div class="bil-hscroll"><div class="vtbl"><div class="vrow vthead"><div class="vth">Vendeur</div><div class="vth c-ryt">Fréquence · dernière / prochaine</div><div class="vth">Engagements tenus · 6 mois</div><div class="vth c-tf">Transformation'+txFenetre()+'</div><div class="vth"></div></div>';
+  t+='<div class="bil-hscroll"><div class="vtbl"><div class="vrow vthead"><div class="vth">Vendeur</div><div class="vth c-ryt">Fréquence · dernière / prochaine</div><div class="vth">Engagements tenus · 6 mois</div><div class="vth c-tf">'+(state.txMesurable===false?'Commandes du mois':'Transformation'+txFenetre())+'</div><div class="vth"></div></div>';
   vlist.forEach(c=>{
     t+='<div class="vrow" data-vbil="'+c.id_user+'|'+c.id_site+'">'+
       '<div class="vname">'+esc(c.nom_vendeur)+(c.vn_vo?'<span class="vcat">'+esc(c.vn_vo)+'</span>':'')+'</div>'+
       '<div class="c-ryt">'+vendeurRythmeCell(c)+'</div>'+
       '<div>'+vendeurTenueCell(c)+'</div>'+
       '<div class="c-tf">'+vendeurTransfoCell(c)+'</div>'+
-      '<div class="vchev">›</div></div>';
+      '<div class="vchev">'+(c.next_bilaterale_at?'›':'<button class="v-plan" data-plan-vend="'+c.id_user+'|'+c.id_site+'" title="Planifier une bilatérale">+</button>')+'</div></div>';
   });
   t+='</div></div>';
   return t;
@@ -1131,13 +1164,13 @@ function vendeursLegend(){
 function suiviSortBar(){
   const s=state.suiviSort||'tenue';
   const c=(k,l)=>'<span class="ssort'+(s===k?' on':'')+'" data-suivisort="'+k+'">'+l+'</span>';
-  return '<div class="suivi-sort"><span class="sort-lbl">Trier par</span>'+c('tenue','Engagements les moins tenus')+c('recence','Plus longtemps sans bilatérale')+(state.txMesurable===false?'':c('transfo','Transfo en baisse'))+'</div>';
+  return '<div class="suivi-sort"><span class="sort-lbl">Trier par</span>'+c('tenue','Engagements les moins tenus')+c('recence','Plus longtemps sans bilatérale')+(state.txMesurable===false?c('transfo','Plus en retard sur l’objectif'):c('transfo','Transfo en baisse'))+'</div>';
 }
-function renderVendeursTables(list){
+function renderVendeursTables(list, sansLegende){
   const sorted=sortVendeurs(list);
   const vn=sorted.filter(v=>v.vn_vo==='VN'), vo=sorted.filter(v=>v.vn_vo==='VO'), vnvo=sorted.filter(v=>v.vn_vo==='VNVO');
   const autres=sorted.filter(v=>!['VN','VO','VNVO'].includes(v.vn_vo));
-  return vendeurTable('Vendeurs VN','#53bda7',vn)+vendeurTable('Vendeurs VO','#fac055',vo)+vendeurTable('Vendeurs VN/VO','#2a5ea9',vnvo)+vendeurTable('Autres','#888780',autres)+vendeursLegend();
+  return vendeurTable('Vendeurs VN','#53bda7',vn)+vendeurTable('Vendeurs VO','#fac055',vo)+vendeurTable('Vendeurs VN/VO','#2a5ea9',vnvo)+vendeurTable('Autres','#888780',autres)+(sansLegende?'':vendeursLegend());
 }
 
 // --- vue Chefs des ventes ---
@@ -1213,12 +1246,12 @@ function renderChefs(){
   return h;
 }
 
-// ÉTAPE 2 — tableau vendeur × mois (colonnes = mois de la plage WeWeb)
+// ÉTAPE 2 — Suivi de l'équipe : tous les vendeurs du périmètre choisi,
+// regroupés par site quand le périmètre en couvre plusieurs.
 function renderSuivi() {
-  if (scopeLevel() !== 'site') return '<div class="bil-empty">Sélectionnez un site dans le périmètre pour voir ses bilatérales.</div>';
   const q = (state.suiviSearch || '').toLowerCase().trim();
-  const site = siteOf(state.selSite);
-  let list = vendeurRows(c => c.id_site === state.selSite);
+  const inScope = new Set(cadInScope().map(c => c.id_user + '|' + c.id_site));
+  let list = vendeurRows(c => inScope.has(c.id_user + '|' + c.id_site));
   let focus = '';
   if (state.chefFocus != null) {
     const chef = (state.chefs || []).find(c => c.id_manager === state.chefFocus);
@@ -1227,13 +1260,27 @@ function renderSuivi() {
     focus = chef ? ' · équipe de ' + esc(chef.nom_chef) : '';
   }
   if (q) list = list.filter(v => (v.nom_vendeur || '').toLowerCase().includes(q));
-  let back = state.chefFocus != null ? '<div class="bil-back" data-suivi-all="1">← toute l’équipe du site</div>' : '';
-  let h = back + '<div class="bil-suivi-head">Bilatérales du site · ' + esc(site ? site.nom_site : '') + focus + ' · ' + list.length + ' vendeur' + (list.length > 1 ? 's' : '') + '</div>';
+  const back = state.chefFocus != null ? '<div class="bil-back" data-suivi-all="1">← toute l’équipe</div>' : '';
+  const recus = list.filter(recuPeriode).length;
+  let h = back + '<div class="bil-suivi-head">Suivi de l’équipe · ' + esc(scopeLabel()) + focus + ' · ' + list.length + ' vendeur' + (list.length > 1 ? 's' : '') +
+    '<span class="suivi-cov">' + recus + ' reçu' + (recus > 1 ? 's' : '') + ' sur la période</span></div>';
   h += '<div class="suivi-filters">' +
     '<input id="bil-suivi-search" class="suivi-search" type="text" placeholder="Rechercher un vendeur…" value="' + esc(state.suiviSearch || '') + '" oninput="window.__bilSuiviSearch(this.value)">' +
     suiviSortBar() + '</div>';
-  if (!list.length) { h += '<div class="bil-empty">' + (q ? 'Aucun vendeur ne correspond à la recherche.' : 'Aucun vendeur actif sur ce site pour la période.') + '</div>'; return h; }
-  h += renderVendeursTables(list);
+  if (!list.length) { h += '<div class="bil-empty">' + (q ? 'Aucun vendeur ne correspond à la recherche.' : 'Aucun vendeur actif dans ce périmètre.') + '</div>'; return h; }
+  const sites = [...new Set(list.map(v => v.id_site))];
+  if (sites.length > 1) {
+    sites.map(id => ({ id, nom: (siteOf(id) || {}).nom_site || ('Site ' + id) }))
+      .sort((a, b) => a.nom.localeCompare(b.nom, 'fr'))
+      .forEach(si => {
+        const l = list.filter(v => v.id_site === si.id);
+        const r = l.filter(recuPeriode).length;
+        h += '<div class="site-block"><div class="site-title">' + esc(si.nom) + '<span>' + r + '/' + l.length + ' reçus</span></div>' + renderVendeursTables(l, true) + '</div>';
+      });
+    h += vendeursLegend();
+  } else {
+    h += renderVendeursTables(list);
+  }
   return h;
 }
 
@@ -1434,9 +1481,61 @@ async function P_maintenant() {
     R_open(Number(r.data));
   } catch (e) { console.error('[bilaterales] maintenant', e); P.saving = false; P.err = messageErreur(e); P_render(); }
 }
+// Planification groupée : les N premiers de la file, un par jour ouvré à 9 h.
+const PB = { items: [], saving: false, err: '', fait: 0 };
+function PB_open() {
+  const l = (state.prioOrdre || []).slice(0, 5);
+  PB.items = l.map((c, i) => ({ c, on: true, date: ymd(jourOuvre(new Date(), i + 1)), heure: '09:00' }));
+  PB.saving = false; PB.err = ''; PB.fait = 0;
+  PB_render();
+}
+function PB_render() {
+  closeModal();
+  const ov = doc.createElement('div'); ov.className = 'bil-ov'; ov.id = 'bil-ov';
+  const n = PB.items.filter(x => x.on).length;
+  ov.innerHTML = '<div class="bil-modal pl-modal pb-modal"><div class="m-head"><div><div class="m-vend">Planifier les bilatérales prioritaires</div>' +
+    '<div class="m-meta">Un entretien par jour ouvré, dans l’ordre de la file. Ajustez les dates si besoin.</div></div><button class="m-close" data-close="1">×</button></div>' +
+    '<div class="m-body">' + PB.items.map((x, i) => {
+      const d = prioDetail(x.c);
+      return '<div class="pb-row"><label class="pb-chk"><input type="checkbox" data-pb-on="' + i + '"' + (x.on ? ' checked' : '') + '></label>' +
+        '<div class="pb-who"><b>' + esc(x.c.nom_vendeur) + '</b><span>' + esc(d.main ? d.txt[d.main] : '') + '</span></div>' +
+        '<input type="date" data-pb-date="' + i + '" min="' + ymd(new Date()) + '" value="' + esc(x.date) + '">' +
+        '<input type="time" data-pb-heure="' + i + '" step="900" value="' + esc(x.heure) + '"></div>';
+    }).join('') +
+    (PB.err ? '<div class="pl-err">' + esc(PB.err) + '</div>' : '') +
+    '<div class="pl-acts"><button class="pl-go" data-pact="batch_go"' + (PB.saving || !n ? ' disabled' : '') + '>' + (PB.saving ? 'Enregistrement… (' + PB.fait + '/' + n + ')' : '📅 Planifier ' + n + ' bilatérale' + (n > 1 ? 's' : '')) + '</button></div>' +
+    '</div></div>';
+  getRoot().appendChild(ov);
+}
+function PB_sync() {
+  PB.items.forEach((x, i) => {
+    const c = doc.querySelector('[data-pb-on="' + i + '"]'), d = doc.querySelector('[data-pb-date="' + i + '"]'), h = doc.querySelector('[data-pb-heure="' + i + '"]');
+    if (c) x.on = c.checked; if (d) x.date = d.value; if (h) x.heure = h.value;
+  });
+}
+async function PB_go() {
+  PB_sync(); PB.err = '';
+  const l = PB.items.filter(x => x.on);
+  if (l.some(x => !x.date || !x.heure)) { PB.err = 'Chaque bilatérale cochée doit avoir une date et une heure.'; return PB_render(); }
+  PB.saving = true; PB.fait = 0; PB_render();
+  const ko = [];
+  for (const x of l) {
+    try {
+      const r = await ctx.supabase.rpc('create_bilaterale', { p_id_user: x.c.id_user, p_id_manager: getViewerId(), p_id_site: x.c.id_site,
+        p_start: x.date + ' ' + x.heure + ':00', p_end: x.date + ' ' + plus(30, x.heure) + ':00', p_duree: '30 min' });
+      if (r.error) throw r.error;
+      PB.fait++; PB_render();
+    } catch (e) { ko.push(x.c.nom_vendeur + ' : ' + messageErreur(e)); }
+  }
+  PB.saving = false;
+  if (ko.length) { PB.err = ko.join(' · '); PB_render(); }
+  else closeModal();
+  if (PB.fait) { bilToast(PB.fait + ' bilatérale' + (PB.fait > 1 ? 's' : '') + ' planifiée' + (PB.fait > 1 ? 's' : '') + ' — elles sont dans votre agenda'); rechargerBil(); }
+}
 function P_route(e) {
   const a = e.target.closest('[data-pact]'); if (!a) return false;
   const v = a.getAttribute('data-pact');
+  if (v === 'batch_go') { PB_go(); return true; }
   if (v === 'planifier') { P_planifier(); return true; }
   if (v === 'maintenant') { P_maintenant(); return true; }
   if (v.indexOf('jour:') === 0) { P_sync(); P.date = v.slice(5); P_render(); return true; }
@@ -1467,7 +1566,6 @@ function setScope(str) {
     const s = siteOf(id);
     if (s) { state.selReseau = s.reseau; state.selAffaire = { key: String(s.id_affaire), label: s.affaire }; state.expanded['r:' + s.reseau] = true; state.expanded['r:' + s.reseau + '|a:' + String(s.id_affaire)] = true; }
   }
-  if (state.tab === 'site' && scopeLevel() !== 'site') state.tab = 'prio';
   if (state.tab === 'enc' && !isDirection()) state.tab = 'prio';
   render();
 }
@@ -1488,6 +1586,9 @@ window.__bilRoute = function (e) {
   e.__bilDone = true;
   // Modale : fermeture
   if (e.target.closest('[data-close]') || (e.target.id === 'bil-ov')) { closeModal(); return; }
+  // Planification groupée
+  if (e.target.closest('[data-batch]')) { PB_open(); return; }
+  if (e.target.closest('[data-pb-on]')) { PB_sync(); setTimeout(PB_render, 0); return; }
   // Fenêtre « Planifier »
   if (e.target.closest('.pl-modal') && P_route(e)) return;
   if (e.target.closest('.pl-modal')) return;
@@ -1506,7 +1607,7 @@ window.__bilRoute = function (e) {
 
   // Filtre de la file de priorité (rôle chef)
   const pf = e.target.closest('[data-priofilter]');
-  if (pf) { state.prioFocus = pf.getAttribute('data-priofilter'); render(); return; }
+  if (pf) { const v = pf.getAttribute('data-priofilter'); state.prioFocus = (state.prioFocus === v && v !== 'tous') ? 'tous' : v; render(); return; }
 
   // Classement direction : clic sur une entité -> descendre / cibler un chef
   const ent = e.target.closest('[data-prio-ent]');
@@ -1768,6 +1869,42 @@ const STYLE = '<style>' +
 '#bil-root .pr-go{flex-shrink:0;color:#b4b2a9;font-size:22px;font-weight:700}' +
 /* --- v6 --- */
 '#bil-root .pr-cad small{display:block;font-size:10px;font-weight:700;margin-top:2px}' +
+/* --- v11 --- */
+'#bil-root .perim-help{font-size:10.5px;font-weight:600;color:#b4b2a9;text-transform:none;letter-spacing:0;margin-left:8px}' +
+'#bil-root .badge-cov{margin-left:auto;font-size:11.5px;font-weight:800;border-radius:20px;padding:2px 10px;white-space:nowrap}' +
+'#bil-root .badge-cov.ok{background:rgba(83,189,167,.16);color:#2c7a68}' +
+'#bil-root .badge-cov.moyen{background:rgba(250,192,85,.22);color:#8a6410}' +
+'#bil-root .badge-cov.faible{background:rgba(226,75,74,.12);color:#b23433}' +
+'#bil-root .badge-n.vide{color:#b4b2a9}' +
+'#bil-root .tree-row .badge-r{margin-left:6px;padding:2px 8px;font-size:10.5px;border-radius:20px;white-space:nowrap}' +
+'#bil-root .pk.clik{cursor:pointer;transition:border-color .12s}' +
+'#bil-root .pk.clik:hover{border-color:#acc5e4}' +
+'#bil-root .pk.on{border-color:#2a5ea9;box-shadow:inset 0 0 0 1px #2a5ea9}' +
+'#bil-root .next-box{background:linear-gradient(135deg,rgba(42,94,169,.08),rgba(83,189,167,.10));border:1px solid rgba(42,94,169,.25);border-radius:14px;padding:14px 18px;margin-bottom:14px}' +
+'#bil-root .nb-l{font-size:11px;font-weight:800;color:#2a5ea9;text-transform:uppercase;letter-spacing:.05em;margin-bottom:6px}' +
+'#bil-root .nb-main{display:flex;align-items:center;gap:14px;flex-wrap:wrap;justify-content:space-between}' +
+'#bil-root .nb-nom{font-size:18px;font-weight:800;color:#1c2b45}' +
+'#bil-root .nb-nom span{font-size:12px;font-weight:600;color:#888780;margin-left:6px}' +
+'#bil-root .nb-why{font-size:13px;color:#2a5ea9;font-weight:600;margin-top:2px}' +
+'#bil-root .nb-acts{display:flex;gap:8px;flex-wrap:wrap}' +
+'#bil-root .nb-batch{border:none;background:#2a5ea9;color:#fff;font-family:inherit;font-size:12.5px;font-weight:800;border-radius:9px;padding:8px 14px;cursor:pointer}' +
+'#bil-root .hint-det{font-size:12px;color:#888780;margin:2px 0 14px}' +
+'#bil-root .hint-det summary{cursor:pointer;color:#2a5ea9;font-weight:700}' +
+'#bil-root .hint-det div{margin-top:6px;line-height:1.5}' +
+'#bil-root .hint-det b{color:#2a5ea9}' +
+'#bil-root .suivi-cov{font-size:12px;font-weight:700;color:#888780;margin-left:10px}' +
+'#bil-root .site-block{margin-bottom:10px}' +
+'#bil-root .site-title{font-size:15px;font-weight:800;color:#1c2b45;margin:20px 0 2px;display:flex;align-items:center;gap:10px}' +
+'#bil-root .site-title span{font-size:11.5px;font-weight:700;color:#888780;background:#f7f6f2;border-radius:20px;padding:2px 10px}' +
+'#bil-root .v-plan{width:28px;height:28px;border-radius:8px;border:1.5px solid #7e57c2;background:#fff;color:#5b3a9e;font-size:16px;font-weight:800;line-height:1;cursor:pointer}' +
+'#bil-root .v-plan:hover{background:rgba(126,87,194,.08)}' +
+'#bil-root .pb-modal{max-width:640px}' +
+'#bil-root .pb-row{display:flex;align-items:center;gap:10px;padding:9px 0;border-bottom:1px solid #f1efe8;flex-wrap:wrap}' +
+'#bil-root .pb-chk input{width:17px;height:17px;accent-color:#2a5ea9}' +
+'#bil-root .pb-who{flex:1;min-width:180px}' +
+'#bil-root .pb-who b{display:block;font-size:14px;color:#2a5ea9}' +
+'#bil-root .pb-who span{font-size:11.5px;color:#888780}' +
+'#bil-root .pb-row input[type=date],#bil-root .pb-row input[type=time]{border:1px solid #ece9e1;border-radius:8px;padding:7px 8px;font-family:inherit;font-size:13px;color:#3a3a38}' +
 '#bil-root .rsn-main{background:#2a5ea9;color:#fff;font-weight:800}' +
 '#bil-root .pr-score{flex-shrink:0;width:54px;text-align:center;font-size:18px;font-weight:800;line-height:1}' +
 '#bil-root .pr-score small{display:block;font-size:9.5px;font-weight:700;color:#b4b2a9;margin-top:2px}' +
