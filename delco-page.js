@@ -1,5 +1,14 @@
 // ============================================================================
-//  DELCO — PAGE (brief + radar) — module One Data (OD.define)  v5 — rôles exclus par réglage du tenant (delco_roles_exclus)
+//  DELCO — PAGE (brief + radar) — module One Data (OD.define)  v6 — rôles exclus par réglage du tenant (delco_roles_exclus)
+//  v6 (13/10/2026) : REGROUPEMENT PAR SUJET. Les signaux de même nature
+//    (même règle, même priorité) forment un seul sujet : « 14 leads sans
+//    premier contact · 7 vendeurs » au lieu de 7 cartes. Le détail par
+//    vendeur ou par site se déplie dans la carte ; chaque ligne garde son
+//    « Analyser » et son détail client. « Analyser » sur le sujet envoie le
+//    sujet entier au chat ; « Plus tard » écarte tous ses signaux.
+//    Le radar n'affiche plus un point par signal (doublon de la liste) mais
+//    une bulle par sujet : taille = volume, distance au centre = ancienneté
+//    du cas le plus vieux, couleur = priorité. Clic = ouvre le sujet.
 //  v5 (12/10/2026) : « signaux » au pluriel (affichait « signals »).
 //  Rendu dans __anchor ; client via ctx.supabase ; création de #dp-root retirée
 //  (le loader fournit l'ancre). Navigation fiche client corrigée : préfixe /fr
@@ -225,6 +234,35 @@ await (async function () {
         border-top:1px solid var(--line);
       }
       .dp-sub-head:first-child{border-top:0;margin-top:0;}
+
+      /* v6 : sujets regroupés */
+      .dp-group-count{
+        display:inline-block;min-width:22px;padding:0 6px;margin-right:6px;
+        border-radius:11px;background:var(--soft);color:var(--blue);
+        font-size:12px;font-weight:800;text-align:center;line-height:20px;
+      }
+      .dp-signal.urgent .dp-group-count{background:rgba(217,112,112,.12);color:var(--red);}
+      .dp-signal.warn   .dp-group-count{background:rgba(250,192,85,.18);color:#b58634;}
+      .dp-signal.good   .dp-group-count{background:rgba(83,189,167,.14);color:var(--green);}
+      .dp-gzone{display:none;margin-top:8px;border-top:1px solid var(--line);}
+      .dp-gzone.open{display:block;}
+      .dp-gsub{padding:8px 4px 8px 10px;border-bottom:1px solid var(--line);}
+      .dp-gsub:last-child{border-bottom:0;}
+      .dp-gsub-head{display:flex;align-items:baseline;justify-content:space-between;gap:10px;}
+      .dp-gsub-name{font-size:12.5px;font-weight:700;color:var(--text);}
+      .dp-gsub-title{font-size:12px;color:var(--muted);margin-left:6px;font-weight:600;}
+      .dp-gsub-desc{font-size:11.5px;color:var(--muted);line-height:1.45;margin-top:2px;}
+      .dp-link{
+        background:none;border:none;padding:0;font-family:inherit;cursor:pointer;
+        font-size:11.5px;font-weight:700;color:var(--blue);white-space:nowrap;
+      }
+      .dp-link:hover{color:var(--green);}
+      .dp-radar-point-n{
+        position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
+        font-size:9px;font-weight:800;color:#fff;pointer-events:none;font-variant-numeric:tabular-nums;
+      }
+      .dp-signal.dp-flash{animation:dp-flash 1.2s ease-out;}
+      @keyframes dp-flash{0%{background:rgba(83,189,167,.18);}100%{background:transparent;}}
 
       .dp-signal-actions{display:flex;flex-direction:column;gap:5px;align-self:center;margin-left:10px;}
       .dp-btn{
@@ -609,6 +647,85 @@ await (async function () {
   let busSite = null;       // site focalisé via la topnav (managers uniquement)
   let busSiteName = null;   // libellé du site focalisé (pour la pastille)
   let showAllBrief = false; // brief : afficher tout ou seulement le top BRIEF_LIMIT
+  const openGroups = new Set(); // v6 : sujets dépliés (conservés d'un rendu à l'autre)
+
+  // ───── v6 : regroupement par sujet ─────────────────────────
+  // Libellé d'un sujet selon la règle ; à défaut, titre du premier signal.
+  const THEMES = {
+    lead_sans_suite:     "Leads sans premier contact",
+    leads_piscine:       "Leads sans preneur",
+    leads_historique:    "Vieux leads jamais contactés",
+    bdc_en_attente:      "BDC en attente",
+    bdc_anciens:         "BDC de plus de 90 jours à solder",
+    propales_a_relancer: "Propales à relancer",
+    rdv_sans_cr:         "RDV sans compte rendu",
+    rdv_du_jour:         "RDV du jour",
+    livraisons_du_jour:  "Livraisons du jour",
+    vo_stock_age:        "VO en stock depuis 90 jours ou plus",
+    objectif_rythme:     (g) => g.priority === "good" ? "Objectif du mois atteint" : "En retard sur l'objectif du mois",
+  };
+  function groupKey(s) {
+    // Une synthèse vendeur reste seule : elle regroupe déjà plusieurs sujets.
+    if (s.rule_code === "vendeur_synthese") return "vs:" + s.id;
+    return (s.rule_code || "autre") + "|" + (s.priority || "info");
+  }
+  // Volume d'un signal = nombre en tête de son titre (« 3 leads… », « 9 BDC… »).
+  function nbDe(s) {
+    const m = String(s.title || "").match(/^(\d[\d\s\u00a0\u202f]*)/);
+    return m ? Number(m[1].replace(/[\s\u00a0\u202f]/g, "")) : null;
+  }
+  function buildGroups(list) {
+    const map = new Map();
+    for (const s of list) {
+      const k = groupKey(s);
+      if (!map.has(k)) map.set(k, { key: k, rule_code: s.rule_code, priority: s.priority || "info", signals: [] });
+      map.get(k).signals.push(s);
+    }
+    return [...map.values()].map(g => {
+      g.signals.sort((a, b) => ((nbDe(b) || 0) - (nbDe(a) || 0)) || (severity(b) - severity(a)));
+      const nbs = g.signals.map(nbDe);
+      g.total = nbs.every(n => n != null) ? nbs.reduce((a, b) => a + b, 0) : null;
+      g.montant = g.signals.reduce((a, s) => a + (Number((s.payload || {}).montant_total) || 0), 0);
+      g.oldestH = Math.max(...g.signals.map(signalAgeHours));
+      g.sev = g.signals.reduce((a, s) => a + severity(s), 0);
+      return g;
+    });
+  }
+  function sortGroups(gs) {
+    const order = { urgent: 0, warn: 1, good: 2, info: 3 };
+    return [...gs].sort((a, b) => {
+      const pa = order[a.priority] ?? 9, pb = order[b.priority] ?? 9;
+      if (pa !== pb) return pa - pb;
+      return (b.sev - a.sev) || (b.signals.length - a.signals.length);
+    });
+  }
+  function groupLabel(g) {
+    const t = THEMES[g.rule_code];
+    if (typeof t === "function") return t(g);
+    return t || (g.signals[0].title || "Signal");
+  }
+  function minusculeInitiale(t) {
+    // « Leads… » → « leads… », mais « BDC… », « RDV… », « VO… » restent tels quels.
+    return /^[A-ZÀ-Ý][a-zà-ÿ]/.test(t) ? t.charAt(0).toLowerCase() + t.slice(1) : t;
+  }
+  function kEur(m) { return m >= 1000 ? Math.round(m / 1000).toLocaleString("fr-FR") + " k€" : Math.round(m) + " €"; }
+  function groupHeadline(g) {
+    const label = groupLabel(g);
+    const base = g.total != null && !/^(Objectif|En retard)/.test(label) ? g.total.toLocaleString("fr-FR") + " " + minusculeInitiale(label) : label;
+    return base + (g.montant > 0 ? " (" + kEur(g.montant) + ")" : "");
+  }
+  function groupWho(g) {
+    const noms = g.signals.map(s => s.subject_name).filter(Boolean);
+    if (!noms.length) return "";
+    if (noms.length <= 2) return noms.join(", ");
+    const sites = noms.every(n => n === n.toUpperCase());
+    return noms.length + (sites ? " sites" : " vendeurs");
+  }
+  function ageLabel(h) {
+    if (h == null || !isFinite(h) || h <= 0) return "";
+    if (h < 48) return Math.round(h) + " h";
+    return Math.round(h / 24) + " j";
+  }
 
   // ───── Rendu cartes signaux ──────────────────────────────
   function hasExpandable(signal) {
@@ -765,9 +882,60 @@ await (async function () {
     `;
   }
 
+  function renderGroupCard(g) {
+    if (g.signals.length === 1) return renderSignalCard(g.signals[0]);
+    const prio = g.priority;
+    const open = openGroups.has(g.key);
+    const repartition = g.signals.slice(0, 3).map(s => {
+      const n = nbDe(s);
+      return escapeHtml(s.subject_name || "?") + (n != null ? " (" + n + ")" : "");
+    }).join(", ") + (g.signals.length > 3 ? "…" : "");
+    const age = ageLabel(g.oldestH);
+    const subs = g.signals.map(s => {
+      const expandable = hasExpandable(s);
+      const cnt = expandable ? detailCount(s) : 0;
+      return `
+        <div class="dp-gsub dp-signal-sub" data-id="${s.id}">
+          <div class="dp-gsub-head">
+            <div><span class="dp-gsub-name">${escapeHtml(s.subject_name || "")}</span><span class="dp-gsub-title">${escapeHtml(s.title || "")}</span></div>
+            <button class="dp-link" data-action="analyser" data-id="${s.id}">Analyser</button>
+          </div>
+          ${s.description ? `<div class="dp-gsub-desc">${escapeHtml(s.description)}</div>` : ""}
+          ${expandable && cnt > 1 ? `
+            <button class="dp-expand-toggle" data-toggle="${s.id}">
+              <span>Voir le détail (${cnt})</span>
+              <svg class="dp-chevron" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><polyline points="6 9 12 15 18 9"/></svg>
+            </button>
+            <div class="dp-expand-zone" data-zone="${s.id}"></div>` : ""}
+        </div>`;
+    }).join("");
+    return `
+      <article class="dp-signal dp-group ${prio}" data-group="${escapeHtml(g.key)}">
+        <div class="dp-signal-bar"></div>
+        <div class="dp-signal-content">
+          <div class="dp-signal-meta">
+            <span class="dp-signal-prio">${fmtPrioLabel(prio)}</span>
+            <span class="dp-signal-time">${escapeHtml(groupWho(g))}${age ? " · le plus ancien : " + age : ""}</span>
+          </div>
+          <h3 class="dp-signal-title"><span class="dp-group-count">${g.signals.length}</span>${escapeHtml(groupHeadline(g))}</h3>
+          <p class="dp-signal-desc">${repartition}</p>
+          <button class="dp-expand-toggle ${open ? "open" : ""}" data-gtoggle="${escapeHtml(g.key)}">
+            <span>${open ? "Replier" : "Voir le détail par " + (groupWho(g).endsWith("sites") ? "site" : "vendeur")} (${g.signals.length})</span>
+            <svg class="dp-chevron" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><polyline points="6 9 12 15 18 9"/></svg>
+          </button>
+          <div class="dp-gzone ${open ? "open" : ""}" data-gzone="${escapeHtml(g.key)}">${subs}</div>
+        </div>
+        <div class="dp-signal-actions">
+          <button class="dp-btn primary" data-action="ganalyser" data-group="${escapeHtml(g.key)}">Analyser</button>
+          <button class="dp-btn ghost"   data-action="gdismiss"  data-group="${escapeHtml(g.key)}">Plus tard</button>
+        </div>
+      </article>`;
+  }
+
   function renderSignalsCard() {
-    const full = sortByImportance(scopedSignals());
+    const full = sortGroups(buildGroups(scopedSignals()));
     const total = full.length;
+    const nbSignaux = scopedSignals().length;
     if (total === 0) {
       const focusMsg = (isManagerProfile && busSite != null)
         ? "Rien à signaler sur le site focalisé."
@@ -782,14 +950,14 @@ await (async function () {
           </div>
         </div>`;
     }
-    const urgentCount = full.filter(s => s.priority === "urgent").length;
+    const urgentCount = full.filter(g => g.priority === "urgent").length;
     const capped = (!showAllBrief && total > BRIEF_LIMIT);
     const list = capped ? full.slice(0, BRIEF_LIMIT) : full;
     const remaining = total - list.length;
     const moreBtn = (total > BRIEF_LIMIT)
       ? `<button class="dp-brief-more" data-brief-toggle>${showAllBrief
           ? "Réduire le brief"
-          : "Voir les " + remaining + " autre" + (remaining > 1 ? "s" : "") + (remaining > 1 ? " signaux" : " signal")}</button>`
+          : "Voir les " + remaining + " autre" + (remaining > 1 ? "s sujets" : " sujet")}</button>`
       : "";
     return `
       <div class="dp-card dp-brief-card">
@@ -797,11 +965,11 @@ await (async function () {
           <h2>Brief du jour</h2>
           <span class="dp-badge-cnt">
             <span class="dp-badge-cnt-dot ${urgentCount > 0 ? "urgent" : ""}"></span>
-            ${total} ${total > 1 ? "signaux" : "signal"}${urgentCount > 0 ? " · " + urgentCount + " urgent" + (urgentCount > 1 ? "s" : "") : ""}
+            ${total} ${total > 1 ? "sujets" : "sujet"} · ${nbSignaux} ${nbSignaux > 1 ? "signaux" : "signal"}${urgentCount > 0 ? " · " + urgentCount + " urgent" + (urgentCount > 1 ? "s" : "") : ""}
           </span>
         </div>
         <div class="dp-signals-list">
-          ${list.map(renderSignalCard).join("")}
+          ${list.map(renderGroupCard).join("")}
           ${moreBtn}
         </div>
       </div>
@@ -904,8 +1072,12 @@ await (async function () {
   }
 
   function renderRadarPoints() {
-    // Filtre selon le site focalisé (managers) puis selon les chips de priorité
-    let filtered = scopedSignals();
+    // v6 : une bulle par SUJET (et non plus un point par signal).
+    let filtered = buildGroups(scopedSignals()).map(g => ({
+      id: g.key, priority: g.priority, group: g,
+      title: groupHeadline(g), subject_name: groupWho(g),
+      payload: { anciennete_h: g.oldestH },
+    }));
     if (radarFilter !== "all") {
       filtered = filtered.filter(s => s.priority === radarFilter);
     }
@@ -959,13 +1131,18 @@ await (async function () {
         else        classes.push("tooltip-top");
       }
 
+      // v6 : taille = volume du sujet (nombre de dossiers, sinon de signaux).
+      const vol = s.group ? (s.group.total != null ? s.group.total : s.group.signals.length) : 1;
+      const taille = Math.round(Math.min(26, 10 + 4 * Math.log2(1 + vol)));
+      const age = s.group ? ageLabel(s.group.oldestH) : "";
       return `
-        <div class="${classes.join(" ")}" style="top: ${cy}%; left: ${cx}%;" data-signal-id="${s.id}">
+        <div class="${classes.join(" ")}" style="top: ${cy}%; left: ${cx}%; width:${taille}px; height:${taille}px;" data-group-id="${escapeHtml(s.id)}">
           <div class="dp-radar-point-pulse"></div>
           <div class="dp-radar-point-dot"></div>
+          ${taille >= 16 && vol > 1 ? `<span class="dp-radar-point-n">${vol > 999 ? "999+" : vol}</span>` : ""}
           <div class="dp-radar-tooltip">
             <div class="dp-radar-tooltip-name">${escapeHtml(tooltip.slice(0, 80))}</div>
-            <div class="dp-radar-tooltip-meta">${meta}</div>
+            <div class="dp-radar-tooltip-meta">${meta}${age ? " · plus ancien " + age : ""}</div>
           </div>
         </div>
       `;
@@ -973,7 +1150,7 @@ await (async function () {
   }
 
   function renderRadarCard() {
-    const base = scopedSignals();
+    const base = buildGroups(scopedSignals());   // v6 : compteurs en sujets
     const urgentCount = base.filter(s => s.priority === "urgent").length;
     const warnCount   = base.filter(s => s.priority === "warn").length;
     const goodCount   = base.filter(s => s.priority === "good").length;
@@ -1107,9 +1284,19 @@ await (async function () {
       chip.addEventListener("click", () => onChipClick(chip.dataset.filter));
     });
 
-    // Clic sur un point du radar = comportement Analyser
-    root.querySelectorAll(".dp-radar-point[data-signal-id]").forEach(point => {
-      point.addEventListener("click", () => onAnalyser(point.dataset.signalId));
+    // v6 : sujets regroupés
+    root.querySelectorAll("[data-gtoggle]").forEach(btn => {
+      btn.addEventListener("click", () => toggleGroup(btn.dataset.gtoggle));
+    });
+    root.querySelectorAll("[data-action='ganalyser']").forEach(btn => {
+      btn.addEventListener("click", () => onAnalyserGroupe(btn.dataset.group));
+    });
+    root.querySelectorAll("[data-action='gdismiss']").forEach(btn => {
+      btn.addEventListener("click", () => onDismissGroupe(btn.dataset.group));
+    });
+    // Clic sur une bulle du radar = ouvre le sujet dans le brief
+    root.querySelectorAll(".dp-radar-point[data-group-id]").forEach(point => {
+      point.addEventListener("click", () => ouvrirSujet(point.dataset.groupId));
     });
   }
 
@@ -1137,6 +1324,93 @@ await (async function () {
       zone.classList.add("open");
       btn.classList.add("open");
       bindExpandClicks(zone);
+    }
+  }
+
+  // ───── v6 : actions sur un sujet ───────────────────────────
+  function trouverGroupe(key) {
+    return buildGroups(scopedSignals()).find(g => g.key === key) || null;
+  }
+  function toggleGroup(key) {
+    if (openGroups.has(key)) openGroups.delete(key); else openGroups.add(key);
+    renderPage({ ok: true });
+  }
+  function ouvrirSujet(key) {
+    const g = trouverGroupe(key);
+    if (!g) return;
+    if (g.signals.length > 1) openGroups.add(key);
+    // Le sujet doit être affiché même s'il est au-delà du top du brief.
+    const rang = sortGroups(buildGroups(scopedSignals())).findIndex(x => x.key === key);
+    if (rang >= BRIEF_LIMIT) showAllBrief = true;
+    renderPage({ ok: true });
+    const sel = g.signals.length > 1 ? `.dp-signal[data-group="${key.replace(/"/g, '\\"')}"]` : `.dp-signal[data-id="${g.signals[0].id}"]`;
+    const card = root.querySelector(sel);
+    if (card) {
+      card.scrollIntoView({ behavior: "smooth", block: "nearest" });
+      card.classList.add("dp-flash");
+      setTimeout(() => card.classList.remove("dp-flash"), 1300);
+    }
+  }
+  async function onDismissGroupe(key) {
+    const g = trouverGroupe(key);
+    if (!g) return;
+    const card = root.querySelector(`.dp-signal[data-group="${key.replace(/"/g, '\\"')}"]`);
+    if (card) card.classList.add("dp-removing");
+    const res = await Promise.all(g.signals.map(s =>
+      sb.rpc("agent_signal_mark", { p_signal_id: s.id, p_status: "dismissed" }).then(r => r.error ? null : s.id).catch(() => null)));
+    const ok = new Set(res.filter(Boolean));
+    if (!ok.size) {
+      showToast("Erreur — impossible de marquer le sujet");
+      if (card) card.classList.remove("dp-removing");
+      return;
+    }
+    setTimeout(() => {
+      signals = signals.filter(s => !ok.has(s.id));
+      openGroups.delete(key);
+      renderPage({ ok: true });
+      try { window.__delcoBadge && window.__delcoBadge.refresh && window.__delcoBadge.refresh(); } catch (_) {}
+    }, 250);
+  }
+  function onAnalyserGroupe(key) {
+    const g = trouverGroupe(key);
+    if (!g) return;
+    g.signals.forEach(s => sb.rpc("agent_signal_mark", { p_signal_id: s.id, p_status: "read" }).then(() => {}, () => {}));
+    try { window.__delcoBadge && window.__delcoBadge.refresh && window.__delcoBadge.refresh(); } catch (_) {}
+    const ids = new Set(g.signals.map(s => s.id));
+    signals = signals.filter(s => !ids.has(s.id));
+    openGroups.delete(key);
+    renderPage({ ok: true });
+    const lignes = g.signals.map(s => {
+      const items = Array.isArray((s.payload || {}).items)
+        ? s.payload.items.slice(0, 5).map(it => "    · " + [it.label, it.meta].filter(Boolean).join(" — ")).join("\n")
+        : "";
+      return "- " + (s.subject_name ? s.subject_name + " : " : "") + (s.title || "") + (s.description ? " — " + s.description : "") + (items ? "\n" + items : "");
+    }).join("\n");
+    const prompt = `Aide-moi à traiter ce sujet du tableau du jour :
+
+**${groupHeadline(g)}** (${groupWho(g)})
+${lignes}
+
+Par où commencer, avec qui, et quelles actions concrètes aujourd'hui ?`;
+    injecterDansChat(prompt);
+  }
+  function injecterDansChat(prompt) {
+    const chatInput = doc.getElementById("cp-input");
+    if (chatInput) {
+      chatInput.value = prompt;
+      chatInput.style.height = "44px";
+      chatInput.style.height = Math.min(chatInput.scrollHeight, 140) + "px";
+      const chatRoot = doc.getElementById("cp-root");
+      if (chatRoot) chatRoot.scrollIntoView({ behavior: "smooth", block: "start" });
+      setTimeout(() => {
+        chatInput.focus();
+        const len = chatInput.value.length;
+        chatInput.setSelectionRange(len, len);
+      }, 500);
+      showToast("Contexte injecté dans le chat");
+    } else {
+      try { doc.defaultView.sessionStorage.setItem("delco-prompt-pending", prompt); } catch (_) {}
+      showToast("Chat introuvable — contexte sauvegardé");
     }
   }
 
