@@ -1,5 +1,10 @@
 // ============================================================================
-//  DELCO — PAGE (brief + radar) — module One Data (OD.define)  v6 — rôles exclus par réglage du tenant (delco_roles_exclus)
+//  DELCO — PAGE (brief + radar) — module One Data (OD.define)  v7 — rôles exclus par réglage du tenant (delco_roles_exclus)
+//  v7 (13/10/2026) : radar sans chiffre dans les bulles ; infobulle en
+//    clair sur trois lignes (le sujet · qui est concerné · « le plus ancien
+//    attend depuis 19 jours » ou « prochain dans 2 h »), sans majuscules ;
+//    pas de ligne d'ancienneté pour les sujets qui n'en ont pas (objectif,
+//    commandes de la veille, clients atelier). Même formulation dans le brief.
 //  v6 (13/10/2026) : REGROUPEMENT PAR SUJET. Les signaux de même nature
 //    (même règle, même priorité) forment un seul sujet : « 14 leads sans
 //    premier contact · 7 vendeurs » au lieu de 7 cartes. Le détail par
@@ -257,6 +262,8 @@ await (async function () {
         font-size:11.5px;font-weight:700;color:var(--blue);white-space:nowrap;
       }
       .dp-link:hover{color:var(--green);}
+      .dp-radar-tooltip-qui{ font-size:10.5px; color:var(--lblue); margin-top:3px; font-weight:600; }
+      .dp-radar-tooltip-age{ font-size:10.5px; color:#fff; opacity:.85; margin-top:2px; }
       .dp-radar-point-n{
         position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
         font-size:9px;font-weight:800;color:#fff;pointer-events:none;font-variant-numeric:tabular-nums;
@@ -687,6 +694,10 @@ await (async function () {
       g.total = nbs.every(n => n != null) ? nbs.reduce((a, b) => a + b, 0) : null;
       g.montant = g.signals.reduce((a, s) => a + (Number((s.payload || {}).montant_total) || 0), 0);
       g.oldestH = Math.max(...g.signals.map(signalAgeHours));
+      // v7 : nature de l'ancienneté affichée
+      const ech = g.signals.map(s => (s.payload || {}).echeance_h).filter(v => v != null && !isNaN(Number(v))).map(Number);
+      g.mode = SANS_AGE.has(g.rule_code) ? "aucun" : (ech.length === g.signals.length ? "echeance" : "attente");
+      if (g.mode === "echeance") g.oldestH = Math.min(...ech);
       g.sev = g.signals.reduce((a, s) => a + severity(s), 0);
       return g;
     });
@@ -720,6 +731,20 @@ await (async function () {
     if (noms.length <= 2) return noms.join(", ");
     const sites = noms.every(n => n === n.toUpperCase());
     return noms.length + (sites ? " sites" : " vendeurs");
+  }
+  // v7 : sujets sans « ancienneté » parlante (la date du signal n'a pas de sens métier)
+  const SANS_AGE = new Set(["objectif_rythme", "wins_dernier_jour", "atelier_opportunite"]);
+  function dureeClaire(h) {
+    if (h < 1) return "moins d'une heure";
+    if (h < 48) { const n = Math.round(h); return n + (n > 1 ? " heures" : " heure"); }
+    const j = Math.round(h / 24); return j + (j > 1 ? " jours" : " jour");
+  }
+  // « le plus ancien attend depuis 19 jours » / « prochain dans 2 heures » / ""
+  function ageTexte(g) {
+    if (!g || g.mode === "aucun" || g.oldestH == null || !isFinite(g.oldestH)) return "";
+    if (g.mode === "echeance") return g.oldestH <= 0 ? "c'est maintenant" : "prochain dans " + dureeClaire(g.oldestH);
+    if (g.oldestH <= 0) return "";
+    return (g.signals.length > 1 || (g.total || 0) > 1 ? "le plus ancien attend depuis " : "en attente depuis ") + dureeClaire(g.oldestH);
   }
   function ageLabel(h) {
     if (h == null || !isFinite(h) || h <= 0) return "";
@@ -890,7 +915,7 @@ await (async function () {
       const n = nbDe(s);
       return escapeHtml(s.subject_name || "?") + (n != null ? " (" + n + ")" : "");
     }).join(", ") + (g.signals.length > 3 ? "…" : "");
-    const age = ageLabel(g.oldestH);
+    const age = ageTexte(g);
     const subs = g.signals.map(s => {
       const expandable = hasExpandable(s);
       const cnt = expandable ? detailCount(s) : 0;
@@ -915,7 +940,7 @@ await (async function () {
         <div class="dp-signal-content">
           <div class="dp-signal-meta">
             <span class="dp-signal-prio">${fmtPrioLabel(prio)}</span>
-            <span class="dp-signal-time">${escapeHtml(groupWho(g))}${age ? " · le plus ancien : " + age : ""}</span>
+            <span class="dp-signal-time">${escapeHtml(groupWho(g))}${age ? " · " + escapeHtml(age) : ""}</span>
           </div>
           <h3 class="dp-signal-title"><span class="dp-group-count">${g.signals.length}</span>${escapeHtml(groupHeadline(g))}</h3>
           <p class="dp-signal-desc">${repartition}</p>
@@ -1134,15 +1159,16 @@ await (async function () {
       // v6 : taille = volume du sujet (nombre de dossiers, sinon de signaux).
       const vol = s.group ? (s.group.total != null ? s.group.total : s.group.signals.length) : 1;
       const taille = Math.round(Math.min(26, 10 + 4 * Math.log2(1 + vol)));
-      const age = s.group ? ageLabel(s.group.oldestH) : "";
+      const age = s.group ? ageTexte(s.group) : "";
+      const qui = s.group ? groupWho(s.group) : (s.subject_name || "");
       return `
         <div class="${classes.join(" ")}" style="top: ${cy}%; left: ${cx}%; width:${taille}px; height:${taille}px;" data-group-id="${escapeHtml(s.id)}">
           <div class="dp-radar-point-pulse"></div>
           <div class="dp-radar-point-dot"></div>
-          ${taille >= 16 && vol > 1 ? `<span class="dp-radar-point-n">${vol > 999 ? "999+" : vol}</span>` : ""}
           <div class="dp-radar-tooltip">
             <div class="dp-radar-tooltip-name">${escapeHtml(tooltip.slice(0, 80))}</div>
-            <div class="dp-radar-tooltip-meta">${meta}${age ? " · plus ancien " + age : ""}</div>
+            <div class="dp-radar-tooltip-qui">${fmtPrioLabel(s.priority)}${qui ? " · " + escapeHtml(qui) : ""}</div>
+            ${age ? `<div class="dp-radar-tooltip-age">${escapeHtml(age.charAt(0).toUpperCase() + age.slice(1))}</div>` : ""}
           </div>
         </div>
       `;
