@@ -138,6 +138,7 @@ OD.define('agenda', {
   const VAR_ID_BILATE_REAL = '851fed59-9397-41ae-b91d-26daa2ff960a';
   function inEditor() { try { return window.self !== window.top; } catch (e) { return true; } }
   function goBilaterale(id, maintenant) {
+    try { hideTip(); if (tipEl) { tipEl.remove(); tipEl = null; } } catch (e) {}
     try { frontWin().sessionStorage.setItem('od_bil_open', JSON.stringify({ id: Number(id), maintenant: !!maintenant, t: Date.now() })); } catch (e) {}
     try { wwLib().wwVariable.updateValue(VAR_ID_BILATE_REAL, Number(id)); } catch (e) {}
     try { closeCreate(); } catch (e) {}
@@ -1081,6 +1082,20 @@ OD.define('agenda', {
     t.style.top = top + 'px'; t.style.left = left + 'px';
   }
   function hideTip() { if (tipEl) tipEl.style.display = 'none'; }
+  // L'infobulle vit dans le body : si l'agenda disparaît pendant qu'elle est
+  // affichée (navigation vers la fiche de bilatérale), mouseleave ne vient
+  // jamais et elle restait figée par-dessus la page suivante (14/10/2026).
+  // On la masque à chaque clic, défilement ou changement de page, et on la
+  // retire dès que l'agenda n'est plus dans le document.
+  if (!window.__agendaTipGuard) {
+    window.__agendaTipGuard = true;
+    const masquer = () => { try { const t = frontDoc().getElementById('agenda-tip'); if (t) t.style.display = 'none'; } catch (e) {} };
+    try {
+      const W = frontWin();
+      ['mousedown', 'scroll', 'popstate', 'pagehide', 'blur'].forEach(ev => W.addEventListener(ev, masquer, true));
+      setInterval(() => { try { if (!frontDoc().getElementById('agenda-root')) { const t = frontDoc().getElementById('agenda-tip'); if (t) t.remove(); } } catch (e) {} }, 500);
+    } catch (e) {}
+  }
 
   // --- init FullCalendar ------------------------------------------------------
   let calendar = null;
