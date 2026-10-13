@@ -150,7 +150,7 @@ state.selAffaire = null;
 state.expanded = {};         // dépli de l'arbre (sélecteur de périmètre)
 state.chefFocus = null;      // équipe d'un chef ciblée dans l'onglet "Bilatérales du site"
 state.view = 'main';         // 'main' (onglets contextuels) | 'timeline' (drill vendeur)
-state.tab = 'prio';          // onglet courant : 'prio' | 'site' | 'enc'
+state.tab = 'site';          // onglet courant : 'site' (défaut, v14) | 'prio' | 'enc'
 state.autoTargeted = false;  // refait l'auto-ciblage du périmètre à chaque arrivée
 state.tlVend = null;
 state.tlMonth = null;
@@ -453,6 +453,8 @@ function shell(inner){ return '<div class="bil">' + STYLE + inner + '</div>'; }
 
 function render() {
   const root = getRoot(); if (!root) return;
+  // Infobulle de l'agenda restée affichée après la navigation : retirée.
+  try { const t = doc.getElementById('agenda-tip'); if (t) t.remove(); } catch (e) {}
   if (state.loading || state.sites === null) { root.innerHTML = shell('<div class="bil-load">Chargement des bilatérales…</div>'); return; }
   if (state.error) { root.innerHTML = shell('<div class="bil-err">Erreur : ' + esc(state.error) + '</div>'); return; }
   if (isVendeur()) { root.innerHTML = shell(renderVendeurSelf()); return; }
@@ -480,7 +482,7 @@ function scopeLevel() {
 // Onglet effectif : retombe sur "prio" si l'onglet courant n'est pas disponible
 // pour le périmètre / le rôle.
 function activeTab() {
-  let t = state.tab || 'prio';
+  let t = state.tab || 'site';
   if (t === 'enc' && !isDirection()) t = 'prio';
   return t;
 }
@@ -676,8 +678,8 @@ function renderTabs() {
   // de l'affaire, le tableau semblait avoir disparu (14/10/2026).
   const t = activeTab();
   let h = '<div class="bil-tabs">';
-  h += '<span class="bil-tab' + (t === 'prio' ? ' on' : '') + '" data-tab="prio">À recevoir en priorité</span>';
   h += '<span class="bil-tab' + (t === 'site' ? ' on' : '') + '" data-tab="site">Suivi de l’équipe</span>';
+  h += '<span class="bil-tab' + (t === 'prio' ? ' on' : '') + '" data-tab="prio">À recevoir en priorité</span>';
   if (isDirection()) h += '<span class="bil-tab' + (t === 'enc' ? ' on' : '') + '" data-tab="enc">Encadrement</span>';
   h += '</div>';
   return h;
@@ -922,38 +924,34 @@ function renderPrioVendeurs() {
     (state.txMesurable === false ? 'part du portefeuille à relancer (> 30 j) — la transformation n’est pas mesurable tant que les affaires perdues ne sont pas enregistrées' : 'baisse de la transformation sur ' + BIL_CFG.transfoJours + ' jours') +
     ' · <b>20</b> ancienneté de la dernière bilatérale (plafond ' + BIL_CFG.retardJ + ' j) · <b>15</b> discipline : engagements non tenus, relances en retard, leads non contactés depuis 48 h. Les vendeurs dont la bilatérale est déjà programmée passent en bas de liste. La raison qui pèse le plus est affichée en bleu.</div></details>';
 
-  h += '<div class="prio-list">';
+  // v14 : liste en tableau sobre. Une ligne = rang, vendeur, POURQUOI (la
+  // raison principale en clair, les autres en gris), dernière bilatérale,
+  // score en barre, action. Plus de pastilles colorées en série.
   const shown = sorted.filter(pass);
+  h += '<div class="pq">';
+  h += '<div class="pq-row pq-head"><div>#</div><div>Vendeur</div><div>Pourquoi le recevoir</div><div>Dernière bilatérale</div><div>Priorité</div><div></div></div>';
   if (!shown.length) h += '<div class="bil-empty">Aucun vendeur pour ce filtre.</div>';
-  shown.forEach(d => {
+  shown.forEach((d, i) => {
     const c = d.c;
     const planifie = isPlanifie(c);
-    let cadBadge, cadCls;
-    if (planifie) { cadBadge = 'RDV<small>' + esc(fmtJJMM(c.next_bilaterale_at)) + '</small>'; cadCls = 'planif'; }
-    else if (c.jours_depuis_bilat == null) { cadBadge = 'Jamais'; cadCls = 'never'; }
-    else if (c.jours_depuis_bilat > BIL_CFG.retardJ) { cadBadge = c.jours_depuis_bilat + ' j'; cadCls = 'late'; }
-    else if (c.jours_depuis_bilat > BIL_CFG.cadenceJ) { cadBadge = c.jours_depuis_bilat + ' j'; cadCls = 'warn'; }
-    else { cadBadge = c.jours_depuis_bilat === 0 ? 'Auj.' : c.jours_depuis_bilat + ' j'; cadCls = 'ok'; }
-    const raisons = [];
-    if (d.main) raisons.push('<span class="rsn rsn-main">' + esc(d.txt[d.main]) + '</span>');
-    else raisons.push('<span class="rsn rsn-green">À jour</span>');
-    ['objectif', 'transfo', 'anciennete', 'discipline'].forEach(k => {
-      if (k === d.main || !(d.comps[k] > 0.15) || !d.txt[k]) return;
-      raisons.push('<span class="rsn ' + (k === 'anciennete' ? 'rsn-amber' : 'rsn-red') + '">' + esc(d.txt[k]) + '</span>');
-    });
-    (d.disAutres || []).slice(0, 2).forEach(t => raisons.push('<span class="rsn rsn-amber">' + esc(t) + '</span>'));
-    if (c.nb_propales_ouvertes > 0) raisons.push('<span class="rsn rsn-blue">' + c.nb_propales_ouvertes + ' propale' + (c.nb_propales_ouvertes > 1 ? 's' : '') + ' ouverte' + (c.nb_propales_ouvertes > 1 ? 's' : '') + '</span>');
-    const sc = d.score, scCol = sc >= 50 ? '#c0524f' : (sc >= 25 ? '#8a6d1f' : '#00997f');
-    h += '<div class="prio-row" data-prio-vend="' + c.id_user + '|' + c.id_site + '">' +
-      '<div class="pr-cad ' + cadCls + '">' + cadBadge + '</div>' +
-      '<div class="pr-main"><div class="pr-name">' + esc(c.nom_vendeur) + (c.vn_vo ? ' <span class="pr-cat">' + esc(c.vn_vo) + '</span>' : '') + '</div>' +
-        '<div class="pr-site">' + esc(c.nom_site) + ' · ' + esc(c.affaire) + '</div>' +
-        '<div class="pr-raisons">' + raisons.join('') + '</div></div>' +
-      '<div class="pr-score" title="Score de priorité sur 100" style="color:' + scCol + '">' + sc + '<small>/100</small></div>' +
-      (planifie
-        ? '<button class="pr-plan done" data-plan-vend="' + c.id_user + '|' + c.id_site + '" title="Une bilatérale est déjà programmée">Programmée</button>'
-        : '<button class="pr-plan" data-plan-vend="' + c.id_user + '|' + c.id_site + '">Planifier</button>') +
-      '<div class="pr-go">›</div>' +
+    const autres = ['objectif', 'transfo', 'discipline', 'anciennete']
+      .filter(k => k !== d.main && d.comps[k] > 0.15 && d.txt[k] && !(k === 'anciennete' && state.ancienneteCommune))
+      .map(k => d.txt[k]).concat((d.disAutres || []).slice(0, 1));
+    if (c.nb_propales_ouvertes > 0) autres.push(c.nb_propales_ouvertes + ' propale' + (c.nb_propales_ouvertes > 1 ? 's' : '') + ' ouverte' + (c.nb_propales_ouvertes > 1 ? 's' : ''));
+    const crit = d.main === 'objectif' || d.main === 'transfo' || d.main === 'discipline';
+    let derniere;
+    if (planifie) derniere = '<span class="pq-planif">Programmée le ' + esc(fmtJJMM(c.next_bilaterale_at)) + '</span>';
+    else if (c.jours_depuis_bilat == null) derniere = '<span class="pq-jamais">Jamais</span>';
+    else derniere = '<span class="' + (c.jours_depuis_bilat > BIL_CFG.retardJ ? 'pq-jamais' : (c.jours_depuis_bilat > BIL_CFG.cadenceJ ? 'pq-warn' : 'pq-ok')) + '">' + (c.jours_depuis_bilat === 0 ? 'Aujourd’hui' : 'Il y a ' + c.jours_depuis_bilat + ' j') + '</span>';
+    const sc = d.score, niv = sc >= 50 ? 'haut' : (sc >= 30 ? 'moyen' : 'bas');
+    h += '<div class="pq-row' + (planifie ? ' is-planif' : '') + '" data-prio-vend="' + c.id_user + '|' + c.id_site + '">' +
+      '<div class="pq-rang">' + (i + 1) + '</div>' +
+      '<div class="pq-who"><b>' + esc(c.nom_vendeur) + '</b><span>' + esc(c.nom_site) + (c.vn_vo ? ' · ' + esc(c.vn_vo) : '') + '</span></div>' +
+      '<div class="pq-why"><div class="pq-main' + (crit ? ' crit' : '') + '">' + esc(d.main ? d.txt[d.main] : 'À jour') + '</div>' +
+        (autres.length ? '<div class="pq-sub">' + autres.map(esc).join(' · ') + '</div>' : '') + '</div>' +
+      '<div class="pq-last">' + derniere + '</div>' +
+      '<div class="pq-score ' + niv + '" title="Score de priorité sur 100"><b>' + sc + '</b><i><u style="width:' + Math.max(4, sc) + '%"></u></i></div>' +
+      '<div class="pq-act">' + (planifie ? '<span class="pq-ok">Programmée</span>' : '<button class="pq-plan" data-plan-vend="' + c.id_user + '|' + c.id_site + '">Planifier</button>') + '</div>' +
     '</div>';
   });
   h += '</div>';
@@ -1885,6 +1883,30 @@ const STYLE = '<style>' +
 /* --- v6 --- */
 '#bil-root .pr-cad small{display:block;font-size:10px;font-weight:700;margin-top:2px}' +
 /* --- v11 --- */
+'#bil-root .pq{background:#fff;border:1px solid #e3e9f3;border-radius:14px;overflow:hidden;box-shadow:0 1px 2px rgba(28,43,69,.05),0 8px 24px rgba(28,43,69,.06)}' +
+'#bil-root .pq-row{display:grid;grid-template-columns:34px minmax(150px,1.1fr) minmax(220px,2.4fr) 132px 112px 108px;gap:14px;align-items:center;padding:13px 18px;border-bottom:1px solid #eef2f8;cursor:pointer;transition:background .12s}' +
+'#bil-root .pq-row:last-child{border-bottom:none}' +
+'#bil-root .pq-row:not(.pq-head):hover{background:#f2f6fc}' +
+'#bil-root .pq-head{cursor:default;background:#f4f7fb;padding:9px 18px;font-size:10.5px;font-weight:800;color:#8b99b0;text-transform:uppercase;letter-spacing:.06em}' +
+'#bil-root .pq-row.is-planif{opacity:.72}' +
+'#bil-root .pq-rang{font-size:13px;font-weight:800;color:#9bb3d1;font-variant-numeric:tabular-nums}' +
+'#bil-root .pq-who b{display:block;font-size:14.5px;font-weight:800;color:#1c2b45}' +
+'#bil-root .pq-who span{display:block;font-size:11.5px;color:#8b99b0;margin-top:1px}' +
+'#bil-root .pq-main{font-size:13px;font-weight:700;color:#2a5ea9;line-height:1.35}' +
+'#bil-root .pq-main.crit{color:#c0524f}' +
+'#bil-root .pq-sub{font-size:11.5px;color:#8b99b0;margin-top:3px;line-height:1.4}' +
+'#bil-root .pq-last span{font-size:12px;font-weight:700}' +
+'#bil-root .pq-jamais{color:#c0524f}#bil-root .pq-warn{color:#8a6d1f}#bil-root .pq-ok{color:#00997f}#bil-root .pq-planif{color:#2a5ea9}' +
+'#bil-root .pq-score{display:flex;flex-direction:column;gap:5px}' +
+'#bil-root .pq-score b{font-size:15px;font-weight:800;font-variant-numeric:tabular-nums;color:#1c2b45}' +
+'#bil-root .pq-score i{display:block;height:5px;border-radius:3px;background:#eef2f8;overflow:hidden}' +
+'#bil-root .pq-score u{display:block;height:100%;border-radius:3px;text-decoration:none}' +
+'#bil-root .pq-score.haut u{background:#d97070}#bil-root .pq-score.moyen u{background:#fac055}#bil-root .pq-score.bas u{background:#53bda7}' +
+'#bil-root .pq-act{text-align:right}' +
+'#bil-root .pq-plan{border:1.5px solid #2a5ea9;background:#fff;color:#2a5ea9;font-family:inherit;font-size:12px;font-weight:800;border-radius:9px;padding:6px 12px;cursor:pointer}' +
+'#bil-root .pq-plan:hover{background:#eef4fc}' +
+'@media (max-width:900px){#bil-root .pq-head{display:none}#bil-root .pq-row{grid-template-columns:28px 1fr auto;grid-template-areas:"r w s" "r y y" "r l a"}' +
+'#bil-root .pq-rang{grid-area:r}#bil-root .pq-who{grid-area:w}#bil-root .pq-why{grid-area:y}#bil-root .pq-last{grid-area:l}#bil-root .pq-score{grid-area:s;min-width:70px}#bil-root .pq-act{grid-area:a}}' +
 '#bil-root .perim-help{font-size:10.5px;font-weight:600;color:#9bb3d1;text-transform:none;letter-spacing:0;margin-left:8px}' +
 '#bil-root .badge-cov{margin-left:auto;font-size:11.5px;font-weight:800;border-radius:20px;padding:2px 10px;white-space:nowrap}' +
 '#bil-root .badge-cov.ok{background:rgba(83,189,167,.16);color:#00997f}' +
