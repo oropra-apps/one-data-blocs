@@ -1,7 +1,15 @@
 // ============================================================================
-//  DELCO BADGE (header) — module One Data (OD.define)  v1
+//  DELCO BADGE (header) — module One Data (OD.define)  v4
 //  Ex-bloc on-app-load n°4. Module app-level : ancre masquée dans le header,
 //  PERSISTANT. Il peint le badge #delco-header-badge rendu par la top nav.
+//
+//  v4 (13/10/2026) — le badge suit le site choisi dans la barre du haut.
+//  Un chef des ventes sur deux sites voyait 11 sujets sur la page Delco à
+//  Arcueil, 11 à L'Haÿ, et 12 sur le badge (les deux sites réunis). Le badge
+//  appelle désormais agent_signals_count_site(site du bus) — le serveur
+//  n'applique le filtre que pour les profils dont la page filtre aussi
+//  (chefs des ventes, rôles 3 et 5) — et se recalcule à chaque changement de
+//  site. Tenant pas encore à jour : retour automatique à agent_signals_count.
 // ============================================================================
 // ====================================================================
 //  Delco · Badge header — Custom JS
@@ -31,6 +39,32 @@ OD.define('delco-badge', {
   let clickBound = false;
 
   function getSupabase() { return ctx.supabase; }   // client du tenant (socle)
+
+  // v2 : site choisi dans la barre du haut (bus de site), null = tout le périmètre.
+  function siteBus() {
+    try { const w = window.wwLib && wwLib.getFrontWindow && wwLib.getFrontWindow(); if (w && w.oropraSite) return w.oropraSite; } catch (_) { }
+    try { return (doc.defaultView && doc.defaultView.oropraSite) || window.oropraSite || null; } catch (_) { return null; }
+  }
+  function busSiteId() {
+    try {
+      const b = siteBus();
+      const id = b && b.getSiteId ? b.getSiteId() : null;
+      return id != null && !isNaN(Number(id)) ? Number(id) : null;
+    } catch (_) { return null; }
+  }
+  // Un seul abonnement au bus, qui appelle toujours le fetch courant
+  // (hot reload : pas de callback périmé).
+  (function bindBus(tries) {
+    const b = siteBus();
+    if (!b || !b.onChange) { if (tries < 120) setTimeout(() => bindBus(tries + 1), 500); return; }
+    if (window.__delcoBadgeBusBound) return;
+    window.__delcoBadgeBusBound = true;
+    try {
+      b.onChange(() => {
+        try { window.__delcoBadge && window.__delcoBadge.refresh && window.__delcoBadge.refresh(); } catch (_) { }
+      });
+    } catch (_) { }
+  })(0);
 
   function getBadge() { return doc.getElementById("delco-header-badge"); }
   function getLink() { return doc.getElementById("delco-header-link"); }
@@ -74,7 +108,11 @@ OD.define('delco-badge', {
       const { data: { session } } = await sb.auth.getSession();
       if (!session) return false;
 
-      const { data, error } = await sb.rpc("agent_signals_count");
+      let { data, error } = await sb.rpc("agent_signals_count_site", { p_id_site: busSiteId() });
+      if (error) {
+        // Tenant sans agent_signals_count_site : ancien comptage, tous sites.
+        ({ data, error } = await sb.rpc("agent_signals_count"));
+      }
       if (error) { console.error("[delco-badge] RPC:", error); return false; }
       const row = Array.isArray(data) ? data[0] : data;
       if (!row) { applyState(0, false); return true; }
