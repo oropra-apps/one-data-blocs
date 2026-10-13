@@ -1,4 +1,13 @@
 // ============================================================================
+//  v16 (13/10/2026) : pictos de la liste VO (tableau et cartes).
+//  * cle a molette = historique vehicule : ouvre la fiche sur l'onglet
+//    « Historique vehicule » ; bleue si au moins une facture, grise et inerte
+//    sinon (RPC vo_historique_nb, une requete au chargement).
+//  * planete orange = annonce du VO sur teamcolin.fr (LIEN_ANNONCE de
+//    v_liste_vo, renseigne si le VO est publie) ; grise sinon.
+//  * appareil photo = diaporama ; photos importees, a defaut celles de
+//    l'annonce (avant : diaporama vide sans photo importee). Grise sans photo.
+//  L'oeil (fiche VO) ne change pas ; le picto « diffusion » est retire.
 //  v15 (13/10/2026) : historique du vehicule, une ligne horizontale
 //  verte « Achat du VO · JJ/MM/AAAA » materialise l'entree en stock : au-dessus,
 //  les factures depuis l'achat ; en dessous, la vie anterieure du vehicule.
@@ -102,7 +111,7 @@ OD.define('vo-liste', {
   var COLS = [
     'VIN', 'NO_VO', 'NO_IMMAT', 'VERSION_EUROTAX', 'DESIGNATION_DMS', 'MARQUE_DMS', 'MODELE_DMS',
     'CARBURANT_DMS', 'BOITEV_EUROTAX', 'D_1MEC', 'D_ACHAT', 'PVENTE', 'PA_HT_TTC', 'KMS', 'SITE', 'AFFAIRE',
-    'RESEAU', 'SOCIETE', 'POINT_VENTE', 'IDSITE', 'IDSITE_Codifie', 'NBPORTE_EUROTAX', 'ImageUrls', 'cover_url', 'URL360', 'radarLink', 'ID_CM', 'PRET_A_LA_VENTE',
+    'RESEAU', 'SOCIETE', 'POINT_VENTE', 'IDSITE', 'IDSITE_Codifie', 'NBPORTE_EUROTAX', 'ImageUrls', 'cover_url', 'URL360', 'radarLink', 'ID_CM', 'PRET_A_LA_VENTE', 'LIEN_ANNONCE',
     'TVA', 'CODETVA', 'CV_DMS', 'TAUX_CO2', 'GARANTIE', 'CODE_GARANTIE', 'LIBELLE_GARANTIE', 'COULEUR_DMS',
     'CARROSSERIE_EUROTAX', 'LABEL_Codifie', 'LIEU_STOCKAGE_Codifie', 'DETAIL_STOCKAGE_Codifie',
     'ORIGINEACHAT_Codifie', 'MIL', 'NATCODE_SELECTED', 'INFOMEDIAIRE_Codifie'
@@ -189,6 +198,11 @@ OD.define('vo-liste', {
       }
     } catch (e) { console.error('[vo] openDiaporama', e); photos = []; }
     var urls = (photos || []).map(function (p) { return p.signedUrl; }).filter(Boolean);
+    if (!urls.length) {
+      var row = (S.raw || []).find(function (x) { return x.VIN === vin; }) || {};
+      urls = images(row);
+      if (!urls.length && mainImage(row)) urls = [mainImage(row)];
+    }
     showDiaporama(urls, 0);
   }
   function openWeb(url) { if (notEmpty(url)) { try { win.open(url, '_blank', 'noopener'); } catch (e) { window.open(url, '_blank'); } } }
@@ -198,7 +212,7 @@ OD.define('vo-liste', {
 
   function fmtEurTTC(v) { var n = num(v); return n ? n.toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + ' € TTC' : '-'; }
 
-  async function openFicheVO(vin) {
+  async function openFicheVO(vin, tab) {
     // Récupère la row (depuis S.raw ou supabase)
     var row = S.raw.find(function (x) { return x.VIN === vin; }) || null;
     if (!row) {
@@ -208,7 +222,7 @@ OD.define('vo-liste', {
     }
     // Met à jour la variable WeWeb (pour les autres composants qui l'écoutent)
     try { wwLib.wwVariable.updateValue(VAR_FICHE_VO, row); } catch (e) { }
-    ficheState.vin = vin; ficheState.row = row; ficheState.tab = 'fiche';
+    ficheState.vin = vin; ficheState.row = row; ficheState.tab = tab || 'fiche';
     // Lit le cache de photos (préchargé en arrière-plan) → miniatures instantanées
     ficheState.photos = S.photoCache[vin] || null;
     ficheState.apv = null;
@@ -1814,6 +1828,12 @@ OD.define('vo-liste', {
       from += size;
       if (from > 20000) break;
     }
+    // v16 : historique véhicule disponible ? (picto clé : bleu si au moins une facture)
+    try {
+      var hq = await c.rpc('vo_historique_nb');
+      if (hq.error) throw hq.error;
+      S.histo = {}; (hq.data || []).forEach(function (x) { S.histo[x.vin] = x.nb; });
+    } catch (e) { console.warn('[vo] vo_historique_nb', e); S.histo = null; }
     return all;
   }
   // RESEAU / AFFAIRE / SITE du site sélectionné via la table SITE (référentiel).
@@ -1904,6 +1924,8 @@ OD.define('vo-liste', {
     rss: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 11a9 9 0 0 1 9 9"/><path d="M4 4a16 16 0 0 1 16 16"/><circle cx="5" cy="19" r="1"/></svg>',
     globe: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15 15 0 0 1 0 20 15 15 0 0 1 0-20z"/></svg>',
     photos: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/></svg>',
+    wrench: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg>',
+    camera: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>',
     car: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M5 13l1.5-4.5A2 2 0 0 1 8.4 7h7.2a2 2 0 0 1 1.9 1.5L19 13"/><path d="M3 13h18v4a1 1 0 0 1-1 1h-1a1 1 0 0 1-1-1v-1H6v1a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1z"/><circle cx="7.5" cy="15.5" r="1"/><circle cx="16.5" cy="15.5" r="1"/></svg>',
     pdf: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="9" y1="15" x2="15" y2="15"/><line x1="9" y1="18" x2="13" y2="18"/></svg>',
     xls: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="9" y1="3" x2="9" y2="21"/></svg>',
@@ -1975,6 +1997,10 @@ OD.define('vo-liste', {
     + '.vo-iact.eye{color:#53bda7}.vo-iact.eye:hover{background:#e7f6f1}'
     + '.vo-iact.globe:hover{background:#eef4fc;color:#2a5ea9}.vo-iact.photos:hover{background:#eef4fc;color:#2a5ea9}'
     + '.vo-iact.rss{color:#cdd9ea;cursor:default}.vo-iact.disabled{opacity:.3;cursor:default}'
+    + '.vo-iact.histo{color:#2a5ea9}.vo-iact.histo:hover{background:#eef4fc;color:#1F4A85}'
+    + '.vo-iact.web{color:#e39a1c}.vo-iact.web:hover{background:#fdf4e3;color:#c47f0c}'
+    + '.vo-iact.cam{color:#2a5ea9}.vo-iact.cam:hover{background:#eef4fc;color:#1F4A85}'
+    + '.vo-iact.histo.disabled,.vo-iact.web.disabled,.vo-iact.cam.disabled{color:#9bb3d1;background:none}'
     + '.vo-thumb-wrap{display:inline-flex;flex:0 0 auto}'
     + '.vo-thumb{width:46px;height:32px;border-radius:6px;object-fit:cover;background:#eef2f8}'
     + '.vo-thumb-ph{width:46px;height:32px;border-radius:6px;background:#eef2f8;display:flex;align-items:center;justify-content:center;color:#c0cee0}.vo-thumb-ph svg{width:20px;height:20px}'
@@ -2051,6 +2077,22 @@ OD.define('vo-liste', {
   function frzAttr(c) { return c.w ? ' style="min-width:' + c.w + 'px;width:' + c.w + 'px"' : ''; }
 
   // ─────────────────────────────────────────────────────────── cellules
+  // v16 : clé = historique véhicule (bleue, grise sans facture) ; planète orange =
+  // annonce sur teamcolin.fr (grise si non publiée) ; appareil photo = diaporama.
+  function pictoHisto(r) {
+    var nb = S.histo ? (S.histo[r.VIN] || 0) : null;
+    if (nb === 0) return '<span class="vo-iact histo disabled" title="Aucun historique pour ce véhicule">' + IC.wrench + '</span>';
+    return '<span class="vo-iact histo" data-act="histo" data-vin="' + esc(r.VIN) + '" title="Historique véhicule' + (nb ? ' · ' + nb + ' facture' + (nb > 1 ? 's' : '') : '') + '">' + IC.wrench + '</span>';
+  }
+  function pictoWeb(r) {
+    if (!notEmpty(r.LIEN_ANNONCE)) return '<span class="vo-iact web disabled" title="Pas d’annonce publiée sur le site">' + IC.globe + '</span>';
+    return '<span class="vo-iact web" data-act="globe" data-url="' + esc(r.LIEN_ANNONCE) + '" title="Voir l’annonce sur le site">' + IC.globe + '</span>';
+  }
+  function pictoPhotos(r) {
+    var n = images(r).length;
+    if (!hasPhoto(r)) return '<span class="vo-iact cam disabled" title="Aucune photo">' + IC.camera + '</span>';
+    return '<span class="vo-iact cam" data-act="photos" data-vin="' + esc(r.VIN) + '" title="Diaporama' + (n ? ' · ' + n + ' photo' + (n > 1 ? 's' : '') : '') + '">' + IC.camera + '</span>';
+  }
   function infosHtml(r) {
     var hasUrl = notEmpty(r.URL360), cm = contremarque(r), img = mainImage(r);
     var thumb = img
@@ -2058,9 +2100,7 @@ OD.define('vo-liste', {
       : '<span class="vo-thumb-ph">' + IC.car + '</span>';
     return '<div class="vo-infos">'
       + '<span class="vo-iact eye" data-act="eye" data-vin="' + esc(r.VIN) + '" title="Fiche VO">' + IC.eye + '</span>'
-      + '<span class="vo-iact rss" title="Diffusion (à venir)">' + IC.rss + '</span>'
-      + '<span class="vo-iact globe' + (hasUrl ? '' : ' disabled') + '" ' + (hasUrl ? 'data-act="globe" data-url="' + esc(r.URL360) + '"' : '') + ' title="Annonce web">' + IC.globe + '</span>'
-      + '<span class="vo-iact photos" data-act="photos" data-vin="' + esc(r.VIN) + '" title="Diaporama">' + IC.photos + '</span>'
+      + pictoHisto(r) + pictoWeb(r) + pictoPhotos(r)
       + thumb
       + '<span class="vo-dot ' + (cm ? 'red' : 'green') + '" data-vin="' + esc(r.VIN) + '" data-cm="' + esc(r.ID_CM || '') + '"' + (cm ? '' : ' title="Disponible à la vente"') + '></span>'
       + '</div>';
@@ -2127,9 +2167,7 @@ OD.define('vo-liste', {
       + '<span class="vo-dot ' + (cm ? 'red' : 'green') + '" data-vin="' + esc(r.VIN) + '" data-cm="' + esc(r.ID_CM || '') + '"' + (cm ? '' : ' title="Disponible à la vente"') + '></span>'
       + '</div>'
       + '<div class="vo-grp">'
-      + '<span class="vo-iact rss" title="Diffusion (à venir)">' + IC.rss + '</span>'
-      + '<span class="vo-iact globe' + (hasUrl ? '' : ' disabled') + '" ' + (hasUrl ? 'data-act="globe" data-url="' + esc(r.URL360) + '"' : '') + ' title="Annonce web">' + IC.globe + '</span>'
-      + '<span class="vo-iact photos" data-act="photos" data-vin="' + esc(r.VIN) + '" title="Diaporama">' + IC.photos + '</span>'
+      + pictoHisto(r) + pictoWeb(r) + pictoPhotos(r)
       + '</div>'
       + '</div>'
       + '<div class="vo-card-ca"><span class="vo-ca"><i style="background:' + ca.color + '"></i>' + esc(ca.label) + '</span></div>'
@@ -2468,6 +2506,7 @@ OD.define('vo-liste', {
   function bindContent(host) {
     host.querySelectorAll('[data-act="eye"]').forEach(function (el) { el.addEventListener('click', function (e) { e.stopPropagation(); openFicheVO(el.getAttribute('data-vin')); }); });
     host.querySelectorAll('[data-act="photos"]').forEach(function (el) { el.addEventListener('click', function (e) { e.stopPropagation(); openDiaporama(el.getAttribute('data-vin')); }); });
+    host.querySelectorAll('[data-act="histo"]').forEach(function (el) { el.addEventListener('click', function (e) { e.stopPropagation(); openFicheVO(el.getAttribute('data-vin'), 'apv'); }); });
     host.querySelectorAll('[data-act="globe"]').forEach(function (el) { el.addEventListener('click', function (e) { e.stopPropagation(); openWeb(el.getAttribute('data-url')); }); });
     host.querySelectorAll('th[data-sort]').forEach(function (el) {
       el.addEventListener('click', function () { var k = el.getAttribute('data-sort'); if (S.sortKey === k) S.sortDir = S.sortDir === 'asc' ? 'desc' : 'asc'; else { S.sortKey = k; S.sortDir = 'asc'; } renderContent(); });
@@ -2883,6 +2922,12 @@ OD.define('vo-liste', {
       from += size;
       if (from > 20000) break;
     }
+    // v16 : historique véhicule disponible ? (picto clé : bleu si au moins une facture)
+    try {
+      var hq = await c.rpc('vo_historique_nb');
+      if (hq.error) throw hq.error;
+      S.histo = {}; (hq.data || []).forEach(function (x) { S.histo[x.vin] = x.nb; });
+    } catch (e) { console.warn('[vo] vo_historique_nb', e); S.histo = null; }
     return all;
   }
   // RESEAU / AFFAIRE / SITE du site sélectionné via la table SITE (référentiel).
@@ -2973,6 +3018,8 @@ OD.define('vo-liste', {
     rss: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 11a9 9 0 0 1 9 9"/><path d="M4 4a16 16 0 0 1 16 16"/><circle cx="5" cy="19" r="1"/></svg>',
     globe: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15 15 0 0 1 0 20 15 15 0 0 1 0-20z"/></svg>',
     photos: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/></svg>',
+    wrench: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg>',
+    camera: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>',
     car: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M5 13l1.5-4.5A2 2 0 0 1 8.4 7h7.2a2 2 0 0 1 1.9 1.5L19 13"/><path d="M3 13h18v4a1 1 0 0 1-1 1h-1a1 1 0 0 1-1-1v-1H6v1a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1z"/><circle cx="7.5" cy="15.5" r="1"/><circle cx="16.5" cy="15.5" r="1"/></svg>',
     pdf: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="9" y1="15" x2="15" y2="15"/><line x1="9" y1="18" x2="13" y2="18"/></svg>',
     xls: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="9" y1="3" x2="9" y2="21"/></svg>',
@@ -3044,6 +3091,10 @@ OD.define('vo-liste', {
     + '.vo-iact.eye{color:#53bda7}.vo-iact.eye:hover{background:#e7f6f1}'
     + '.vo-iact.globe:hover{background:#eef4fc;color:#2a5ea9}.vo-iact.photos:hover{background:#eef4fc;color:#2a5ea9}'
     + '.vo-iact.rss{color:#cdd9ea;cursor:default}.vo-iact.disabled{opacity:.3;cursor:default}'
+    + '.vo-iact.histo{color:#2a5ea9}.vo-iact.histo:hover{background:#eef4fc;color:#1F4A85}'
+    + '.vo-iact.web{color:#e39a1c}.vo-iact.web:hover{background:#fdf4e3;color:#c47f0c}'
+    + '.vo-iact.cam{color:#2a5ea9}.vo-iact.cam:hover{background:#eef4fc;color:#1F4A85}'
+    + '.vo-iact.histo.disabled,.vo-iact.web.disabled,.vo-iact.cam.disabled{color:#9bb3d1;background:none}'
     + '.vo-thumb-wrap{display:inline-flex;flex:0 0 auto}'
     + '.vo-thumb{width:46px;height:32px;border-radius:6px;object-fit:cover;background:#eef2f8}'
     + '.vo-thumb-ph{width:46px;height:32px;border-radius:6px;background:#eef2f8;display:flex;align-items:center;justify-content:center;color:#c0cee0}.vo-thumb-ph svg{width:20px;height:20px}'
@@ -3120,6 +3171,22 @@ OD.define('vo-liste', {
   function frzAttr(c) { return c.w ? ' style="min-width:' + c.w + 'px;width:' + c.w + 'px"' : ''; }
 
   // ─────────────────────────────────────────────────────────── cellules
+  // v16 : clé = historique véhicule (bleue, grise sans facture) ; planète orange =
+  // annonce sur teamcolin.fr (grise si non publiée) ; appareil photo = diaporama.
+  function pictoHisto(r) {
+    var nb = S.histo ? (S.histo[r.VIN] || 0) : null;
+    if (nb === 0) return '<span class="vo-iact histo disabled" title="Aucun historique pour ce véhicule">' + IC.wrench + '</span>';
+    return '<span class="vo-iact histo" data-act="histo" data-vin="' + esc(r.VIN) + '" title="Historique véhicule' + (nb ? ' · ' + nb + ' facture' + (nb > 1 ? 's' : '') : '') + '">' + IC.wrench + '</span>';
+  }
+  function pictoWeb(r) {
+    if (!notEmpty(r.LIEN_ANNONCE)) return '<span class="vo-iact web disabled" title="Pas d’annonce publiée sur le site">' + IC.globe + '</span>';
+    return '<span class="vo-iact web" data-act="globe" data-url="' + esc(r.LIEN_ANNONCE) + '" title="Voir l’annonce sur le site">' + IC.globe + '</span>';
+  }
+  function pictoPhotos(r) {
+    var n = images(r).length;
+    if (!hasPhoto(r)) return '<span class="vo-iact cam disabled" title="Aucune photo">' + IC.camera + '</span>';
+    return '<span class="vo-iact cam" data-act="photos" data-vin="' + esc(r.VIN) + '" title="Diaporama' + (n ? ' · ' + n + ' photo' + (n > 1 ? 's' : '') : '') + '">' + IC.camera + '</span>';
+  }
   function infosHtml(r) {
     var hasUrl = notEmpty(r.URL360), cm = contremarque(r), img = mainImage(r);
     var thumb = img
@@ -3127,9 +3194,7 @@ OD.define('vo-liste', {
       : '<span class="vo-thumb-ph">' + IC.car + '</span>';
     return '<div class="vo-infos">'
       + '<span class="vo-iact eye" data-act="eye" data-vin="' + esc(r.VIN) + '" title="Fiche VO">' + IC.eye + '</span>'
-      + '<span class="vo-iact rss" title="Diffusion (à venir)">' + IC.rss + '</span>'
-      + '<span class="vo-iact globe' + (hasUrl ? '' : ' disabled') + '" ' + (hasUrl ? 'data-act="globe" data-url="' + esc(r.URL360) + '"' : '') + ' title="Annonce web">' + IC.globe + '</span>'
-      + '<span class="vo-iact photos" data-act="photos" data-vin="' + esc(r.VIN) + '" title="Diaporama">' + IC.photos + '</span>'
+      + pictoHisto(r) + pictoWeb(r) + pictoPhotos(r)
       + thumb
       + '<span class="vo-dot ' + (cm ? 'red' : 'green') + '" data-vin="' + esc(r.VIN) + '" data-cm="' + esc(r.ID_CM || '') + '"' + (cm ? '' : ' title="Disponible à la vente"') + '></span>'
       + '</div>';
@@ -3196,9 +3261,7 @@ OD.define('vo-liste', {
       + '<span class="vo-dot ' + (cm ? 'red' : 'green') + '" data-vin="' + esc(r.VIN) + '" data-cm="' + esc(r.ID_CM || '') + '"' + (cm ? '' : ' title="Disponible à la vente"') + '></span>'
       + '</div>'
       + '<div class="vo-grp">'
-      + '<span class="vo-iact rss" title="Diffusion (à venir)">' + IC.rss + '</span>'
-      + '<span class="vo-iact globe' + (hasUrl ? '' : ' disabled') + '" ' + (hasUrl ? 'data-act="globe" data-url="' + esc(r.URL360) + '"' : '') + ' title="Annonce web">' + IC.globe + '</span>'
-      + '<span class="vo-iact photos" data-act="photos" data-vin="' + esc(r.VIN) + '" title="Diaporama">' + IC.photos + '</span>'
+      + pictoHisto(r) + pictoWeb(r) + pictoPhotos(r)
       + '</div>'
       + '</div>'
       + '<div class="vo-card-ca"><span class="vo-ca"><i style="background:' + ca.color + '"></i>' + esc(ca.label) + '</span></div>'
@@ -3537,6 +3600,7 @@ OD.define('vo-liste', {
   function bindContent(host) {
     host.querySelectorAll('[data-act="eye"]').forEach(function (el) { el.addEventListener('click', function (e) { e.stopPropagation(); openFicheVO(el.getAttribute('data-vin')); }); });
     host.querySelectorAll('[data-act="photos"]').forEach(function (el) { el.addEventListener('click', function (e) { e.stopPropagation(); openDiaporama(el.getAttribute('data-vin')); }); });
+    host.querySelectorAll('[data-act="histo"]').forEach(function (el) { el.addEventListener('click', function (e) { e.stopPropagation(); openFicheVO(el.getAttribute('data-vin'), 'apv'); }); });
     host.querySelectorAll('[data-act="globe"]').forEach(function (el) { el.addEventListener('click', function (e) { e.stopPropagation(); openWeb(el.getAttribute('data-url')); }); });
     host.querySelectorAll('th[data-sort]').forEach(function (el) {
       el.addEventListener('click', function () { var k = el.getAttribute('data-sort'); if (S.sortKey === k) S.sortDir = S.sortDir === 'asc' ? 'desc' : 'asc'; else { S.sortKey = k; S.sortDir = 'asc'; } renderContent(); });
