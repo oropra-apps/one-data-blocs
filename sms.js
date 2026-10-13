@@ -37,6 +37,35 @@ OD.define('sms', {
   }
   function readVar(id) { try { return wwLib.wwVariable.getValue(id); } catch (e) { return null; } }
 
+  /* ---- site courant -------------------------------------------------------
+     UN FIL PAR CONCESSION, 13/10/2026. Un cycle commercial, c'est un client
+     ET un site : les echanges d'Arcueil et de Sceaux n'appartiennent pas a la
+     meme conversation, et ils partent de deux agents RCS distincts. Le fil est
+     donc filtre sur le site retenu, et le site est FIGE A L'OUVERTURE dans
+     `state.site` : la bulle affichee et l'envoi doivent designer la meme
+     concession, meme si le bandeau change pendant que la modale est ouverte
+     (dans ce cas on recharge, § onChange).
+     Quand le perimetre est au-dessus du site (groupe, affaire), `siteCourant`
+     rend null : on montre alors tout, chaque bulle portant son site.
+     ------------------------------------------------------------------------- */
+  function busSite() { try { return win.oropraSite || window.oropraSite || null; } catch (e) { return null; } }
+  function siteCourant() {
+    const bus = busSite();
+    if (bus && typeof bus.getSiteId === 'function') {
+      const v = bus.getSiteId();
+      if (v != null && v !== '') return Number(v);
+    }
+    const v = readVar(SELECTED_SITE_VAR_ID);
+    return (v != null && v !== '') ? Number(v) : null;
+  }
+  function nomSite(id) {
+    if (id == null) return '';
+    const bus = busSite();
+    const liste = (bus && typeof bus.getSites === 'function') ? (bus.getSites() || []) : [];
+    const s = liste.find(x => Number(x.id_site) === Number(id));
+    return s ? (s.site || s.affaire || ('Site ' + id)) : ('Site ' + id);
+  }
+
   const state = window.__smsState || {};
   if (state.open === undefined) state.open = false;
   if (state.minimized === undefined) state.minimized = false;
@@ -48,6 +77,8 @@ OD.define('sms', {
   if (state.channel === undefined) state.channel = null;
   if (state.selectedKey === undefined) state.selectedKey = null;
   if (state.client === undefined) state.client = null;
+  if (state.site === undefined) state.site = null;
+  if (state.unsubSite === undefined) state.unsubSite = null;
   if (state.pos === undefined) state.pos = null;
   if (state.dictating === undefined) state.dictating = false;
   if (state.dictFinal === undefined) state.dictFinal = null;
@@ -65,10 +96,12 @@ OD.define('sms', {
   function dayKey(iso) { try { return new Date(iso).toDateString(); } catch (e) { return ''; } }
 
   /* ---- data --------------------------------------------------------------- */
-  async function loadThread(idClient) {
+  async function loadThread(idClient, idSite) {
     state.loading = true; state.error = null; render();
     try {
-      const { data, error } = await sb().from('sms_messages').select('*').eq('id_client', idClient).order('created_at', { ascending: true });
+      let q = sb().from('sms_messages').select('*').eq('id_client', idClient);
+      if (idSite != null) q = q.eq('id_site', Number(idSite));
+      const { data, error } = await q.order('created_at', { ascending: true });
       if (error) throw error;
       state.messages = data || [];
     } catch (e) { console.error('[sms] loadThread', e); state.error = e.message || String(e); state.messages = []; }
@@ -82,12 +115,19 @@ OD.define('sms', {
     state.messages.sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
   }
   function removeMessageByRow(row) { state.messages = state.messages.filter(m => !((row.message_sid && m.message_sid === row.message_sid) || (row.id != null && m.id === row.id))); }
-  function subscribeRealtime(idClient) {
+  // `postgres_changes` n'accepte qu'UNE condition de filtre : on garde le
+  // client cote serveur et on ecarte les lignes d'une autre concession ici.
+  function subscribeRealtime(idClient, idSite) {
     if (state.channel) { try { sb().removeChannel(state.channel); } catch (e) {} state.channel = null; }
     try {
-      state.channel = sb().channel('sms_thread_' + idClient)
+      state.channel = sb().channel('sms_thread_' + idClient + '_' + (idSite == null ? 'all' : idSite))
         .on('postgres_changes', { event: '*', schema: 'public', table: 'sms_messages', filter: 'id_client=eq.' + idClient },
-          (payload) => { if (payload.eventType === 'DELETE') removeMessageByRow(payload.old || {}); else upsertMessage(payload.new, { reconcileTemp: true }); render(true); })
+          (payload) => {
+            const row = payload.eventType === 'DELETE' ? (payload.old || {}) : (payload.new || {});
+            if (idSite != null && row.id_site != null && Number(row.id_site) !== Number(idSite)) return;
+            if (payload.eventType === 'DELETE') removeMessageByRow(row); else upsertMessage(row, { reconcileTemp: true });
+            render(true);
+          })
         .subscribe();
     } catch (e) { console.warn('[sms] realtime KO', e && e.message); }
   }
@@ -102,7 +142,9 @@ OD.define('sms', {
     if (!toNumber) { state.error = 'Pas de numéro mobile pour ce client.'; render(); return; }
     const agentAuthUid = (window.oropraUser && (window.oropraUser.auth_uid || window.oropraUser.id)) || null;
     const idClient = c.IDVu != null ? c.IDVu : null;
-    const idSite = readVar(SELECTED_SITE_VAR_ID) != null ? readVar(SELECTED_SITE_VAR_ID) : null;
+    // Le site du FIL, fige a l'ouverture : on n'envoie jamais sous une autre
+    // enseigne que celle qu'on a sous les yeux.
+    const idSite = state.site != null ? state.site : null;
     let idCycleCom = null;
     // Cycle com du client : requête directe sur la vue v_contacts_client (source
     // de l'ex-collection WeWeb 097aa7fd, supprimée). On prend le contact le PLUS
@@ -110,11 +152,15 @@ OD.define('sms', {
     // dépendait de son tri ; « le cycle courant » est l'intention.
     if (idClient != null) {
       try {
-        const { data: cc } = await sb()
+        let qc = sb()
           .from('v_contacts_client')
           .select('id_cycle_com, date_contact')
           .eq('idvu', Number(idClient))
-          .not('id_cycle_com', 'is', null)
+          .not('id_cycle_com', 'is', null);
+        // Le cycle appartient au couple client + site : sans ce filtre on
+        // remontait le cycle d'une autre concession.
+        if (idSite != null) qc = qc.eq('id_site', Number(idSite));
+        const { data: cc } = await qc
           .order('date_contact', { ascending: false })
           .limit(1)
           .maybeSingle();
@@ -213,6 +259,7 @@ OD.define('sms', {
     '.sms-row.failed .sms-bubble{background:#e2493f;color:#fff}' +
     '.sms-txt{white-space:pre-wrap}' +
     '.sms-meta{float:right;font-size:10.5px;margin:6px 0 -3px 10px}' +
+    '.sms-site{display:block;font-size:10px;font-weight:700;letter-spacing:.3px;text-transform:uppercase;color:#8a7a5c;margin-bottom:2px}' +
     '.sms-row.out .sms-meta{color:#667781}' +
     '.sms-row.in .sms-meta{color:#667781}' +
     '.sms-del{border:none;background:#fff;color:#e2493f;box-shadow:0 1px 5px rgba(0,0,0,.2);width:28px;height:28px;border-radius:50%;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;flex:0 0 auto;order:-1}' +
@@ -236,6 +283,13 @@ OD.define('sms', {
     '</style>';
 
   /* ---- rendu -------------------------------------------------------------- */
+  // Le sous-titre nomme la concession : c'est elle qui choisit l'agent RCS,
+  // donc l'enseigne sous laquelle le client verra arriver le message.
+  function sousTitre(c) {
+    const tel = (c && c.TEl_MOB) || '';
+    if (state.site != null) return [tel, nomSite(state.site)].filter(Boolean).join(' · ');
+    return [tel, 'toutes concessions — envoi depuis votre site de rattachement'].filter(Boolean).join(' · ');
+  }
   function renderBar() {
     const c = state.client || {};
     return STYLE + '<div class="sms-bar" data-act="restore">' +
@@ -254,6 +308,7 @@ OD.define('sms', {
     return '<div class="sms-row ' + (out ? 'out' : 'in') + (failed ? ' failed' : '') + '">' +
       (selected ? '<button class="sms-del" data-act="del" data-key="' + esc(key) + '" title="Supprimer">' + IC_TRASH + '</button>' : '') +
       '<div class="sms-bubble" data-act="sel" data-key="' + esc(key) + '">' +
+        (state.site == null && m.id_site != null ? '<span class="sms-site">' + esc(nomSite(m.id_site)) + '</span>' : '') +
         '<span class="sms-txt">' + esc(m.body || '') + '</span>' +
         '<span class="sms-meta">' + esc(meta) + '</span>' +
       '</div></div>';
@@ -278,7 +333,7 @@ OD.define('sms', {
     root.innerHTML = STYLE + '<div class="sms-card">' +
       '<div class="sms-head">' +
         '<div class="sms-ava">' + esc(initials(c)) + '</div>' +
-        '<div class="sms-hinfo"><div class="sms-hname">' + esc(clientLabel(c) || 'Client') + '</div><div class="sms-hsub">' + esc(c.TEl_MOB || 'SMS') + '</div></div>' +
+        '<div class="sms-hinfo"><div class="sms-hname">' + esc(clientLabel(c) || 'Client') + '</div><div class="sms-hsub">' + esc(sousTitre(c)) + '</div></div>' +
         '<button class="sms-hbtn" data-act="min" title="Réduire">' + IC_MIN + '</button>' +
         '<button class="sms-hbtn" data-act="close" title="Fermer">' + IC_CLOSE + '</button>' +
       '</div>' +
@@ -351,13 +406,34 @@ OD.define('sms', {
     ensureRoot();
     const c = (opts && opts.client) || readVar(SELECTED_CLIENT_VAR_ID) || {};
     state.open = true; state.minimized = false; state.client = c; state.error = null; state.input = ''; state.selectedKey = null; state._scrolled = false;
+    state.site = siteCourant();
     render();
-    if (c.IDVu != null) { loadThread(c.IDVu).then(() => subscribeRealtime(c.IDVu)); }
+    if (c.IDVu != null) { loadThread(c.IDVu, state.site).then(() => subscribeRealtime(c.IDVu, state.site)); }
     else { state.error = 'Aucun client sélectionné.'; render(); }
+    ecouteSite();
+  }
+  // Changer de concession dans le bandeau pendant que la modale est ouverte
+  // change de conversation : on recharge le fil plutot que de laisser a l'ecran
+  // celui d'une autre enseigne.
+  function ecouteSite() {
+    if (state.unsubSite) { try { state.unsubSite(); } catch (e) {} state.unsubSite = null; }
+    const bus = busSite();
+    if (!bus || typeof bus.onChange !== 'function') return;
+    try {
+      state.unsubSite = bus.onChange(() => {
+        if (!state.open) return;
+        const nouveau = siteCourant();
+        if (Number(nouveau) === Number(state.site) || (nouveau == null && state.site == null)) return;
+        state.site = nouveau; state.selectedKey = null; state._scrolled = false;
+        const c = state.client || {};
+        if (c.IDVu != null) loadThread(c.IDVu, state.site).then(() => subscribeRealtime(c.IDVu, state.site));
+      });
+    } catch (e) { console.warn('[sms] onChange site KO', e && e.message); }
   }
   function closeUi() {
     stopDictation();
     if (state.channel) { try { sb().removeChannel(state.channel); } catch (e) {} state.channel = null; }
+    if (state.unsubSite) { try { state.unsubSite(); } catch (e) {} state.unsubSite = null; }
     state.open = false; state.minimized = false; state.input = ''; state.selectedKey = null;
     const root = getRoot(); if (root) root.innerHTML = '';
     try { wwLib.wwVariable.updateValue(SMS_BODY_VAR_ID, ''); } catch (e) {}
@@ -366,7 +442,7 @@ OD.define('sms', {
 
   window.__SMS_UI__ = {
     open: open, close: closeUi, minimize: setMinimized,
-    refresh: () => { if (state.open && state.client && state.client.IDVu != null) loadThread(state.client.IDVu); }
+    refresh: () => { if (state.open && state.client && state.client.IDVu != null) loadThread(state.client.IDVu, state.site); }
   };
 }
 });
