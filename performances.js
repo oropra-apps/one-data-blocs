@@ -774,6 +774,7 @@ OD.define('performances', {
 #perf-root .pf-shead .title { font-size:13px; font-weight:500; }
 #perf-root .pf-shead .sub { margin-left:auto; font-size:10px; color:var(--blue-lt); }
 #perf-root .pf-c4-note { font-size:11px; color:var(--text-mut); margin:-6px 0 10px; }
+#perf-root .pf-cb-chips { display:flex; gap:6px; flex-wrap:wrap; margin:-4px 0 10px; }
 
 #perf-root .pf-kpi-grid { display:grid; grid-template-columns:repeat(5,1fr); gap:10px; }
 #perf-root .pf-kpi { background:#f5f8fc; border-radius:8px; padding:12px; }
@@ -1357,17 +1358,29 @@ OD.define('performances', {
     }
     html += '</div>';
 
-    html += '<div class="pf-charts">';
-    html += '<div class="pf-card" style="margin-bottom:0">' + shead('var(--blue-dk)', modeVolume() ? 'Volume par indicateur' : 'Réalisé vs Objectif') + '<div class="pf-chart-wrap"><canvas id="pf-c1"></canvas></div></div>';
-    html += '<div class="pf-card" style="margin-bottom:0">' + shead('var(--green)', chart2Title()) + '<div class="pf-chart-wrap"><canvas id="pf-c2"></canvas></div></div>';
-    html += '</div>';
-    if (IS_TC) {
-      const nTc = KPIS_OBJ.filter(k => num(agg[k.o]) > 0).length;
-      if (nTc) {
-        html += '<div class="pf-card">' + shead('var(--orange)', 'Avancement des objectifs — part de chaque vendeur', scopeLabel + (state.vnvo !== 'ALL' ? ' · ' + state.vnvo : '')) +
-          '<div class="pf-c4-note">Chaque barre = réalisé en % de l\'objectif, découpé par vendeur. Trait orange : avancement théorique au prorata du mois (' + Math.round(__prorata * 100) + ' %).</div>' +
-          '<div class="pf-chart-wrap-tc" style="height:' + (nTc * 34 + 96) + 'px"><canvas id="pf-c4"></canvas></div></div>';
-      }
+    if (modeVolume()) {
+      // Grands comptes : pas d'objectif, on garde les volumes.
+      html += '<div class="pf-charts">';
+      html += '<div class="pf-card" style="margin-bottom:0">' + shead('var(--blue-dk)', 'Volume par indicateur') + '<div class="pf-chart-wrap"><canvas id="pf-c1"></canvas></div></div>';
+      html += '<div class="pf-card" style="margin-bottom:0">' + shead('var(--green)', chart2Title()) + '<div class="pf-chart-wrap"><canvas id="pf-c2"></canvas></div></div>';
+      html += '</div>';
+    } else {
+      // 13/10/2026 : deux questions, deux graphiques — « va-t-on y arriver ? »
+      // et « qui fait décrocher l'équipe ? ». Le détail chiffré reste au tableau.
+      const ksA = KPIS_OBJ.filter(k => num(agg[k.o]) > 0);
+      const ksB = ksA.filter(k => !k.derive);
+      if (!ksB.some(k => k.r === state.cbKpi)) state.cbKpi = ksB.length ? ksB[0].r : null;
+      const nVend = vendeursRythme(selRows, state.cbKpi).length;
+      const hA = Math.max(200, ksA.length * 34 + 60), hB = Math.max(200, nVend * 26 + 60);
+      const sub = scopeLabel + (state.vnvo !== 'ALL' ? ' · ' + state.vnvo : '');
+      html += '<div class="pf-charts">';
+      html += '<div class="pf-card" style="margin-bottom:0">' + shead('var(--blue-dk)', 'Où en est-on du mois ?', sub)
+        + '<div class="pf-c4-note">Réalisé en % de l\'objectif · trait orange : rythme attendu à date (' + Math.round(__prorata * 100) + ' %) · barre claire : projection de fin de mois au rythme actuel.</div>'
+        + (ksA.length ? '<div class="pf-chart-wrap-tc" style="height:' + Math.max(hA, hB) + 'px"><canvas id="pf-ca"></canvas></div>' : '<div class="pf-empty">Aucun objectif sur ce périmètre.</div>') + '</div>';
+      html += '<div class="pf-card" style="margin-bottom:0">' + shead('var(--green)', 'Qui est en avance, qui est en retard', sub)
+        + '<div class="pf-cb-chips">' + ksB.map(k => '<span class="pf-chip ' + (state.cbKpi === k.r ? 'active' : '') + '" data-cbkpi="' + esc(k.r) + '">' + esc(k.label) + '</span>').join('') + '</div>'
+        + (nVend ? '<div class="pf-chart-wrap-tc" style="height:' + Math.max(hA, hB) + 'px"><canvas id="pf-cb"></canvas></div>' : '<div class="pf-empty">Aucun vendeur avec un objectif sur cet indicateur.</div>') + '</div>';
+      html += '</div>';
     }
 
     if (mois.length > 1) {
@@ -1600,6 +1613,21 @@ OD.define('performances', {
   // afficher des taux d'atteinte n'a aucun sens. On bascule les deux
   // graphiques sur des volumes.
   function modeVolume() { return IS_TC && state.segment === 'grand_compte'; }
+  // Écart au rythme par vendeur, en unités (commandes…) : réalisé − objectif × prorata.
+  // Seuls les vendeurs (et chefs) qui ont un objectif sur l'indicateur.
+  function vendeursRythme(rows, kr) {
+    const k = KPIS.find(x => x.r === kr); if (!k || !k.o) return [];
+    const par = {};
+    for (const r of rows) {
+      if (!estVendeurPerf(r)) continue;
+      const id = String(vendeurId(r));
+      if (!par[id]) par[id] = { nom: r.nom_complet_affichage || r.nomComplet || ('Vendeur ' + id), r: 0, o: 0 };
+      par[id].r += num(r[k.r]); par[id].o += num(r[k.o]);
+    }
+    return Object.values(par).filter(v => v.o > 0)
+      .map(v => Object.assign(v, { ecart: Math.round((v.r - v.o * __prorata) * 10) / 10 }))
+      .sort((a, b) => a.ecart - b.ecart || a.nom.localeCompare(b.nom, 'fr'));
+  }
   function chart2Title() {
     const rows = rowsForSelection();
     const d = effectiveChildDim(rows);
@@ -1746,86 +1774,118 @@ OD.define('performances', {
       });
     }
 
-    const c4 = doc.getElementById('pf-c4');
-    if (c4) {
-      // 13/10/2026 : en % de l'OBJECTIF (plus en % des commandes), barres
-      // empilées par vendeur, trait de l'avancement théorique au prorata.
-      // Même périmètre que le taux d'atteinte : vendeurs (et chefs ayant un
-      // objectif) des deux côtés, l'encadrement sans objectif reste à part.
+    const fmtE = v => (v > 0 ? '+' : (v < 0 ? '−' : '')) + String(Math.abs(Math.round(v * 10) / 10)).replace('.', ',');
+    const pr = __prorata;
+    const statut = (r, o) => {
+      if (o <= 0) return '#7a9cc4';
+      if (pr < 0.03) return '#2a5ea9';
+      const x = (r / o) / pr;            // 1 = pile dans le rythme
+      return x >= 1.1 ? '#53bda7' : (x >= 0.9 ? '#fac055' : '#e07a6e');
+    };
+
+    // A — Où en est-on du mois ?
+    const ca = doc.getElementById('pf-ca');
+    if (ca) {
       const ks = KPIS_OBJ.filter(k => num(agg[k.o]) > 0);
-      const PAL = ['#2a5ea9', '#53bda7', '#fac055', '#7a9cc4', '#2c7a68', '#e0a93a', '#acc5e4', '#1f4a87', '#8fd3c3', '#f6d58e', '#3b78c9', '#c9d8ee'];
-      const parV = {};
-      for (const r of rows) {
-        if (!estVendeurPerf(r)) continue;
-        const id = String(vendeurId(r));
-        if (!parV[id]) parV[id] = { nom: r.nom_complet_affichage || r.nomComplet || ('Vendeur ' + id), agg: emptyAgg() };
-        addAgg(parV[id].agg, r);
-      }
-      const vends = Object.values(parV)
-        .filter(v => ks.some(k => num(v.agg[k.r]) > 0))
-        .sort((a, b) => num(b.agg[KPI_CDE.r]) - num(a.agg[KPI_CDE.r]) || a.nom.localeCompare(b.nom, 'fr'));
-      const datasets = vends.map((v, idx) => ({
-        label: v.nom,
-        data: ks.map(k => Math.round(1000 * num(v.agg[k.r]) / num(agg[k.o])) / 10),
-        brut: ks.map(k => num(v.agg[k.r])),
-        backgroundColor: PAL[idx % PAL.length],
-        borderColor: '#ffffff', borderWidth: { right: 1 },
-        stack: 'obj', maxBarThickness: 22
-      }));
-      const totaux = ks.map(k => num(agg[k.o]) > 0 ? Math.round(100 * num(agg[k.r]) / num(agg[k.o])) : 0);
-      const theo = Math.round(__prorata * 100);
-      const xmax = Math.max(100, theo, ...totaux) + 12;
-      const pluginC4 = {
-        id: 'pfObjectifs',
+      const rea = ks.map(k => num(agg[k.r])), obj = ks.map(k => num(agg[k.o]));
+      const pct = ks.map((k, i) => Math.round(100 * rea[i] / obj[i]));
+      const proj = ks.map((k, i) => pr >= 0.03 ? Math.round(rea[i] / pr) : null);
+      const projPct = ks.map((k, i) => proj[i] == null ? 0 : Math.round(100 * proj[i] / obj[i]));
+      const theo = Math.round(pr * 100);
+      const xmax = Math.min(200, Math.max(110, theo + 10, ...pct.map(v => v + 10), ...projPct.map(v => Math.min(v, 160))));
+      const pluginA = {
+        id: 'pfMois',
         afterDatasetsDraw(ch) {
           const g = ch.ctx, xs = ch.scales.x, ys = ch.scales.y;
           g.save();
-          // Valeur de chaque part, si le segment est assez large pour la porter
-          ch.data.datasets.forEach((ds, di) => {
-            const meta = ch.getDatasetMeta(di); if (meta.hidden) return;
-            meta.data.forEach((bar, bi) => {
-              const v = ds.data[bi]; if (!v) return;
-              const w = Math.abs(bar.x - bar.base);
-              if (w < 26) return;
-              g.fillStyle = (ds.backgroundColor === '#fac055' || ds.backgroundColor === '#acc5e4' || ds.backgroundColor === '#f6d58e' || ds.backgroundColor === '#8fd3c3' || ds.backgroundColor === '#c9d8ee') ? '#1f4a87' : '#ffffff';
-              g.font = '600 10px "Nunito Sans", sans-serif'; g.textAlign = 'center'; g.textBaseline = 'middle';
-              g.fillText(Math.round(v) + '%', (bar.x + bar.base) / 2, bar.y);
-            });
+          ks.forEach((k, i) => {
+            const y = ys.getPixelForValue(i);
+            const xEnd = xs.getPixelForValue(Math.min(Math.max(pct[i], projPct[i]), xmax));
+            const manque = Math.round((rea[i] - obj[i] * pr) * 10) / 10;
+            let t = rea[i] + ' / ' + obj[i];
+            if (proj[i] != null) t += ' · proj. ' + proj[i];
+            if (pr >= 0.03) t += ' · ' + fmtE(manque) + ' vs rythme';
+            g.fillStyle = '#1f4a87'; g.font = '700 10.5px "Nunito Sans", sans-serif'; g.textAlign = 'left'; g.textBaseline = 'middle';
+            const w = g.measureText(t).width;
+            const x = (xEnd + 6 + w > ch.chartArea.right) ? ch.chartArea.right - w : xEnd + 6;
+            g.fillText(t, x, y);
           });
-          // Total au bout de la barre
-          g.fillStyle = '#1f4a87'; g.font = '700 11px "Nunito Sans", sans-serif'; g.textAlign = 'left'; g.textBaseline = 'middle';
-          ks.forEach((k, bi) => g.fillText(totaux[bi] + ' %  ·  ' + num(agg[k.r]) + ' / ' + num(agg[k.o]), xs.getPixelForValue(Math.min(totaux[bi], xmax)) + 6, ys.getPixelForValue(bi)));
-          // Avancement théorique au prorata temporis
           const x = xs.getPixelForValue(theo);
-          g.strokeStyle = '#fac055'; g.lineWidth = 2; g.setLineDash([5, 4]);
+          g.strokeStyle = '#e0a93a'; g.lineWidth = 2; g.setLineDash([5, 4]);
           g.beginPath(); g.moveTo(x, ys.top - 4); g.lineTo(x, ys.bottom); g.stroke(); g.setLineDash([]);
           g.fillStyle = '#c98a10'; g.font = '700 10px "Nunito Sans", sans-serif'; g.textAlign = 'center'; g.textBaseline = 'bottom';
-          g.fillText('théorique ' + theo + ' %', x, ys.top - 6);
+          g.fillText('rythme ' + theo + ' %', x, ys.top - 6);
           g.restore();
         }
       };
-      __c4 = new Chart(c4.getContext('2d'), {
+      __c1 = new Chart(ca.getContext('2d'), {
         type: 'bar',
-        data: { labels: ks.map(k => k.label), datasets },
-        plugins: [pluginC4],
+        data: {
+          labels: ks.map(k => k.label),
+          datasets: [
+            { label: 'Réalisé', data: pct, backgroundColor: ks.map((k, i) => statut(rea[i], obj[i])), borderRadius: 3, barPercentage: 0.55, categoryPercentage: 1, grouped: false, order: 1 },
+            { label: 'Projection fin de mois', data: projPct.map(v => Math.min(v, xmax)), backgroundColor: ks.map((k, i) => statut(rea[i], obj[i]) + '40'), borderRadius: 3, barPercentage: 0.55, categoryPercentage: 1, grouped: false, order: 2 }
+          ]
+        },
+        plugins: [pluginA],
         options: {
           indexAxis: 'y', responsive: true, maintainAspectRatio: false,
-          layout: { padding: { top: 18, right: 8 } },
+          layout: { padding: { top: 16, right: 6 } },
           plugins: {
-            legend: { display: true, position: 'bottom', labels: { boxWidth: 10, boxHeight: 10, font: { size: 10 }, color: '#4a6a8a' } },
-            tooltip: {
-              callbacks: {
-                title: it => it.length ? it[0].label : '',
-                label: i => {
-                  const ds = i.dataset, k = ks[i.dataIndex];
-                  return ds.label + ' : ' + ds.brut[i.dataIndex] + ' sur un objectif de ' + num(agg[k.o]) + ' · ' + ds.data[i.dataIndex] + ' %';
-                }
-              }
-            }
+            legend: { display: false },
+            tooltip: { callbacks: { label: i => i.datasetIndex === 0
+              ? 'Réalisé ' + rea[i.dataIndex] + ' / ' + obj[i.dataIndex] + ' (' + pct[i.dataIndex] + ' %)'
+              : 'Projection fin de mois ' + (proj[i.dataIndex] == null ? '—' : proj[i.dataIndex] + ' (' + projPct[i.dataIndex] + ' %)') } }
           },
           scales: {
-            x: { stacked: true, beginAtZero: true, max: xmax, ticks: { font: { size: 9 }, color: '#7a9cc4', callback: v => v + '%' }, grid: { color: '#eaf0f9' } },
-            y: { stacked: true, ticks: { font: { size: 11 }, color: '#4a6a8a' }, grid: { display: false } }
+            x: { beginAtZero: true, max: xmax, ticks: { font: { size: 9 }, color: '#7a9cc4', callback: v => v + '%' }, grid: { color: '#eaf0f9' } },
+            y: { ticks: { font: { size: 11 }, color: '#4a6a8a' }, grid: { display: false } }
+          }
+        }
+      });
+    }
+
+    // B — Qui est en avance, qui est en retard (en unités, pas en %)
+    const cb = doc.getElementById('pf-cb');
+    if (cb) {
+      const v = vendeursRythme(rows, state.cbKpi);
+      const k = KPIS.find(x => x.r === state.cbKpi) || KPI_CDE;
+      const unite = /^Cde/.test(k.label) ? 'cdes' : '';
+      const ext = Math.max(2, ...v.map(x => Math.abs(x.ecart))) * 1.35;
+      const pluginB = {
+        id: 'pfRythme',
+        afterDatasetsDraw(ch) {
+          const g = ch.ctx, xs = ch.scales.x, ys = ch.scales.y;
+          g.save();
+          g.strokeStyle = '#7a9cc4'; g.lineWidth = 1;
+          const x0 = xs.getPixelForValue(0);
+          g.beginPath(); g.moveTo(x0, ys.top); g.lineTo(x0, ys.bottom); g.stroke();
+          v.forEach((x, i) => {
+            const y = ys.getPixelForValue(i);
+            const t = fmtE(x.ecart) + (unite ? ' ' + unite : '') + '  (' + x.r + ' / ' + x.o + ')';
+            g.font = '700 10.5px "Nunito Sans", sans-serif'; g.textBaseline = 'middle';
+            g.fillStyle = x.ecart < -0.5 ? '#b23433' : (x.ecart > 0.5 ? '#2c7a68' : '#8a6410');
+            const xb = xs.getPixelForValue(x.ecart);
+            if (x.ecart < 0) { g.textAlign = 'right'; g.fillText(t, Math.min(xb, x0) - 6, y); }
+            else { g.textAlign = 'left'; g.fillText(t, Math.max(xb, x0) + 6, y); }
+          });
+          g.restore();
+        }
+      };
+      __c2 = new Chart(cb.getContext('2d'), {
+        type: 'bar',
+        data: { labels: v.map(x => x.nom), datasets: [{ label: 'Écart au rythme', data: v.map(x => x.ecart),
+          backgroundColor: v.map(x => x.ecart < -0.5 ? '#e07a6e' : (x.ecart > 0.5 ? '#53bda7' : '#fac055')), borderRadius: 3, barPercentage: 0.6, minBarLength: 3 }] },
+        plugins: [pluginB],
+        options: {
+          indexAxis: 'y', responsive: true, maintainAspectRatio: false,
+          plugins: { legend: { display: false }, tooltip: { callbacks: { label: i => {
+            const x = v[i.dataIndex];
+            return x.r + ' réalisé(s) · attendu à date ' + (Math.round(x.o * pr * 10) / 10).toString().replace('.', ',') + ' · objectif du mois ' + x.o;
+          } } } },
+          scales: {
+            x: { min: -ext, max: ext, ticks: { font: { size: 9 }, color: '#7a9cc4', callback: val => fmtE(val) }, grid: { color: '#eaf0f9' } },
+            y: { ticks: { font: { size: 11 }, color: '#4a6a8a' }, grid: { display: false } }
           }
         }
       });
@@ -2201,6 +2261,7 @@ OD.define('performances', {
     root.querySelectorAll('[data-vuetc]').forEach(b => b.addEventListener('click', () => { state.vueTC = b.getAttribute('data-vuetc'); render(); }));
     root.querySelectorAll('[data-seg]').forEach(b => b.addEventListener('click', () => { state.segment = b.getAttribute('data-seg'); render(); }));
     root.querySelectorAll('[data-mois]').forEach(b => b.addEventListener('click', () => { state.mois = b.getAttribute('data-mois'); render(); }));
+    root.querySelectorAll('[data-cbkpi]').forEach(b => b.addEventListener('click', () => { state.cbKpi = b.getAttribute('data-cbkpi'); render(); }));
     const clear = root.querySelector('#pf-clear');
     if (clear) clear.addEventListener('click', () => { state.selection = { level: 'all', key: null, label: 'Tout le périmètre' }; render(); });
 
