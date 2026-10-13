@@ -278,6 +278,9 @@ OD.define('kanban', {
       const r = await supabase.rpc('get_kanban_cards', { p_id_user: state.vendeurId, p_date_from: state.period.from, p_date_to: state.period.to, p_id_site: state.busSite != null ? Number(state.busSite) : null });
       if (r.error) throw r.error;
       state.cards = normalizeCards(r.data || []);
+      // 13/10/2026 : les cartes s'affichent TOUT DE SUITE ; les pastilles BACS
+      // (lecture REST sous RLS, ~300 ms) arrivent ensuite et redessinent.
+      state.loading = false; render();
       // Statut BACS et n° de commande : lus à part, sur les seules cartes
       // BACS. `get_kanban_cards` renvoie une table au format figé ; y ajouter
       // une colonne obligerait à la recréer avec ses droits.
