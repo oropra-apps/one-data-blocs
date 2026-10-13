@@ -1,5 +1,7 @@
 // ============================================================================
-//  BILATÉRALES — v17 (14/10/2026, Team Colin)
+//  BILATÉRALES — v18 (14/10/2026, Team Colin) — v18 : périmètre sans défilement sur mobile ;
+//     priorité : retard d'objectif rapporté à l'attendu à date
+//  v17
 //   - Cadence de la direction : 1 bilatérale par semaine et par vendeur
 //     minimum (cadenceJ 7, retard au-delà de 10 j) ; période par défaut =
 //     semaine en cours, preset « Cette semaine ».
@@ -803,7 +805,11 @@ function prioDetail(c) {
   if (K && K.obj_cdes > 0) {
     const att = K.obj_cdes * prorataMois();
     r.attendu = att; r.ecart = K.cdes - att;
-    r.comps.objectif = clamp01((att - K.cdes) / K.obj_cdes);
+    // v18 : écart rapporté à l'ATTENDU à date (et non à l'objectif du mois
+    // entier, qui écrasait les retards en milieu de mois : 0 commande sur
+    // 8,1 attendues ne pesait que 45 % et passait derrière un retard moindre).
+    // Plancher à 30 % de l'objectif pour ne pas dramatiser les premiers jours.
+    r.comps.objectif = clamp01((att - K.cdes) / Math.max(att, K.obj_cdes * 0.3));
     r.txt.objectif = (r.ecart < 0 ? 'Retard de ' + fmtNb(-r.ecart) + ' cmd sur l’objectif' : 'En avance de ' + fmtNb(r.ecart) + ' cmd') +
       ' (' + fmtNb(K.cdes, 0) + ' / ' + fmtNb(K.obj_cdes, 0) + ', attendu à date ' + fmtNb(att) + ')';
   } else { r.comps.objectif = 0; }
@@ -1016,7 +1022,7 @@ function renderPrioVendeurs() {
       '<div class="nb-acts"><button class="pr-plan" data-plan-vend="' + d0.c.id_user + '|' + d0.c.id_site + '">Planifier</button>' +
       (aFaire.length > 1 ? '<button class="nb-batch" data-batch="1">📅 Planifier les ' + Math.min(5, aFaire.length) + ' premiers</button>' : '') + '</div></div></div>';
   }
-  h += '<details class="hint-det"><summary>Comment est calculé le classement ?</summary><div>Score sur 100 : <b>40</b> retard sur l’objectif de commandes au prorata du mois · <b>25</b> ' +
+  h += '<details class="hint-det"><summary>Comment est calculé le classement ?</summary><div>Score sur 100 : <b>40</b> retard de commandes rapporté à l’attendu à date (0 commande sur 8 attendues = 40 points) · <b>25</b> ' +
     (state.txMesurable === false ? 'part du portefeuille à relancer (> 30 j) — la transformation n’est pas mesurable tant que les affaires perdues ne sont pas enregistrées' : 'baisse de la transformation sur ' + BIL_CFG.transfoJours + ' jours') +
     ' · <b>20</b> ancienneté de la dernière bilatérale (plafond ' + BIL_CFG.retardJ + ' j) · <b>15</b> discipline : engagements non tenus, relances en retard, leads non contactés depuis 48 h. Les vendeurs dont la bilatérale est déjà programmée passent en bas de liste. La raison qui pèse le plus est affichée en bleu.</div></details>';
 
@@ -2285,6 +2291,11 @@ const STYLE = '<style>' +
 '#bil-root.bil-narrow .tbar{min-width:60px}' +
 '#bil-root.bil-narrow .pt-tree th:nth-child(2),#bil-root.bil-narrow .pt-tree td:nth-child(2),#bil-root.bil-narrow .pt-tree th:nth-child(4),#bil-root.bil-narrow .pt-tree td:nth-child(4),#bil-root.bil-narrow .pt-tree th:nth-child(6),#bil-root.bil-narrow .pt-tree td:nth-child(6){display:none}' +
 '#bil-root.bil-narrow .pt-shead .sub{display:none}' +
+'#bil-root.bil-narrow .pt-tree th{white-space:normal;padding:6px;line-height:1.25}' +
+'#bil-root.bil-narrow .pt-tree td{padding:6px}' +
+'#bil-root.bil-narrow .pt-tree td:first-child{max-width:150px}' +
+'#bil-root.bil-narrow .pt-cell{min-width:72px}' +
+'#bil-root.bil-narrow .pt-tree .lv-affaire td:first-child{padding-left:14px}#bil-root.bil-narrow .pt-tree .lv-site td:first-child{padding-left:22px}#bil-root.bil-narrow .pt-tree .lv-vendeur td:first-child{padding-left:30px}#bil-root.bil-narrow .pt-tree .lv-site.flat td:first-child{padding-left:6px}#bil-root.bil-narrow .pt-tree .lv-vendeur.flat td:first-child{padding-left:20px}' +
 '#bil-root.bil-narrow .pt-card{padding:12px}' +
 '#bil-root.bil-narrow .suivi-cov{display:block;margin:4px 0 0}' +
 '#bil-root.bil-narrow .site-title{flex-wrap:wrap}' +
