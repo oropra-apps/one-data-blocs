@@ -68,7 +68,7 @@ const VAR_ID_BILATE_REAL = '851fed59-9397-41ae-b91d-26daa2ff960a';
 //            propositions ne veut rien dire).
 // Surcharge possible par ctx.tenant.config.bilaterales ou window.__OD_BIL_CFG.
 const BIL_CFG = (function () {
-  const base = { cadenceJ: 30, retardJ: 45, minVolumeTransfo: 8 };
+  const base = { cadenceJ: 30, retardJ: 45, minVolumeTransfo: 8, transfoJours: 90 };
   try { Object.assign(base, (ctx && ctx.tenant && ctx.tenant.config && ctx.tenant.config.bilaterales) || {}); } catch (e) {}
   try { Object.assign(base, window.__OD_BIL_CFG || {}); } catch (e) {}
   return base;
@@ -240,7 +240,8 @@ async function loadData() {
     // Best effort : volumes de transfo et chiffres du tableau de bord. Leur
     // absence (SQL non appliqué, autre tenant) ne bloque jamais la page.
     const souple = (pr) => Promise.resolve(pr).catch(e => ({ data: null, error: e }));
-    const [rVol, rDash] = await Promise.all([
+    const [rTx, rVol, rDash] = await Promise.all([
+      souple(supabase.rpc('bilat_transfo', { p_viewer_id_user: viewer, p_jours: BIL_CFG.transfoJours })),
       souple(supabase.rpc('bilat_transfo_volumes', { p_viewer_id_user: viewer, p_date_from: state.period.from, p_date_to: state.period.to })),
       souple(lireDash(auj.getFullYear(), auj.getMonth() + 1))
     ]);
@@ -279,10 +280,27 @@ async function loadData() {
       const vol = {};
       if (rVol && !rVol.error && Array.isArray(rVol.data)) rVol.data.forEach(v => { vol[Number(v.id_user)] = v; });
       state.volumesOk = !!(rVol && !rVol.error);
+      // v8 : transformation STABLE (bilat_transfo) quand elle est disponible.
+      // L'ancienne comptait les propositions par date de mise à jour : un
+      // traitement en masse (549 propositions le 17/09/2026) faisait basculer
+      // la « période précédente » d'un vendeur d'un jour à l'autre.
+      const tx = {};
+      state.transfoStable = !!(rTx && !rTx.error && Array.isArray(rTx.data));
+      if (state.transfoStable) rTx.data.forEach(v => { tx[Number(v.id_user)] = v; });
+      const taux = (g, t) => (t > 0 ? Math.round(1000 * g / t) / 10 : null);
       state.cadence.forEach(c => {
-        const v = vol[c.id_user];
-        c.tx_tot_actuel = v ? Number(v.tot_actuel || 0) : null;
-        c.tx_tot_precedent = v ? Number(v.tot_precedent || 0) : null;
+        if (state.transfoStable) {
+          const v = tx[c.id_user];
+          const g1 = v ? Number(v.gagnees_actuel || 0) : 0, t1 = v ? Number(v.tranchees_actuel || 0) : 0;
+          const g0 = v ? Number(v.gagnees_precedent || 0) : 0, t0 = v ? Number(v.tranchees_precedent || 0) : 0;
+          c.transfo_actuel = taux(g1, t1); c.transfo_precedent = taux(g0, t0);
+          c.tx_tot_actuel = t1; c.tx_tot_precedent = t0;
+          c.tx_ouvertes = v ? Number(v.ouvertes_actuel || 0) : 0;
+        } else {
+          const v = vol[c.id_user];
+          c.tx_tot_actuel = v ? Number(v.tot_actuel || 0) : null;
+          c.tx_tot_precedent = v ? Number(v.tot_precedent || 0) : null;
+        }
         enrichirTransfo(c);
       });
     }
@@ -389,12 +407,14 @@ function enrichirTransfo(c) {
   c.transfo_hausse = !!(c.tx_signif && c.tx_signif_prec && c.transfo_actuel != null && c.transfo_precedent != null
                         && c.transfo_actuel > c.transfo_precedent + 5);
 }
+function txUnite() { return state.transfoStable ? 'affaires tranchées' : 'prop.'; }
+function txFenetre() { return state.transfoStable ? ' ' + BIL_CFG.transfoJours + ' j' : ''; }
 function transfoTexte(c) {
-  if (!c || c.transfo_actuel == null) return 'Transfo : pas de proposition sur la période';
-  if (!c.tx_signif) return 'Transfo : volume insuffisant' + (c.tx_tot_actuel != null ? ' (' + c.tx_tot_actuel + ' prop.)' : '');
-  let t = 'Transfo ' + fmtNb(c.transfo_actuel) + ' %';
-  if (c.tx_signif_prec && c.transfo_precedent != null) t += ' (' + fmtNb(c.transfo_precedent) + ' % avant)';
-  if (c.tx_tot_actuel != null) t += ' · ' + c.tx_tot_actuel + ' prop.';
+  if (!c || c.transfo_actuel == null) return 'Transfo' + txFenetre() + ' : aucune affaire ' + (state.transfoStable ? 'tranchée' : 'sur la période');
+  if (!c.tx_signif) return 'Transfo' + txFenetre() + ' : volume insuffisant' + (c.tx_tot_actuel != null ? ' (' + c.tx_tot_actuel + ' ' + txUnite() + ')' : '');
+  let t = 'Transfo' + txFenetre() + ' ' + fmtNb(c.transfo_actuel) + ' %';
+  if (c.tx_signif_prec && c.transfo_precedent != null) t += ' (' + fmtNb(c.transfo_precedent) + ' % ' + (state.transfoStable ? 'les ' + BIL_CFG.transfoJours + ' j d’avant' : 'avant') + ')';
+  if (c.tx_tot_actuel != null) t += ' · ' + c.tx_tot_actuel + ' ' + txUnite();
   return t;
 }
 
@@ -661,7 +681,7 @@ function prioDetail(c) {
   if (c.transfo_baisse && c.transfo_precedent > 0) {
     const poidsVol = Math.min(1, (c.tx_tot_actuel != null ? c.tx_tot_actuel : BIL_CFG.minVolumeTransfo) / 20);
     r.comps.transfo = clamp01((c.transfo_precedent - c.transfo_actuel) / c.transfo_precedent) * poidsVol;
-    r.txt.transfo = 'Transfo ' + fmtNb(c.transfo_precedent) + ' % → ' + fmtNb(c.transfo_actuel) + ' %';
+    r.txt.transfo = 'Transfo' + txFenetre() + ' ' + fmtNb(c.transfo_precedent) + ' % → ' + fmtNb(c.transfo_actuel) + ' %';
   } else { r.comps.transfo = 0; }
   // Ancienneté
   const j = c.jours_depuis_bilat;
@@ -1037,7 +1057,7 @@ function vendeurTenueCell(c){
 }
 function vendeurTransfoCell(c){
   if(c.transfo_actuel==null) return '<div class="vtf na" title="Aucune proposition sur la période">—</div>';
-  if(!c.tx_signif) return '<div class="vtf na" title="'+esc(transfoTexte(c))+'">trop peu'+(c.tx_tot_actuel!=null?'<span class="vtf-n">'+c.tx_tot_actuel+' prop.</span>':'')+'</div>';
+  if(!c.tx_signif) return '<div class="vtf na" title="'+esc(transfoTexte(c))+'">trop peu'+(c.tx_tot_actuel!=null?'<span class="vtf-n">'+c.tx_tot_actuel+' '+(state.transfoStable?'tranchées':'prop.')+'</span>':'')+'</div>';
   const cls=c.transfo_hausse?'up':(c.transfo_baisse?'down':'flat'), ar=c.transfo_hausse?'↗':(c.transfo_baisse?'↘':'→');
   return '<div class="vtf '+cls+'" title="'+esc(transfoTexte(c))+'">'+fmtNb(c.transfo_actuel)+' % '+ar+
     (c.tx_signif_prec&&c.transfo_precedent!=null?'<span class="vtf-n">'+fmtNb(c.transfo_precedent)+' % avant</span>':'')+'</div>';
@@ -1059,7 +1079,7 @@ function sortVendeurs(list){
 function vendeurTable(titre, couleur, vlist){
   if(!vlist.length) return '';
   let t='<div class="bil-cat-title" style="color:'+couleur+'">'+titre+' <span class="bil-cat-n">'+vlist.length+' vendeur'+(vlist.length>1?'s':'')+'</span></div>';
-  t+='<div class="bil-hscroll"><div class="vtbl"><div class="vrow vthead"><div class="vth">Vendeur</div><div class="vth c-ryt">Fréquence · dernière / prochaine</div><div class="vth">Engagements tenus · 6 mois</div><div class="vth c-tf">Transformation</div><div class="vth"></div></div>';
+  t+='<div class="bil-hscroll"><div class="vtbl"><div class="vrow vthead"><div class="vth">Vendeur</div><div class="vth c-ryt">Fréquence · dernière / prochaine</div><div class="vth">Engagements tenus · 6 mois</div><div class="vth c-tf">Transformation'+txFenetre()+'</div><div class="vth"></div></div>';
   vlist.forEach(c=>{
     t+='<div class="vrow" data-vbil="'+c.id_user+'|'+c.id_site+'">'+
       '<div class="vname">'+esc(c.nom_vendeur)+(c.vn_vo?'<span class="vcat">'+esc(c.vn_vo)+'</span>':'')+'</div>'+
@@ -1078,7 +1098,9 @@ function vendeursLegend(){
     '<span class="lg"><span class="sw" style="background:#e24b4a"></span>Non tenu</span>'+
     '<span class="lg"><span class="sw" style="background:#d8dfe9"></span>En cours (pas encore pointé)</span>'+
     '<span class="lg">· Engagements tenus = (tenus + ½ partiels) / engagements pointés, sur 6 mois</span>'+
-    '<span class="lg">· Transformation = affaires gagnées / propositions de la période, affichée à partir de '+BIL_CFG.minVolumeTransfo+' propositions</span></div>';
+    '<span class="lg">· '+(state.transfoStable
+      ? 'Transformation = affaires gagnées (commande signée) / affaires tranchées (gagnées + perdues), sur les propositions créées ces '+BIL_CFG.transfoJours+' derniers jours, comparée aux '+BIL_CFG.transfoJours+' jours d’avant'
+      : 'Transformation = affaires gagnées / propositions de la période')+', affichée à partir de '+BIL_CFG.minVolumeTransfo+' affaires</span></div>';
 }
 function suiviSortBar(){
   const s=state.suiviSort||'tenue';
@@ -2224,9 +2246,10 @@ function R_objectif(rea, obj){
 }
 function R_transfoSous(c){
   if(!c) return 'période en cours';
-  if(c.transfo_actuel==null) return 'aucune proposition sur la période';
-  if(!c.tx_signif) return 'volume insuffisant'+(c.tx_tot_actuel!=null?' ('+c.tx_tot_actuel+' prop.)':'');
-  return (c.tx_signif_prec&&c.transfo_precedent!=null?fmtNb(c.transfo_precedent)+' % la période précédente':'gagnées / propositions')+(c.tx_tot_actuel!=null?' · '+c.tx_tot_actuel+' prop.':'');
+  if(c.transfo_actuel==null) return state.transfoStable ? 'aucune affaire tranchée sur '+BIL_CFG.transfoJours+' j' : 'aucune proposition sur la période';
+  if(!c.tx_signif) return 'volume insuffisant'+(c.tx_tot_actuel!=null?' ('+c.tx_tot_actuel+' '+txUnite()+')':'');
+  const avant = c.tx_signif_prec&&c.transfo_precedent!=null ? fmtNb(c.transfo_precedent)+' % '+(state.transfoStable?'les '+BIL_CFG.transfoJours+' j d’avant':'la période précédente') : 'gagnées / tranchées';
+  return avant+(c.tx_tot_actuel!=null?' · '+c.tx_tot_actuel+' '+txUnite():'')+(state.transfoStable&&c.tx_ouvertes?' · '+c.tx_ouvertes+' encore ouvertes':'');
 }
 function R_partEtat(p){ const x=R.parts[p]; return !x ? 'load' : x.st; }
 function R_kpis(){
@@ -2245,7 +2268,7 @@ function R_kpis(){
   h+='<div class="kpi clik'+on('fi')+'" data-rkpi="fi"><div class="k-l">Financements</div><div class="k-v" style="color:'+colObj(fi)+'">'+v(K.fi)+(fi.obj?'<span class="k-of"> / '+fmtNb(fi.obj,0)+'</span>':'')+'</div><div class="k-s">'+(dashOk?(fi.att==null?'pas d’objectif saisi':'attendu à date '+fmtNb(fi.att)):'')+'</div></div>';
   const c=R.cad;
   const txCol = !c||!c.tx_signif ? '#888780' : (c.transfo_baisse?'#b23433':(c.transfo_hausse?'#2c7a68':'#2a5ea9'));
-  h+='<div class="kpi mute"><div class="k-l">Transformation</div><div class="k-v" style="color:'+txCol+'">'+(c&&c.tx_signif&&c.transfo_actuel!=null?fmtNb(c.transfo_actuel)+' %':'—')+'</div><div class="k-s">'+esc(R_transfoSous(c))+'</div></div>';
+  h+='<div class="kpi mute"><div class="k-l">Transformation'+txFenetre()+'</div><div class="k-v" style="color:'+txCol+'">'+(c&&c.tx_signif&&c.transfo_actuel!=null?fmtNb(c.transfo_actuel)+' %':'—')+'</div><div class="k-s">'+esc(R_transfoSous(c))+'</div></div>';
   h+='<div class="kpi clik'+on('pipeline')+'" data-rkpi="pipeline"><div class="k-l">Affaires en cours</div><div class="k-v" style="color:#2a5ea9">'+v(K.pipe_affaires)+'</div><div class="k-s">'+(dashOk?fmtNb(K.pipe_a_relancer,0)+' à relancer (> 30 j)':'')+'</div></div>';
   h+='<div class="kpi clik'+on('leads')+'" data-rkpi="leads"><div class="k-l">Leads jamais contactés</div><div class="k-v" style="color:'+((K.leads_jamais||0)>0?'#b23433':'#2c7a68')+'">'+v(K.leads_jamais)+'</div><div class="k-s">'+(dashOk?'dont '+fmtNb(K.leads_jamais_48h,0)+' depuis plus de 48 h':'')+'</div></div>';
   h+='<div class="kpi clik'+on('rdv')+'" data-rkpi="rdv"><div class="k-l">RDV à venir</div><div class="k-v" style="color:#2a5ea9">'+v(K.rdv_a_venir)+(D.nbRetardRdv>0?' <span class="k-alert">⚠ '+D.nbRetardRdv+'</span>':'')+'</div><div class="k-s">'+(dashOk?fmtNb(K.rdv_tenus,0)+' tenus ce mois':'')+(D.nbRetardRdv>0?' · '+D.nbRetardRdv+' sans compte rendu':'')+'</div></div>';
@@ -2384,7 +2407,7 @@ function R_constats(){
     const fi=R_objectif(K.fi,K.obj_fi);
     if(fi.obj) out.push('Financements : '+fmtNb(fi.rea,0)+' sur '+fmtNb(fi.obj,0)+' (attendu à date '+fmtNb(fi.att)+').');
   }
-  if(c && c.tx_signif && c.transfo_actuel!=null) out.push('Transformation : '+fmtNb(c.transfo_actuel)+' %'+(c.tx_signif_prec&&c.transfo_precedent!=null?' contre '+fmtNb(c.transfo_precedent)+' % la période précédente':'')+(c.tx_tot_actuel!=null?', sur '+c.tx_tot_actuel+' propositions':'')+'.');
+  if(c && c.tx_signif && c.transfo_actuel!=null) out.push('Transformation'+(state.transfoStable?' sur '+BIL_CFG.transfoJours+' jours':'')+' : '+fmtNb(c.transfo_actuel)+' %'+(c.tx_signif_prec&&c.transfo_precedent!=null?' contre '+fmtNb(c.transfo_precedent)+' % '+(state.transfoStable?'les '+BIL_CFG.transfoJours+' jours d’avant':'la période précédente'):'')+(c.tx_tot_actuel!=null?', sur '+c.tx_tot_actuel+' '+(state.transfoStable?'affaires tranchées':'propositions'):'')+'.');
   if(K){
     const bits=[];
     bits.push(fmtNb(K.pipe_affaires,0)+' affaires en cours dont '+fmtNb(K.pipe_a_relancer,0)+' à relancer (plus de 30 j)');
