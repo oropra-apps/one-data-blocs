@@ -978,8 +978,8 @@ OD.define('agenda', {
 #agenda-ov .agm-foot-col{display:flex;flex-direction:column;gap:8px}
 #agenda-ov .agm-foot-row{display:flex;gap:10px}
 #agenda-ov .agm-foot-row .agm-save{flex:1}
-#agenda-ov .agm-now{width:100%;border:1.5px solid #7e57c2;border-radius:10px;padding:11px;background:#fff;color:#5b3a9e;font-family:inherit;font-weight:800;font-size:13.5px;cursor:pointer;transition:background .15s}
-#agenda-ov .agm-now:hover{background:rgba(126,87,194,.08)}
+#agenda-ov .agm-now{width:100%;border:1.5px solid #2a5ea9;border-radius:10px;padding:11px;background:#fff;color:#1F4A85;font-family:inherit;font-weight:800;font-size:13.5px;cursor:pointer;transition:background .15s}
+#agenda-ov .agm-now:hover{background:#eef4fc}
 #agenda-ov .agm-now:disabled{opacity:.55;cursor:default}
 #agenda-ov .agm-hint{font-size:11px;color:#7a98c5;font-weight:600;margin-top:6px;line-height:1.4}
 #agenda-ov .agm-grp-list{display:flex;flex-direction:column;gap:6px}
@@ -988,7 +988,7 @@ OD.define('agenda', {
 #agenda-ov .agm-grp-it i{width:8px;height:8px;border-radius:3px;flex:0 0 auto}
 #agenda-ov .agm-grp-it span{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 #agenda-ov .agm-grp-it b{color:#9bb3d1;font-size:16px}
-#agenda-root .fc .fc-event.ag-tmp{opacity:.75;outline:1.5px dashed #7e57c2;outline-offset:-1.5px}
+#agenda-root .fc .fc-event.ag-tmp{opacity:.75;outline:1.5px dashed #2a5ea9;outline-offset:-1.5px}
 #agenda-ov .agm-foot-edit .agm-save{flex:1}
 #agenda-ov .agm-del{border:1.5px solid #f0b6b6;border-radius:10px;padding:12px 16px;background:#fff;color:#c0392b;font-family:inherit;font-weight:800;font-size:14px;cursor:pointer;transition:all .15s}
 #agenda-ov .agm-del:hover{background:#fcebeb}
