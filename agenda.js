@@ -1,4 +1,8 @@
 // ============================================================================
+//  v25 (14/10/2026) : vendeurs inactifs retirés du choix « vendeur évalué »
+//   (même effectif que l'accueil : présents dans dash_lire ce mois-ci ou le
+//   mois dernier) ; bilatérales en bleu foncé #1F4A85 (charte One Data).
+// ============================================================================
 //  v21 (14/10/2026) : BILATÉRALES DEPUIS L'AGENDA (Team Colin).
 //   - Création : retour immédiat. Un toast confirme « Bilatérale planifiée
 //     avec … », l'événement apparaît tout de suite (placeholder) puis le
@@ -116,7 +120,7 @@ OD.define('agenda', {
     colors: {
       client:    '#e8833a',   // RDV client : orange
       relance:   '#9aa3ad',   // relances : gris
-      bilat:     '#7e57c2',   // bilatérales : violet
+      bilat:     '#1F4A85',   // bilatérales : bleu foncé (charte One Data, v25 — le violet n'en fait pas partie)
       livraison: '#53bda7',   // livraisons : vert
       creneau:   '#2a5ea9',   // créneaux : bleu
     },
@@ -1788,7 +1792,11 @@ OD.define('agenda', {
     const moi = v.find(x => x.est_moi);
     // On ne s'évalue pas soi-même : la liste proposait le chef en tête
     // (recette Team Colin 07/10/2026, AGD-08). La base refuse aussi.
-    return groupeParFonction(v.filter(x => !x.est_moi), moi ? moi.id_user : null)
+    // v25 : seuls les vendeurs suivis par l'accueil (présents dans dash_lire ce
+    // mois-ci ou le mois dernier) — les comptes inactifs ne sont plus proposés.
+    // Le vendeur déjà choisi (modification) reste toujours dans la liste.
+    const garde = x => Number(x.id_role) !== 4 || !actifsBilat || !actifsBilat.size || actifsBilat.has(Number(x.id_user != null ? x.id_user : x.id)) || String(x.id) === String(cs && cs.bilatUser);
+    return groupeParFonction(v.filter(x => !x.est_moi && garde(x)), moi ? moi.id_user : null)
       .map(g => ({ label: g.label, items: g.items }))
       .filter(g => g.items && g.items.length);
   }
@@ -1797,7 +1805,21 @@ OD.define('agenda', {
   // l'ouverture de la fenêtre, gardé une minute. Absent (SQL non appliqué) :
   // la liste reste celle de la v20, sans annotation.
   let resumeBilat = null, resumeBilatT = 0, resumeBilatEnVol = false;
+  let actifsBilat = null, actifsBilatT = 0;
+  function chargerActifsBilat(c) {
+    if (actifsBilat && Date.now() - actifsBilatT < 600000) return;
+    const now = new Date(), prev = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+    const lire = d => Promise.resolve(c.rpc('dash_lire', { p_annee: d.getFullYear(), p_mois: d.getMonth() + 1 })).catch(() => ({ error: true }));
+    Promise.all([lire(now), lire(prev)]).then(rs => {
+      const set = new Set();
+      rs.forEach(r => { if (r && !r.error && r.data) ((r.data.vendeurs || []).concat(r.data.etat || [])).forEach(l => { if (l && l.id_user != null) set.add(Number(l.id_user)); }); });
+      if (!set.size) return;                       // pas de tableau de bord : on garde toute la liste
+      actifsBilat = set; actifsBilatT = Date.now();
+      if (cs && cs.mode === 'bilat' && frontDoc().getElementById('agenda-ov')) { syncInputs(); renderCreate(); }
+    });
+  }
   function chargerResumeBilat() {
+    try { const c0 = sb(); if (c0) chargerActifsBilat(c0); } catch (e) {}
     if (resumeBilatEnVol || (resumeBilat && Date.now() - resumeBilatT < 60000)) return;
     const c = sb(); if (!c) return;
     resumeBilatEnVol = true;
