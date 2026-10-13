@@ -1093,7 +1093,7 @@ OD.define('agenda', {
     try {
       const W = frontWin();
       ['mousedown', 'scroll', 'popstate', 'pagehide', 'blur'].forEach(ev => W.addEventListener(ev, masquer, true));
-      setInterval(() => { try { if (!frontDoc().getElementById('agenda-root')) { const t = frontDoc().getElementById('agenda-tip'); if (t) t.remove(); } } catch (e) {} }, 500);
+      setInterval(() => { try { const r = frontDoc().getElementById('agenda-root'); if (!r || !r.offsetParent) { const t = frontDoc().getElementById('agenda-tip'); if (t) t.remove(); } } catch (e) {} }, 500);
     } catch (e) {}
   }
 
