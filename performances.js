@@ -1371,7 +1371,7 @@ OD.define('performances', {
       const ksB = ksA.filter(k => !k.derive);
       if (!ksB.some(k => k.r === state.cbKpi)) state.cbKpi = ksB.length ? ksB[0].r : null;
       const nVend = vendeursRythme(selRows, state.cbKpi).length;
-      const hA = Math.max(200, ksA.length * 34 + 60), hB = Math.max(200, nVend * 26 + 60);
+      const hA = Math.max(220, ksA.length * 42 + 60), hB = Math.max(220, nVend * 34 + 50);
       const sub = scopeLabel + (state.vnvo !== 'ALL' ? ' · ' + state.vnvo : '');
       html += '<div class="pf-charts">';
       html += '<div class="pf-card" style="margin-bottom:0">' + shead('var(--blue-dk)', 'Où en est-on du mois ?', sub)
@@ -1625,7 +1625,7 @@ OD.define('performances', {
       par[id].r += num(r[k.r]); par[id].o += num(r[k.o]);
     }
     return Object.values(par).filter(v => v.o > 0)
-      .map(v => Object.assign(v, { ecart: Math.round((v.r - v.o * __prorata) * 10) / 10 }))
+      .map(v => Object.assign(v, { ecart: Math.round(v.r - v.o * __prorata) }))
       .sort((a, b) => a.ecart - b.ecart || a.nom.localeCompare(b.nom, 'fr'));
   }
   function chart2Title() {
@@ -1774,7 +1774,7 @@ OD.define('performances', {
       });
     }
 
-    const fmtE = v => (v > 0 ? '+' : (v < 0 ? '−' : '')) + String(Math.abs(Math.round(v * 10) / 10)).replace('.', ',');
+    const fmtE = v => { const n = Math.round(v); return (n > 0 ? '+' : (n < 0 ? '−' : '')) + Math.abs(n); };
     const pr = __prorata;
     const statut = (r, o) => {
       if (o <= 0) return '#7a9cc4';
@@ -1792,7 +1792,7 @@ OD.define('performances', {
       const proj = ks.map((k, i) => pr >= 0.03 ? Math.round(rea[i] / pr) : null);
       const projPct = ks.map((k, i) => proj[i] == null ? 0 : Math.round(100 * proj[i] / obj[i]));
       const theo = Math.round(pr * 100);
-      const xmax = Math.min(200, Math.max(110, theo + 10, ...pct.map(v => v + 10), ...projPct.map(v => Math.min(v, 160))));
+      const xmax = Math.min(150, Math.max(100, theo + 10, ...pct.map(v => v + 5), ...projPct));
       const pluginA = {
         id: 'pfMois',
         afterDatasetsDraw(ch) {
@@ -1801,14 +1801,16 @@ OD.define('performances', {
           ks.forEach((k, i) => {
             const y = ys.getPixelForValue(i);
             const xEnd = xs.getPixelForValue(Math.min(Math.max(pct[i], projPct[i]), xmax));
-            const manque = Math.round((rea[i] - obj[i] * pr) * 10) / 10;
-            let t = rea[i] + ' / ' + obj[i];
-            if (proj[i] != null) t += ' · proj. ' + proj[i];
-            if (pr >= 0.03) t += ' · ' + fmtE(manque) + ' vs rythme';
-            g.fillStyle = '#1f4a87'; g.font = '700 10.5px "Nunito Sans", sans-serif'; g.textAlign = 'left'; g.textBaseline = 'middle';
-            const w = g.measureText(t).width;
-            const x = (xEnd + 6 + w > ch.chartArea.right) ? ch.chartArea.right - w : xEnd + 6;
-            g.fillText(t, x, y);
+            const manque = Math.round(rea[i] - obj[i] * pr);
+            const xc = ch.chartArea.right + 12;
+            g.textAlign = 'left'; g.textBaseline = 'middle';
+            g.fillStyle = '#1f4a87'; g.font = '800 12px "Nunito Sans", sans-serif';
+            const t1 = rea[i] + ' / ' + obj[i];
+            g.fillText(t1, xc, y - 7);
+            let t2 = proj[i] != null ? 'proj. ' + proj[i] : '';
+            if (pr >= 0.03) t2 += (t2 ? '  ·  ' : '') + fmtE(manque) + ' vs rythme';
+            g.fillStyle = manque < 0 ? '#b23433' : (manque > 0 ? '#2c7a68' : '#8a6410'); g.font = '700 10.5px "Nunito Sans", sans-serif';
+            g.fillText(t2, xc, y + 8);
           });
           const x = xs.getPixelForValue(theo);
           g.strokeStyle = '#e0a93a'; g.lineWidth = 2; g.setLineDash([5, 4]);
@@ -1830,7 +1832,7 @@ OD.define('performances', {
         plugins: [pluginA],
         options: {
           indexAxis: 'y', responsive: true, maintainAspectRatio: false,
-          layout: { padding: { top: 16, right: 6 } },
+          layout: { padding: { top: 18, right: 170 } },
           plugins: {
             legend: { display: false },
             tooltip: { callbacks: { label: i => i.datasetIndex === 0
@@ -1839,7 +1841,7 @@ OD.define('performances', {
           },
           scales: {
             x: { beginAtZero: true, max: xmax, ticks: { font: { size: 9 }, color: '#7a9cc4', callback: v => v + '%' }, grid: { color: '#eaf0f9' } },
-            y: { ticks: { font: { size: 11 }, color: '#4a6a8a' }, grid: { display: false } }
+            y: { ticks: { font: { size: 12, weight: '700', family: 'Nunito Sans' }, color: '#1f4a87' }, grid: { display: false } }
           }
         }
       });
@@ -1851,7 +1853,7 @@ OD.define('performances', {
       const v = vendeursRythme(rows, state.cbKpi);
       const k = KPIS.find(x => x.r === state.cbKpi) || KPI_CDE;
       const unite = /^Cde/.test(k.label) ? 'cdes' : '';
-      const ext = Math.max(2, ...v.map(x => Math.abs(x.ecart))) * 1.35;
+      const ext = Math.max(2, ...v.map(x => Math.abs(x.ecart))) + 1;
       const pluginB = {
         id: 'pfRythme',
         afterDatasetsDraw(ch) {
@@ -1860,14 +1862,17 @@ OD.define('performances', {
           g.strokeStyle = '#7a9cc4'; g.lineWidth = 1;
           const x0 = xs.getPixelForValue(0);
           g.beginPath(); g.moveTo(x0, ys.top); g.lineTo(x0, ys.bottom); g.stroke();
+          const xc = ch.chartArea.right + 12;
           v.forEach((x, i) => {
             const y = ys.getPixelForValue(i);
-            const t = fmtE(x.ecart) + (unite ? ' ' + unite : '') + '  (' + x.r + ' / ' + x.o + ')';
-            g.font = '700 10.5px "Nunito Sans", sans-serif'; g.textBaseline = 'middle';
-            g.fillStyle = x.ecart < -0.5 ? '#b23433' : (x.ecart > 0.5 ? '#2c7a68' : '#8a6410');
-            const xb = xs.getPixelForValue(x.ecart);
-            if (x.ecart < 0) { g.textAlign = 'right'; g.fillText(t, Math.min(xb, x0) - 6, y); }
-            else { g.textAlign = 'left'; g.fillText(t, Math.max(xb, x0) + 6, y); }
+            g.textAlign = 'left'; g.textBaseline = 'middle';
+            g.fillStyle = x.ecart < 0 ? '#b23433' : (x.ecart > 0 ? '#2c7a68' : '#8a6410');
+            g.font = '800 12px "Nunito Sans", sans-serif';
+            const t1 = fmtE(x.ecart) + (unite ? ' ' + unite : '');
+            g.fillText(t1, xc, y);
+            const w = g.measureText(t1).width;
+            g.fillStyle = '#7a9cc4'; g.font = '600 10.5px "Nunito Sans", sans-serif';
+            g.fillText('  ' + x.r + ' / ' + x.o, xc + w, y);
           });
           g.restore();
         }
@@ -1875,17 +1880,18 @@ OD.define('performances', {
       __c2 = new Chart(cb.getContext('2d'), {
         type: 'bar',
         data: { labels: v.map(x => x.nom), datasets: [{ label: 'Écart au rythme', data: v.map(x => x.ecart),
-          backgroundColor: v.map(x => x.ecart < -0.5 ? '#e07a6e' : (x.ecart > 0.5 ? '#53bda7' : '#fac055')), borderRadius: 3, barPercentage: 0.6, minBarLength: 3 }] },
+          backgroundColor: v.map(x => x.ecart < 0 ? '#e07a6e' : (x.ecart > 0 ? '#53bda7' : '#fac055')), borderRadius: 3, barPercentage: 0.6, minBarLength: 3 }] },
         plugins: [pluginB],
         options: {
           indexAxis: 'y', responsive: true, maintainAspectRatio: false,
+          layout: { padding: { right: 120 } },
           plugins: { legend: { display: false }, tooltip: { callbacks: { label: i => {
             const x = v[i.dataIndex];
-            return x.r + ' réalisé(s) · attendu à date ' + (Math.round(x.o * pr * 10) / 10).toString().replace('.', ',') + ' · objectif du mois ' + x.o;
+            return x.r + ' réalisé(s) · attendu à date ' + Math.round(x.o * pr) + ' · objectif du mois ' + x.o;
           } } } },
           scales: {
-            x: { min: -ext, max: ext, ticks: { font: { size: 9 }, color: '#7a9cc4', callback: val => fmtE(val) }, grid: { color: '#eaf0f9' } },
-            y: { ticks: { font: { size: 11 }, color: '#4a6a8a' }, grid: { display: false } }
+            x: { min: -ext, max: ext, ticks: { font: { size: 10 }, color: '#7a9cc4', precision: 0, stepSize: Math.max(1, Math.ceil(ext / 4)), callback: val => fmtE(val) }, grid: { color: '#eaf0f9' } },
+            y: { ticks: { font: { size: 12, weight: '700', family: 'Nunito Sans' }, color: '#1f4a87' }, grid: { display: false } }
           }
         }
       });
