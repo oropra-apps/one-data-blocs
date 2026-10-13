@@ -1,4 +1,9 @@
 // ============================================================================
+//  v17 (13/10/2026) : fiche VO ouverte par la cle (onglet Historique) : la croix
+//  ne fermait pas et il fallait cliquer deux fois dehors. Le chargement de
+//  l'historique, lance pendant la construction de la popup, la redessinait de
+//  l'interieur : deux popups empilees. Chargement differe ; toute popup restante
+//  est retiree avant d'en dessiner une.
 //  v16 (13/10/2026) : pictos de la liste VO (tableau et cartes).
 //  * cle a molette = historique vehicule : ouvre la fiche sur l'onglet
 //    « Historique vehicule » ; bleue si au moins une facture, grise et inerte
@@ -237,7 +242,7 @@ OD.define('vo-liste', {
   }
 
   function renderFichePopup() {
-    var old = doc.getElementById('vo-fiche-overlay'); if (old) old.remove();
+    doc.querySelectorAll('#vo-fiche-overlay').forEach(function (o) { o.remove(); });
     var row = ficheState.row || {}; var vin = ficheState.vin;
     var tab = ficheState.tab;
     var isDisp = !contremarque(row);
@@ -1558,7 +1563,9 @@ OD.define('vo-liste', {
     });
   }
 
-  function renderApvTab() { return hvRenderTab(ficheState, function () { if (!ficheState.apvLoading) loadApv(ficheState.vin); }); }
+  // v17 : chargement differe. Lance pendant la construction de la popup, il la
+  // redessinait de l'interieur : deux popups empilees (croix inerte, 2 clics dehors).
+  function renderApvTab() { return hvRenderTab(ficheState, function () { if (!ficheState.apvLoading) { ficheState.apvLoading = true; var v = ficheState.vin; setTimeout(function () { ficheState.apvLoading = false; if (ficheState.vin === v && doc.getElementById('vo-fiche-overlay')) loadApv(v); }, 0); } }); }
 
   // Une ligne sobre repliee, la liste complete au clic. <details> est natif :
   // pas de gestionnaire d'evenement a recabler apres chaque rendu.
@@ -2838,7 +2845,9 @@ OD.define('vo-liste', {
     });
   }
 
-  function renderApvTab() { return hvRenderTab(ficheState, function () { if (!ficheState.apvLoading) loadApv(ficheState.vin); }); }
+  // v17 : chargement differe. Lance pendant la construction de la popup, il la
+  // redessinait de l'interieur : deux popups empilees (croix inerte, 2 clics dehors).
+  function renderApvTab() { return hvRenderTab(ficheState, function () { if (!ficheState.apvLoading) { ficheState.apvLoading = true; var v = ficheState.vin; setTimeout(function () { ficheState.apvLoading = false; if (ficheState.vin === v && doc.getElementById('vo-fiche-overlay')) loadApv(v); }, 0); } }); }
 
   // Une ligne sobre repliee, la liste complete au clic. <details> est natif :
   // pas de gestionnaire d'evenement a recabler apres chaque rendu.
