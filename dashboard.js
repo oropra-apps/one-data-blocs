@@ -687,9 +687,15 @@ OD.define('dashboard', {
     }
 
     // Les vendeurs triés sur un critère, les plus en retard d'abord.
+    // Corrigé le 14/10/2026 : le signe était inversé. « asc » triait du plus
+    // grand au plus petit, et le tri par défaut l'inverse. Le constat du chef
+    // désignait donc comme « écart le plus important » le vendeur LE PLUS
+    // PROCHE de son objectif (Christophe Da Silva 9/16 au lieu de Mohamed
+    // Hassaine 0/18), et les listes « leads en attente » ou « affaires
+    // froides » commençaient par le vendeur qui en avait le moins.
     function classement(A, f, ordre) {
       const l = A.vendeurs.slice();
-      l.sort((a, b) => (ordre === 'asc' ? 1 : -1) * (num(f(b)) - num(f(a))));
+      l.sort((a, b) => (ordre === 'asc' ? 1 : -1) * (num(f(a)) - num(f(b))));
       return l;
     }
 
