@@ -49,7 +49,10 @@
     //    proposition (PlanetVO) ; le stock complète. Lu par une fonction qui
     //    vérifie le périmètre : la table source est sous RLS.
     ST.V = null;
-    if (!P.id_configuration && (P.bacs_sf_id || P.id_affaire_bacs)) {
+    // 13/10/2026 : lu aussi quand une configuration existe — la capture BACS
+    //    du devis (modèle, finition, visuel) prime sur configuration_vn, souvent
+    //    fausse (teinte dans « marque ») ou partagée entre plusieurs véhicules.
+    if (P.bacs_sf_id || P.id_affaire_bacs) {
       try {
         const { data:V } = await sb.rpc('bacs_simulation_vehicule', { p_id_propale: idProp });
         ST.V = (V && typeof V === 'object') ? V : null;
@@ -142,7 +145,9 @@
     // le propose (Antoine, 21/09). On le précise sans changer d'univers.
     const estVDVK = univBrut === 'VD/VK';
     const univers = estVDVK ? 'VO' : univBrut;
-    const vehName  = [C.marque, C.famille, C.finition].filter(Boolean).join(' ')
+    const cMarque  = /^ext[ée]rieur/i.test(String(C.marque || '')) ? '' : C.marque;
+    const vehName  = (V && V.config_libelle)
+      || [cMarque, C.famille, C.finition].filter(Boolean).join(' ')
       || (V && (V.libelle || [V.marque, V.modele].filter(Boolean).join(' ')))
       || (P.LABEL || '—');
     const siteName = si.NomSite || si.SITE || si.RaisonSociale || ('Site #' + (P.id_site || '—'));
@@ -161,7 +166,7 @@
         <div><div class="pv-cli-name">${esc(cName)}</div><div class="pv-cli-rows">${cliRows}</div></div></div>`);
 
     // -- Véhicule (config ou stock)
-    const srcPhoto = C.couleur_photo || (V && V.photo) || null;
+    const srcPhoto = (V && V.config_photo) || C.couleur_photo || (V && V.photo) || null;
     const photo = srcPhoto
       ? `<img src="${esc(srcPhoto)}" alt="Aperçu véhicule" onerror="this.parentNode.textContent='aperçu véhicule'">`
       : 'aperçu véhicule';
