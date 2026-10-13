@@ -247,6 +247,12 @@ async function loadData() {
       souple(lireDash(auj.getFullYear(), auj.getMonth() + 1)),
       souple(lireDash(moisPrec.getFullYear(), moisPrec.getMonth() + 1))
     ]);
+    const [rPerimH, rMesEng] = await Promise.all([
+      dir ? souple(supabase.rpc('get_agenda_perimeter', { p_viewer_id_user: viewer })) : Promise.resolve(null),
+      isVendeur() ? souple(supabase.rpc('bilat_engagements_ouverts', { p_id_user: viewer, p_exclure_bilaterale: null })) : Promise.resolve(null)
+    ]);
+    state.perimH = (rPerimH && !rPerimH.error && Array.isArray(rPerimH.data)) ? rPerimH.data : null;
+    state.mesEngagements = (rMesEng && !rMesEng.error && Array.isArray(rMesEng.data)) ? rMesEng.data : null;
     const [rSites, rBils, rCad, rTenue, rChefs] = await Promise.all([
       supabase.rpc('get_perimetre_sites', { p_viewer_id_user: viewer }),
       supabase.rpc('get_bilaterales', { p_viewer_id_user: viewer, p_date_from: bilFrom, p_date_to: bilTo }),
@@ -375,6 +381,8 @@ async function loadData() {
       resultat: b.resultat, actions: b.actions, engagement: b.engagement,
       statut: computeStatut(b), mois: b.start_date ? monthKey(b.start_date) : null
     }));
+    // v15 : encadrement recalculé (direction) sur la hiérarchie réelle.
+    if (dir) state.chefs = construireChefs(state.chefs || []);
     // Auto-ciblage : si le périmètre est restreint, on déplie/cible directement
     // (un chef sur une seule affaire arrive sur cette affaire, pas sur la racine).
     autoTargetPerimetre();
@@ -446,6 +454,60 @@ function transfoTexte(c) {
   if (c.tx_signif_prec && c.transfo_precedent != null) t += ' (' + fmtNb(c.transfo_precedent) + ' % ' + (state.transfoStable ? 'les ' + BIL_CFG.transfoJours + ' j d’avant' : 'avant') + ')';
   if (c.tx_tot_actuel != null) t += ' · ' + c.tx_tot_actuel + ' ' + txUnite();
   return t;
+}
+
+// --- Encadrement (direction) — v15 ------------------------------------------
+// get_chefs_bilaterales ne connaissait un chef que s'il avait des bilatérales
+// sur 6 mois, et comptait son équipe avec les vendeurs hors effectif : base
+// vierge = « Aucun chef des ventes ». On part désormais de la HIÉRARCHIE
+// (get_agenda_perimeter : chefs des ventes et leurs sites), de l'EFFECTIF
+// (vendeurs suivis par l'accueil) et des bilatérales RÉALISÉES chargées par
+// la page. La tenue des engagements reste celle de la base.
+function construireChefs(chefsBase) {
+  const H = state.perimH;
+  if (!H || !H.length) return chefsBase;
+  const base = {}; chefsBase.forEach(c => { base[c.id_manager] = c; });
+  const parChef = {};
+  H.forEach(r => {
+    if (Number(r.id_role) !== 3 || r.id_user == null) return;
+    const k = Number(r.id_user);
+    const o = parChef[k] || (parChef[k] = { id_manager: k, nom_chef: r.nom_complet || ('Chef ' + k), sites: new Set() });
+    if (r.id_site != null) o.sites.add(Number(r.id_site));
+  });
+  const ids = Object.keys(parChef);
+  if (!ids.length) return chefsBase;
+  const debut = state.period.from, fin = state.period.to;
+  const faites = (state.bils || []).filter(b => b.statut === 'realisee' && b.start_date);
+  const auj = new Date();
+  const moisCle = k => { const d = new Date(auj.getFullYear(), auj.getMonth() - k, 1); return ymd(d).slice(0, 7); };
+  return ids.map(k => {
+    const o = parChef[k];
+    const equipe = (state.cadence || []).filter(c => o.sites.has(c.id_site));
+    const eqIds = new Set(equipe.map(c => c.id_user));
+    const n = eqIds.size;
+    const siennes = faites.filter(b => b.id_manager === o.id_manager && eqIds.has(b.id_user));
+    const dPer = siennes.filter(b => { const d = String(b.start_date).slice(0, 10); return d >= debut && d <= fin; });
+    const vus = new Set(dPer.map(b => b.id_user)).size;
+    const regularite = [5, 4, 3, 2, 1, 0].map(kk => {
+      const m = moisCle(kk);
+      const u = new Set(siennes.filter(b => String(b.start_date).slice(0, 7) === m).map(b => b.id_user)).size;
+      return n ? Math.round(100 * u / n) : 0;
+    });
+    // délai moyen entre deux bilatérales d'un même vendeur
+    const parV = {}; siennes.forEach(b => (parV[b.id_user] = parV[b.id_user] || []).push(new Date(String(b.start_date).replace(' ', 'T')).getTime()));
+    const ecarts = []; Object.values(parV).forEach(l => { l.sort((a, b) => a - b); for (let i = 1; i < l.length; i++) ecarts.push((l[i] - l[i - 1]) / 86400000); });
+    const b0 = base[o.id_manager] || {};
+    const noms = [...o.sites].map(id => (siteOf(id) || {}).nom_site).filter(Boolean).sort();
+    return {
+      id_manager: o.id_manager, nom_chef: o.nom_chef,
+      nom_site: noms.length > 1 ? noms[0] + ' + ' + (noms.length - 1) : (noms[0] || '—'),
+      sites: [...o.sites],
+      team_size: n, vus_periode: vus, couverture: n ? Math.round(100 * vus / n) : 0, volume: dPer.length,
+      delai_moyen: ecarts.length ? Math.round(ecarts.reduce((a, b) => a + b, 0) / ecarts.length) : null,
+      eng: b0.eng || { tenu: 0, partiel: 0, non_tenu: 0, en_cours: 0 },
+      regularite
+    };
+  }).filter(c => c.team_size > 0);
 }
 
 // --- Rendu : coquille -------------------------------------------------------
@@ -562,6 +624,18 @@ function scopeLabel() {
     const tCol = tp == null ? '#8b99b0' : (tp >= 80 ? '#00997f' : (tp >= 60 ? '#8a6d1f' : '#c0524f'));
     h += '<div class="pk"><div class="pk-v" style="color:' + tCol + '">' + (tp == null ? '—' : tp + '%') + '</div><div class="pk-l">mes engagements tenus</div><div class="pk-s">sur 6 mois</div></div>';
     h += '</div>';
+    // v15 : ce que le vendeur s'est engagé à faire, avec cible et échéance.
+    const mesEng = state.mesEngagements || [];
+    if (mesEng.length) {
+      const auj = ymd(new Date());
+      h += '<div class="bil-cat-title" style="color:#2a5ea9">Mes engagements en cours</div><div class="me-eng">' +
+        mesEng.map(e => {
+          const echu = e.echeance && String(e.echeance).slice(0, 10) < auj;
+          return '<div class="me-row"><div class="me-lib">' + esc(e.libelle) + '</div>' +
+            (e.cible != null && e.cible !== '' ? '<div class="me-cible">objectif <b>' + esc(String(e.cible)) + '</b></div>' : '') +
+            (e.echeance ? '<div class="me-ech' + (echu ? ' echu' : '') + '">' + (echu ? 'échéance dépassée le ' : 'pour le ') + esc(fmtDate(String(e.echeance))) + '</div>' : '') + '</div>';
+        }).join('') + '</div>';
+    }
     h += renderSelfTimeline(mine);
     return h;
   }
@@ -822,7 +896,7 @@ function leaderboardEntities() {
   const chefs = (state.chefs || []).filter(c => s && c.nom_site === s.nom_site);
   return chefs.map(c => {
     const tp = tenuePctOf(c.eng);
-    return { type: 'chef', key: c.id_manager, label: c.nom_chef, sub: 'chef des ventes' + (c.team_size ? ' · ' + c.vus_periode + '/' + c.team_size + ' vus' : ''), reg: c.regularite, m: { cov: c.couverture, tenue: tp }, score: chefScore(c), scopeStr: 'chef:' + c.id_manager };
+    return { type: 'chef', key: c.id_manager, label: c.nom_chef, sub: 'chef des ventes' + (c.team_size ? ' · ' + c.vus_periode + '/' + c.team_size + ' reçus' : ''), reg: c.regularite, m: { cov: c.couverture, tenue: tp }, score: chefScore(c), scopeStr: 'chef:' + c.id_manager };
   });
 }
 
@@ -1204,7 +1278,7 @@ function chefRow(c){
   return '<div class="crow" data-chef="'+c.id_manager+'">'+
     '<div class="cname">'+esc(c.nom_chef)+flag+'<span class="csite">'+esc(c.nom_site)+'</span></div>'+
     '<div>'+chefRegStrip(c.regularite)+'</div>'+
-    '<div class="ccov" style="color:'+covCol+'">'+cov+'%<span class="cfrac">'+c.vus_periode+'/'+c.team_size+' vus</span></div>'+
+    '<div class="ccov" style="color:'+covCol+'">'+cov+'%<span class="cfrac">'+c.vus_periode+'/'+c.team_size+' reçus</span></div>'+
     '<div class="cten" style="color:'+tCol+'">'+(tp==null?'—':tp+'%')+'</div>'+
     '<div class="cdel" style="color:'+dCol+'">'+(c.delai_moyen==null?'—':c.delai_moyen+'<span class="u"> j</span>')+'</div>'+
     '<div class="cchev">›</div></div>';
@@ -1220,11 +1294,11 @@ function chefsInScope(){
   const lvl=scopeLevel();
   return (state.chefs||[]).filter(c=>{
     if(lvl==='racine') return true;
-    const s=(state.sites||[]).find(x=>x.nom_site===c.nom_site);
-    if(!s) return false;
-    if(lvl==='reseau') return s.reseau===state.selReseau;
-    if(lvl==='affaire') return s.reseau===state.selReseau && String(s.id_affaire)===String(state.selAffaire.key);
-    if(lvl==='site') return s.id_site===state.selSite;
+    const ss = Array.isArray(c.sites) ? c.sites.map(id=>siteOf(id)).filter(Boolean) : (state.sites||[]).filter(x=>x.nom_site===c.nom_site);
+    if(!ss.length) return false;
+    if(lvl==='reseau') return ss.some(s=>s.reseau===state.selReseau);
+    if(lvl==='affaire') return ss.some(s=>s.reseau===state.selReseau && String(s.id_affaire)===String(state.selAffaire.key));
+    if(lvl==='site') return ss.some(s=>s.id_site===state.selSite);
     return true;
   });
 }
@@ -1232,7 +1306,7 @@ function renderChefs(){
   if(state.chefs===null) return '<div class="bil-empty">Chargement de l\'évaluation des chefs…</div>';
   if(state.chefsError) return '<div class="bil-empty">Évaluation indisponible : '+esc(state.chefsError)+'</div>';
   const list=chefsInScope(), nb=list.length;
-  if(!nb) return '<div class="bil-empty">Aucun chef des ventes avec activité de bilatérale dans ce périmètre.</div>';
+  if(!nb) return '<div class="bil-empty">Aucun chef des ventes rattaché à ce périmètre.</div>';
   const covMoy=Math.round(list.reduce((s,c)=>s+c.couverture,0)/nb);
   const irr=list.filter(c=>c.regularite.filter(p=>p>0).length<=3||c.couverture<50).length;
   const tenVals=list.map(c=>tenuePctOf(c.eng)).filter(x=>x!=null);
@@ -1240,7 +1314,7 @@ function renderChefs(){
   const vol=list.reduce((s,c)=>s+c.volume,0);
   let h='<div class="prio-head">Encadrement <span class="prio-sub">'+nb+' chef'+(nb>1?'s':'')+' des ventes · '+esc(scopeLabel())+'</span></div>';
   h+='<div class="prio-kpis">';
-  h+='<div class="pk"><div class="pk-v" style="color:'+(covMoy>=85?'#00997f':(covMoy>=60?'#8a6d1f':'#c0524f'))+'">'+covMoy+'%</div><div class="pk-l">couverture moyenne</div><div class="pk-s">équipes vues ce mois</div></div>';
+  h+='<div class="pk"><div class="pk-v" style="color:'+(covMoy>=85?'#00997f':(covMoy>=60?'#8a6d1f':'#c0524f'))+'">'+covMoy+'%</div><div class="pk-l">couverture moyenne</div><div class="pk-s">vendeurs reçus sur la période</div></div>';
   h+='<div class="pk"><div class="pk-v" style="color:'+(irr?'#c0524f':'#00997f')+'">'+irr+'</div><div class="pk-l">chefs irréguliers</div><div class="pk-s">≤ 3 mois actifs / 6</div></div>';
   h+='<div class="pk"><div class="pk-v" style="color:'+(tenMoy==null?'#8b99b0':(tenMoy>=80?'#00997f':(tenMoy>=60?'#8a6d1f':'#c0524f')))+'">'+(tenMoy==null?'—':tenMoy+'%')+'</div><div class="pk-l">tenue moyenne</div><div class="pk-s">engagements des équipes</div></div>';
   h+='<div class="pk"><div class="pk-v" style="color:#2a5ea9">'+vol+'</div><div class="pk-l">bilatérales</div><div class="pk-s">sur la période</div></div>';
@@ -1268,8 +1342,9 @@ function renderSuivi() {
   let focus = '';
   if (state.chefFocus != null) {
     const chef = (state.chefs || []).find(c => c.id_manager === state.chefFocus);
+    const sitesChef = chef && Array.isArray(chef.sites) ? new Set(chef.sites) : null;
     const teamIds = new Set((state.bils || []).filter(b => b.id_manager === state.chefFocus).map(b => b.id_user));
-    list = list.filter(v => teamIds.has(v.id_user));
+    list = list.filter(v => sitesChef ? sitesChef.has(v.id_site) : teamIds.has(v.id_user));
     focus = chef ? ' · équipe de ' + esc(chef.nom_chef) : '';
   }
   if (q) list = list.filter(v => (v.nom_vendeur || '').toLowerCase().includes(q));
@@ -1397,9 +1472,20 @@ function openBil(id) {
     '<div class="m-body">'+
       '<div class="m-sec res"><div class="s-lbl">Résultat</div><div class="s-txt">'+esc(b.resultat||'—')+'</div></div>'+
       '<div class="m-sec act"><div class="s-lbl">Actions</div><div class="s-txt">'+esc(b.actions||'—')+'</div></div>'+
-      '<div class="m-sec eng"><div class="s-lbl">Engagement</div><div class="s-txt">'+esc(b.engagement||'—')+'</div></div>'+
+      '<div class="m-sec eng"><div class="s-lbl">Engagements</div><div class="s-txt" id="bil-ro-eng">'+esc(b.engagement||'—')+'</div></div>'+
     '</div></div>';
   root.appendChild(ov);
+  // Détail structuré : quoi, combien, pour quand, et où en est le suivi.
+  Promise.resolve(ctx.supabase.rpc('bilat_engagements', { p_id_bilaterales: b.id })).then(r => {
+    if (r.error || !Array.isArray(r.data) || !r.data.length) return;
+    const el = doc.getElementById('bil-ro-eng'); if (!el) return;
+    const st = { tenu: ['Tenu', 'ok'], partiel: ['Partiel', 'warn'], non_tenu: ['Non tenu', 'ko'], en_cours: ['En cours', 'cours'] };
+    el.classList.add('ro-eng');
+    el.innerHTML = r.data.map(e => '<div class="ro-row"><span class="ro-lib">' + esc(e.libelle) + '</span>' +
+      (e.cible != null ? '<span class="ro-m">objectif ' + esc(String(e.cible)) + '</span>' : '') +
+      (e.echeance ? '<span class="ro-m">pour le ' + esc(fmtJJMM(String(e.echeance))) + '</span>' : '') +
+      '<span class="ro-st ' + (st[e.statut_suivi] || st.en_cours)[1] + '">' + (st[e.statut_suivi] || st.en_cours)[0] + '</span></div>').join('');
+  }).catch(() => {});
 }
 function closeModal(){ const ov = doc.getElementById('bil-ov'); if (ov) ov.remove(); }
 
@@ -1586,7 +1672,7 @@ function setScope(str) {
 function focusChef(idManager) {
   const chef = (state.chefs || []).find(c => c.id_manager === idManager);
   if (chef) {
-    const s = (state.sites || []).find(x => x.nom_site === chef.nom_site);
+    const s = Array.isArray(chef.sites) && chef.sites.length === 1 ? siteOf(chef.sites[0]) : (state.sites || []).find(x => x.nom_site === chef.nom_site);
     if (s) { state.selSite = s.id_site; state.selReseau = s.reseau; state.selAffaire = { key: String(s.id_affaire), label: s.affaire }; }
   }
   state.chefFocus = idManager; state.tab = 'site';
@@ -1883,6 +1969,19 @@ const STYLE = '<style>' +
 /* --- v6 --- */
 '#bil-root .pr-cad small{display:block;font-size:10px;font-weight:700;margin-top:2px}' +
 /* --- v11 --- */
+'#bil-root .me-eng{background:#fff;border:1px solid #e3e9f3;border-radius:12px;overflow:hidden;margin-bottom:6px}' +
+'#bil-root .me-row{display:flex;flex-wrap:wrap;align-items:center;gap:6px 14px;padding:11px 16px;border-bottom:1px solid #eef2f8}' +
+'#bil-root .me-row:last-child{border-bottom:none}' +
+'#bil-root .me-lib{flex:1 1 260px;font-size:14px;font-weight:700;color:#1c2b45}' +
+'#bil-root .me-cible{font-size:12px;color:#5a6b86}#bil-root .me-cible b{color:#2a5ea9}' +
+'#bil-root .me-ech{font-size:12px;font-weight:700;color:#00997f}#bil-root .me-ech.echu{color:#c0524f}' +
+'#bil-root .s-txt.ro-eng{white-space:normal;padding:6px 10px}' +
+'#bil-root .ro-row{display:flex;flex-wrap:wrap;align-items:center;gap:4px 12px;padding:7px 4px;border-bottom:1px solid #e3e9f3}' +
+'#bil-root .ro-row:last-child{border-bottom:none}' +
+'#bil-root .ro-lib{flex:1 1 220px;font-weight:700;color:#1c2b45}' +
+'#bil-root .ro-m{font-size:12px;color:#5a6b86}' +
+'#bil-root .ro-st{font-size:11px;font-weight:800;border-radius:6px;padding:2px 8px}' +
+'#bil-root .ro-st.ok{background:#e4f4f0;color:#00997f}#bil-root .ro-st.warn{background:#fdf3de;color:#8a6d1f}#bil-root .ro-st.ko{background:#fbeceb;color:#c0524f}#bil-root .ro-st.cours{background:#eef2f8;color:#5a6b86}' +
 '#bil-root .pq{background:#fff;border:1px solid #e3e9f3;border-radius:14px;overflow:hidden;box-shadow:0 1px 2px rgba(28,43,69,.05),0 8px 24px rgba(28,43,69,.06)}' +
 '#bil-root .pq-row{display:grid;grid-template-columns:34px minmax(150px,1.1fr) minmax(220px,2.4fr) 132px 112px 108px;gap:14px;align-items:center;padding:13px 18px;border-bottom:1px solid #eef2f8;cursor:pointer;transition:background .12s}' +
 '#bil-root .pq-row:last-child{border-bottom:none}' +
