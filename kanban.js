@@ -1,4 +1,10 @@
 // ============================================================================
+//  v62 (13/10/2026) : opportunité mêlant simulations VN et VO (recette Team
+//  Colin, Julien Lemaignen : RAV4 PHV + Aygo X du stock). get_kanban_cards
+//  renvoie vn_vo = « VN+VO » : la carte affiche « VN · VO », reste visible
+//  sous les filtres VN ET VO, et annonce « Plusieurs véhicules » au lieu du
+//  véhicule de la simulation la plus récente. La photo du VO dans la liste
+//  des propositions est corrigée côté base (get_affaire_quotes).
 //  v59 (12/10/2026) : le cycle BACS ne s'applique qu'aux clients raccordés à
 //  BACS (Team Colin). Ailleurs : colonnes Simulations / Propale / BDC / Gagné /
 //  Perdu, ni pastille de statut BACS ni bouton « B », cartes déplaçables.
@@ -421,7 +427,8 @@ OD.define('kanban', {
   }
 
   function passFilters(c) {
-    if (state.fType !== 'tous' && (c.vn_vo_effectif || c.vn_vo) !== state.fType) return false;
+    // v62 : « VN+VO » (affaire mixte) passe sous les deux filtres.
+    if (state.fType !== 'tous' && String(c.vn_vo_effectif || c.vn_vo || '').split('+').indexOf(state.fType) < 0) return false;
     if (state.fClient !== 'tous' && c.client_type !== state.fClient) return false;
     if (state.fFin !== 'tous' && c.financement !== state.fFin) return false;
     return true;
@@ -777,7 +784,10 @@ OD.define('kanban', {
     if (c.vn_vo === 'VO' && c.vin) {
       h += '<div class="kc-veh"><span class="kc-vdot"></span><button type="button" class="kc-veh-link" data-vin="' + esc(c.vin) + '" title="Ouvrir la fiche VO">' + esc(c.vehicule || c.vin || '—') + '</button> <span class="kc-vt">VO</span></div>';
     } else {
-      h += '<div class="kc-veh"><span class="kc-vdot"></span>' + esc(c.vehicule || c.vin || '—') + (c.vn_vo ? ' <span class="kc-vt">' + esc(c.vn_vo) + '</span>' : '') + '</div>';
+      // v62 : carte plurale aux véhicules différents -> pas le véhicule d'une simulation au hasard
+      const libVeh = (vnMulti && c.veh_uniforme === false) ? 'Plusieurs v\u00e9hicules' : (c.vehicule || c.vin || '—');
+      const libVt = c.vn_vo === 'VN+VO' ? 'VN \u00b7 VO' : c.vn_vo;
+      h += '<div class="kc-veh"><span class="kc-vdot"></span>' + esc(libVeh) + (libVt ? ' <span class="kc-vt">' + esc(libVt) + '</span>' : '') + '</div>';
     }
 
     // Commandes : la somme a un sens (ventes reelles) et s'affiche a cote du
