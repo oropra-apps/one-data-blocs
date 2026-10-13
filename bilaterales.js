@@ -720,10 +720,15 @@ function prioDetail(c) {
   r.disAutres = dis.slice(1).filter(x => x.v > 0 && x.t).map(x => x.t);
   // Score et raison principale
   let best = null, bestV = 0;
+  // Une raison partagée par TOUTE l'équipe affichée (ex. personne n'a encore
+  // été reçu) ne distingue personne : elle compte dans le score mais ne
+  // devient la raison principale qu'à défaut d'autre.
   Object.keys(POIDS).forEach(k => {
     const v = POIDS[k] * (r.comps[k] || 0); r.score += v;
+    if (k === 'anciennete' && state.ancienneteCommune) return;
     if (v > bestV && r.txt[k]) { bestV = v; best = k; }
   });
+  if (!best && r.comps.anciennete > 0 && r.txt.anciennete) best = 'anciennete';
   r.score = Math.round(r.score);
   r.main = best;
   return r;
@@ -844,6 +849,7 @@ function renderPrioVendeurs() {
   // planifiée non réalisée, et sans RDV déjà programmé.
   const isCadenceLate = (c) => !isPlanifie(c) && c.jours_depuis_bilat != null && (c.jours_depuis_bilat > BIL_CFG.retardJ || c.nb_retard > 0);
 
+  state.ancienneteCommune = cad.length > 1 && cad.every(c => c.jours_depuis_bilat == null);
   const det = cad.map(prioDetail);
   const sousObj = (d) => (d.comps.objectif || 0) > 0.1;
   const total = cad.length;
