@@ -741,7 +741,10 @@ function scopeLabel() {
   }
 
   function renderPerimPanel() {
-  return renderDatePicker() + '<div class="bil-perim"><div class="perim-title">Périmètre <span class="perim-help">« 3/11 reçus » = vendeurs reçus en bilatérale sur la période / vendeurs actifs</span></div>' + renderTree() + '</div>';
+  const lvl = scopeLevel();
+  const chip = lvl === 'racine' ? '' : '<span class="pt-sel">' + esc(scopeLabel()) + '<b data-scope="racine" title="Revenir à tout le périmètre">✕</b></span>';
+  return renderDatePicker() + '<div class="pt-card"><div class="pt-shead"><div class="bar"></div><div class="title">Périmètre</div>' + chip +
+    '<div class="sub">Cliquez une ligne pour filtrer · ▶ pour déplier jusqu’aux vendeurs</div></div>' + renderTree() + '</div>';
 }
 
 // Onglets contextuels : En priorité (toujours), Bilatérales du site (si scope=site),
@@ -1083,60 +1086,71 @@ function autoTargetPerimetre() {
 }
 
 // ÉTAPE 1 — arbre périmètre (réseau > affaire > site), avec compteur de bilatérales
-// v11 : chaque nœud du périmètre affiche « X/Y reçus » — vendeurs ayant eu
-// une bilatérale RÉALISÉE sur la période / vendeurs actifs — et, en rouge,
-// le nombre de comptes rendus en retard. L'ancien « N bilat. » comptait des
-// bilatérales de toute nature et ne disait rien de la couverture.
-function couvertureNoeud(pred) {
+// v16 : le périmètre reprend le composant des pages Performances et Suivi
+// d'activité — carte à liseré, tableau-arbre réseau ▸ affaire ▸ site ▸
+// vendeurs, carrés ▶/▼, ligne choisie surlignée — avec des colonnes propres
+// aux bilatérales. Un niveau unique (un seul réseau, une seule affaire) est
+// aplati, comme là-bas.
+function statsNoeud(pred) {
   const vs = (state.cadence || []).filter(c => { const s = siteOf(c.id_site); return s && pred(s); });
   const ids = new Set(vs.map(v => v.id_user));
-  const recus = new Set(vs.filter(recuPeriode).map(v => v.id_user));
-  return { total: ids.size, recus: recus.size };
+  const recus = new Set(vs.filter(recuPeriode).map(v => v.id_user)).size;
+  const jamais = new Set(vs.filter(v => v.jours_depuis_bilat == null).map(v => v.id_user)).size;
+  const prog = new Set(vs.filter(v => v.next_bilaterale_at).map(v => v.id_user)).size;
+  const sitesIds = new Set((state.sites || []).filter(pred).map(s => s.id_site));
+  const retard = retardsOuvertsPeriode().filter(b => sitesIds.has(b.id_site)).length;
+  return { total: ids.size, recus, jamais, prog, retard };
 }
-function badgeCouverture(cov, retard) {
-  if (!cov.total) return '<span class="badge-n vide">aucun vendeur actif</span>';
-  const p = cov.recus / cov.total;
-  const cls = p >= 0.8 ? 'ok' : (p >= 0.4 ? 'moyen' : 'faible');
-  return '<span class="badge-cov ' + cls + '" title="Vendeurs reçus en bilatérale sur la période / vendeurs actifs">' + cov.recus + '/' + cov.total + ' reçus</span>' +
-    (retard ? '<span class="badge-r" title="Bilatérales passées sans compte rendu">' + retard + ' CR en retard</span>' : '');
+function cellulesNoeud(st) {
+  const p = st.total ? Math.round(100 * st.recus / st.total) : null;
+  const col = p == null ? '#acc5e4' : (p >= 80 ? '#53bda7' : (p >= 40 ? '#fac055' : '#d97070'));
+  const txt = p == null ? '#7a9cc4' : (p >= 80 ? '#00997f' : (p >= 40 ? '#8a6d1f' : '#c0524f'));
+  return '<td class="pt-n">' + st.total + '</td>' +
+    '<td><div class="pt-cell"><div class="pt-top"><span class="pt-ro">' + st.recus + ' / ' + st.total + '</span>' +
+      (p == null ? '' : '<span class="pt-pct" style="color:' + txt + ';background:' + col + '26">' + p + ' %</span>') + '</div>' +
+      '<div class="pt-track"><i style="width:' + (p || 0) + '%;background:' + col + '"></i></div></div></td>' +
+    '<td class="pt-n">' + (st.prog || '<span class="pt-0">0</span>') + '</td>' +
+    '<td class="pt-n' + (st.jamais ? ' pt-ko' : '') + '">' + (st.jamais || '<span class="pt-0">0</span>') + '</td>' +
+    '<td class="pt-n' + (st.retard ? ' pt-ko' : '') + '">' + (st.retard || '<span class="pt-0">0</span>') + '</td>';
 }
+function expIcon(open) { return '<span class="pt-exp">' + (open ? '▼' : '▶') + '</span>'; }
 function renderTree() {
   const sites = state.sites || [];
-  const retardBySite = {};
-  retardsOuvertsPeriode().forEach(b => { retardBySite[b.id_site] = (retardBySite[b.id_site] || 0) + 1; });
-  const tree = {};
-  for (const s of sites) {
-    if (!tree[s.reseau]) tree[s.reseau] = { label: s.reseau, affaires: {}, retard: 0 };
-    const ak = String(s.id_affaire);
-    if (!tree[s.reseau].affaires[ak]) tree[s.reseau].affaires[ak] = { label: s.affaire, sites: [], retard: 0 };
-    const rt = retardBySite[s.id_site] || 0;
-    tree[s.reseau].affaires[ak].sites.push({ ...s, retard: rt });
-    tree[s.reseau].affaires[ak].retard += rt; tree[s.reseau].retard += rt;
-  }
-  let h = '<div class="bil-tree">';
+  if (!sites.length) return '<div class="bil-empty">Aucun site dans votre périmètre.</div>';
   const lvl = scopeLevel();
-  const covAll = couvertureNoeud(() => true);
-  h += '<div class="tree-row lv-root' + (lvl === 'racine' ? ' sel' : '') + '" data-scope="racine"><span class="exp"></span><span class="ico">◆</span> Tout mon périmètre' + badgeCouverture(covAll, retardsOuvertsPeriode().length) + '</div>';
-  const reseaux = Object.keys(tree).sort();
-  if (!reseaux.length) h += '<div class="bil-empty">Aucun site dans votre périmètre.</div>';
+  const reseaux = [...new Set(sites.map(s => s.reseau))].sort();
+  const collapseR = reseaux.length === 1;
+  let body = '';
   for (const rk of reseaux) {
-    const Rn = tree[rk]; const rOpen = !!state.expanded['r:'+rk];
+    const rKey = 'r:' + rk, rOpen = !!state.expanded[rKey] || collapseR;
     const rSel = lvl === 'reseau' && state.selReseau === rk;
-    h += '<div class="tree-row lv-reseau' + (rSel ? ' sel' : '') + '" data-scope="reseau:'+esc(rk)+'"><span class="exp" data-exp="r:'+esc(rk)+'">'+(rOpen?'▾':'▸')+'</span>'+esc(Rn.label)+badgeCouverture(couvertureNoeud(s => s.reseau === rk), Rn.retard)+'</div>';
+    if (!collapseR) body += '<tr class="lv-reseau' + (rSel ? ' is-selected' : '') + '" data-scope="reseau:' + esc(rk) + '"><td><span data-exp="' + esc(rKey) + '">' + expIcon(rOpen) + '</span>' + esc(rk) + '</td>' + cellulesNoeud(statsNoeud(s => s.reseau === rk)) + '</tr>';
     if (!rOpen) continue;
-    for (const ak of Object.keys(Rn.affaires)) {
-      const A = Rn.affaires[ak]; const aOpen = !!state.expanded['r:'+rk+'|a:'+ak];
-      const aSel = lvl === 'affaire' && state.selReseau === rk && String(state.selAffaire.key) === ak;
-      h += '<div class="tree-row lv-affaire' + (aSel ? ' sel' : '') + '" data-scope="affaire:'+esc(rk)+'|'+esc(ak)+'"><span class="exp" data-exp="r:'+esc(rk)+'|a:'+esc(ak)+'">'+(aOpen?'▾':'▸')+'</span>'+esc(A.label)+badgeCouverture(couvertureNoeud(s => s.reseau === rk && String(s.id_affaire) === ak), A.retard)+'</div>';
+    const affs = []; const vu = {};
+    sites.filter(s => s.reseau === rk).forEach(s => { const k = String(s.id_affaire); if (!vu[k]) { vu[k] = 1; affs.push({ key: k, label: s.affaire }); } });
+    const collapseA = collapseR && affs.length === 1;
+    for (const A of affs.sort((x, y) => String(x.label).localeCompare(String(y.label), 'fr'))) {
+      const aKey = rKey + '|a:' + A.key, aOpen = !!state.expanded[aKey] || collapseA;
+      const aSel = lvl === 'affaire' && state.selReseau === rk && String(state.selAffaire.key) === A.key;
+      if (!collapseA) body += '<tr class="lv-affaire' + (aSel ? ' is-selected' : '') + '" data-scope="affaire:' + esc(rk) + '|' + esc(A.key) + '"><td><span data-exp="' + esc(aKey) + '">' + expIcon(aOpen) + '</span>' + esc(A.label) + '</td>' + cellulesNoeud(statsNoeud(s => s.reseau === rk && String(s.id_affaire) === A.key)) + '</tr>';
       if (!aOpen) continue;
-      for (const st of A.sites.sort((x,y)=>x.nom_site.localeCompare(y.nom_site))) {
-        const sSel = lvl === 'site' && state.selSite === st.id_site;
-        h += '<div class="tree-row lv-site' + (sSel ? ' sel' : '') + '" data-scope="site:'+st.id_site+'"><span class="exp"></span><span class="ico">●</span> '+esc(st.nom_site)+badgeCouverture(couvertureNoeud(s => s.id_site === st.id_site), st.retard)+'</div>';
+      for (const S of sites.filter(s => s.reseau === rk && String(s.id_affaire) === A.key).sort((x, y) => x.nom_site.localeCompare(y.nom_site, 'fr'))) {
+        const sKey = aKey + '|s:' + S.id_site, sOpen = !!state.expanded[sKey];
+        const sSel = lvl === 'site' && state.selSite === S.id_site;
+        body += '<tr class="lv-site' + (sSel ? ' is-selected' : '') + (collapseA ? ' flat' : '') + '" data-scope="site:' + S.id_site + '"><td><span data-exp="' + esc(sKey) + '">' + expIcon(sOpen) + '</span>' + esc(S.nom_site) + '</td>' + cellulesNoeud(statsNoeud(s => s.id_site === S.id_site)) + '</tr>';
+        if (!sOpen) continue;
+        const vend = (state.cadence || []).filter(c => c.id_site === S.id_site).sort((x, y) => (x.nom_vendeur || '').localeCompare(y.nom_vendeur || '', 'fr'));
+        if (!vend.length) body += '<tr class="lv-vendeur' + (collapseA ? ' flat' : '') + '"><td class="pt-vide">Aucun vendeur actif</td><td colspan="5"></td></tr>';
+        vend.forEach(c => {
+          const recu = recuPeriode(c);
+          const etat = recu ? '<span class="pt-ok">reçu</span>' : (c.next_bilaterale_at ? '<span class="pt-prog">programmé le ' + esc(fmtJJMM(c.next_bilaterale_at)) + '</span>' : (c.jours_depuis_bilat == null ? '<span class="pt-ko">jamais reçu</span>' : '<span class="pt-mut">il y a ' + c.jours_depuis_bilat + ' j</span>'));
+          body += '<tr class="lv-vendeur' + (collapseA ? ' flat' : '') + '" data-prio-vend="' + c.id_user + '|' + c.id_site + '"><td>' + esc(c.nom_vendeur) + (c.vn_vo ? ' <span class="fct">· ' + esc(c.vn_vo) + '</span>' : '') + '</td>' +
+            '<td colspan="5" class="pt-etat">' + etat + '</td></tr>';
+        });
       }
     }
   }
-  h += '</div>';
-  return h;
+  return '<div class="pt-wrap"><table class="pt-tree"><thead><tr><th>Périmètre</th><th>Vendeurs</th><th>Reçus sur la période</th><th>Programmés</th><th>Jamais reçus</th><th>CR en retard</th></tr></thead><tbody>' + body + '</tbody></table></div>';
 }
 
 // ============================================================================
@@ -1969,6 +1983,41 @@ const STYLE = '<style>' +
 /* --- v6 --- */
 '#bil-root .pr-cad small{display:block;font-size:10px;font-weight:700;margin-top:2px}' +
 /* --- v11 --- */
+'#bil-root .pt-card{background:#fff;border:1px solid #eaf0f9;border-radius:10px;padding:15px;margin-bottom:16px}' +
+'#bil-root .pt-shead{display:flex;align-items:center;gap:8px;margin-bottom:14px;flex-wrap:wrap}' +
+'#bil-root .pt-shead .bar{width:3px;height:17px;background:#2a5ea9}' +
+'#bil-root .pt-shead .title{font-size:13px;font-weight:600;color:#2a5ea9}' +
+'#bil-root .pt-shead .sub{margin-left:auto;font-size:10px;color:#acc5e4}' +
+'#bil-root .pt-sel{display:inline-flex;align-items:center;gap:8px;background:#2a5ea9;color:#fff;padding:4px 10px;border-radius:6px;font-size:12px;font-weight:600}' +
+'#bil-root .pt-sel b{cursor:pointer;opacity:.85;font-size:11px}' +
+'#bil-root .pt-wrap{width:100%;overflow-x:auto;-webkit-overflow-scrolling:touch}' +
+'#bil-root .pt-tree{width:100%;border-collapse:collapse}' +
+'#bil-root .pt-tree th{font-size:10px;font-weight:600;color:#7a9cc4;text-transform:uppercase;letter-spacing:.4px;padding:8px 10px;background:#f9fbfd;border-bottom:1px solid #eaf0f9;text-align:center;white-space:nowrap}' +
+'#bil-root .pt-tree th:first-child{text-align:left}' +
+'#bil-root .pt-tree td{padding:6px 10px;font-size:12px;border-bottom:.5px solid #eaf0f9;vertical-align:middle;color:#2a5ea9}' +
+'#bil-root .pt-tree td:first-child{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:320px}' +
+'#bil-root .pt-tree tr{cursor:pointer}' +
+'#bil-root .pt-tree tr.lv-reseau{background:#f5f8fc}#bil-root .pt-tree tr.lv-affaire{background:#fafbfd}#bil-root .pt-tree tr.lv-site,#bil-root .pt-tree tr.lv-vendeur{background:#fff}' +
+'#bil-root .pt-tree tbody tr:hover{filter:brightness(.97)}' +
+'#bil-root .pt-tree tr.is-selected{background:#acc5e4!important}' +
+'#bil-root .pt-tree tr.is-selected td:first-child{font-weight:700;color:#2a5ea9}' +
+'#bil-root .pt-tree .lv-reseau td:first-child{color:#2a5ea9;font-weight:600}' +
+'#bil-root .pt-tree .lv-affaire td:first-child{color:#2a5ea9;font-weight:500;padding-left:24px}' +
+'#bil-root .pt-tree .lv-site td:first-child{color:#4a6a8a;font-weight:500;padding-left:44px}' +
+'#bil-root .pt-tree .lv-vendeur td:first-child{color:#4a6a8a;padding-left:64px}' +
+'#bil-root .pt-tree .lv-site.flat td:first-child{padding-left:10px}' +
+'#bil-root .pt-tree .lv-vendeur.flat td:first-child{padding-left:32px}' +
+'#bil-root .pt-tree .fct{color:#acc5e4;font-size:10px}' +
+'#bil-root .pt-exp{display:inline-flex;align-items:center;justify-content:center;width:16px;height:16px;border-radius:3px;background:#eaf0f9;font-size:9px;color:#7a9cc4;margin-right:6px;vertical-align:middle}' +
+'#bil-root .pt-n{text-align:center;font-variant-numeric:tabular-nums;font-weight:600}' +
+'#bil-root .pt-ko{color:#c0524f}#bil-root .pt-0{color:#acc5e4;font-weight:400}' +
+'#bil-root .pt-cell{display:flex;flex-direction:column;gap:3px;min-width:96px}' +
+'#bil-root .pt-top{display:flex;align-items:center;justify-content:space-between;gap:6px}' +
+'#bil-root .pt-ro{font-size:11px;color:#2a5ea9;font-weight:500;font-variant-numeric:tabular-nums}' +
+'#bil-root .pt-pct{font-size:9px;font-weight:600;padding:1px 5px;border-radius:3px}' +
+'#bil-root .pt-track{height:3px;background:#eaf0f9;border-radius:2px;overflow:hidden}#bil-root .pt-track i{display:block;height:100%}' +
+'#bil-root .pt-etat{font-size:11.5px}#bil-root .pt-etat .pt-ok{color:#00997f;font-weight:700}#bil-root .pt-prog{color:#2a5ea9;font-weight:700}#bil-root .pt-mut{color:#7a9cc4}' +
+'#bil-root .pt-vide{font-style:italic;color:#7a9cc4}' +
 '#bil-root .me-eng{background:#fff;border:1px solid #e3e9f3;border-radius:12px;overflow:hidden;margin-bottom:6px}' +
 '#bil-root .me-row{display:flex;flex-wrap:wrap;align-items:center;gap:6px 14px;padding:11px 16px;border-bottom:1px solid #eef2f8}' +
 '#bil-root .me-row:last-child{border-bottom:none}' +
