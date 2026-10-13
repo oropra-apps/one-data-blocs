@@ -1,4 +1,8 @@
 // ============================================================================
+//  v20 (13/10/2026) : vignette de la liste VO vide alors que le vehicule a des
+//  photos (filtre Photos = Oui). La 1re photo de l'annonce ne se chargeait pas
+//  (echec passager du CDN, ou lien mort : 11 VO sur 652). Nouvel essai, puis
+//  photos suivantes du vehicule ; l'icone voiture seulement si aucune ne charge.
 //  v19 (13/10/2026) : chargement de la liste VO accelere (recette : tres long
 //  depuis l'ouverture du stock a tout le groupe, 1 485 VO).
 //  * le stock etait charge 3 fois a l'ouverture (ancien boot() d'une copie
@@ -200,6 +204,35 @@ OD.define('vo-liste', {
     S._loadP = loadAll();
     return S._loadP;
   }
+  // v20 : photo de la liste qui ne s'affiche pas. 1) nouvel essai apres 1,5 s
+  // (echec passager du CDN des annonces) ; 2) photos suivantes du vehicule (lien
+  // mort chez l'hebergeur) ; 3) a defaut seulement, l'icone voiture.
+  function voImgErr(img) {
+    if (!img) return;
+    var essai = Number(img.getAttribute('data-essai') || 0) + 1;
+    img.setAttribute('data-essai', essai);
+    var vide = function () {
+      img.style.display = 'none';
+      var ph = (img.nextElementSibling && /vo-(thumb-)?ph/.test(img.nextElementSibling.className)) ? img.nextElementSibling : (img.parentNode && img.parentNode.querySelector('.vo-ph, .vo-thumb-ph'));
+      if (ph) ph.style.display = 'flex';
+    };
+    if (essai > 6) return vide();
+    var base = img.getAttribute('data-base') || img.getAttribute('src');
+    if (essai === 1) {
+      img.setAttribute('data-base', base);
+      setTimeout(function () { img.src = base + (base.indexOf('?') === -1 ? '?' : '&') + 'r=1'; }, 1500);
+      return;
+    }
+    var vin = img.getAttribute('data-vin');
+    var row = (S.raw || []).find(function (x) { return x.VIN === vin; });
+    if (!row) return vide();
+    ensureImages(row).then(function () {
+      var liste = images(row).filter(function (u) { return u !== base; });
+      var suivante = liste[essai - 2];
+      if (suivante) img.src = suivante; else vide();
+    }, vide);
+  }
+  win.__voImgErr = window.__voImgErr = voImgErr;
   function mainImage(row) { if (notEmpty(row.cover_url)) return row.cover_url; var a = images(row); return a.length ? a[0] : null; }
   function hasPhoto(row) { return notEmpty(row.cover_url) || images(row).length > 0; }
 
@@ -2143,7 +2176,7 @@ OD.define('vo-liste', {
   function infosHtml(r) {
     var hasUrl = notEmpty(r.URL360), cm = contremarque(r), img = mainImage(r);
     var thumb = img
-      ? '<span class="vo-thumb-wrap"><img class="vo-thumb" src="' + esc(img) + '" loading="lazy" onerror="this.style.display=\'none\';this.nextSibling.style.display=\'flex\'"><span class="vo-thumb-ph" style="display:none">' + IC.car + '</span></span>'
+      ? '<span class="vo-thumb-wrap"><img class="vo-thumb" src="' + esc(img) + '" data-vin="' + esc(r.VIN) + '" loading="lazy" onerror="__voImgErr(this)"><span class="vo-thumb-ph" style="display:none">' + IC.car + '</span></span>'
       : '<span class="vo-thumb-ph">' + IC.car + '</span>';
     return '<div class="vo-infos">'
       + '<span class="vo-iact eye" data-act="eye" data-vin="' + esc(r.VIN) + '" title="Fiche VO">' + IC.eye + '</span>'
@@ -2203,7 +2236,7 @@ OD.define('vo-liste', {
   function cardHtml(r) {
     var img = mainImage(r), ca = critair(r), cm = contremarque(r), hasUrl = notEmpty(r.URL360), sel = !!S.sel[r.VIN];
     var imgPart = img
-      ? '<img src="' + esc(img) + '" alt="" loading="lazy" onerror="this.style.display=\'none\';this.parentNode.querySelector(\'.vo-ph\')&&(this.parentNode.querySelector(\'.vo-ph\').style.display=\'flex\')"><div class="vo-ph" style="display:none">' + IC.car + '</div>'
+      ? '<img src="' + esc(img) + '" alt="" data-vin="' + esc(r.VIN) + '" loading="lazy" onerror="__voImgErr(this)"><div class="vo-ph" style="display:none">' + IC.car + '</div>'
       : '<div class="vo-ph">' + IC.car + '</div>';
     return '<div class="vo-card' + (sel ? ' sel' : '') + '">'
       + '<div class="vo-card-img">' + imgPart
@@ -3238,7 +3271,7 @@ OD.define('vo-liste', {
   function infosHtml(r) {
     var hasUrl = notEmpty(r.URL360), cm = contremarque(r), img = mainImage(r);
     var thumb = img
-      ? '<span class="vo-thumb-wrap"><img class="vo-thumb" src="' + esc(img) + '" loading="lazy" onerror="this.style.display=\'none\';this.nextSibling.style.display=\'flex\'"><span class="vo-thumb-ph" style="display:none">' + IC.car + '</span></span>'
+      ? '<span class="vo-thumb-wrap"><img class="vo-thumb" src="' + esc(img) + '" data-vin="' + esc(r.VIN) + '" loading="lazy" onerror="__voImgErr(this)"><span class="vo-thumb-ph" style="display:none">' + IC.car + '</span></span>'
       : '<span class="vo-thumb-ph">' + IC.car + '</span>';
     return '<div class="vo-infos">'
       + '<span class="vo-iact eye" data-act="eye" data-vin="' + esc(r.VIN) + '" title="Fiche VO">' + IC.eye + '</span>'
@@ -3298,7 +3331,7 @@ OD.define('vo-liste', {
   function cardHtml(r) {
     var img = mainImage(r), ca = critair(r), cm = contremarque(r), hasUrl = notEmpty(r.URL360), sel = !!S.sel[r.VIN];
     var imgPart = img
-      ? '<img src="' + esc(img) + '" alt="" loading="lazy" onerror="this.style.display=\'none\';this.parentNode.querySelector(\'.vo-ph\')&&(this.parentNode.querySelector(\'.vo-ph\').style.display=\'flex\')"><div class="vo-ph" style="display:none">' + IC.car + '</div>'
+      ? '<img src="' + esc(img) + '" alt="" data-vin="' + esc(r.VIN) + '" loading="lazy" onerror="__voImgErr(this)"><div class="vo-ph" style="display:none">' + IC.car + '</div>'
       : '<div class="vo-ph">' + IC.car + '</div>';
     return '<div class="vo-card' + (sel ? ' sel' : '') + '">'
       + '<div class="vo-card-img">' + imgPart
