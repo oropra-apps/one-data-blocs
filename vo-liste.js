@@ -1,4 +1,13 @@
 // ============================================================================
+//  v19 (13/10/2026) : chargement de la liste VO accelere (recette : tres long
+//  depuis l'ouverture du stock a tout le groupe, 1 485 VO).
+//  * le stock etait charge 3 fois a l'ouverture (ancien boot() d'une copie
+//    anterieure du module + demarrage final + abonnement au site) : 7,3 Mo ;
+//    un seul chargement partage, reutilise 5 min (changement de site compris).
+//  * la liste ne lit plus les 20 URL de photos de chaque VO : 1re photo et
+//    nombre (PHOTO_1, NB_PHOTOS) ; liste complete a l'ouverture de la fiche.
+//  * pages triees sur le VIN (sans tri, recouvrements possibles) et lues en
+//    parallele, avec l'historique.
 //  v18 (13/10/2026) : historique du vehicule, la barre « Achat du VO » se
 //  placait sous le bandeau de l'annee de la facture suivante (achat 18/03/2026
 //  affiche sous « 2025 »). Elle se place a sa date, sous le bandeau de son
@@ -120,7 +129,7 @@ OD.define('vo-liste', {
   var COLS = [
     'VIN', 'NO_VO', 'NO_IMMAT', 'VERSION_EUROTAX', 'DESIGNATION_DMS', 'MARQUE_DMS', 'MODELE_DMS',
     'CARBURANT_DMS', 'BOITEV_EUROTAX', 'D_1MEC', 'D_ACHAT', 'PVENTE', 'PA_HT_TTC', 'KMS', 'SITE', 'AFFAIRE',
-    'RESEAU', 'SOCIETE', 'POINT_VENTE', 'IDSITE', 'IDSITE_Codifie', 'NBPORTE_EUROTAX', 'ImageUrls', 'cover_url', 'URL360', 'radarLink', 'ID_CM', 'PRET_A_LA_VENTE', 'LIEN_ANNONCE',
+    'RESEAU', 'SOCIETE', 'POINT_VENTE', 'IDSITE', 'IDSITE_Codifie', 'NBPORTE_EUROTAX', 'PHOTO_1', 'NB_PHOTOS', 'cover_url', 'URL360', 'radarLink', 'ID_CM', 'PRET_A_LA_VENTE', 'LIEN_ANNONCE',
     'TVA', 'CODETVA', 'CV_DMS', 'TAUX_CO2', 'GARANTIE', 'CODE_GARANTIE', 'LIBELLE_GARANTIE', 'COULEUR_DMS',
     'CARROSSERIE_EUROTAX', 'LABEL_Codifie', 'LIEU_STOCKAGE_Codifie', 'DETAIL_STOCKAGE_Codifie',
     'ORIGINEACHAT_Codifie', 'MIL', 'NATCODE_SELECTED', 'INFOMEDIAIRE_Codifie'
@@ -165,9 +174,31 @@ OD.define('vo-liste', {
 
   function images(row) {
     var raw = row.ImageUrls;
+    // v19 : la liste ne lit que la 1re photo (PHOTO_1) ; la liste complete est
+    // chargee a l'ouverture de la fiche ou du diaporama (ensureImages).
+    if (raw === undefined) return notEmpty(row.PHOTO_1) ? [row.PHOTO_1] : [];
     if (!notEmpty(raw)) return [];
     if (raw[0] === '[') { try { var a = JSON.parse(raw); if (Array.isArray(a)) return a.filter(Boolean); } catch (e) { } }
     return String(raw).split(/[;\n|,]+/).map(function (x) { return x.trim(); }).filter(function (x) { return /^https?:\/\//.test(x); });
+  }
+  function nbPhotos(row) { return row.ImageUrls === undefined && row.NB_PHOTOS != null ? Number(row.NB_PHOTOS) || 0 : images(row).length; }
+  async function ensureImages(row) {
+    if (!row || !row.VIN || row.ImageUrls !== undefined) return row;
+    if (!(Number(row.NB_PHOTOS) > 1)) return row;
+    try {
+      var c = sb(); if (!c) return row;
+      var r = await c.from('v_liste_vo').select('ImageUrls').eq('VIN', row.VIN).limit(1);
+      if (!r.error && r.data && r.data[0]) row.ImageUrls = r.data[0].ImageUrls;
+    } catch (e) { console.warn('[vo] ensureImages', e); }
+    return row;
+  }
+  // v19 : un seul chargement du stock par montage, partage par les appels
+  // simultanes (montage, abonnement au site) et reutilise 5 min ; force = recharger.
+  function loadAllOnce(force) {
+    if (!force && S._loadP && Date.now() - S._loadAt < 300000) return S._loadP;
+    S._loadAt = Date.now();
+    S._loadP = loadAll();
+    return S._loadP;
   }
   function mainImage(row) { if (notEmpty(row.cover_url)) return row.cover_url; var a = images(row); return a.length ? a[0] : null; }
   function hasPhoto(row) { return notEmpty(row.cover_url) || images(row).length > 0; }
@@ -209,6 +240,7 @@ OD.define('vo-liste', {
     var urls = (photos || []).map(function (p) { return p.signedUrl; }).filter(Boolean);
     if (!urls.length) {
       var row = (S.raw || []).find(function (x) { return x.VIN === vin; }) || {};
+      await ensureImages(row);
       urls = images(row);
       if (!urls.length && mainImage(row)) urls = [mainImage(row)];
     }
@@ -229,6 +261,7 @@ OD.define('vo-liste', {
       if (c) { var r = await c.from('v_liste_vo').select('*').eq('VIN', vin).limit(1); row = (r.data && r.data[0]) || { VIN: vin }; }
       else row = { VIN: vin };
     }
+    await ensureImages(row);
     // Met à jour la variable WeWeb (pour les autres composants qui l'écoutent)
     try { wwLib.wwVariable.updateValue(VAR_FICHE_VO, row); } catch (e) { }
     ficheState.vin = vin; ficheState.row = row; ficheState.tab = tab || 'fiche';
@@ -1833,22 +1866,21 @@ OD.define('vo-liste', {
   // ─────────────────────────────────────────────────────────── chargement données
   async function loadAll() {
     var c = sb(); if (!c) return [];
-    var all = [], from = 0, size = 1000;
-    while (true) {
-      var res = await c.from('v_liste_vo').select(COLS).range(from, from + size - 1);
-      if (res.error) { S.error = res.error.message || String(res.error); break; }
-      var batch = res.data || [];
-      all = all.concat(batch);
-      if (batch.length < size) break;
-      from += size;
-      if (from > 20000) break;
-    }
+    var size = 1000;
     // v16 : historique véhicule disponible ? (picto clé : bleu si au moins une facture)
-    try {
-      var hq = await c.rpc('vo_historique_nb');
+    var histoP = c.rpc('vo_historique_nb').then(function (hq) {
       if (hq.error) throw hq.error;
       S.histo = {}; (hq.data || []).forEach(function (x) { S.histo[x.vin] = x.nb; });
-    } catch (e) { console.warn('[vo] vo_historique_nb', e); S.histo = null; }
+    }).catch(function (e) { console.warn('[vo] vo_historique_nb', e); S.histo = null; });
+    // v19 : tri sur le VIN (sans tri, les pages pouvaient se recouvrir ou omettre
+    // des vehicules) ; 1re page avec le total, les suivantes en parallele.
+    var first = await c.from('v_liste_vo').select(COLS, { count: 'exact' }).order('VIN').range(0, size - 1);
+    if (first.error) { S.error = first.error.message || String(first.error); await histoP; return []; }
+    var all = first.data || [], total = first.count || all.length, reqs = [];
+    for (var from = size; from < total && from < 20000; from += size) reqs.push(c.from('v_liste_vo').select(COLS).order('VIN').range(from, from + size - 1));
+    var rest = await Promise.all(reqs);
+    rest.forEach(function (res) { if (res.error) S.error = res.error.message || String(res.error); else all = all.concat(res.data || []); });
+    await histoP;
     return all;
   }
   // RESEAU / AFFAIRE / SITE du site sélectionné via la table SITE (référentiel).
@@ -2104,7 +2136,7 @@ OD.define('vo-liste', {
     return '<span class="vo-iact web" data-act="globe" data-url="' + esc(r.LIEN_ANNONCE) + '" title="Voir l’annonce sur le site">' + IC.globe + '</span>';
   }
   function pictoPhotos(r) {
-    var n = images(r).length;
+    var n = nbPhotos(r);
     if (!hasPhoto(r)) return '<span class="vo-iact cam disabled" title="Aucune photo">' + IC.camera + '</span>';
     return '<span class="vo-iact cam" data-act="photos" data-vin="' + esc(r.VIN) + '" title="Diaporama' + (n ? ' · ' + n + ' photo' + (n > 1 ? 's' : '') : '') + '">' + IC.camera + '</span>';
   }
@@ -2584,10 +2616,10 @@ OD.define('vo-liste', {
   }
 
   // ─────────────────────────────────────────────────────────── init / reload
-  async function start() {
+  async function start(force) {
     S.loading = true; S.error = null; renderContent();
     try { var role = num(connectedUser().ID_Role); S.showPA = role != null && PA_ROLES.indexOf(role) !== -1; } catch (e) { S.showPA = false; }
-    S.raw = await loadAll();
+    S.raw = await loadAllOnce(force);
     var d = await resolveDefaults();
     if (d) { if (S.f.reseau == null) S.f.reseau = d.reseau || null; if (S.f.affaire == null) S.f.affaire = d.affaire || null; if (S.f.site == null) S.f.site = d.site || null; }
     S.loading = false;
@@ -2615,7 +2647,7 @@ OD.define('vo-liste', {
     }
   }
   function reloadForSite() { S.f.reseau = null; S.f.affaire = null; S.f.site = null; S.sel = {}; start(); }
-  window.__voReload = function () { start(); };
+  window.__voReload = function () { start(true); };
   win.__voPosters = window.__voPosters = function () { generatePosters(doc.getElementById('vo-pdf')); };
   win.__voExcel = window.__voExcel = function () { exportExcel(doc.getElementById('vo-xls')); };
   win.__voClearSel = window.__voClearSel = function () { S.sel = {}; renderContent(); };
@@ -2639,7 +2671,7 @@ OD.define('vo-liste', {
     if (r.getAttribute('data-vo-ver') === String(VER) && r.querySelector('#vo-content')) return;
     renderShell(); watchSite(); start();
   }
-  boot();
+  // v19 : appel retire. Il doublait le demarrage final (deux chargements du stock).
   function vfChip(lbl, val) { return '<div class="vf-chip"><div class="vf-chip-lbl">' + lbl + '</div><div class="vf-chip-val">' + val + '</div></div>'; }
   function vfTab(id, lbl, cur) { return '<button type="button" class="vf-tab' + (cur === id ? ' on' : '') + '" data-tab="' + id + '">' + lbl + '</button>'; }
   function vfRow(lbl, val) { return '<div class="vf-row"><span class="vf-row-lbl">' + lbl + '</span><span class="vf-row-val">' + val + '</span></div>'; }
@@ -2929,22 +2961,21 @@ OD.define('vo-liste', {
   // ─────────────────────────────────────────────────────────── chargement données
   async function loadAll() {
     var c = sb(); if (!c) return [];
-    var all = [], from = 0, size = 1000;
-    while (true) {
-      var res = await c.from('v_liste_vo').select(COLS).range(from, from + size - 1);
-      if (res.error) { S.error = res.error.message || String(res.error); break; }
-      var batch = res.data || [];
-      all = all.concat(batch);
-      if (batch.length < size) break;
-      from += size;
-      if (from > 20000) break;
-    }
+    var size = 1000;
     // v16 : historique véhicule disponible ? (picto clé : bleu si au moins une facture)
-    try {
-      var hq = await c.rpc('vo_historique_nb');
+    var histoP = c.rpc('vo_historique_nb').then(function (hq) {
       if (hq.error) throw hq.error;
       S.histo = {}; (hq.data || []).forEach(function (x) { S.histo[x.vin] = x.nb; });
-    } catch (e) { console.warn('[vo] vo_historique_nb', e); S.histo = null; }
+    }).catch(function (e) { console.warn('[vo] vo_historique_nb', e); S.histo = null; });
+    // v19 : tri sur le VIN (sans tri, les pages pouvaient se recouvrir ou omettre
+    // des vehicules) ; 1re page avec le total, les suivantes en parallele.
+    var first = await c.from('v_liste_vo').select(COLS, { count: 'exact' }).order('VIN').range(0, size - 1);
+    if (first.error) { S.error = first.error.message || String(first.error); await histoP; return []; }
+    var all = first.data || [], total = first.count || all.length, reqs = [];
+    for (var from = size; from < total && from < 20000; from += size) reqs.push(c.from('v_liste_vo').select(COLS).order('VIN').range(from, from + size - 1));
+    var rest = await Promise.all(reqs);
+    rest.forEach(function (res) { if (res.error) S.error = res.error.message || String(res.error); else all = all.concat(res.data || []); });
+    await histoP;
     return all;
   }
   // RESEAU / AFFAIRE / SITE du site sélectionné via la table SITE (référentiel).
@@ -3200,7 +3231,7 @@ OD.define('vo-liste', {
     return '<span class="vo-iact web" data-act="globe" data-url="' + esc(r.LIEN_ANNONCE) + '" title="Voir l’annonce sur le site">' + IC.globe + '</span>';
   }
   function pictoPhotos(r) {
-    var n = images(r).length;
+    var n = nbPhotos(r);
     if (!hasPhoto(r)) return '<span class="vo-iact cam disabled" title="Aucune photo">' + IC.camera + '</span>';
     return '<span class="vo-iact cam" data-act="photos" data-vin="' + esc(r.VIN) + '" title="Diaporama' + (n ? ' · ' + n + ' photo' + (n > 1 ? 's' : '') : '') + '">' + IC.camera + '</span>';
   }
@@ -3680,17 +3711,17 @@ OD.define('vo-liste', {
   }
 
   // ─────────────────────────────────────────────────────────── init / reload
-  async function start() {
+  async function start(force) {
     S.loading = true; S.error = null; renderContent();
     try { var role = num(connectedUser().ID_Role); S.showPA = role != null && PA_ROLES.indexOf(role) !== -1; } catch (e) { S.showPA = false; }
-    S.raw = await loadAll();
+    S.raw = await loadAllOnce(force);
     var d = await resolveDefaults();
     if (d) { if (S.f.reseau == null) S.f.reseau = d.reseau || null; if (S.f.affaire == null) S.f.affaire = d.affaire || null; if (S.f.site == null) S.f.site = d.site || null; }
     S.loading = false;
     renderChips(); renderContent();
   }
   function reloadForSite() { S.f.reseau = null; S.f.affaire = null; S.f.site = null; S.sel = {}; start(); }
-  window.__voReload = function () { start(); };
+  window.__voReload = function () { start(true); };
   win.__voPosters = window.__voPosters = function () { generatePosters(doc.getElementById('vo-pdf')); };
   win.__voExcel = window.__voExcel = function () { exportExcel(doc.getElementById('vo-xls')); };
   win.__voClearSel = window.__voClearSel = function () { S.sel = {}; renderContent(); };
