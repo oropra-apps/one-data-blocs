@@ -74,7 +74,8 @@
   const CSS = `
   .pv-wrap{font-family:inherit;color:#1c2b45;max-width:1180px;margin:0 auto}
   .pv-top{background:#fff;border:1px solid #e3edf9;border-radius:12px;padding:13px 16px;display:flex;align-items:center;gap:16px;flex-wrap:wrap;margin-bottom:16px}
-  .pv-tag{background:#E8963B;color:#fff;font-weight:800;border-radius:7px;padding:4px 9px;font-size:12px}
+  .pv-tag{background:#53bda7;color:#fff;font-weight:800;border-radius:7px;padding:4px 9px;font-size:12px}
+  .pv-tag.vo{background:#fac055;color:#633806}
   .pv-title{font-size:16px;font-weight:800;color:#1f4a87}
   .pv-ctx{display:flex;align-items:center;gap:14px;flex-wrap:wrap}
   .pv-chip{display:flex;flex-direction:column;line-height:1.2}
@@ -173,7 +174,13 @@
     const attr = (k, v) => `<div class="pv-attr"><div class="k">${k}</div><div class="v">${v}</div></div>`;
     const swatch = c => `<span class="pv-sw" style="background:${c}"></span>`;
     const kmFmt = n => (n != null && n !== '') ? Number(n).toLocaleString('fr-FR') + ' km' : '—';
-    const vehAttrs = V ? [
+    // 13/10/2026 : V existe aussi pour une simulation VN de catalogue (capture
+    // BACS du devis). La présentation « véhicule d'occasion » ne vaut que pour
+    // un VO / VD-VK ou un véhicule identifié (VIN, km, stock).
+    const occ = !!(V && (univers !== 'VN' || V.vin || V.km != null || V.statut_stock));
+    const Vc = V || {};
+    const energieLib = e => ({ HSD: 'Hybride', PHEV: 'Hybride rechargeable', BEV: 'Électrique', EV: 'Électrique', ESS: 'Essence', DSL: 'Diesel' }[String(e || '').toUpperCase()] || e);
+    const vehAttrs = occ ? [
       attr('Marque', esc(V.marque || '—')),
       attr('Modèle', esc(V.modele || '—')),
       attr('Version', esc(V.version || '—')),
@@ -187,18 +194,18 @@
       attr('Origine', esc(V.origine || '—')),
       attr('Puissance fiscale', V.puissance_fiscale != null ? esc(V.puissance_fiscale) + ' CV' : '—')
     ].join('') : [
-      attr('Marque', esc(C.marque || 'Toyota')),
-      attr('Famille', esc(C.famille || '—')),
-      attr('Finition', esc(C.finition || '—')),
-      attr('Motorisation', esc(C.motorisation || '—')),
-      attr('Carrosserie', esc(C.carrosserie || '—')),
-      attr('Énergie', esc(C.energie || '—')),
-      attr('CO₂', C.co2 != null ? esc(C.co2) + ' g/km' : '—'),
-      attr('Couleur ext.', C.couleur_ext ? swatch('#8893a0') + esc(C.couleur_ext) : '<span class="pv-empty">non renseignée</span>'),
-      attr('Intérieur', C.couleur_interieur ? swatch('#222') + esc(C.couleur_interieur) : '<span class="pv-empty">—</span>')
+      attr('Marque', esc(cMarque || Vc.marque || 'Toyota')),
+      attr('Famille', esc(C.famille || Vc.config_famille || '—')),
+      attr('Finition', esc(C.finition || Vc.config_finition || '—')),
+      attr('Motorisation', esc(C.motorisation || Vc.config_motorisation || '—')),
+      attr('Carrosserie', esc(C.carrosserie || Vc.config_carrosserie || '—')),
+      attr('Énergie', esc(C.energie || energieLib(Vc.config_energie) || '—')),
+      attr('CO₂', (C.co2 != null || Vc.config_co2) ? esc(C.co2 != null ? C.co2 : Vc.config_co2) + ' g/km' : '—'),
+      attr('Couleur ext.', (C.couleur_ext || Vc.config_ext) ? swatch('#8893a0') + esc(C.couleur_ext || Vc.config_ext) : '<span class="pv-empty">non renseignée</span>'),
+      attr('Intérieur', (C.couleur_interieur || Vc.config_int) ? swatch('#5a6b80') + esc(C.couleur_interieur || Vc.config_int) : '<span class="pv-empty">—</span>')
     ].join('');
     const vinAff = P.VIN || (V && V.vin);
-    const vehTitle = V
+    const vehTitle = occ
       ? `VÉHICULE — ${esc(univers)}${estVDVK ? ' · VD/VK' : ''}${vinAff ? ' · VIN ' + esc(vinAff) : ''}`
       : (enStock ? `VÉHICULE — EN STOCK · VIN ${esc(P.VIN)}` : 'VÉHICULE — CONFIGURATION');
     const vehCard = card(vehTitle,
@@ -274,12 +281,12 @@
 
     root.innerHTML = `<style>${CSS}</style><div class="pv-wrap">
       <div class="pv-top">
-        <span class="pv-tag"${univers === 'VN' ? '' : ` style="background:#3a9e8a"`}>${esc(univers)}</span>${estVDVK ? '<span class="pv-tag" style="background:#ede9fe;color:#5b21b6">VD/VK</span>' : ''}<span class="pv-title">Proposition</span>
+        <span class="pv-tag${univers === 'VN' ? '' : ' vo'}">${esc(univers)}</span>${estVDVK ? '<span class="pv-tag" style="background:#ede9fe;color:#5b21b6">VD/VK</span>' : ''}<span class="pv-title">Proposition</span>
         <div class="pv-ctx">
           <div class="pv-chip"><span>Véhicule</span><b>${esc(vehName)}</b></div>
           <div class="pv-sep"></div>
           <div class="pv-chip"><span>Point de vente</span><b>${esc(siteName)}</b></div>
-          <span class="pv-branch">${V ? (estVDVK ? '🚗 Stock VO · démonstration' : (V.statut_stock ? '🚗 Stock VO' : '🚗 Véhicule d\'occasion')) : (enStock ? '🚗 En stock' : '🔧 Configuration — à produire')}</span>
+          <span class="pv-branch">${occ ? (estVDVK ? '🚗 Stock VO · démonstration' : (V.statut_stock ? '🚗 Stock VO' : '🚗 Véhicule d\'occasion')) : (enStock ? '🚗 En stock' : '🔧 Configuration — à produire')}</span>
         </div>
         <div class="pv-ht"><span class="on">TTC</span><div class="pv-switch"></div><span>HT</span></div>
       </div>
