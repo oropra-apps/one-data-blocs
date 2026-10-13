@@ -1,5 +1,6 @@
 // ============================================================================
-//  BILATÉRALES — v22 (14/10/2026, Team Colin) — v22 : direction = file des vendeurs à recevoir (plus de classement des réseaux)
+//  BILATÉRALES — v23 (14/10/2026, Team Colin) — v23 : vue vendeur refaite (prochaine, chiffres regardés, engagements, historique)
+//  v22 — v22 : direction = file des vendeurs à recevoir (plus de classement des réseaux)
 //  v21 — v21 : performance (appels en parallèle, bilat_cadence, cache)
 //  v20 — v20 : Encadrement en cartes sur mobile
 //  v19 — v19 : vue direction (sites repliés, régularité depuis le démarrage, nœuds vides masqués)
@@ -660,58 +661,85 @@ function scopeLabel() {
 // Sélecteur de périmètre : l'arbre est toujours visible, tout s'adapte au clic.
 
   // ===== INTERFACE VENDEUR (rôle 4) : "Mes bilatérales", lecture seule =====
+  // v23 : vue vendeur refaite. Avant : quatre tuiles dont « à planifier » en
+  // gros caractères et « 0 sur la période » (la semaine en cours), puis
+  // « Aucune bilatérale sur la période ». Désormais : la prochaine bilatérale,
+  // ce qui y sera regardé (ses chiffres du mois, les mêmes que ceux du chef),
+  // ses engagements en cours, puis tout son historique (12 mois).
   function renderVendeurSelf() {
     const me = getViewerId();
     const name = getViewerName() || 'Moi';
-    // La vue vendeur reste scopée sur la PÉRIODE en cours (+ ses programmées à venir),
-    // indépendamment de l'historique élargi chargé pour la timeline/réalisation, afin que
-    // le libellé "période en cours" et le compteur "sur la période" restent exacts.
-    const _debMois = state.period.from.slice(0, 7);
-    const mine = (state.bils || []).filter(b => b.id_user === me && b.mois && b.mois >= _debMois)
+    const nowIso = ymd(new Date());
+    const mine = (state.bils || []).filter(b => b.id_user === me)
       .sort((a, b) => (b.start_date || '').localeCompare(a.start_date || ''));
     const realised = mine.filter(b => b.statut === 'realisee');
     const future = mine.filter(b => b.statut === 'programmee').sort((a, b) => (a.start_date || '').localeCompare(b.start_date || ''));
-    const retard = mine.filter(b => b.statut === 'retard');
     const last = realised[0] || null;
     const next = future[0] || null;
     const eng = (state.tenueMap || {})[me] || null;
     const tp = tenuePctOf(eng);
-
-    let h = '<div class="prio-head">Mes bilatérales <span class="prio-sub">' + esc(name) + ' · période en cours</span></div>';
-    h += '<div class="prio-kpis">';
-    if (last) {
-      const j = daysSinceTs(last.start_date); const col = j == null ? '#8b99b0' : (j <= BIL_CFG.cadenceJ ? '#00997f' : (j <= BIL_CFG.retardJ ? '#8a6d1f' : '#c0524f'));
-      h += '<div class="pk"><div class="pk-v" style="font-size:18px;color:' + col + '">' + esc(fmtDate(last.start_date)) + '</div><div class="pk-l">dernière bilatérale</div><div class="pk-s">' + (j == null ? '' : 'il y a ' + j + ' j') + (last.nom_chef ? ' · ' + esc(last.nom_chef) : '') + '</div></div>';
-    } else {
-      h += '<div class="pk"><div class="pk-v" style="color:#c0524f">—</div><div class="pk-l">dernière bilatérale</div><div class="pk-s">aucune reçue</div></div>';
-    }
-    if (next) {
-      h += '<div class="pk"><div class="pk-v" style="font-size:18px;color:#2a5ea9">' + esc(fmtDate(next.start_date)) + '</div><div class="pk-l">prochaine</div><div class="pk-s">' + fmtHeure(next.start_date) + (next.nom_chef ? ' · ' + esc(next.nom_chef) : '') + '</div></div>';
-    } else {
-      h += '<div class="pk"><div class="pk-v" style="color:#9bb3d1">à planifier</div><div class="pk-l">prochaine</div><div class="pk-s">aucune programmée</div></div>';
-    }
-    h += '<div class="pk"><div class="pk-v" style="color:#2a5ea9">' + mine.length + '</div><div class="pk-l">sur la période</div><div class="pk-s">' + realised.length + ' réalisée' + (realised.length > 1 ? 's' : '') + (retard.length ? ' · ' + retard.length + ' en attente' : '') + '</div></div>';
-    const tCol = tp == null ? '#8b99b0' : (tp >= 80 ? '#00997f' : (tp >= 60 ? '#8a6d1f' : '#c0524f'));
-    h += '<div class="pk"><div class="pk-v" style="color:' + tCol + '">' + (tp == null ? '—' : tp + '%') + '</div><div class="pk-l">mes engagements tenus</div><div class="pk-s">sur 6 mois</div></div>';
-    h += '</div>';
-    // v15 : ce que le vendeur s'est engagé à faire, avec cible et échéance.
     const mesEng = state.mesEngagements || [];
+    const echus = mesEng.filter(e => e.echeance && String(e.echeance).slice(0, 10) < nowIso).length;
+    const chef = (next && next.nom_chef) || (last && last.nom_chef) || '';
+
+    let h = '<div class="prio-head">Mes bilatérales <span class="prio-sub">' + esc(name) +
+      ' · 1 entretien tous les ' + BIL_CFG.cadenceJ + ' jours avec ' + (chef ? esc(chef) : 'votre chef des ventes') + '</span></div>';
+
+    // Prochaine bilatérale
+    if (next) {
+      const d = new Date(String(next.start_date).replace(' ', 'T'));
+      const quand = d.toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long' });
+      h += '<div class="next-box vs-next"><div class="nb-l">Ma prochaine bilatérale</div><div class="nb-main"><div>' +
+        '<div class="nb-nom">' + esc(quand) + ' à ' + esc(fmtHeure(next.start_date)) + '</div>' +
+        '<div class="nb-why">avec ' + esc(next.nom_chef || 'votre chef des ventes') + ' · préparez-la avec les chiffres ci-dessous et vos engagements en cours</div></div></div></div>';
+    } else {
+      h += '<div class="next-box vs-next vide"><div class="nb-l">Ma prochaine bilatérale</div><div class="nb-main"><div>' +
+        '<div class="nb-nom">Pas encore programmée</div>' +
+        '<div class="nb-why">Votre chef des ventes la planifie dans son agenda : elle apparaîtra ici et dans le vôtre.</div></div></div></div>';
+    }
+
+    // Repères
+    const jLast = last ? daysSinceTs(last.start_date) : null;
+    const colLast = jLast == null ? '#c0524f' : (jLast <= BIL_CFG.cadenceJ ? '#00997f' : (jLast <= BIL_CFG.retardJ ? '#8a6d1f' : '#c0524f'));
+    const tCol = tp == null ? '#8b99b0' : (tp >= 80 ? '#00997f' : (tp >= 60 ? '#8a6d1f' : '#c0524f'));
+    h += '<div class="prio-kpis">';
+    h += '<div class="pk"><div class="pk-v" style="color:' + colLast + '">' + (last ? (jLast === 0 ? 'Aujourd’hui' : 'il y a ' + jLast + ' j') : '—') + '</div><div class="pk-l">dernière bilatérale</div><div class="pk-s">' + (last ? esc(fmtDate(last.start_date)) + (last.nom_chef ? ' · ' + esc(last.nom_chef) : '') : 'aucune encore') + '</div></div>';
+    h += '<div class="pk"><div class="pk-v" style="color:' + (echus ? '#c0524f' : '#2a5ea9') + '">' + mesEng.length + '</div><div class="pk-l">engagement' + (mesEng.length > 1 ? 's' : '') + ' en cours</div><div class="pk-s">' + (echus ? echus + ' échéance' + (echus > 1 ? 's' : '') + ' dépassée' + (echus > 1 ? 's' : '') : (mesEng.length ? 'dans les temps' : 'aucun pour l’instant')) + '</div></div>';
+    h += '<div class="pk"><div class="pk-v" style="color:' + tCol + '">' + (tp == null ? '—' : tp + ' %') + '</div><div class="pk-l">engagements tenus</div><div class="pk-s">' + (tp == null ? 'aucun encore pointé' : 'sur 6 mois') + '</div></div>';
+    h += '</div>';
+
+    // Ce qui sera regardé : mes chiffres du mois (mêmes nombres que l'accueil et la fiche du chef)
+    const K = dashOf(me);
+    if (K) {
+      const o = K.obj_cdes > 0 ? R_objectif(K.cdes, K.obj_cdes) : null;
+      const lignes = [];
+      lignes.push(['Commandes du mois', o ? fmtNb(K.cdes, 0) + ' / ' + fmtNb(o.obj, 0) : fmtNb(K.cdes, 0),
+        o ? (o.ecart < -0.5 ? 'retard de ' + fmtNb(-o.ecart) + ' sur l’attendu à date (' + fmtNb(o.att) + ')' : 'dans l’objectif à date (' + fmtNb(o.att) + ' attendues)') : 'pas d’objectif saisi',
+        o && o.ecart < -0.5 ? 'ko' : 'ok']);
+      if (K.pipe_affaires) lignes.push(['Affaires à relancer', fmtNb(K.pipe_a_relancer, 0), 'sans contact depuis plus de 30 jours, sur ' + fmtNb(K.pipe_affaires, 0) + ' en cours', K.pipe_a_relancer > 0 ? 'warn' : 'ok']);
+      lignes.push(['Leads non contactés', fmtNb(K.leads_jamais, 0), K.leads_jamais_48h ? 'dont ' + fmtNb(K.leads_jamais_48h, 0) + ' depuis plus de 48 h' : 'aucun en souffrance', K.leads_jamais_48h > 0 ? 'ko' : (K.leads_jamais > 0 ? 'warn' : 'ok')]);
+      if (K.livr_retard || K.livr_attente) lignes.push(['Livraisons en retard', fmtNb(K.livr_retard, 0), fmtNb(K.livr_attente, 0) + ' en attente', K.livr_retard > 0 ? 'ko' : 'ok']);
+      if (K.rdv_a_venir || K.rdv_tenus) lignes.push(['RDV à venir', fmtNb(K.rdv_a_venir, 0), fmtNb(K.rdv_tenus, 0) + ' tenus ce mois', 'ok']);
+      h += '<div class="bil-cat-title" style="color:#2a5ea9">Ce qui sera regardé en bilatérale <span class="bil-cat-n">mes chiffres du mois, les mêmes que ceux de mon chef</span></div>' +
+        '<div class="vs-ch">' + lignes.map(l => '<div class="vs-row ' + l[3] + '"><span class="vs-l">' + esc(l[0]) + '</span><b>' + esc(l[1]) + '</b><span class="vs-s">' + esc(l[2]) + '</span></div>').join('') + '</div>';
+    }
+
+    // Engagements en cours
     if (mesEng.length) {
-      const auj = ymd(new Date());
-      h += '<div class="bil-cat-title" style="color:#2a5ea9">Mes engagements en cours</div><div class="me-eng">' +
+      h += '<div class="bil-cat-title" style="color:#2a5ea9">Mes engagements en cours <span class="bil-cat-n">ils seront pointés à la prochaine bilatérale</span></div><div class="me-eng">' +
         mesEng.map(e => {
-          const echu = e.echeance && String(e.echeance).slice(0, 10) < auj;
+          const echu = e.echeance && String(e.echeance).slice(0, 10) < nowIso;
           return '<div class="me-row"><div class="me-lib">' + esc(e.libelle) + '</div>' +
             (e.cible != null && e.cible !== '' ? '<div class="me-cible">objectif <b>' + esc(String(e.cible)) + '</b></div>' : '') +
             (e.echeance ? '<div class="me-ech' + (echu ? ' echu' : '') + '">' + (echu ? 'échéance dépassée le ' : 'pour le ') + esc(fmtDate(String(e.echeance))) + '</div>' : '') + '</div>';
         }).join('') + '</div>';
     }
-    h += renderSelfTimeline(mine);
+    h += renderSelfTimeline(mine.filter(b => b.statut !== 'programmee'));
     return h;
   }
   function renderSelfTimeline(list) {
-    if (!list.length) return '<div class="bil-empty">Aucune bilatérale sur la période.</div>';
-    let h = '<div class="bil-cat-title" style="color:#2a5ea9">Mes entretiens</div><div class="tl">';
+    if (!list.length) return '<div class="bil-cat-title" style="color:#2a5ea9">Mon historique</div><div class="bil-empty">Aucune bilatérale encore : la première apparaîtra ici avec son compte rendu.</div>';
+    let h = '<div class="bil-cat-title" style="color:#2a5ea9">Mon historique <span class="bil-cat-n">12 derniers mois · cliquez pour relire un compte rendu</span></div><div class="tl">';
     let i = 0;
     for (const b of list) {
       const side = i % 2 === 0 ? 'left' : 'right'; i++;
@@ -2199,6 +2227,12 @@ const STYLE = '<style>' +
 '#bil-root .hint-det b{color:#2a5ea9}' +
 '#bil-root .suivi-cov{font-size:12px;font-weight:700;color:#8b99b0;margin-left:10px}' +
 '#bil-root .site-block{margin-bottom:10px}' +
+'#bil-root .vs-next{margin-bottom:14px}#bil-root .vs-next.vide{background:#f4f7fb;border-color:#e3e9f3}#bil-root .vs-next.vide .nb-nom{color:#5a6b86}' +
+'#bil-root .vs-ch{background:#fff;border:1px solid #e3e9f3;border-radius:12px;overflow:hidden;margin-bottom:16px}' +
+'#bil-root .vs-row{display:grid;grid-template-columns:minmax(150px,1.1fr) 90px 2fr;align-items:center;gap:12px;padding:11px 16px;border-bottom:1px solid #eef2f8;border-left:3px solid #53bda7}' +
+'#bil-root .vs-row:last-child{border-bottom:none}#bil-root .vs-row.warn{border-left-color:#fac055}#bil-root .vs-row.ko{border-left-color:#d97070}' +
+'#bil-root .vs-l{font-size:13px;font-weight:700;color:#1c2b45}#bil-root .vs-row b{font-size:16px;font-weight:800;color:#2a5ea9;font-variant-numeric:tabular-nums}#bil-root .vs-row.ko b{color:#c0524f}#bil-root .vs-s{font-size:12px;color:#5a6b86}' +
+'#bil-root.bil-narrow .vs-row{grid-template-columns:1fr auto}#bil-root.bil-narrow .vs-s{grid-column:1/3}' +
 '#bil-root .pq-more{display:flex;align-items:center;gap:12px;margin:12px 0 4px}#bil-root .pq-more span{font-size:12px;color:#8b99b0}' +
 '#bil-root .pq-plus{font-family:inherit;font-size:13px;font-weight:700;color:#2a5ea9;background:#fff;border:1px solid #e3e9f3;border-radius:9px;padding:8px 14px;cursor:pointer}#bil-root .pq-plus:hover{background:rgba(172,197,228,.16)}' +
 '#bil-root .site-block.repli{margin-bottom:0;border-bottom:1px solid #eaf0f9}' +
