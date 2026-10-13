@@ -1,4 +1,8 @@
 // ============================================================================
+//  v18 (13/10/2026) : historique du vehicule, la barre « Achat du VO » se
+//  placait sous le bandeau de l'annee de la facture suivante (achat 18/03/2026
+//  affiche sous « 2025 »). Elle se place a sa date, sous le bandeau de son
+//  annee, cree s'il n'existe pas.
 //  v17 (13/10/2026) : fiche VO ouverte par la cle (onglet Historique) : la croix
 //  ne fermait pas et il fallait cliquer deux fois dehors. Le chargement de
 //  l'historique, lance pendant la construction de la popup, la redessinait de
@@ -1740,14 +1744,18 @@ OD.define('vo-liste', {
       achatFait = true;
       return '<tr class="hv-achat"><td colspan="5"><div class="hv-achat-l">Achat du VO · ' + hvEsc(hvDate(achat)) + '</div></td></tr>';
     };
+    // bandeau d'annee : emis une fois par annee, y compris pour l'annee de l'achat
+    // quand aucune facture ne la porte (la barre se place alors sous son annee).
+    var annee = function (a) {
+      if (!a || a === an) return '';
+      an = a;
+      var ta = at.filter(function (x) { return String(x.date_fac || '').slice(0, 4) === a; }).reduce(function (s, x) { return s + (hvNum(x.montant_ht) || 0); }, 0);
+      return '<tr class="hv-annee"><td colspan="4">' + a + '</td><td class="c-num">' + (ta ? hvEur(ta) : '') + '</td></tr>';
+    };
+    var barreAchat = function () { return annee(achat.slice(0, 4)) + achatLigne(); };
     rows.forEach(function (r) {
-      var a = r.date_fac ? String(r.date_fac).slice(0, 4) : null;
-      if (a && a !== an) {
-        an = a;
-        var ta = at.filter(function (x) { return String(x.date_fac || '').slice(0, 4) === a; }).reduce(function (s, x) { return s + (hvNum(x.montant_ht) || 0); }, 0);
-        h += '<tr class="hv-annee"><td colspan="4">' + a + '</td><td class="c-num">' + (ta ? hvEur(ta) : '') + '</td></tr>';
-      }
-      if (!achatFait && String(r.date_fac || '').slice(0, 10) < achat) h += achatLigne();
+      if (!achatFait && String(r.date_fac || '').slice(0, 10) < achat) h += barreAchat();
+      h += annee(r.date_fac ? String(r.date_fac).slice(0, 4) : null);
       var cls = (hvEstAtelier(r) ? '' : 'hv-vente') + ((hvNum(r.montant_ht) || 0) < 0 ? ' hv-avoir' : '');
       h += '<tr' + (cls.trim() ? ' class="' + cls.trim() + '"' : '') + '>'
         + '<td class="c-date">' + hvEsc(hvDate(r.date_fac)) + '</td>'
@@ -1756,7 +1764,7 @@ OD.define('vo-liste', {
         + '<td class="c-num">' + (r.nb_lignes > 0 && hvNum(r.pieces_ht) ? hvEur(r.pieces_ht) : '—') + '</td>'
         + '<td class="c-num c-tot">' + hvEur(r.montant_ht) + '</td></tr>';
     });
-    if (!achatFait) h += achatLigne();
+    if (!achatFait) h += barreAchat();
     h += '</tbody><tfoot><tr><td colspan="4" style="padding:11px 10px 0;border-top:1.5px solid #d7e2f0;color:#54678a;font-weight:600">Total atelier</td>'
       + '<td class="c-num c-tot" style="padding:11px 10px 0;border-top:1.5px solid #d7e2f0">' + hvEur(tot) + '</td></tr></tfoot></table>';
     return h;
