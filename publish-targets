@@ -60,3 +60,12 @@ whatsapp      = teamcolin
 
 # Module interne OROPRA : jamais de défaut de flotte.
 onboarding   = oropra
+
+# Bilatérales v6 et agenda v21 (14/10/2026) : ils appellent les fonctions
+# bilat_* (bilat_realiser, bilat_synthese_part, bilat_resume_vendeurs,
+# bilat_creer_maintenant…) et dash_lire, livrées par
+# bilaterales_02_fonctions_teamcolin.sql sur la seule base de Team Colin. Les
+# deux modules savent se replier, mais une bilatérale future n'y serait plus
+# réalisable : tant que le SQL n'est pas sur les autres tenants, on cible.
+bilaterales   = teamcolin
+agenda        = teamcolin
