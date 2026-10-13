@@ -1,5 +1,6 @@
 // ============================================================================
-//  BILATÉRALES — v21 (14/10/2026, Team Colin) — v21 : performance (appels en parallèle, bilat_cadence, cache)
+//  BILATÉRALES — v22 (14/10/2026, Team Colin) — v22 : direction = file des vendeurs à recevoir (plus de classement des réseaux)
+//  v21 — v21 : performance (appels en parallèle, bilat_cadence, cache)
 //  v20 — v20 : Encadrement en cartes sur mobile
 //  v19 — v19 : vue direction (sites repliés, régularité depuis le démarrage, nœuds vides masqués)
 //  v18 — v18 : périmètre sans défilement sur mobile ;
@@ -908,8 +909,11 @@ function prioScore(c) { return prioDetail(c).score; }
 // ÉTAPE 0 (landing) — file de priorité "qui recevoir"
 // "En priorité" : direction -> classement des entités-filles du périmètre, des
 // moins performantes aux plus performantes ; chef -> file de ses vendeurs.
+// v22 : la direction voit, elle aussi, la file des VENDEURS à recevoir sur
+// son périmètre (le classement des réseaux/affaires faisait doublon avec
+// l'arbre du périmètre et l'onglet Encadrement, et affichait des zéros).
 function renderPriorite() {
-  return isDirection() ? renderPrioLeaderboard() : renderPrioVendeurs();
+  return renderPrioVendeurs();
 }
 
 // Agrégats d'une liste de vendeurs (cadence) : couverture + tenue.
@@ -1069,7 +1073,7 @@ function renderPrioVendeurs() {
       '<div class="nb-main"><div><div class="nb-nom">' + esc(d0.c.nom_vendeur) + ' <span>' + esc(d0.c.nom_site) + '</span></div>' +
       '<div class="nb-why">' + esc([d0.main ? d0.txt[d0.main] : '', ...['objectif', 'transfo', 'discipline'].filter(k => k !== d0.main && d0.comps[k] > 0.15 && d0.txt[k]).map(k => d0.txt[k])].filter(Boolean).join(' · ')) + '</div></div>' +
       '<div class="nb-acts"><button class="pr-plan" data-plan-vend="' + d0.c.id_user + '|' + d0.c.id_site + '">Planifier</button>' +
-      (aFaire.length > 1 ? '<button class="nb-batch" data-batch="1">📅 Planifier les ' + Math.min(5, aFaire.length) + ' premiers</button>' : '') + '</div></div></div>';
+      (aFaire.length > 1 && !isDirection() ? '<button class="nb-batch" data-batch="1">📅 Planifier les ' + Math.min(5, aFaire.length) + ' premiers</button>' : '') + '</div></div></div>';
   }
   h += '<details class="hint-det"><summary>Comment est calculé le classement ?</summary><div>Score sur 100 : <b>40</b> retard de commandes rapporté à l’attendu à date (0 commande sur 8 attendues = 40 points) · <b>25</b> ' +
     (state.txMesurable === false ? 'part du portefeuille à relancer (> 30 j) — la transformation n’est pas mesurable tant que les affaires perdues ne sont pas enregistrées' : 'baisse de la transformation sur ' + BIL_CFG.transfoJours + ' jours') +
@@ -1078,7 +1082,11 @@ function renderPrioVendeurs() {
   // v14 : liste en tableau sobre. Une ligne = rang, vendeur, POURQUOI (la
   // raison principale en clair, les autres en gris), dernière bilatérale,
   // score en barre, action. Plus de pastilles colorées en série.
-  const shown = sorted.filter(pass);
+  const shownAll = sorted.filter(pass);
+  // v22 : au-delà de 30 lignes (direction : 90+ vendeurs), on affiche les 30
+  // premiers et un bouton pour la suite.
+  const maxL = state.prioMax || 30;
+  const shown = shownAll.slice(0, maxL);
   h += '<div class="pq">';
   h += '<div class="pq-row pq-head"><div>#</div><div>Vendeur</div><div>Pourquoi le recevoir</div><div>Dernière bilatérale</div><div>Priorité</div><div></div></div>';
   if (!shown.length) h += '<div class="bil-empty">Aucun vendeur pour ce filtre.</div>';
@@ -1106,6 +1114,7 @@ function renderPrioVendeurs() {
     '</div>';
   });
   h += '</div>';
+  if (shownAll.length > shown.length) h += '<div class="pq-more"><button class="pq-plus" data-prio-plus="1">Afficher les ' + Math.min(30, shownAll.length - shown.length) + ' suivants</button><span>' + shown.length + ' sur ' + shownAll.length + '</span></div>';
   return h;
 }
 function fmtJJMM(ts) { const t = String(ts || ''); return t.length >= 10 ? t.slice(8, 10) + '/' + t.slice(5, 7) : ''; }
@@ -1848,6 +1857,8 @@ window.__bilRoute = function (e) {
   if (chefRowEl) { focusChef(Number(chefRowEl.getAttribute('data-chef'))); return; }
 
   // "toute l'équipe du site" (annule le focus chef)
+  const plus = e.target.closest('[data-prio-plus]');
+  if (plus) { state.prioMax = (state.prioMax || 30) + 30; render(); return; }
   const sst = e.target.closest('[data-suivi-site]');
   if (sst) { state.suiviOpen = state.suiviOpen || {}; const k = sst.getAttribute('data-suivi-site'); state.suiviOpen[k] = !state.suiviOpen[k]; render(); return; }
   const all = e.target.closest('[data-suivi-all]');
@@ -2188,6 +2199,8 @@ const STYLE = '<style>' +
 '#bil-root .hint-det b{color:#2a5ea9}' +
 '#bil-root .suivi-cov{font-size:12px;font-weight:700;color:#8b99b0;margin-left:10px}' +
 '#bil-root .site-block{margin-bottom:10px}' +
+'#bil-root .pq-more{display:flex;align-items:center;gap:12px;margin:12px 0 4px}#bil-root .pq-more span{font-size:12px;color:#8b99b0}' +
+'#bil-root .pq-plus{font-family:inherit;font-size:13px;font-weight:700;color:#2a5ea9;background:#fff;border:1px solid #e3e9f3;border-radius:9px;padding:8px 14px;cursor:pointer}#bil-root .pq-plus:hover{background:rgba(172,197,228,.16)}' +
 '#bil-root .site-block.repli{margin-bottom:0;border-bottom:1px solid #eaf0f9}' +
 '#bil-root .site-block.repli .site-title{margin:0;padding:11px 4px}' +
 '#bil-root .site-title.clik{cursor:pointer;user-select:none}' +
