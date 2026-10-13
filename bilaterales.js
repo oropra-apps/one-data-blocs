@@ -1,4 +1,12 @@
 // ============================================================================
+//  BILATÉRALES — v17 (14/10/2026, Team Colin)
+//   - Cadence de la direction : 1 bilatérale par semaine et par vendeur
+//     minimum (cadenceJ 7, retard au-delà de 10 j) ; période par défaut =
+//     semaine en cours, preset « Cette semaine ».
+//   - Mobile : suivi de l'équipe en cartes, périmètre réduit à l'essentiel.
+//   - Fiche ouverte depuis l'agenda : tuile Transformation complétée après
+//     chargement ; heure de mise à jour en heure de Paris.
+// ============================================================================
 //  BILATÉRALES — v6 (14/10/2026, Team Colin) — préparation de la revue du 14/10
 //
 //  1. LA FICHE A TOUJOURS SES CHIFFRES. get_vendeur_synthese dépassait le
@@ -68,7 +76,7 @@ const VAR_ID_BILATE_REAL = '851fed59-9397-41ae-b91d-26daa2ff960a';
 //            propositions ne veut rien dire).
 // Surcharge possible par ctx.tenant.config.bilaterales ou window.__OD_BIL_CFG.
 const BIL_CFG = (function () {
-  const base = { cadenceJ: 30, retardJ: 45, minVolumeTransfo: 8, transfoJours: 90 };
+  const base = { cadenceJ: 7, retardJ: 10, minVolumeTransfo: 8, transfoJours: 90 };  // Team Colin : 1 bilatérale par semaine et par vendeur minimum
   try { Object.assign(base, (ctx && ctx.tenant && ctx.tenant.config && ctx.tenant.config.bilaterales) || {}); } catch (e) {}
   try { Object.assign(base, window.__OD_BIL_CFG || {}); } catch (e) {}
   return base;
@@ -136,7 +144,9 @@ const state = window.__bil || {};
   //
   // TOUJOURS réinitialisée (13/08/2026), comme la navigation juste en dessous :
   // l'état vit sur window.__bil et survivrait sinon aux navigations SPA.
-  state.period = { from: ymd(firstOfMonth), to: ymd(now) };
+  // v17 : cadence hebdomadaire -> défaut = lundi de la semaine en cours -> aujourd'hui.
+  const lundi = new Date(now.getFullYear(), now.getMonth(), now.getDate() - ((now.getDay() + 6) % 7));
+  state.period = { from: ymd(BIL_CFG.cadenceJ <= 7 ? lundi : firstOfMonth), to: ymd(now) };
 }
 if (state.sites === undefined)   state.sites = null;   // périmètre (arbre)
 if (state.bils === undefined)    state.bils = null;    // bilatérales détaillées
@@ -392,6 +402,14 @@ async function loadData() {
     state.sites = state.sites || []; state.bils = state.bils || [];
   } finally {
     state.loading = false; render();
+    // Fiche ouverte depuis l'agenda avant la fin du chargement : on complète la
+    // tuile Transformation sans reconstruire la fiche (la saisie en cours reste).
+    try {
+      if (typeof R !== 'undefined' && R.detail && !R.done) {
+        if (!R.cad) R.cad = (state.cadence || []).find(x => x.id_user === Number(R.detail.id_user)) || null;
+        const el = doc.getElementById('r-kpi-tx'); if (el) el.outerHTML = R_txTile();
+      }
+    } catch (e) {}
   }
 }
 
@@ -610,7 +628,7 @@ function scopeLabel() {
     let h = '<div class="prio-head">Mes bilatérales <span class="prio-sub">' + esc(name) + ' · période en cours</span></div>';
     h += '<div class="prio-kpis">';
     if (last) {
-      const j = daysSinceTs(last.start_date); const col = j == null ? '#8b99b0' : (j <= 30 ? '#00997f' : (j <= 60 ? '#8a6d1f' : '#c0524f'));
+      const j = daysSinceTs(last.start_date); const col = j == null ? '#8b99b0' : (j <= BIL_CFG.cadenceJ ? '#00997f' : (j <= BIL_CFG.retardJ ? '#8a6d1f' : '#c0524f'));
       h += '<div class="pk"><div class="pk-v" style="font-size:18px;color:' + col + '">' + esc(fmtDate(last.start_date)) + '</div><div class="pk-l">dernière bilatérale</div><div class="pk-s">' + (j == null ? '' : 'il y a ' + j + ' j') + (last.nom_chef ? ' · ' + esc(last.nom_chef) : '') + '</div></div>';
     } else {
       h += '<div class="pk"><div class="pk-v" style="color:#c0524f">—</div><div class="pk-l">dernière bilatérale</div><div class="pk-s">aucune reçue</div></div>';
@@ -692,6 +710,7 @@ function scopeLabel() {
           '<div class="bp-pop-foot">' +
             '<span class="bp-hint">' + (state.dpStart ? 'Cliquez la date de <b>fin</b>' : 'Cliquez la date de <b>début</b>') + '</span>' +
             '<span class="bp-presets">' +
+              '<button class="bp-preset" data-period-preset="semaine">Cette semaine</button>' +
               '<button class="bp-preset" data-period-preset="mois">Ce mois</button>' +
               '<button class="bp-preset" data-period-preset="3mois">3 mois</button>' +
               '<button class="bp-preset" data-period-preset="annee">Année</button>' +
@@ -1243,9 +1262,9 @@ function vendeurTable(titre, couleur, vlist){
   vlist.forEach(c=>{
     t+='<div class="vrow" data-vbil="'+c.id_user+'|'+c.id_site+'">'+
       '<div class="vname">'+esc(c.nom_vendeur)+(c.vn_vo?'<span class="vcat">'+esc(c.vn_vo)+'</span>':'')+'</div>'+
-      '<div class="c-ryt">'+vendeurRythmeCell(c)+'</div>'+
-      '<div>'+vendeurTenueCell(c)+'</div>'+
-      '<div class="c-tf">'+vendeurTransfoCell(c)+'</div>'+
+      '<div class="c-ryt" data-l="Fréquence · dernière / prochaine">'+vendeurRythmeCell(c)+'</div>'+
+      '<div class="c-ten" data-l="Engagements tenus · 6 mois">'+vendeurTenueCell(c)+'</div>'+
+      '<div class="c-tf" data-l="'+(state.txMesurable===false?'Commandes du mois':'Transformation')+'">'+vendeurTransfoCell(c)+'</div>'+
       '<div class="vchev">'+(c.next_bilaterale_at?'›':'<button class="v-plan" data-plan-vend="'+c.id_user+'|'+c.id_site+'" title="Planifier une bilatérale">+</button>')+'</div></div>';
   });
   t+='</div></div>';
@@ -1258,9 +1277,12 @@ function vendeursLegend(){
     '<span class="lg"><span class="sw" style="background:#d97070"></span>Non tenu</span>'+
     '<span class="lg"><span class="sw" style="background:#d8dfe9"></span>En cours (pas encore pointé)</span>'+
     '<span class="lg">· Engagements tenus = (tenus + ½ partiels) / engagements pointés, sur 6 mois</span>'+
-    '<span class="lg">· '+(state.transfoStable
+    '<span class="lg">· Fréquence attendue : 1 bilatérale tous les '+BIL_CFG.cadenceJ+' jours par vendeur (point orange au-delà, rouge après '+BIL_CFG.retardJ+' jours)</span>'+
+    '<span class="lg">· '+(state.txMesurable===false
+      ? 'Commandes du mois = commandes signées / objectif, et écart à l’attendu à date. La transformation n’est pas affichée : aucune affaire perdue n’est enregistrée, le taux serait faux'
+      : state.transfoStable
       ? 'Transformation = affaires gagnées (commande signée) / affaires tranchées (gagnées + perdues), sur les propositions créées ces '+BIL_CFG.transfoJours+' derniers jours, comparée aux '+BIL_CFG.transfoJours+' jours d’avant'
-      : 'Transformation = affaires gagnées / propositions de la période')+', affichée à partir de '+BIL_CFG.minVolumeTransfo+' affaires</span></div>';
+      : 'Transformation = affaires gagnées / propositions de la période')+(state.txMesurable===false?'':', affichée à partir de '+BIL_CFG.minVolumeTransfo+' affaires')+'</span></div>';
 }
 function suiviSortBar(){
   const s=state.suiviSort||'tenue';
@@ -1288,7 +1310,7 @@ function chefRow(c){
   let flag=''; if(active<=3||cov<50) flag='<span class="cflag irr">irrégulier</span>'; else if(active>=6&&cov>=90&&tp!=null&&tp>=80) flag='<span class="cflag exe">exemplaire</span>';
   const covCol=cov>=85?'#00997f':(cov>=60?'#8a6d1f':'#c0524f');
   const tCol=tp==null?'#8b99b0':(tp>=80?'#00997f':(tp>=60?'#8a6d1f':'#c0524f'));
-  const dCol=c.delai_moyen==null?'#8b99b0':(c.delai_moyen<=30?'#00997f':(c.delai_moyen<=45?'#8a6d1f':'#c0524f'));
+  const dCol=c.delai_moyen==null?'#8b99b0':(c.delai_moyen<=BIL_CFG.cadenceJ?'#00997f':(c.delai_moyen<=BIL_CFG.retardJ?'#8a6d1f':'#c0524f'));
   return '<div class="crow" data-chef="'+c.id_manager+'">'+
     '<div class="cname">'+esc(c.nom_chef)+flag+'<span class="csite">'+esc(c.nom_site)+'</span></div>'+
     '<div>'+chefRegStrip(c.regularite)+'</div>'+
@@ -1853,7 +1875,8 @@ function pickDpDay(dstr) {
 function applyPeriodPreset(kind) {
   const now = new Date();
   let from;
-  if (kind === 'mois')       from = new Date(now.getFullYear(), now.getMonth(), 1);
+  if (kind === 'semaine')    from = new Date(now.getFullYear(), now.getMonth(), now.getDate() - ((now.getDay() + 6) % 7));
+  else if (kind === 'mois')  from = new Date(now.getFullYear(), now.getMonth(), 1);
   else if (kind === '3mois') from = new Date(now.getFullYear(), now.getMonth() - 2, 1);
   else if (kind === 'annee') from = new Date(now.getFullYear(), 0, 1);
   else return;
@@ -2250,6 +2273,21 @@ const STYLE = '<style>' +
   '#bil-root .bil-ov{padding:12px}' +
 '}' +
 '#bil-root.bil-narrow .suivi-search{flex:1 1 100%;max-width:none}' +
+'#bil-root.bil-narrow .bil-hscroll .vtbl{min-width:0}' +
+'#bil-root.bil-narrow .vrow.vthead{display:none}' +
+'#bil-root.bil-narrow .vrow{grid-template-columns:minmax(0,1fr) auto;gap:8px 14px;padding:12px 14px}' +
+'#bil-root.bil-narrow .vrow>.vname{grid-column:1;grid-row:1}' +
+'#bil-root.bil-narrow .vrow>.vchev{grid-column:2;grid-row:1}' +
+'#bil-root.bil-narrow .vrow>.c-ryt{grid-column:1/3}' +
+'#bil-root.bil-narrow .vrow>.c-ten{grid-column:1}' +
+'#bil-root.bil-narrow .vrow>.c-tf{grid-column:2;text-align:right}' +
+'#bil-root.bil-narrow .vrow>[data-l]::before{content:attr(data-l);display:block;font-size:10px;font-weight:800;color:#8b99b0;text-transform:uppercase;letter-spacing:.04em;margin-bottom:3px}' +
+'#bil-root.bil-narrow .tbar{min-width:60px}' +
+'#bil-root.bil-narrow .pt-tree th:nth-child(2),#bil-root.bil-narrow .pt-tree td:nth-child(2),#bil-root.bil-narrow .pt-tree th:nth-child(4),#bil-root.bil-narrow .pt-tree td:nth-child(4),#bil-root.bil-narrow .pt-tree th:nth-child(6),#bil-root.bil-narrow .pt-tree td:nth-child(6){display:none}' +
+'#bil-root.bil-narrow .pt-shead .sub{display:none}' +
+'#bil-root.bil-narrow .pt-card{padding:12px}' +
+'#bil-root.bil-narrow .suivi-cov{display:block;margin:4px 0 0}' +
+'#bil-root.bil-narrow .site-title{flex-wrap:wrap}' +
 '#bil-root.bil-narrow .tl::before{left:13px}' +
 '#bil-root.bil-narrow .tl-sep{text-align:left;padding-left:0}' +
 '#bil-root.bil-narrow .tl-row,#bil-root.bil-narrow .tl-row.left,#bil-root.bil-narrow .tl-row.right{justify-content:flex-end;min-height:auto;margin-bottom:24px}' +
@@ -2594,11 +2632,24 @@ function R_objectif(rea, obj){
 }
 function R_transfoSous(c){
   if(state.txMesurable===false) return 'non mesurable : aucune affaire perdue enregistrée';
-  if(!c) return 'période en cours';
+  if(!c) return state.loading||!state.cadence ? 'chargement…' : 'pas de donnée sur la période';
   if(c.transfo_actuel==null) return state.transfoStable ? 'aucune affaire tranchée sur '+BIL_CFG.transfoJours+' j' : 'aucune proposition sur la période';
   if(!c.tx_signif) return 'volume insuffisant'+(c.tx_tot_actuel!=null?' ('+c.tx_tot_actuel+' '+txUnite()+')':'');
   const avant = c.tx_signif_prec&&c.transfo_precedent!=null ? fmtNb(c.transfo_precedent)+' % '+(state.transfoStable?'les '+BIL_CFG.transfoJours+' j d’avant':'la période précédente') : 'gagnées / tranchées';
   return avant+(c.tx_tot_actuel!=null?' · '+c.tx_tot_actuel+' '+txUnite():'')+(state.transfoStable&&c.tx_ouvertes?' · '+c.tx_ouvertes+' encore ouvertes':'');
+}
+function R_heureParis(v){
+  try {
+    let t=String(v).trim().replace(' ','T');
+    if(!/[zZ]|[+-]\d\d:?\d\d$/.test(t)) t+='Z';
+    const d=new Date(t); if(isNaN(d)) return String(v).slice(11,16);
+    return d.toLocaleTimeString('fr-FR',{hour:'2-digit',minute:'2-digit',timeZone:'Europe/Paris'}).replace(':','h');
+  } catch(e){ return String(v).slice(11,16); }
+}
+function R_txTile(){
+  const c=R.cad;
+  const txCol = !c||!c.tx_signif ? '#8b99b0' : (c.transfo_baisse?'#c0524f':(c.transfo_hausse?'#00997f':'#2a5ea9'));
+  return '<div class="kpi mute" id="r-kpi-tx"><div class="k-l">Transformation'+txFenetre()+'</div><div class="k-v" style="color:'+txCol+'">'+(c&&c.tx_signif&&c.transfo_actuel!=null?fmtNb(c.transfo_actuel)+' %':'—')+'</div><div class="k-s">'+esc(R_transfoSous(c))+'</div></div>';
 }
 function R_partEtat(p){ const x=R.parts[p]; return !x ? 'load' : x.st; }
 function R_kpis(){
@@ -2615,9 +2666,7 @@ function R_kpis(){
   h+='<div class="kpis">';
   h+='<div class="kpi clik big'+on('cmd')+'" data-rkpi="cmd"><div class="k-l">Commandes du mois</div><div class="k-v" style="color:'+colObj(cmd)+'">'+v(K.cdes)+(cmd.obj?'<span class="k-of"> / '+fmtNb(cmd.obj,0)+'</span>':'')+'</div><div class="k-s">'+(dashOk?subObj(cmd,'cmd'):'')+'</div>'+(Kp?'<div class="k-p">mois dernier : '+fmtNb(Kp.cdes,0)+(Kp.obj_cdes?' / '+fmtNb(Kp.obj_cdes,0):'')+'</div>':'')+'</div>';
   h+='<div class="kpi clik'+on('fi')+'" data-rkpi="fi"><div class="k-l">Financements</div><div class="k-v" style="color:'+colObj(fi)+'">'+v(K.fi)+(fi.obj?'<span class="k-of"> / '+fmtNb(fi.obj,0)+'</span>':'')+'</div><div class="k-s">'+(dashOk?(fi.att==null?'pas d’objectif saisi':'attendu à date '+fmtNb(fi.att)):'')+'</div></div>';
-  const c=R.cad;
-  const txCol = !c||!c.tx_signif ? '#8b99b0' : (c.transfo_baisse?'#c0524f':(c.transfo_hausse?'#00997f':'#2a5ea9'));
-  h+='<div class="kpi mute"><div class="k-l">Transformation'+txFenetre()+'</div><div class="k-v" style="color:'+txCol+'">'+(c&&c.tx_signif&&c.transfo_actuel!=null?fmtNb(c.transfo_actuel)+' %':'—')+'</div><div class="k-s">'+esc(R_transfoSous(c))+'</div></div>';
+  h+=R_txTile();
   h+='<div class="kpi clik'+on('pipeline')+'" data-rkpi="pipeline"><div class="k-l">Affaires en cours</div><div class="k-v" style="color:#2a5ea9">'+v(K.pipe_affaires)+'</div><div class="k-s">'+(dashOk?fmtNb(K.pipe_a_relancer,0)+' à relancer (> 30 j)':'')+'</div></div>';
   h+='<div class="kpi clik'+on('leads')+'" data-rkpi="leads"><div class="k-l">Leads jamais contactés</div><div class="k-v" style="color:'+((K.leads_jamais||0)>0?'#c0524f':'#00997f')+'">'+v(K.leads_jamais)+'</div><div class="k-s">'+(dashOk?'dont '+fmtNb(K.leads_jamais_48h,0)+' depuis plus de 48 h':'')+'</div></div>';
   h+='<div class="kpi clik'+on('rdv')+'" data-rkpi="rdv"><div class="k-l">RDV à venir</div><div class="k-v" style="color:#2a5ea9">'+v(K.rdv_a_venir)+(D.nbRetardRdv>0?' <span class="k-alert">⚠ '+D.nbRetardRdv+'</span>':'')+'</div><div class="k-s">'+(dashOk?fmtNb(K.rdv_tenus,0)+' tenus ce mois':'')+(D.nbRetardRdv>0?' · '+D.nbRetardRdv+' sans compte rendu':'')+'</div></div>';
@@ -2689,7 +2738,7 @@ function R_bloc2(){
     cells+=ligne('Hors loueurs',K.hors_loueurs,0,Kp?Kp.hors_loueurs:null,0);
     cells+=ligne('Reprises',K.reprise,0,Kp?Kp.reprise:null,0);
     cells+=ligne('LOA',K.loa,0,Kp?Kp.loa:null,0);
-    return '<div class="b2-title">Production du mois — même source que l’accueil'+(R.majDash?' · à jour à '+esc(String(R.majDash).slice(11,16)):'')+'</div><div class="perf-grid">'+cells+'</div>'+
+    return '<div class="b2-title">Production du mois — même source que l’accueil'+(R.majDash?' · à jour à '+esc(R_heureParis(R.majDash)):'')+'</div><div class="perf-grid">'+cells+'</div>'+
       '<div class="b2-note">Le trait vertical marque l’attendu à date : l’objectif du mois au prorata des jours écoulés.</div>';
   }
   if(k==='leads'){
