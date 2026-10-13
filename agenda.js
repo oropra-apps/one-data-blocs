@@ -1,4 +1,23 @@
 // ============================================================================
+//  v21 (14/10/2026) : BILATÉRALES DEPUIS L'AGENDA (Team Colin).
+//   - Création : retour immédiat. Un toast confirme « Bilatérale planifiée
+//     avec … », l'événement apparaît tout de suite (placeholder) puis le
+//     calendrier se recharge. Avant, la fenêtre se fermait sans rien dire et
+//     l'événement n'apparaissait qu'après un temps de chargement muet.
+//   - Liste « Vendeur évalué » enrichie : date de la dernière bilatérale
+//     réalisée, ou « jamais reçu », et un repère ⚠ en cas de retard
+//     (RPC bilat_resume_vendeurs). Les vendeurs à recevoir passent en tête.
+//   - Bouton « Mener l'entretien maintenant » : crée la bilatérale à l'instant
+//     présent (RPC bilat_creer_maintenant) et ouvre la fiche de réalisation.
+//   - Clic sur une bilatérale : à venir -> modifier OU « Réaliser maintenant » ;
+//     passée -> « Compléter le compte rendu » (le clic ne faisait plus rien).
+//     Les deux ouvrent la fiche de réalisation sur la page Bilatérales.
+//   - Livraisons empilées au même créneau (≥ 3) regroupées en un seul bloc
+//     « N livraisons », qui se déplie au clic. Vues jour/semaine seulement.
+//  Prérequis SQL : bilaterales_02_fonctions_teamcolin.sql. Sans lui, la liste
+//  des vendeurs reste celle de la v20 et « maintenant » affiche une erreur
+//  explicite ; rien d'autre ne change.
+// ============================================================================
 //  v20 (08/10/2026) : le selecteur de collaborateur suit le site choisi dans
 //  la barre du haut. Chef des ventes : la liste ne garde que les
 //  collaborateurs de ce site (ou de tout le perimetre si « Tout mon
@@ -110,6 +129,27 @@ OD.define('agenda', {
   const sb = () => window.__OD_SB__ || window.wwLib?.wwPlugins?.supabase?.instance;
   function wwVal(id) { try { const v = wwLib().wwVariable.getValue(id); return (v == null || v === '') ? null : v; } catch (e) { return null; } }
 
+  // --- passage vers la fiche de réalisation (page Bilatérales) ---------------
+  // La page Bilatérales ouvre la fiche si elle trouve un id au montage :
+  // sessionStorage (fiable, survit à la navigation SPA) et, par compatibilité,
+  // la variable WeWeb historique « id_bilate_real ».
+  const BIL_PATH = '/fr/bilaterales';
+  const BIL_PAGE_UID = '7bfcfe73-4e89-40cf-bc84-1e07ddb478a6';
+  const VAR_ID_BILATE_REAL = '851fed59-9397-41ae-b91d-26daa2ff960a';
+  function inEditor() { try { return window.self !== window.top; } catch (e) { return true; } }
+  function goBilaterale(id, maintenant) {
+    try { frontWin().sessionStorage.setItem('od_bil_open', JSON.stringify({ id: Number(id), maintenant: !!maintenant, t: Date.now() })); } catch (e) {}
+    try { wwLib().wwVariable.updateValue(VAR_ID_BILATE_REAL, Number(id)); } catch (e) {}
+    try { closeCreate(); } catch (e) {}
+    if (inEditor()) {
+      try { wwLib().wwApp.goTo(BIL_PAGE_UID); return; } catch (e) {}
+      try { wwLib().goTo(BIL_PAGE_UID); return; } catch (e) {}
+      return;
+    }
+    try { wwLib().goTo(BIL_PATH); return; } catch (e) {}
+    try { frontWin().location.href = BIL_PATH; } catch (e) {}
+  }
+
   function siteValRaw() { return wwVal(CFG.siteVar); }
   function siteIds() { const v = siteValRaw(); return v == null ? null : (Array.isArray(v) ? v.map(Number) : [Number(v)]); }
   function agendaUserVal() { return wwVal(CFG.agendaUserVar); }
@@ -192,7 +232,66 @@ OD.define('agenda', {
       if (typesActifs.indexOf(familleEvt(e)) < 0) continue;
       out.push(mapEvent(e));
     }
-    return out;
+    return grouperLivraisons(out);
+  }
+
+  // Livraisons empilées : au-delà de SEUIL_GROUPE livraisons qui commencent au
+  // même instant, la colonne devient une suite de lamelles illisibles (relevé
+  // du 13/10/2026 : une dizaine le mardi à 10 h). On les remplace par UN bloc
+  // « N livraisons » qui se déplie au clic. En vue Liste et Mois, on garde le
+  // détail : ces vues n'empilent pas.
+  const SEUIL_GROUPE = 3;
+  function vueEmpile() {
+    try { const t = calendar && calendar.view && calendar.view.type; return !t || t.indexOf('timeGrid') === 0; }
+    catch (e) { return true; }
+  }
+  function grouperLivraisons(evts) {
+    if (!vueEmpile()) return evts;
+    const paquets = {}, autres = [];
+    evts.forEach(ev => {
+      const p = ev.extendedProps || {};
+      if (familleEvt(p) !== 'livraison') { autres.push(ev); return; }
+      const k = normTs(String(ev.start || ''));
+      (paquets[k] = paquets[k] || []).push(ev);
+    });
+    Object.keys(paquets).forEach(k => {
+      const lot = paquets[k];
+      if (lot.length < SEUIL_GROUPE) { lot.forEach(ev => autres.push(ev)); return; }
+      const c = CFG.colors.livraison;
+      const fin = lot.map(ev => String(ev.end || ev.start || '')).sort().pop();
+      autres.push({
+        id: 'grp-livr-' + k, title: '🚚 ' + lot.length + ' livraisons',
+        start: lot[0].start, end: fin || lot[0].end, allDay: false,
+        backgroundColor: tint(c, 0.22), borderColor: tint(c, 0.22), textColor: '#1F4A85',
+        editable: false,
+        extendedProps: { _accent: c, _groupe: lot, source_type: 'groupe', title: lot.length + ' livraisons',
+                         description: lot.map(ev => '• ' + (ev.title || '')).join('\n') }
+      });
+    });
+    return autres;
+  }
+  // Dépli d'un groupe : la liste des livraisons, chacune ouvrable comme avant.
+  function ouvrirGroupe(p) {
+    const lot = (p && p._groupe) || [];
+    if (!lot.length) return;
+    const d = frontDoc(); let ov = d.getElementById('agenda-ov');
+    if (!ov) { ov = d.createElement('div'); ov.id = 'agenda-ov'; (d.body || d.documentElement).appendChild(ov); ov.addEventListener('mousedown', (e) => { if (e.target === ov) closeCreate(); }); }
+    const quand = String(lot[0].start || '');
+    const jour = quand ? new Date(quand.slice(0, 10) + 'T12:00:00') : null;
+    const titre = lot.length + ' livraisons' + (jour ? ' · ' + jour.toLocaleDateString('fr-FR', { weekday: 'short', day: '2-digit', month: '2-digit' }) + ' ' + quand.slice(11, 16).replace(':', 'h') : '');
+    ov.innerHTML = '<div class="agm"><div class="agm-head"><span class="agm-title">' + esc(titre) + '</span><button class="agm-x" id="agm-x">×</button></div>'
+      + '<div class="agm-body"><div class="agm-grp-list">'
+      + lot.map((ev, i) => '<button type="button" class="agm-grp-it" data-i="' + i + '"><i style="background:' + CFG.colors.livraison + '"></i><span>' + esc(ev.title || 'Livraison') + '</span><b>›</b></button>').join('')
+      + '</div></div></div>';
+    d.getElementById('agm-x').addEventListener('click', closeCreate);
+    ov.querySelectorAll('.agm-grp-it').forEach(b => b.addEventListener('click', () => {
+      const ev = lot[Number(b.getAttribute('data-i'))]; if (!ev) return;
+      const pseudo = { title: ev.title, startStr: String(ev.start || ''), endStr: String(ev.end || ''),
+                       start: ev.start ? new Date(String(ev.start)) : null, end: ev.end ? new Date(String(ev.end)) : null,
+                       extendedProps: ev.extendedProps || {} };
+      closeCreate();
+      openEdit(pseudo);
+    }));
   }
   async function fetchEvents(info, success, failure) {
     // Mode planning : même calendrier, autre source. C'est ce qui garantit un
@@ -209,6 +308,7 @@ OD.define('agenda', {
       const p_site_ids = (agendaUserVal() != null) ? null : siteIds();
       const { data, error } = await client.rpc('get_calendar_events', { p_start, p_end, p_user_ids: await effectiveUserIds(), p_site_ids });
       if (error) throw error;
+      retirerProvisoires();
       success(buildEvents(data || []));
     } catch (err) { console.error('[agenda] erreur fetch', err); failure(err); }
   }
@@ -621,7 +721,7 @@ OD.define('agenda', {
         vin: r.vin, nom_site: r.nom_site, nom_vendeur: r.nom_vendeur,
         origin_id: r.id_rdv
       }));
-      success(rows.map(mapEvent));
+      success(grouperLivraisons(rows.map(mapEvent)));
     } catch (err) {
       console.error('[agenda] planning livraisons', err);
       failure(err);
@@ -875,6 +975,20 @@ OD.define('agenda', {
 #agenda-ov .agm-save:hover{background:#46a892}
 #agenda-ov .agm-save:disabled{opacity:.55;cursor:default}
 #agenda-ov .agm-foot-edit{display:flex;gap:10px}
+#agenda-ov .agm-foot-col{display:flex;flex-direction:column;gap:8px}
+#agenda-ov .agm-foot-row{display:flex;gap:10px}
+#agenda-ov .agm-foot-row .agm-save{flex:1}
+#agenda-ov .agm-now{width:100%;border:1.5px solid #7e57c2;border-radius:10px;padding:11px;background:#fff;color:#5b3a9e;font-family:inherit;font-weight:800;font-size:13.5px;cursor:pointer;transition:background .15s}
+#agenda-ov .agm-now:hover{background:rgba(126,87,194,.08)}
+#agenda-ov .agm-now:disabled{opacity:.55;cursor:default}
+#agenda-ov .agm-hint{font-size:11px;color:#7a98c5;font-weight:600;margin-top:6px;line-height:1.4}
+#agenda-ov .agm-grp-list{display:flex;flex-direction:column;gap:6px}
+#agenda-ov .agm-grp-it{display:flex;align-items:center;gap:10px;width:100%;text-align:left;border:1.5px solid #e2eaf5;background:#fff;border-radius:10px;padding:9px 12px;font-family:inherit;font-size:13px;font-weight:700;color:#1F4A85;cursor:pointer}
+#agenda-ov .agm-grp-it:hover{border-color:#acc5e4;background:#f7f9fc}
+#agenda-ov .agm-grp-it i{width:8px;height:8px;border-radius:3px;flex:0 0 auto}
+#agenda-ov .agm-grp-it span{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+#agenda-ov .agm-grp-it b{color:#9bb3d1;font-size:16px}
+#agenda-root .fc .fc-event.ag-tmp{opacity:.75;outline:1.5px dashed #7e57c2;outline-offset:-1.5px}
 #agenda-ov .agm-foot-edit .agm-save{flex:1}
 #agenda-ov .agm-del{border:1.5px solid #f0b6b6;border-radius:10px;padding:12px 16px;background:#fff;color:#c0392b;font-family:inherit;font-weight:800;font-size:14px;cursor:pointer;transition:all .15s}
 #agenda-ov .agm-del:hover{background:#fcebeb}
@@ -972,6 +1086,30 @@ OD.define('agenda', {
   let calendar = null;
   let showSunday = false;                              // dimanche masqué par défaut
   const refetch = () => { try { calendar && calendar.refetchEvents(); } catch (e) {} };
+  // Événements PROVISOIRES : posés à l'enregistrement pour que l'utilisateur
+  // voie son rendez-vous tout de suite, retirés dès que la vraie liste arrive.
+  // Sans eux, la fenêtre se fermait sur un agenda inchangé le temps du
+  // rechargement, et l'on croyait l'enregistrement perdu (recette 13/10/2026).
+  function poserProvisoire(o) {
+    try {
+      if (!calendar) return;
+      const c = CFG.colors[o.famille] || CFG.colors.creneau;
+      calendar.addEvent({
+        id: 'tmp-' + Date.now(), title: o.titre, start: o.start.replace(' ', 'T'), end: o.end.replace(' ', 'T'),
+        backgroundColor: tint(c, 0.14), borderColor: tint(c, 0.14), textColor: '#1F4A85', editable: false,
+        classNames: ['ag-tmp'], extendedProps: { _accent: c, _provisoire: true, source_type: 'tmp' }
+      });
+    } catch (e) {}
+  }
+  function retirerProvisoires() {
+    try { if (calendar) calendar.getEvents().forEach(ev => { if (ev.extendedProps && ev.extendedProps._provisoire) ev.remove(); }); } catch (e) {}
+  }
+  // Rechargement après écriture : immédiat, puis une seconde passe, pour
+  // couvrir un premier chargement déjà en vol au moment de l'enregistrement.
+  function refetchApresEcriture() {
+    refetch();
+    setTimeout(refetch, 1200);
+  }
   function updateSundayBtn() { try { const b = document.querySelector('#agenda-root .fc-dimanche-button'); if (b) b.classList.toggle('fc-button-active', showSunday); } catch (e) {} }
 
   // --- responsive -------------------------------------------------------------
@@ -1094,7 +1232,21 @@ OD.define('agenda', {
         info.el.addEventListener('mouseenter', () => showTip(info.el, info.event));
         info.el.addEventListener('mouseleave', hideTip);
       },
-      eventClick: (arg) => { hideTip(); window.__agendaSelected = arg.event.extendedProps; openEdit(arg.event); },
+      eventClick: (arg) => {
+        hideTip();
+        const p = arg.event.extendedProps || {};
+        if (p._provisoire) return;                       // en cours d'enregistrement
+        if (p._groupe) { ouvrirGroupe(p); return; }      // bloc « N livraisons »
+        window.__agendaSelected = p; openEdit(arg.event);
+      },
+      // Le regroupement des livraisons dépend de la vue (empilée ou non) :
+      // passer de Semaine à Liste sur la même plage ne recharge pas les
+      // événements, il faut donc le demander.
+      datesSet: (arg) => {
+        const empile = String(arg.view && arg.view.type || '').indexOf('timeGrid') === 0;
+        if (window.__agendaVueEmpile !== undefined && window.__agendaVueEmpile !== empile) refetch();
+        window.__agendaVueEmpile = empile;
+      },
       eventDrop: applyDragResize,
       eventResize: applyDragResize,
     });
@@ -1625,6 +1777,72 @@ OD.define('agenda', {
       .map(g => ({ label: g.label, items: g.items }))
       .filter(g => g.items && g.items.length);
   }
+  // Résumé des bilatérales par vendeur visible (bilat_resume_vendeurs) :
+  // dernière réalisée, prochaine programmée, nombre en retard. Chargé à
+  // l'ouverture de la fenêtre, gardé une minute. Absent (SQL non appliqué) :
+  // la liste reste celle de la v20, sans annotation.
+  let resumeBilat = null, resumeBilatT = 0, resumeBilatEnVol = false;
+  function chargerResumeBilat() {
+    if (resumeBilatEnVol || (resumeBilat && Date.now() - resumeBilatT < 60000)) return;
+    const c = sb(); if (!c) return;
+    resumeBilatEnVol = true;
+    Promise.resolve(c.rpc('bilat_resume_vendeurs')).then(({ data, error }) => {
+      if (error) { console.warn('[agenda] bilat_resume_vendeurs', error.message || error); return; }
+      const m = {}; (data || []).forEach(r => { m[Number(r.id_user)] = r; });
+      resumeBilat = m; resumeBilatT = Date.now();
+      if (cs && cs.mode === 'bilat' && frontDoc().getElementById('agenda-ov')) { syncInputs(); renderCreate(); }
+    }).catch(e => console.warn('[agenda] bilat_resume_vendeurs', e)).finally(() => { resumeBilatEnVol = false; });
+  }
+  function joursDepuis(ts) {
+    if (!ts) return null;
+    const d = new Date(String(ts).slice(0, 10) + 'T12:00:00'); if (isNaN(d)) return null;
+    const a = new Date(); a.setHours(12, 0, 0, 0);
+    return Math.max(0, Math.round((a - d) / 86400000));
+  }
+  function jjmm(ts) { const t = String(ts || ''); return t.length >= 10 ? t.slice(8, 10) + '/' + t.slice(5, 7) : ''; }
+  // Plus c'est haut, plus il faut recevoir ce vendeur : en retard, puis
+  // jamais reçu, puis ancienneté de la dernière. Un RDV déjà programmé passe
+  // derrière : l'action est prise.
+  function urgenceBilat(id) {
+    const r = resumeBilat && resumeBilat[Number(id)];
+    if (!r) return 500;                                  // aucune bilatérale du tout = jamais reçu
+    if (r.prochaine) return -1;
+    let u = (Number(r.nb_retard) || 0) > 0 ? 1000 : 0;
+    const j = joursDepuis(r.derniere);
+    u += j == null ? 500 : Math.min(j, 400);
+    return u;
+  }
+  function libelleVendeurBilat(v) {
+    const nom = String(v.nom || '');
+    if (!resumeBilat) return nom;
+    const r = resumeBilat[Number(v.id)];
+    if (!r) return nom + ' \u00b7 jamais re\u00e7u';
+    const bits = [];
+    if (r.prochaine) bits.push('pr\u00e9vue le ' + jjmm(r.prochaine));
+    else if (r.derniere) { const j = joursDepuis(r.derniere); bits.push('derni\u00e8re ' + (j === 0 ? 'aujourd\u2019hui' : 'il y a ' + j + ' j')); }
+    else bits.push('jamais re\u00e7u');
+    if ((Number(r.nb_retard) || 0) > 0) bits.push(r.nb_retard + ' en retard');
+    return ((Number(r.nb_retard) || 0) > 0 ? '\u26a0 ' : '') + nom + ' \u00b7 ' + bits.join(' \u00b7 ');
+  }
+  // Site d'une bilatérale : celui de la barre du haut s'il est unique et que
+  // le vendeur y est rattaché, sinon le site du vendeur. Avec « Tout mon
+  // périmètre », la bilatérale partait sans site et n'apparaissait pas sur
+  // la page Bilatérales (filtrée par site).
+  function siteBilat(idUser) {
+    const lignes = (perimRows() || []).filter(r => String(r.id_user) === String(idUser) && r.id_site != null);
+    const top = siteIds();
+    if (top && top.length === 1 && (!lignes.length || lignes.some(r => Number(r.id_site) === Number(top[0])))) return Number(top[0]);
+    return lignes.length ? Number(lignes[0].id_site) : (top && top.length === 1 ? Number(top[0]) : null);
+  }
+  function nomVendeurBilat(id) {
+    const v = (collaborateursVisibles() || []).find(x => String(x.id) === String(id));
+    return v ? v.nom : '';
+  }
+  function libQuand(startStr) {
+    const t = String(startStr || ''); if (t.length < 16) return t;
+    const d = new Date(t.slice(0, 10) + 'T12:00:00');
+    return d.toLocaleDateString('fr-FR', { weekday: 'short', day: '2-digit', month: '2-digit' }) + ' \u00e0 ' + t.slice(11, 13) + 'h' + t.slice(14, 16);
+  }
   const pad2 = (n) => String(n).padStart(2, '0');
   function endStrFrom(date, time, mins) { const [Y, Mo, D] = date.split('-').map(Number); const [h, mi] = time.split(':').map(Number); const dt = new Date(Y, Mo - 1, D, h, mi); dt.setMinutes(dt.getMinutes() + Number(mins)); return dt.getFullYear() + '-' + pad2(dt.getMonth() + 1) + '-' + pad2(dt.getDate()) + ' ' + pad2(dt.getHours()) + ':' + pad2(dt.getMinutes()) + ':00'; }
   function fmtDuree(min) { min = Number(min) || 0; const h = Math.floor(min / 60), m = min % 60; if (h === 0) return m + ' min'; if (m === 0) return h + 'h'; return h + 'h ' + m + ' min'; }
@@ -2016,9 +2234,10 @@ OD.define('agenda', {
     const date = startStr.slice(0, 10) || '';
     const time = (startStr.slice(11, 16)) || '09:00';
     let dur = 30; if (sel.end && sel.start) { const d = Math.round((sel.end - sel.start) / 60000); if (d >= 15) dur = d; }
-    cs = { editing: false, editId: null, idRpv: null, mode: 'rdv', date, time, dur, idClient: null, clientLabel: '', client: null, origine: ORIGINES[0], physique: true, rdvType: null, creneauType: null, bilatUser: null, comment: '', saving: false, err: '' };
+    cs = { editing: false, editId: null, idRpv: null, mode: 'rdv', date, time, dur, idClient: null, clientLabel: '', client: null, origine: ORIGINES[0], physique: true, rdvType: null, creneauType: null, bilatUser: null, bilatNom: '', comment: '', saving: false, err: '' };
     const navCli = wwVal(CFG.selectedClientVar);
     if (navCli && typeof navCli === 'object' && navCli.IDVu != null) { cs.idClient = Number(navCli.IDVu); cs.clientLabel = clientLabel(navCli); cs.client = navCli; }
+    chargerResumeBilat();
     loadRdvTypes().then(renderCreate);
     renderCreate();
   }
@@ -2029,9 +2248,11 @@ OD.define('agenda', {
     if (st === 'bilat' && !p.can_edit) return;            // bilat\u00e9rale : lecture seule c\u00f4t\u00e9 vendeur
     // PASSE : la modale d'edition refusait, et le clic ne faisait rien. Il
     // ouvre desormais le COMPTE RENDU — a venir on modifie, passe on conclut.
-    // Un creneau sans client et une bilaterale n'ont rien a conclure.
+    // Un creneau sans client n'a rien a conclure. Une bilaterale passee
+    // ouvre sa fiche de realisation (v21) : avant, le clic restait muet.
     if (isPastSlot(ev.startStr || '') || isPastSlot(p.event_start_time || '')) {
       if (st === 'rdv' && Number(p.id_client) > 0) { openCompteRendu(ev); }
+      else if (st === 'bilat') { openBilatPassee(ev); }
       return;
     }
     if (st !== 'rdv' && st !== 'bilat') return;            // rpv : non \u00e9ditable ici
@@ -2049,10 +2270,28 @@ OD.define('agenda', {
       rdvType: (p.id_rdv_type != null ? Number(p.id_rdv_type) : null),
       creneauType: (p.id_rdv_type != null ? Number(p.id_rdv_type) : null),
       bilatUser: (st === 'bilat' && p.id_user != null ? Number(p.id_user) : null),
+      bilatNom: (st === 'bilat' ? (ev.title || '').replace(/^Bilat\s*/i, '') : ''),
       comment: (st === 'bilat' ? '' : (p.description || '')), saving: false, err: ''
     };
+    if (st === 'bilat') chargerResumeBilat();
     loadRdvTypes().then(renderCreate);
     renderCreate();
+  }
+  // Bilatérale dont l'heure est passée : on ne la déplace plus, on la mène.
+  function openBilatPassee(ev) {
+    const p = ev.extendedProps || {};
+    const d = frontDoc(); let ov = d.getElementById('agenda-ov');
+    if (!ov) { ov = d.createElement('div'); ov.id = 'agenda-ov'; (d.body || d.documentElement).appendChild(ov); ov.addEventListener('mousedown', (e) => { if (e.target === ov) closeCreate(); }); }
+    const quand = String(ev.startStr || p.event_start_time || '');
+    const jour = quand ? new Date(quand.slice(0, 10) + 'T12:00:00') : null;
+    const qui = (ev.title || '').replace(/^Bilat\s*/i, '') || 'collaborateur';
+    ov.innerHTML = '<div class="agm"><div class="agm-head"><span class="agm-title">Bilatérale</span><button class="agm-x" id="agm-x">×</button></div>'
+      + '<div class="agm-body"><div class="agm-cr-head"><div class="agm-cr-when">'
+      + (jour ? esc(jour.toLocaleDateString('fr-FR', { weekday: 'short', day: '2-digit', month: '2-digit' })) : '') + '<small>' + esc(quand.slice(11, 16).replace(':', 'h')) + '</small></div>'
+      + '<div class="agm-cr-who"><b>' + esc(qui) + '</b><span>L’heure est passée : il reste à saisir le compte rendu et les engagements.</span></div></div></div>'
+      + '<div class="agm-foot"><button class="agm-save" id="agm-mener">Compléter le compte rendu</button></div></div>';
+    d.getElementById('agm-x').addEventListener('click', closeCreate);
+    d.getElementById('agm-mener').addEventListener('click', () => goBilaterale(p.origin_id, false));
   }
 
   const TITLES = { rdv: 'Nouveau RDV Client', creneau: 'Nouveau Cr\u00e9neau', bilat: 'Nouvelle Bilat\u00e9rale' };
@@ -2086,7 +2325,13 @@ OD.define('agenda', {
       mid += '<div><div class="agm-lbl">Type de cr\u00e9neau</div><select class="agm-sel" id="agm-ctype" style="width:100%"><option value="">\u2014 choisir \u2014</option>' + types.map(t => '<option value="' + t.id + '"' + (String(t.id) === String(cs.creneauType) ? ' selected' : '') + '>' + esc(t.label) + '</option>').join('') + '</select></div>';
     } else {
       const grp = bilatVendeurGroups();
-      mid += '<div><div class="agm-lbl">Vendeur \u00e9valu\u00e9</div><select class="agm-sel" id="agm-bvend" style="width:100%"><option value="">\u2014 choisir \u2014</option>' + grp.map(g => '<optgroup label="' + esc(g.label) + '">' + g.items.map(v => '<option value="' + v.id + '"' + (String(v.id) === String(cs.bilatUser) ? ' selected' : '') + '>' + esc(v.nom) + '</option>').join('') + '</optgroup>').join('') + '</select></div>';
+      const res = resumeBilat;
+      const tri = (a, b) => urgenceBilat(b.id) - urgenceBilat(a.id) || String(a.nom).localeCompare(String(b.nom), 'fr');
+      mid += '<div><div class="agm-lbl">Vendeur \u00e9valu\u00e9</div><select class="agm-sel" id="agm-bvend" style="width:100%"><option value="">\u2014 choisir \u2014</option>'
+        + grp.map(g => '<optgroup label="' + esc(g.label) + '">' + g.items.slice().sort(res ? tri : () => 0).map(v => '<option value="' + v.id + '"' + (String(v.id) === String(cs.bilatUser) ? ' selected' : '') + '>' + esc(libelleVendeurBilat(v)) + '</option>').join('') + '</optgroup>').join('')
+        + '</select>'
+        + (res ? '<div class="agm-hint">\u26a0 = bilat\u00e9rale en retard \u00b7 les vendeurs \u00e0 recevoir en priorit\u00e9 sont en t\u00eate de chaque groupe.</div>' : '')
+        + '</div>';
     }
     const seg = ed ? '' : ('<div class="agm-seg">'
       + '<button data-mode="rdv" class="' + (cs.mode === 'rdv' ? 'on' : '') + '">RDV CLIENT</button>'
@@ -2107,12 +2352,19 @@ OD.define('agenda', {
     } else if (cs.editing) {
       foot = '<button class="agm-del" id="agm-del"' + (cs.saving ? ' disabled' : '') + '>Supprimer</button>'
         + '<button class="agm-save" id="agm-save"' + (cs.saving ? ' disabled' : '') + '>' + saveLbl + '</button>';
+      // Bilatérale à venir : on peut aussi la mener tout de suite. La fiche
+      // ramène alors sa date à l'instant présent.
+      if (cs.mode === 'bilat') foot = '<div class="agm-foot-col"><div class="agm-foot-row">' + foot + '</div>'
+        + '<button class="agm-now" id="agm-real-now"' + (cs.saving ? ' disabled' : '') + '>\u25b6\u2002R\u00e9aliser maintenant</button></div>';
+    } else if (cs.mode === 'bilat') {
+      foot = '<div class="agm-foot-col"><button class="agm-save" id="agm-save"' + (cs.saving ? ' disabled' : '') + '>' + (cs.saving ? 'Enregistrement\u2026' : '\ud83d\udcc5\u2002Planifier la bilat\u00e9rale') + '</button>'
+        + '<button class="agm-now" id="agm-start-now"' + (cs.saving ? ' disabled' : '') + '>\u25b6\u2002Mener l\u2019entretien maintenant</button></div>';
     } else {
       foot = '<button class="agm-save" id="agm-save"' + (cs.saving ? ' disabled' : '') + '>' + saveLbl + '</button>';
     }
     ov.innerHTML = '<div class="agm"><div class="agm-head"><span class="agm-title">' + esc(popTitle()) + '</span><button class="agm-x" id="agm-x">\u00d7</button></div>'
       + '<div class="agm-body">' + bodyHtml() + '</div>'
-      + '<div class="agm-foot' + (cs.editing ? ' agm-foot-edit' : '') + '">' + foot + '</div></div>';
+      + '<div class="agm-foot' + (cs.editing && cs.mode !== 'bilat' ? ' agm-foot-edit' : '') + '">' + foot + '</div></div>';
     wireCreate();
   }
   function syncInputs() {
@@ -2146,6 +2398,9 @@ OD.define('agenda', {
     if (g('agm-del-cancel')) g('agm-del-cancel').addEventListener('click', () => { cs.confirmDel = false; renderCreate(); });
     if (g('agm-del-yes')) g('agm-del-yes').addEventListener('click', performDelete);
     if (g('agm-save')) g('agm-save').addEventListener('click', doSave);
+    if (g('agm-real-now')) g('agm-real-now').addEventListener('click', () => { if (cs && cs.editId != null) goBilaterale(cs.editId, true); });
+    if (g('agm-start-now')) g('agm-start-now').addEventListener('click', demarrerBilatMaintenant);
+    if (g('agm-bvend')) g('agm-bvend').addEventListener('change', () => { syncInputs(); });
   }
   async function doSave() {
     syncInputs();
@@ -2180,11 +2435,45 @@ OD.define('agenda', {
       } else {
         if (!s.bilatUser) { s.err = 'S\u00e9lectionne le vendeur \u00e9valu\u00e9.'; return renderCreate(); }
         s.saving = true; renderCreate();
-        res = await c.rpc('create_bilaterale', { p_id_user: Number(s.bilatUser), p_id_manager: Number(CACHED_UID), p_id_site: site != null ? Number(site) : null, p_start: startStr, p_end: endStr, p_duree: dur });
+        res = await c.rpc('create_bilaterale', { p_id_user: Number(s.bilatUser), p_id_manager: Number(CACHED_UID), p_id_site: siteBilat(s.bilatUser), p_start: startStr, p_end: endStr, p_duree: dur });
       }
       if (res && res.error) throw res.error;
-      closeCreate(); refetch();
+      const quandTxt = libQuand(startStr);
+      if (!s.editing) {
+        const titre = s.mode === 'bilat' ? ('Bilat ' + nomVendeurBilat(s.bilatUser))
+                    : s.mode === 'rdv' ? (s.clientLabel || 'RDV client') : 'Cr\u00e9neau';
+        poserProvisoire({ famille: s.mode === 'bilat' ? 'bilat' : (s.mode === 'rdv' ? 'client' : 'creneau'), titre, start: startStr, end: endStr });
+      }
+      const msg = s.mode === 'bilat'
+        ? (s.editing ? 'Bilat\u00e9rale d\u00e9plac\u00e9e au ' : 'Bilat\u00e9rale planifi\u00e9e avec ' + nomVendeurBilat(s.bilatUser) + ' \u00b7 ') + quandTxt
+        : (s.editing ? 'Modification enregistr\u00e9e \u00b7 ' : 'Enregistr\u00e9 dans l\u2019agenda \u00b7 ') + quandTxt;
+      closeCreate();
+      toast(msg, 'ok');
+      if (s.mode === 'bilat') { resumeBilatT = 0; }
+      refetchApresEcriture();
     } catch (e) { console.error('[agenda] enregistrement', e); s.saving = false; s.err = (e && e.message) ? e.message : String(e); renderCreate(); }
+  }
+  // « Mener l'entretien maintenant » : la bilatérale est créée à l'instant
+  // présent puis la fiche de réalisation s'ouvre. Pas de détour par le
+  // calendrier : le chef est déjà en face du vendeur.
+  async function demarrerBilatMaintenant() {
+    syncInputs();
+    const s = cs; if (!s) return; s.err = '';
+    if (!s.bilatUser) { s.err = 'S\u00e9lectionne le vendeur \u00e9valu\u00e9.'; return renderCreate(); }
+    s.saving = true; renderCreate();
+    try {
+      const { data, error } = await sb().rpc('bilat_creer_maintenant', {
+        p_id_user: Number(s.bilatUser), p_id_site: siteBilat(s.bilatUser), p_duree_min: Number(s.dur) || 30 });
+      if (error) throw error;
+      resumeBilatT = 0;
+      goBilaterale(data, false);
+    } catch (e) {
+      console.error('[agenda] bilat_creer_maintenant', e);
+      s.saving = false;
+      const m = (e && e.message) ? e.message : String(e);
+      s.err = /bilat_creer_maintenant/.test(m) ? 'Fonction indisponible : le script SQL des bilat\u00e9rales v6 n\u2019est pas encore appliqu\u00e9.' : m;
+      renderCreate();
+    }
   }
   async function performDelete() {
     const s = cs; if (!s || !s.editing) return; s.err = '';
@@ -2213,11 +2502,14 @@ OD.define('agenda', {
     const ok = d.getElementById('agm-err-ok'); if (ok) ok.addEventListener('click', close);
   }
   // Petit toast d'erreur (erreurs techniques inattendues).
-  function toast(msg) {
+  function toast(msg, kind) {
     try {
       const d = frontDoc(); let t = d.getElementById('agenda-toast');
-      if (!t) { t = d.createElement('div'); t.id = 'agenda-toast'; t.style.cssText = 'position:fixed;bottom:24px;left:50%;transform:translateX(-50%);z-index:4000;background:#a32d2d;color:#fff;font-family:inherit;font-size:13px;font-weight:700;padding:11px 18px;border-radius:10px;box-shadow:0 6px 24px rgba(163,45,45,.35);max-width:80vw'; (d.body || d.documentElement).appendChild(t); }
-      t.textContent = msg; t.style.display = 'block';
+      if (!t) { t = d.createElement('div'); t.id = 'agenda-toast'; (d.body || d.documentElement).appendChild(t); }
+      const ok = kind === 'ok';
+      t.style.cssText = 'position:fixed;bottom:24px;left:50%;transform:translateX(-50%);z-index:4000;color:#fff;font-family:"Nunito Sans",system-ui,sans-serif;font-size:13px;font-weight:700;padding:11px 18px;border-radius:10px;max-width:80vw;'
+        + (ok ? 'background:#2c7a68;box-shadow:0 6px 24px rgba(44,122,104,.35)' : 'background:#a32d2d;box-shadow:0 6px 24px rgba(163,45,45,.35)');
+      t.textContent = (ok ? '\u2713 ' : '') + msg; t.style.display = 'block';
       clearTimeout(window.__agendaToastT); window.__agendaToastT = setTimeout(() => { try { t.style.display = 'none'; } catch (x) {} }, 5000);
     } catch (e) { console.error(msg); }
   }
