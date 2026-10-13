@@ -426,9 +426,24 @@ OD.define('performances', {
   // Tolérant au décalage front/base : sur un tenant sans la migration
   // 20260821210000, ID_Role peut manquer — on retombe alors sur l'ancien
   // comportement plutôt que d'afficher des zéros partout.
+  // 13/10/2026 : un chef ou un adjoint à qui l'on a fixé un objectif est suivi
+  // comme un vendeur, sous son nom (ex. un adjoint qui vend à L'Haÿ). Seul
+  // l'encadrement SANS objectif reste regroupé sur la ligne « Encadrement ».
+  let __chefsObjSrc = null, __chefsObj = new Set();
+  function chefsAvecObjectif() {
+    if (__chefsObjSrc === allRawData) return __chefsObj;
+    __chefsObjSrc = allRawData; __chefsObj = new Set();
+    for (const row of allRawData) {
+      if (row && row.ID_Role != null && Number(row.ID_Role) !== 4
+          && KPIS.some(k => k.mode === 'obj' && !k.derive && k.o && num(row[k.o]) > 0))
+        __chefsObj.add(String(vendeurId(row)));
+    }
+    return __chefsObj;
+  }
   function estVendeurPerf(row) {
     const r = row && row.ID_Role;
-    return r == null || Number(r) === 4;
+    if (r == null || Number(r) === 4) return true;
+    return chefsAvecObjectif().has(String(vendeurId(row)));
   }
   function emptyAgg() {
     const a = {};
@@ -758,6 +773,7 @@ OD.define('performances', {
 #perf-root .pf-shead .bar { width:3px; height:17px; }
 #perf-root .pf-shead .title { font-size:13px; font-weight:500; }
 #perf-root .pf-shead .sub { margin-left:auto; font-size:10px; color:var(--blue-lt); }
+#perf-root .pf-c4-note { font-size:11px; color:var(--text-mut); margin:-6px 0 10px; }
 
 #perf-root .pf-kpi-grid { display:grid; grid-template-columns:repeat(5,1fr); gap:10px; }
 #perf-root .pf-kpi { background:#f5f8fc; border-radius:8px; padding:12px; }
@@ -1346,9 +1362,12 @@ OD.define('performances', {
     html += '<div class="pf-card" style="margin-bottom:0">' + shead('var(--green)', chart2Title()) + '<div class="pf-chart-wrap"><canvas id="pf-c2"></canvas></div></div>';
     html += '</div>';
     if (IS_TC) {
-      const nTc = KPIS.filter(k => k !== KPI_CDE && k.mode !== 'euro').length;
-      html += '<div class="pf-card">' + shead('var(--orange)', 'Taux d\'équipement — % des commandes', scopeLabel + (state.vnvo !== 'ALL' ? ' · ' + state.vnvo : '')) +
-        '<div class="pf-chart-wrap-tc" style="height:' + (nTc * 26 + 46) + 'px"><canvas id="pf-c4"></canvas></div></div>';
+      const nTc = KPIS_OBJ.filter(k => num(agg[k.o]) > 0).length;
+      if (nTc) {
+        html += '<div class="pf-card">' + shead('var(--orange)', 'Avancement des objectifs — part de chaque vendeur', scopeLabel + (state.vnvo !== 'ALL' ? ' · ' + state.vnvo : '')) +
+          '<div class="pf-c4-note">Chaque barre = réalisé en % de l\'objectif, découpé par vendeur. Trait orange : avancement théorique au prorata du mois (' + Math.round(__prorata * 100) + ' %).</div>' +
+          '<div class="pf-chart-wrap-tc" style="height:' + (nTc * 34 + 96) + 'px"><canvas id="pf-c4"></canvas></div></div>';
+      }
     }
 
     if (mois.length > 1) {
@@ -1729,24 +1748,84 @@ OD.define('performances', {
 
     const c4 = doc.getElementById('pf-c4');
     if (c4) {
-      // Taux de pénétration sur le VOLUME TOTAL (vendeurs + encadrement), comme le reporting.
-      const ks = KPIS.filter(k => k !== KPI_CDE && k.mode !== 'euro');
-      const vals = ks.map(k => { const p = tauxCde(agg, k); return p == null ? 0 : p; });
-      const cnt = ks.map(k => volTotal(agg, k));
-      const cde = volTotal(agg, KPI_CDE);
+      // 13/10/2026 : en % de l'OBJECTIF (plus en % des commandes), barres
+      // empilées par vendeur, trait de l'avancement théorique au prorata.
+      // Même périmètre que le taux d'atteinte : vendeurs (et chefs ayant un
+      // objectif) des deux côtés, l'encadrement sans objectif reste à part.
+      const ks = KPIS_OBJ.filter(k => num(agg[k.o]) > 0);
+      const PAL = ['#2a5ea9', '#53bda7', '#fac055', '#7a9cc4', '#2c7a68', '#e0a93a', '#acc5e4', '#1f4a87', '#8fd3c3', '#f6d58e', '#3b78c9', '#c9d8ee'];
+      const parV = {};
+      for (const r of rows) {
+        if (!estVendeurPerf(r)) continue;
+        const id = String(vendeurId(r));
+        if (!parV[id]) parV[id] = { nom: r.nom_complet_affichage || r.nomComplet || ('Vendeur ' + id), agg: emptyAgg() };
+        addAgg(parV[id].agg, r);
+      }
+      const vends = Object.values(parV)
+        .filter(v => ks.some(k => num(v.agg[k.r]) > 0))
+        .sort((a, b) => num(b.agg[KPI_CDE.r]) - num(a.agg[KPI_CDE.r]) || a.nom.localeCompare(b.nom, 'fr'));
+      const datasets = vends.map((v, idx) => ({
+        label: v.nom,
+        data: ks.map(k => Math.round(1000 * num(v.agg[k.r]) / num(agg[k.o])) / 10),
+        brut: ks.map(k => num(v.agg[k.r])),
+        backgroundColor: PAL[idx % PAL.length],
+        borderColor: '#ffffff', borderWidth: { right: 1 },
+        stack: 'obj', maxBarThickness: 22
+      }));
+      const totaux = ks.map(k => num(agg[k.o]) > 0 ? Math.round(100 * num(agg[k.r]) / num(agg[k.o])) : 0);
+      const theo = Math.round(__prorata * 100);
+      const xmax = Math.max(100, theo, ...totaux) + 12;
+      const pluginC4 = {
+        id: 'pfObjectifs',
+        afterDatasetsDraw(ch) {
+          const g = ch.ctx, xs = ch.scales.x, ys = ch.scales.y;
+          g.save();
+          // Valeur de chaque part, si le segment est assez large pour la porter
+          ch.data.datasets.forEach((ds, di) => {
+            const meta = ch.getDatasetMeta(di); if (meta.hidden) return;
+            meta.data.forEach((bar, bi) => {
+              const v = ds.data[bi]; if (!v) return;
+              const w = Math.abs(bar.x - bar.base);
+              if (w < 26) return;
+              g.fillStyle = (ds.backgroundColor === '#fac055' || ds.backgroundColor === '#acc5e4' || ds.backgroundColor === '#f6d58e' || ds.backgroundColor === '#8fd3c3' || ds.backgroundColor === '#c9d8ee') ? '#1f4a87' : '#ffffff';
+              g.font = '600 10px "Nunito Sans", sans-serif'; g.textAlign = 'center'; g.textBaseline = 'middle';
+              g.fillText(Math.round(v) + '%', (bar.x + bar.base) / 2, bar.y);
+            });
+          });
+          // Total au bout de la barre
+          g.fillStyle = '#1f4a87'; g.font = '700 11px "Nunito Sans", sans-serif'; g.textAlign = 'left'; g.textBaseline = 'middle';
+          ks.forEach((k, bi) => g.fillText(totaux[bi] + ' %  ·  ' + num(agg[k.r]) + ' / ' + num(agg[k.o]), xs.getPixelForValue(Math.min(totaux[bi], xmax)) + 6, ys.getPixelForValue(bi)));
+          // Avancement théorique au prorata temporis
+          const x = xs.getPixelForValue(theo);
+          g.strokeStyle = '#fac055'; g.lineWidth = 2; g.setLineDash([5, 4]);
+          g.beginPath(); g.moveTo(x, ys.top - 4); g.lineTo(x, ys.bottom); g.stroke(); g.setLineDash([]);
+          g.fillStyle = '#c98a10'; g.font = '700 10px "Nunito Sans", sans-serif'; g.textAlign = 'center'; g.textBaseline = 'bottom';
+          g.fillText('théorique ' + theo + ' %', x, ys.top - 6);
+          g.restore();
+        }
+      };
       __c4 = new Chart(c4.getContext('2d'), {
         type: 'bar',
-        data: { labels: ks.map(k => k.label), datasets: [{ label: '% des commandes', data: vals, backgroundColor: ks.map(k => k.mode === 'obj' ? '#2a5ea9' : '#acc5e4'), borderRadius: 3, maxBarThickness: 18 }] },
+        data: { labels: ks.map(k => k.label), datasets },
+        plugins: [pluginC4],
         options: {
           indexAxis: 'y', responsive: true, maintainAspectRatio: false,
+          layout: { padding: { top: 18, right: 8 } },
           plugins: {
-            legend: { display: false }, tooltip: {
-              callbacks: { label: i => cnt[i.dataIndex] + ' / ' + cde + ' cdes · ' + vals[i.dataIndex] + '%' }
+            legend: { display: true, position: 'bottom', labels: { boxWidth: 10, boxHeight: 10, font: { size: 10 }, color: '#4a6a8a' } },
+            tooltip: {
+              callbacks: {
+                title: it => it.length ? it[0].label : '',
+                label: i => {
+                  const ds = i.dataset, k = ks[i.dataIndex];
+                  return ds.label + ' : ' + ds.brut[i.dataIndex] + ' sur un objectif de ' + num(agg[k.o]) + ' · ' + ds.data[i.dataIndex] + ' %';
+                }
+              }
             }
           },
           scales: {
-            x: { beginAtZero: true, suggestedMax: 100, ticks: { font: { size: 9 }, color: '#7a9cc4', callback: v => v + '%' }, grid: { color: '#eaf0f9' } },
-            y: { ticks: { font: { size: 10 }, color: '#4a6a8a' }, grid: { display: false } }
+            x: { stacked: true, beginAtZero: true, max: xmax, ticks: { font: { size: 9 }, color: '#7a9cc4', callback: v => v + '%' }, grid: { color: '#eaf0f9' } },
+            y: { stacked: true, ticks: { font: { size: 11 }, color: '#4a6a8a' }, grid: { display: false } }
           }
         }
       });
