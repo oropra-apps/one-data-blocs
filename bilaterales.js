@@ -2760,10 +2760,22 @@ function R_render(){
     }
   }
   const scrollPrec = ov.scrollTop;
+  try { const t=doc.getElementById('agenda-tip'); if(t) t.style.display='none'; } catch(e){}
   ov.innerHTML = R_STYLE + '<div class="real-modal'+(R.reunion?' reunion':'')+'">'+
     '<div class="real-toolbar">'+(R.done?'':'<button class="real-mode" data-ract="reunion">'+(R.reunion?'↙ Quitter le mode réunion':'⤢ Mode réunion')+'</button>')+'</div>'+
     '<button class="real-close" data-ract="annuler" title="Fermer">×</button>'+body+'</div>';
+  R_autoHauteur();
   ov.scrollTop = scrollPrec;
+}
+// Le bilan et les actions grandissent avec leur contenu : le bilan pré-rempli
+// (constats chiffrés) se lit en entier sans ascenseur interne.
+function R_autoHauteur(){
+  ['rf-res','rf-act'].forEach(id=>{
+    const t=doc.getElementById(id); if(!t) return;
+    const ajuste=()=>{ t.style.height='auto'; t.style.height=Math.min(Math.max(t.scrollHeight+4, id==='rf-res'?260:120), 900)+'px'; };
+    ajuste();
+    if(!t.__auto){ t.__auto=true; t.addEventListener('input', ajuste); }
+  });
 }
 
 // --- Après l'enregistrement ----------------------------------------------------
@@ -2986,6 +2998,8 @@ const R_STYLE = '<style>'+
 '#real-ov .field.res label{color:#2a5ea9}#real-ov .field.act label{color:#8a6d1f}#real-ov .field.eng label{color:#00997f}'+
 '#real-ov .field textarea{width:100%;border:1px solid #e3e9f3;border-radius:10px;padding:11px 13px;font-family:inherit;font-size:14px;color:#1c2b45;resize:vertical;min-height:80px;background:rgba(172,197,228,.10);box-sizing:border-box}'+
 '#real-ov .field textarea:focus{outline:none;border-color:#2a5ea9;background:#fff}'+
+'#real-ov .field.res textarea{min-height:260px;line-height:1.55}'+
+'#real-ov .field.act textarea{min-height:120px;line-height:1.55}'+
 '#real-ov .save-bar{display:flex;justify-content:flex-end;align-items:center;gap:10px;margin-top:4px}'+
 '#real-ov .save-msg{font-size:13px;font-weight:700;margin-right:auto}'+
 '#real-ov .btn{border:none;border-radius:9px;padding:10px 20px;font-family:inherit;font-size:14px;font-weight:700;cursor:pointer}'+
