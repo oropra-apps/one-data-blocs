@@ -1,4 +1,8 @@
 // ============================================================================
+//  v15 (13/10/2026) : historique du vehicule, une ligne horizontale
+//  verte « Achat du VO · JJ/MM/AAAA » materialise l'entree en stock : au-dessus,
+//  les factures depuis l'achat ; en dessous, la vie anterieure du vehicule.
+//  Date prise sur la fiche (D_ACHAT), sinon lue dans v_liste_vo.
 //  v11 (08/10/2026) : diaporama plein ecran. Une fleche du clavier avancait de
 //  plusieurs photos (un ecouteur de plus a chaque photo affichee) ; la bulle
 //  Pulse / retours passait par-dessus (z-index 2147482000 contre 9999).
@@ -1607,6 +1611,10 @@ OD.define('vo-liste', {
     + '.hv-annee td{background:#f4f8fd;color:#1F4A85;font-weight:700;font-size:11.5px;padding:5px 10px;border-bottom:1px solid #e3ecf7}'
     + '.hv-vente td{background:#f7fafe}'
     + '.hv-avoir .c-tot{color:#b05a3c}'
+    + '.hv-tab tr.hv-achat td{padding:8px 0;border-bottom:none;background:none}'
+    + '.hv-achat-l{display:flex;align-items:center;gap:10px;color:#2f8a76;font-size:11px;font-weight:800;letter-spacing:.4px;text-transform:uppercase;white-space:nowrap}'
+    + '.hv-achat-l::before{content:"";width:84px;flex:none;border-top:2px solid #2f8a76}'
+    + '.hv-achat-l::after{content:"";flex:1;border-top:2px solid #2f8a76}'
     + '.hv-t{font-weight:700;color:#1F4A85;font-size:13px}'
     + '.hv-s{font-size:11.5px;color:#7a98c5;margin-top:2px}'
     + '.hv-s b{font-weight:700;color:#54678a}'
@@ -1706,6 +1714,11 @@ OD.define('vo-liste', {
       + '</div>';
     h += '<table class="hv-tab"><thead><tr><th class="c-date">Date</th><th>Intervention</th><th class="c-num">Main-d’œuvre</th><th class="c-num">Pièces</th><th class="c-num">Total HT</th></tr></thead><tbody>';
     var an = null;
+    var achat = st.achat ? String(st.achat).slice(0, 10) : null, achatFait = !achat;
+    var achatLigne = function () {
+      achatFait = true;
+      return '<tr class="hv-achat"><td colspan="5"><div class="hv-achat-l">Achat du VO · ' + hvEsc(hvDate(achat)) + '</div></td></tr>';
+    };
     rows.forEach(function (r) {
       var a = r.date_fac ? String(r.date_fac).slice(0, 4) : null;
       if (a && a !== an) {
@@ -1713,6 +1726,7 @@ OD.define('vo-liste', {
         var ta = at.filter(function (x) { return String(x.date_fac || '').slice(0, 4) === a; }).reduce(function (s, x) { return s + (hvNum(x.montant_ht) || 0); }, 0);
         h += '<tr class="hv-annee"><td colspan="4">' + a + '</td><td class="c-num">' + (ta ? hvEur(ta) : '') + '</td></tr>';
       }
+      if (!achatFait && String(r.date_fac || '').slice(0, 10) < achat) h += achatLigne();
       var cls = (hvEstAtelier(r) ? '' : 'hv-vente') + ((hvNum(r.montant_ht) || 0) < 0 ? ' hv-avoir' : '');
       h += '<tr' + (cls.trim() ? ' class="' + cls.trim() + '"' : '') + '>'
         + '<td class="c-date">' + hvEsc(hvDate(r.date_fac)) + '</td>'
@@ -1721,6 +1735,7 @@ OD.define('vo-liste', {
         + '<td class="c-num">' + (r.nb_lignes > 0 && hvNum(r.pieces_ht) ? hvEur(r.pieces_ht) : '—') + '</td>'
         + '<td class="c-num c-tot">' + hvEur(r.montant_ht) + '</td></tr>';
     });
+    if (!achatFait) h += achatLigne();
     h += '</tbody><tfoot><tr><td colspan="4" style="padding:11px 10px 0;border-top:1.5px solid #d7e2f0;color:#54678a;font-weight:600">Total atelier</td>'
       + '<td class="c-num c-tot" style="padding:11px 10px 0;border-top:1.5px solid #d7e2f0">' + hvEur(tot) + '</td></tr></tfoot></table>';
     return h;
@@ -1744,6 +1759,10 @@ OD.define('vo-liste', {
           st.apvDet = null;
         } else {
           st.apv = h.data || [];
+          st.achat = (st.row && st.row.D_ACHAT) || null;
+          if (!st.achat) {
+            try { var sa = await client.from('v_liste_vo').select('D_ACHAT').eq('VIN', vin).limit(1); st.achat = (sa.data && sa.data[0] && sa.data[0].D_ACHAT) || null; } catch (e2) { st.achat = null; }
+          }
           st.apvDet = null;
           if (!d.error && Array.isArray(d.data)) {
             st.apvDet = {};
