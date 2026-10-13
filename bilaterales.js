@@ -303,6 +303,20 @@ async function loadData() {
         }
         enrichirTransfo(c);
       });
+      // v9 : une transformation n'a de sens que si des affaires PERDUES sont
+      // enregistrées. Relevé du 14/10/2026 chez Team Colin : aucune sur 90
+      // jours, toutes les transfos sortaient à 100 %. Dans ce cas, elle n'est
+      // ni affichée ni comptée dans le score (remplacée par la part du
+      // portefeuille à relancer).
+      if (state.transfoStable) {
+        const pertes = (rTx.data || []).reduce((s, v) => s + Number(v.tranchees_actuel || 0) - Number(v.gagnees_actuel || 0)
+                                                         + Number(v.tranchees_precedent || 0) - Number(v.gagnees_precedent || 0), 0);
+        state.txMesurable = pertes > 0;
+      } else state.txMesurable = true;
+      if (!state.txMesurable) state.cadence.forEach(c => {
+        c.transfo_actuel = null; c.transfo_precedent = null; c.tx_signif = false; c.tx_signif_prec = false;
+        c.transfo_baisse = false; c.transfo_hausse = false;
+      });
     }
     // Chiffres du tableau de bord (dash_lire, mois en cours), par vendeur.
     state.dash = (rDash && !rDash.error && rDash.data) ? indexerDash(rDash.data) : null;
@@ -410,6 +424,7 @@ function enrichirTransfo(c) {
 function txUnite() { return state.transfoStable ? 'affaires tranchées' : 'prop.'; }
 function txFenetre() { return state.transfoStable ? ' ' + BIL_CFG.transfoJours + ' j' : ''; }
 function transfoTexte(c) {
+  if (state.txMesurable === false) return 'Transfo non mesurable : aucune affaire perdue n’est enregistrée';
   if (!c || c.transfo_actuel == null) return 'Transfo' + txFenetre() + ' : aucune affaire ' + (state.transfoStable ? 'tranchée' : 'sur la période');
   if (!c.tx_signif) return 'Transfo' + txFenetre() + ' : volume insuffisant' + (c.tx_tot_actuel != null ? ' (' + c.tx_tot_actuel + ' ' + txUnite() + ')' : '');
   let t = 'Transfo' + txFenetre() + ' ' + fmtNb(c.transfo_actuel) + ' %';
@@ -677,8 +692,12 @@ function prioDetail(c) {
     r.txt.objectif = (r.ecart < 0 ? 'Retard de ' + fmtNb(-r.ecart) + ' cmd sur l’objectif' : 'En avance de ' + fmtNb(r.ecart) + ' cmd') +
       ' (' + fmtNb(K.cdes, 0) + ' / ' + fmtNb(K.obj_cdes, 0) + ', attendu à date ' + fmtNb(att) + ')';
   } else { r.comps.objectif = 0; }
-  // Transfo
-  if (c.transfo_baisse && c.transfo_precedent > 0) {
+  // Transfo, ou à défaut (pertes non enregistrées) part du portefeuille à relancer
+  if (state.txMesurable === false) {
+    const aff = K ? (K.pipe_affaires || 0) : 0, rel = K ? (K.pipe_a_relancer || 0) : 0;
+    r.comps.transfo = aff > 0 ? clamp01(rel / aff) * Math.min(1, aff / 10) : 0;
+    r.txt.transfo = aff > 0 && rel > 0 ? rel + ' affaire' + (rel > 1 ? 's' : '') + ' sur ' + aff + ' à relancer (> 30 j)' : '';
+  } else if (c.transfo_baisse && c.transfo_precedent > 0) {
     const poidsVol = Math.min(1, (c.tx_tot_actuel != null ? c.tx_tot_actuel : BIL_CFG.minVolumeTransfo) / 20);
     r.comps.transfo = clamp01((c.transfo_precedent - c.transfo_actuel) / c.transfo_precedent) * poidsVol;
     r.txt.transfo = 'Transfo' + txFenetre() + ' ' + fmtNb(c.transfo_precedent) + ' % → ' + fmtNb(c.transfo_actuel) + ' %';
@@ -865,7 +884,7 @@ function renderPrioVendeurs() {
   h += '<div class="prio-chips">';
   fchips.forEach(([k, l, n]) => { if (n === 0 && k !== 'tous') return; const extra = (k === 'retard' ? ' retard' : ''); h += '<span class="prio-chip' + extra + (f === k ? ' on' : '') + '" data-priofilter="' + k + '">' + l + '<span class="pc-n">' + n + '</span></span>'; });
   h += '</div>';
-  h += '<div class="hint-line">Classement : 40 % retard sur l’objectif · 25 % baisse de transfo · 20 % ancienneté de la dernière bilatérale · 15 % discipline (engagements, relances, leads). La raison principale est en tête de chaque ligne.</div>';
+  h += '<div class="hint-line">Classement : 40 % retard sur l’objectif · 25 % ' + (state.txMesurable === false ? 'part du portefeuille à relancer (la transfo n’est pas mesurable tant que les affaires perdues ne sont pas enregistrées)' : 'baisse de transfo') + ' · 20 % ancienneté de la dernière bilatérale · 15 % discipline (engagements, relances, leads). La raison principale est en tête de chaque ligne.</div>';
 
   h += '<div class="prio-list">';
   const shown = sorted.filter(pass);
@@ -1056,6 +1075,7 @@ function vendeurTenueCell(c){
   return '<div class="tcell"><div class="ttop">'+bar+'<span class="tpct" style="color:'+col+'">'+(pct==null?'—':pct+'%')+'</span></div><div class="tdet">'+det.join(' · ')+'</div></div>';
 }
 function vendeurTransfoCell(c){
+  if(state.txMesurable===false) return '<div class="vtf na" title="'+esc(transfoTexte(c))+'">non mesurable</div>';
   if(c.transfo_actuel==null) return '<div class="vtf na" title="Aucune proposition sur la période">—</div>';
   if(!c.tx_signif) return '<div class="vtf na" title="'+esc(transfoTexte(c))+'">trop peu'+(c.tx_tot_actuel!=null?'<span class="vtf-n">'+c.tx_tot_actuel+' '+(state.transfoStable?'tranchées':'prop.')+'</span>':'')+'</div>';
   const cls=c.transfo_hausse?'up':(c.transfo_baisse?'down':'flat'), ar=c.transfo_hausse?'↗':(c.transfo_baisse?'↘':'→');
@@ -1105,7 +1125,7 @@ function vendeursLegend(){
 function suiviSortBar(){
   const s=state.suiviSort||'tenue';
   const c=(k,l)=>'<span class="ssort'+(s===k?' on':'')+'" data-suivisort="'+k+'">'+l+'</span>';
-  return '<div class="suivi-sort"><span class="sort-lbl">Trier par</span>'+c('tenue','Engagements les moins tenus')+c('recence','Plus longtemps sans bilatérale')+c('transfo','Transfo en baisse')+'</div>';
+  return '<div class="suivi-sort"><span class="sort-lbl">Trier par</span>'+c('tenue','Engagements les moins tenus')+c('recence','Plus longtemps sans bilatérale')+(state.txMesurable===false?'':c('transfo','Transfo en baisse'))+'</div>';
 }
 function renderVendeursTables(list){
   const sorted=sortVendeurs(list);
@@ -2245,6 +2265,7 @@ function R_objectif(rea, obj){
   const att=obj*prorataMois(); return { obj, rea, att, ecart: rea-att };
 }
 function R_transfoSous(c){
+  if(state.txMesurable===false) return 'non mesurable : aucune affaire perdue enregistrée';
   if(!c) return 'période en cours';
   if(c.transfo_actuel==null) return state.transfoStable ? 'aucune affaire tranchée sur '+BIL_CFG.transfoJours+' j' : 'aucune proposition sur la période';
   if(!c.tx_signif) return 'volume insuffisant'+(c.tx_tot_actuel!=null?' ('+c.tx_tot_actuel+' '+txUnite()+')':'');
