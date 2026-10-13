@@ -127,8 +127,8 @@ OD.define('kanban', {
   function estMarque() { return getViewerRole() === 5; }
   function fmtPeriodKan() { const f = (s) => { const d = new Date(s + 'T12:00:00'); return d.toLocaleDateString('fr-FR', { day: '2-digit', month: 'short' }); }; return f(state.period.from) + ' \u2192 ' + f(state.period.to); }
   function vnvoNorm(t) { return (t || '').toUpperCase().replace(/[^A-Z]/g, ''); }
-  function vnvoRank(t) { const n = vnvoNorm(t); if (n === 'VN') return 0; if (n === 'VO') return 1; if (n === 'VNVO') return 2; return 3; }
-  function vnvoLabel(t) { const n = vnvoNorm(t); if (n === 'VN') return 'VN'; if (n === 'VO') return 'VO'; if (n === 'VNVO') return 'VN/VO'; return 'Autres'; }
+  function vnvoRank(t) { const n = vnvoNorm(t); if (n === 'ADJOINT') return -1; if (n === 'VN') return 0; if (n === 'VO') return 1; if (n === 'VNVO') return 2; return 3; }
+  function vnvoLabel(t) { const n = vnvoNorm(t); if (n === 'ADJOINT') return 'Adjoints'; if (n === 'VN') return 'VN'; if (n === 'VO') return 'VO'; if (n === 'VNVO') return 'VN/VO'; return 'Autres'; }
   function siteBus() { try { const w = wwLib.getFrontWindow(); if (w && w.oropraSite) return w.oropraSite; } catch (e) { } return window.oropraSite || null; }
 
   // ── Navigation : éditeur vs prod ──────────────────────────────────────────
