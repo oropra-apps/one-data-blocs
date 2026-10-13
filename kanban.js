@@ -2,9 +2,10 @@
 //  v62 (13/10/2026) : opportunité mêlant simulations VN et VO (recette Team
 //  Colin, Julien Lemaignen : RAV4 PHV + Aygo X du stock). get_kanban_cards
 //  renvoie vn_vo = « VN+VO » : la carte affiche « VN · VO », reste visible
-//  sous les filtres VN ET VO, et annonce « Plusieurs véhicules » au lieu du
-//  véhicule de la simulation la plus récente. La photo du VO dans la liste
-//  des propositions est corrigée côté base (get_affaire_quotes).
+//  sous les filtres VN ET VO ; avec 2 simulations ou plus sur des marques /
+//  modèles différents, la carte n'affiche plus de marque ni de modèle. Dans
+//  la liste des propositions, liseré vert (VN) ou orange (VO) comme les
+//  cartes. Photo et libellé du VO corrigés côté base (get_affaire_quotes).
 //  v59 (12/10/2026) : le cycle BACS ne s'applique qu'aux clients raccordés à
 //  BACS (Team Colin). Ailleurs : colonnes Simulations / Propale / BDC / Gagné /
 //  Perdu, ni pastille de statut BACS ni bouton « B », cartes déplaçables.
@@ -784,10 +785,14 @@ OD.define('kanban', {
     if (c.vn_vo === 'VO' && c.vin) {
       h += '<div class="kc-veh"><span class="kc-vdot"></span><button type="button" class="kc-veh-link" data-vin="' + esc(c.vin) + '" title="Ouvrir la fiche VO">' + esc(c.vehicule || c.vin || '—') + '</button> <span class="kc-vt">VO</span></div>';
     } else {
-      // v62 : carte plurale aux véhicules différents -> pas le véhicule d'une simulation au hasard
-      const libVeh = (vnMulti && c.veh_uniforme === false) ? 'Plusieurs v\u00e9hicules' : (c.vehicule || c.vin || '—');
+      // v62 : 2 simulations ou plus sur des marques / modèles différents -> pas
+      // de marque ni de modèle (ce serait ceux d'une simulation au hasard).
       const libVt = c.vn_vo === 'VN+VO' ? 'VN \u00b7 VO' : c.vn_vo;
-      h += '<div class="kc-veh"><span class="kc-vdot"></span>' + esc(libVeh) + (libVt ? ' <span class="kc-vt">' + esc(libVt) + '</span>' : '') + '</div>';
+      if (vnMulti && c.veh_uniforme === false) {
+        if (libVt) h += '<div class="kc-veh"><span class="kc-vt" style="margin-left:0">' + esc(libVt) + '</span></div>';
+      } else {
+        h += '<div class="kc-veh"><span class="kc-vdot"></span>' + esc(c.vehicule || c.vin || '—') + (libVt ? ' <span class="kc-vt">' + esc(libVt) + '</span>' : '') + '</div>';
+      }
     }
 
     // Commandes : la somme a un sens (ventes reelles) et s'affiche a cote du
@@ -1265,6 +1270,16 @@ OD.define('kanban', {
   async function choisirQuoteVN(idPropale) {
     let quotes = [];
     try { const r = await ctx.supabase.rpc('get_affaire_quotes', { p_id_propale_bdc: Number(idPropale) }); quotes = (r && r.data) || []; } catch (e) {}
+    // v62 : neuf ou occasion de chaque proposition (liseré vert VN / orange VO, comme les cartes)
+    if (quotes.length > 1) {
+      try {
+        const rv = await ctx.supabase.from('PROPALE_BDC').select('id_propale_bdc,"VN_VO"')
+          .in('id_propale_bdc', quotes.map(q => Number(q.id_propale_bdc)));
+        const nat = {};
+        ((rv && rv.data) || []).forEach(x => { nat[String(x.id_propale_bdc)] = String(x.VN_VO || '').toUpperCase(); });
+        quotes.forEach(q => { q.vn_vo = nat[String(q.id_propale_bdc)] || ''; });
+      } catch (e) {}
+    }
     if (quotes.length <= 1) {
       const only = quotes.length ? quotes[0].id_propale_bdc : idPropale;
       try { wwLib.wwVariable.updateValue(VAR_ID_PROPALE, Number(only)); } catch (e) {}
@@ -1286,7 +1301,7 @@ OD.define('kanban', {
         : '<span class="odq-img odq-img-vide"></span>';
       const sf = esc(q.bacs_sf_id || ''), lib = esc(q.vehicule || '');
       return '<div class="odq-row">'
-        + '<button type="button" data-vnq="' + q.id_propale_bdc + '" class="odq-main">' + img
+        + '<button type="button" data-vnq="' + q.id_propale_bdc + '" class="odq-main' + (q.vn_vo === 'VN' ? ' odq-vn' : (q.vn_vo === 'VO' ? ' odq-vo' : '')) + '">' + img
         + '<span class="odq-txt"><b>' + (lib || '\u2014') + '</b>'
         + (q.couleur ? '<i>' + esc(q.couleur) + '</i>' : '<i class="odq-vide">couleur non renseign\u00e9e</i>') + '</span>'
         + '<span class="odq-prix">' + prix + '</span></button>'
@@ -1302,6 +1317,8 @@ OD.define('kanban', {
         '.odq-row{display:flex;gap:8px;align-items:stretch;margin-bottom:2px}' +
         '.odq-main{flex:1;display:flex;gap:14px;align-items:center;text-align:left;border:1px solid #e3edf9;background:#fff;border-radius:12px;padding:10px 14px;cursor:pointer;font:inherit;transition:.12s}' +
         '.odq-main:hover{border-color:#2a5ea9;background:#f7faff}' +
+        '.odq-main.odq-vn{border-left:3px solid #53bda7}.odq-main.odq-vo{border-left:3px solid #fac055}' +
+        '.odq-main.odq-vn:hover{border-left-color:#53bda7}.odq-main.odq-vo:hover{border-left-color:#fac055}' +
         '.odq-img{width:88px;height:54px;object-fit:contain;border-radius:8px;background:#eef2f7;flex:0 0 auto;display:inline-block}' +
         '.odq-txt{flex:1;display:flex;flex-direction:column;gap:2px;min-width:0}' +
         '.odq-txt b{font-weight:800;color:#1f2b45;font-size:14px}' +
