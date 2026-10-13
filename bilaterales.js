@@ -200,8 +200,11 @@ function computeStatut(b){
                  (b.actions && String(b.actions).trim()) ||
                  (b.engagement && String(b.engagement).trim());
   if (filled) return 'realisee';
-  const future = b.start_date && new Date(String(b.start_date).replace(' ','T')) > new Date();
-  return future ? 'programmee' : 'retard';
+  // En retard seulement une fois l'entretien terminé (fin prévue, ou une
+  // heure après le début) : une bilatérale en cours n'est pas en retard.
+  const ts = x => x ? new Date(String(x).replace(' ','T')) : null;
+  const fin = ts(b.end_date) || (b.start_date ? new Date(ts(b.start_date).getTime() + 3600000) : null);
+  return (fin && fin > new Date()) ? 'programmee' : 'retard';
 }
 // Fin du mois d'une date 'YYYY-MM-..' -> 'YYYY-MM-JJ' (dernier jour du mois).
 function endOfMonth(dstr){
@@ -696,9 +699,15 @@ function renderPriorite() {
 }
 
 // Agrégats d'une liste de vendeurs (cadence) : couverture + tenue.
+// Reçu sur la période = une bilatérale RÉALISÉE dans la période. Le compteur
+// de la base (nb_bilaterales_periode) comptait aussi les programmées.
+function recuPeriode(c) {
+  const d = c && c.last_bilaterale_at ? String(c.last_bilaterale_at).slice(0, 10) : null;
+  return !!(d && d >= state.period.from && d <= state.period.to);
+}
 function entityMetrics(vs) {
   const total = vs.length;
-  const vus = vs.filter(v => (v.nb_bilaterales_periode || 0) > 0).length;
+  const vus = vs.filter(recuPeriode).length;
   const cov = total ? Math.round(100 * vus / total) : 0;
   let t = 0, p = 0, n = 0;
   vs.forEach(v => { const e = (state.tenueMap || {})[v.id_user]; if (e) { t += e.tenu; p += e.partiel; n += e.non_tenu; } });
@@ -799,7 +808,7 @@ function renderPrioVendeurs() {
   const det = cad.map(prioDetail);
   const sousObj = (d) => (d.comps.objectif || 0) > 0.1;
   const total = cad.length;
-  const vus = cad.filter(c => c.nb_bilaterales_periode > 0).length;
+  const vus = cad.filter(recuPeriode).length;
   const jamais = cad.filter(isJamais).length;
   const retardCad = cad.filter(isCadenceLate).length;
   const baisse = cad.filter(c => c.transfo_baisse).length;
@@ -2004,6 +2013,14 @@ async function R_pdfPropale(idPropale, status, majIso){
 }
 
 function R_LS(){ try { return wwLib.getFrontWindow().localStorage; } catch(e){ return window.localStorage; } }
+// Clé du brouillon : id + vendeur + date prévue. L'id seul ne suffit pas :
+// create_bilaterale numérote par max+1, un id libéré par une suppression est
+// réattribué, et la nouvelle fiche héritait du brouillon de l'ancienne
+// (relevé du 14/10/2026 : « Recette : bilan test… » réapparu).
+function R_draftKey(){
+  if(R.bilId==null || !R.detail) return null;
+  return 'bil_draft_'+R.bilId+'_'+R.detail.id_user+'_'+String(R.detail.start_date||'').slice(0,16).replace(/[^0-9]/g,'');
+}
 let R_draftTimer=null;
 function R_saveDraft(){
   if(R.bilId==null) return;
@@ -2012,16 +2029,19 @@ function R_saveDraft(){
     try {
       const payload={ resultat:(R.detail&&R.detail.resultat)||'', actions:(R.detail&&R.detail.actions)||'',
         engagements:(R.engagements||[]).map(e=>({libelle:e.libelle,ordre:e.ordre,cible:e.cible,echeance:e.echeance})), revues:R.revues||{}, ts:Date.now() };
-      R_LS().setItem('bil_draft_'+R.bilId, JSON.stringify(payload));
+      const k=R_draftKey(); if(!k) return;
+      R_LS().setItem(k, JSON.stringify(payload));
       const ind=doc.getElementById('r-draft-ind'); if(ind){ ind.textContent='brouillon enregistré'; ind.style.opacity='1'; setTimeout(()=>{ if(ind) ind.style.opacity='.5'; },1200); }
     } catch(e){}
   }, 500);
 }
-function R_clearDraft(){ try { R_LS().removeItem('bil_draft_'+R.bilId); } catch(e){} }
+function R_clearDraft(){ try { const k=R.draftKeyAtLoad||R_draftKey(); if(k) R_LS().removeItem(k); R_LS().removeItem('bil_draft_'+R.bilId); } catch(e){} }
 function R_applyDraft(){
   if(R._draftApplied) return; R._draftApplied=true;
   try {
-    const raw=R_LS().getItem('bil_draft_'+R.bilId); if(!raw) return;
+    R.draftKeyAtLoad=R_draftKey();
+    try { R_LS().removeItem('bil_draft_'+R.bilId); } catch(x){}   // ancien format, ambigu : abandonné
+    const raw=R.draftKeyAtLoad ? R_LS().getItem(R.draftKeyAtLoad) : null; if(!raw) return;
     const d=JSON.parse(raw); if(!d) return;
     if(R.detail){ if(d.resultat){ R.detail.resultat=d.resultat; R.fromDraft=true; } if(d.actions) R.detail.actions=d.actions; }
     if(Array.isArray(d.engagements) && d.engagements.length) R.engagements=d.engagements.map((e,i)=>({ libelle:e.libelle||'', ordre:e.ordre!=null?e.ordre:i, cible:(e.cible!=null?e.cible:''), echeance:e.echeance||'' }));
