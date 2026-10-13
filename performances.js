@@ -1340,7 +1340,7 @@ OD.define('performances', {
         '</div>';
     }
     html += '</div>';
-    const libres = KPIS.filter(k => k.mode !== 'obj');
+    const libres = KPIS.filter(k => k.mode !== 'obj' && k.mode !== 'interne');
     if (libres.length) {
       html += '<div class="pf-kpi-sub">Mix &amp; équipement · en % des commandes</div>';
       html += '<div class="pf-kpi-grid' + (IS_TC ? ' tc' : '') + '">';
@@ -1787,7 +1787,8 @@ OD.define('performances', {
     const ca = doc.getElementById('pf-ca');
     if (ca) {
       const ks = KPIS_OBJ.filter(k => num(agg[k.o]) > 0);
-      const rea = ks.map(k => num(agg[k.r])), obj = ks.map(k => num(agg[k.o]));
+      // Même chiffre que les cartes du haut : volume TOTAL du périmètre (encadrement compris)
+      const rea = ks.map(k => volTotal(agg, k)), obj = ks.map(k => num(agg[k.o]));
       const pct = ks.map((k, i) => Math.round(100 * rea[i] / obj[i]));
       const proj = ks.map((k, i) => pr >= 0.03 ? Math.round(rea[i] / pr) : null);
       const projPct = ks.map((k, i) => proj[i] == null ? 0 : Math.round(100 * proj[i] / obj[i]));
