@@ -1,5 +1,6 @@
 // ============================================================================
-//  BILATÉRALES — v20 (14/10/2026, Team Colin) — v20 : Encadrement en cartes sur mobile
+//  BILATÉRALES — v21 (14/10/2026, Team Colin) — v21 : performance (appels en parallèle, bilat_cadence, cache)
+//  v20 — v20 : Encadrement en cartes sur mobile
 //  v19 — v19 : vue direction (sites repliés, régularité depuis le démarrage, nœuds vides masqués)
 //  v18 — v18 : périmètre sans défilement sur mobile ;
 //     priorité : retard d'objectif rapporté à l'attendu à date
@@ -228,13 +229,16 @@ function endOfMonth(dstr){
 }
 
 // --- Chargement RPC ---------------------------------------------------------
-async function loadData() {
-  window.__bilLoadData = loadData;
-  const viewer = getViewerId();
-  if (viewer == null) { state.error = 'Utilisateur non identifié'; render(); return; }
-  if (state.loading) return;
-  state.loading = true; state.error = null; render();
-  try {
+// v21 — PERFORMANCE. Avant : trois vagues d'appels en série (transfo ~1,4 s,
+// puis périmètre, puis cadence ~2,5 s), soit 4 à 5 s pour un directeur.
+// Désormais : 1) un seul Promise.all (le plus lent fixe la durée) ;
+// 2) bilat_cadence (SQL allégé) à la place de get_cadence_bilaterales, avec
+// repli automatique si elle n'est pas installée ; 3) les volumes de transfo
+// ne sont demandés qu'en repli ; 4) cache en mémoire (10 min) : en revenant
+// sur la page, l'affichage est immédiat et les données se rafraîchissent
+// en arrière-plan.
+const BIL_CACHE_MS = 10 * 60000;
+async function chargerTout(viewer) {
     const supabase = ctx.supabase;
     // Pour le suivi/timeline, on élargit la borne haute afin d'inclure les bilatérales
     // PROGRAMMÉES à venir — pas seulement dans le mois courant, mais aussi les mois
@@ -255,26 +259,38 @@ async function loadData() {
     // absence (SQL non appliqué, autre tenant) ne bloque jamais la page.
     const souple = (pr) => Promise.resolve(pr).catch(e => ({ data: null, error: e }));
     const moisPrec = new Date(auj.getFullYear(), auj.getMonth() - 1, 1);
-    const [rTx, rVol, rDash, rDashPrec] = await Promise.all([
+    const cadArgs = { p_viewer_id_user: viewer, p_date_from: state.period.from, p_date_to: state.period.to };
+    const cadence = async () => {
+      if (window.__bilCadFn !== 'get_cadence_bilaterales') {
+        const r = await souple(supabase.rpc('bilat_cadence', cadArgs));
+        if (!r.error) { window.__bilCadFn = 'bilat_cadence'; return r; }
+        window.__bilCadFn = 'get_cadence_bilaterales';
+      }
+      return supabase.rpc('get_cadence_bilaterales', cadArgs);
+    };
+    const [rTx, rDash, rDashPrec, rPerimH, rMesEng, rSites, rBils, rCad, rTenue, rChefs] = await Promise.all([
       souple(supabase.rpc('bilat_transfo', { p_viewer_id_user: viewer, p_jours: BIL_CFG.transfoJours })),
-      souple(supabase.rpc('bilat_transfo_volumes', { p_viewer_id_user: viewer, p_date_from: state.period.from, p_date_to: state.period.to })),
       souple(lireDash(auj.getFullYear(), auj.getMonth() + 1)),
-      souple(lireDash(moisPrec.getFullYear(), moisPrec.getMonth() + 1))
-    ]);
-    const [rPerimH, rMesEng] = await Promise.all([
+      souple(lireDash(moisPrec.getFullYear(), moisPrec.getMonth() + 1)),
       dir ? souple(supabase.rpc('get_agenda_perimeter', { p_viewer_id_user: viewer })) : Promise.resolve(null),
-      isVendeur() ? souple(supabase.rpc('bilat_engagements_ouverts', { p_id_user: viewer, p_exclure_bilaterale: null })) : Promise.resolve(null)
-    ]);
-    state.perimH = (rPerimH && !rPerimH.error && Array.isArray(rPerimH.data)) ? rPerimH.data : null;
-    state.mesEngagements = (rMesEng && !rMesEng.error && Array.isArray(rMesEng.data)) ? rMesEng.data : null;
-    const [rSites, rBils, rCad, rTenue, rChefs] = await Promise.all([
+      isVendeur() ? souple(supabase.rpc('bilat_engagements_ouverts', { p_id_user: viewer, p_exclure_bilaterale: null })) : Promise.resolve(null),
       supabase.rpc('get_perimetre_sites', { p_viewer_id_user: viewer }),
       supabase.rpc('get_bilaterales', { p_viewer_id_user: viewer, p_date_from: bilFrom, p_date_to: bilTo }),
-      supabase.rpc('get_cadence_bilaterales', { p_viewer_id_user: viewer, p_date_from: state.period.from, p_date_to: state.period.to }),
+      cadence(),
       supabase.rpc('get_bilaterale_tenue_vendeurs', { p_viewer_id_user: viewer }),
       dir ? supabase.rpc('get_chefs_bilaterales', { p_viewer_id_user: viewer, p_date_from: state.period.from, p_date_to: state.period.to })
           : Promise.resolve({ data: [], error: null })
     ]);
+    // Ancienne transfo (par date de mise à jour) : seulement si bilat_transfo manque.
+    const rVol = (rTx && !rTx.error) ? null
+      : await souple(supabase.rpc('bilat_transfo_volumes', { p_viewer_id_user: viewer, p_date_from: state.period.from, p_date_to: state.period.to }));
+    return { rTx, rVol, rDash, rDashPrec, rPerimH, rMesEng, rSites, rBils, rCad, rTenue, rChefs };
+}
+function appliquerDonnees(r, premier) {
+    const { rTx, rVol, rDash, rDashPrec, rPerimH, rMesEng, rSites, rBils, rCad, rTenue, rChefs } = r;
+    const dir = isDirection();
+    state.perimH = (rPerimH && !rPerimH.error && Array.isArray(rPerimH.data)) ? rPerimH.data : null;
+    state.mesEngagements = (rMesEng && !rMesEng.error && Array.isArray(rMesEng.data)) ? rMesEng.data : null;
     if (rSites.error) throw rSites.error;
     if (rBils.error)  throw rBils.error;
     // La file de priorité est "best effort" : son échec n'empêche pas la page.
@@ -399,13 +415,43 @@ async function loadData() {
     if (dir) state.chefs = construireChefs(state.chefs || []);
     // Auto-ciblage : si le périmètre est restreint, on déplie/cible directement
     // (un chef sur une seule affaire arrive sur cette affaire, pas sur la racine).
-    autoTargetPerimetre();
+    if (premier) autoTargetPerimetre();
+}
+function bilOverlayOuvert() {
+  try { const root = getRoot(); return !!(root && root.querySelector('.bil-ov, .pl-ov, .pb-ov')); } catch (e) { return false; }
+}
+async function loadData(opts) {
+  window.__bilLoadData = loadData;
+  opts = opts || {};
+  const viewer = getViewerId();
+  if (viewer == null) { state.error = 'Utilisateur non identifié'; render(); return; }
+  if (state.loading || state.refreshing) { state.reloadPending = true; return; }
+  const key = viewer + '|' + state.period.from + '|' + state.period.to;
+  const C = window.__bilCache;
+  const enCache = !!(C && C.key === key && Date.now() - C.t < BIL_CACHE_MS);
+  let affiche = false;
+  if (enCache) {
+    try { appliquerDonnees(C.r, state.sites === null || !state.cadence); state.error = null; affiche = true; } catch (e) {}
+  }
+  if (!affiche && opts.silencieux && state.sites && state.cadence) affiche = true;
+  if (affiche) { state.loading = false; render(); }
+  else { state.loading = true; state.error = null; render(); }
+  state.refreshing = true;
+  try {
+    const r = await chargerTout(viewer);
+    if (r.rSites.error) throw r.rSites.error;
+    if (r.rBils.error) throw r.rBils.error;
+    window.__bilCache = { key, t: Date.now(), r };
+    appliquerDonnees(r, !affiche);
   } catch (e) {
     console.error('[bilaterales] RPC', e);
-    state.error = (e && e.message) ? e.message : String(e);
-    state.sites = state.sites || []; state.bils = state.bils || [];
+    if (!affiche) {
+      state.error = (e && e.message) ? e.message : String(e);
+      state.sites = state.sites || []; state.bils = state.bils || [];
+    }
   } finally {
-    state.loading = false; render();
+    state.loading = false; state.refreshing = false;
+    if (!bilOverlayOuvert()) render();
     // Fiche ouverte depuis l'agenda avant la fin du chargement : on complète la
     // tuile Transformation sans reconstruire la fiche (la saisie en cours reste).
     try {
@@ -414,6 +460,7 @@ async function loadData() {
         const el = doc.getElementById('r-kpi-tx'); if (el) el.outerHTML = R_txTile();
       }
     } catch (e) {}
+    if (state.reloadPending) { state.reloadPending = false; setTimeout(() => loadData(), 0); }
   }
 }
 
@@ -1713,7 +1760,8 @@ function P_route(e) {
   return true;
 }
 function rechargerBil() {
-  if (window.__bilLoadData) { state.sites = null; state.bils = null; state.cadence = null; window.__bilLoadData(); }
+  window.__bilCache = null;
+  if (window.__bilLoadData) window.__bilLoadData({ silencieux: true });
 }
 
 // --- Délégation des clics (routeur réassignable, comme le dashboard) --------
