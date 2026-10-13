@@ -1,5 +1,6 @@
 // ============================================================================
-//  BILATÉRALES — v19 (14/10/2026, Team Colin) — v19 : vue direction (sites repliés, régularité depuis le démarrage, nœuds vides masqués)
+//  BILATÉRALES — v20 (14/10/2026, Team Colin) — v20 : Encadrement en cartes sur mobile
+//  v19 — v19 : vue direction (sites repliés, régularité depuis le démarrage, nœuds vides masqués)
 //  v18 — v18 : périmètre sans défilement sur mobile ;
 //     priorité : retard d'objectif rapporté à l'attendu à date
 //  v17
@@ -1336,10 +1337,10 @@ function chefRow(c){
   const dCol=c.delai_moyen==null?'#8b99b0':(c.delai_moyen<=BIL_CFG.cadenceJ?'#00997f':(c.delai_moyen<=BIL_CFG.retardJ?'#8a6d1f':'#c0524f'));
   return '<div class="crow" data-chef="'+c.id_manager+'">'+
     '<div class="cname">'+esc(c.nom_chef)+flag+'<span class="csite">'+esc(c.nom_site)+'</span></div>'+
-    '<div>'+chefRegStrip(c.regularite)+'</div>'+
-    '<div class="ccov" style="color:'+covCol+'">'+cov+'%<span class="cfrac">'+c.vus_periode+'/'+c.team_size+' reçus</span></div>'+
-    '<div class="cten" style="color:'+tCol+'">'+(tp==null?'—':tp+'%')+'</div>'+
-    '<div class="cdel" style="color:'+dCol+'">'+(c.delai_moyen==null?'—':c.delai_moyen+'<span class="u"> j</span>')+'</div>'+
+    '<div class="creg" data-l="Régularité · 6 mois">'+chefRegStrip(c.regularite)+'</div>'+
+    '<div class="ccov" data-l="Couverture" style="color:'+covCol+'">'+cov+'%<span class="cfrac">'+c.vus_periode+'/'+c.team_size+' reçus</span></div>'+
+    '<div class="cten" data-l="Tenue équipe" style="color:'+tCol+'">'+(tp==null?'—':tp+'%')+'</div>'+
+    '<div class="cdel" data-l="Délai moy." style="color:'+dCol+'">'+(c.delai_moyen==null?'—':c.delai_moyen+'<span class="u"> j</span>')+'</div>'+
     '<div class="cchev">›</div></div>';
 }
 function sortChefs(list){
@@ -2317,6 +2318,13 @@ const STYLE = '<style>' +
 '}' +
 '#bil-root.bil-narrow .suivi-search{flex:1 1 100%;max-width:none}' +
 '#bil-root.bil-narrow .bil-hscroll .vtbl{min-width:0}' +
+'#bil-root.bil-narrow .bil-hscroll .ctbl{min-width:0}' +
+'#bil-root.bil-narrow .crow.cthead{display:none}' +
+'#bil-root.bil-narrow .crow{grid-template-columns:repeat(3,minmax(0,1fr)) 20px;gap:10px 12px;padding:12px 14px}' +
+'#bil-root.bil-narrow .crow>.cname{grid-column:1/4;grid-row:1}' +
+'#bil-root.bil-narrow .crow>.cchev{grid-column:4;grid-row:1}' +
+'#bil-root.bil-narrow .crow>.creg{grid-column:1/5}' +
+'#bil-root.bil-narrow .crow>[data-l]::before{content:attr(data-l);display:block;font-size:10px;font-weight:800;color:#8b99b0;text-transform:uppercase;letter-spacing:.04em;margin-bottom:3px}' +
 '#bil-root.bil-narrow .vrow.vthead{display:none}' +
 '#bil-root.bil-narrow .vrow{grid-template-columns:minmax(0,1fr) auto;gap:8px 14px;padding:12px 14px}' +
 '#bil-root.bil-narrow .vrow>.vname{grid-column:1;grid-row:1}' +
