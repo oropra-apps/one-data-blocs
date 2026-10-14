@@ -1,4 +1,7 @@
 // ============================================================================
+//  v65 (14/10/2026) : passage en commande (caddie ou glisser), la simulation
+//  disparaissait sans que la commande n'apparaisse : rechargement unique trop
+//  tôt. Rechargements successifs jusqu'à voir la commande de l'affaire.
 //  v64 (13/10/2026) : historique du vehicule, la barre « Achat du VO » se
 //  placait sous le bandeau de l'annee de la facture suivante (achat 18/03/2026
 //  affiche sous « 2025 »). Elle se place a sa date, sous le bandeau de son
@@ -956,10 +959,33 @@ OD.define('kanban', {
     });
     if (r && r.ok) {
       try { const ov = doc.getElementById('vn-choose-overlay'); if (ov) ov.remove(); } catch (e) {}
-      await loadData();
+      await attendreCommande(id);
       return true;
     }
     return false;
+  }
+
+  // v65 : BACS crée la commande puis l'extension la remonte quelques secondes
+  // plus tard. Recharger une seule fois tout de suite montrait la simulation
+  // disparue (archivée « Convertie ») sans la commande. On recharge jusqu'à
+  // voir une commande sur la même affaire (0 s, 2 s, 4 s, 8 s, 15 s).
+  async function attendreCommande(idQuote) {
+    let aff = null;
+    try {
+      const r = await ctx.supabase.from('PROPALE_BDC').select('id_affaire_bacs')
+        .eq('id_propale_bdc', Number(idQuote)).maybeSingle();
+      aff = r && r.data ? r.data.id_affaire_bacs : null;
+    } catch (e) {}
+    const aCommande = () => (state.cards || []).some(c => c.id_affaire_bacs === aff
+      && (c.nature === 'commande' || /^801/.test(String(c.bacs_sf_id || ''))));
+    const delais = [0, 2000, 4000, 8000, 15000];
+    for (let i = 0; i < delais.length; i++) {
+      if (delais[i]) await new Promise(res => setTimeout(res, delais[i]));
+      await loadData();
+      if (!aff || aCommande()) return;
+      if (i === 0) toast('Commande créée dans BACS, elle arrive dans la colonne Commandes…');
+    }
+    toast('La commande est bien dans BACS ; elle apparaîtra ici à sa remontée.');
   }
 
 
