@@ -1078,14 +1078,21 @@ OD.define('admin', {
           body.innerHTML = '<div class="oda-loading"><span class="oda-spin"></span>Création du lien…</div>';
           var res = await createInvite(row.id_user, prov);
           if (res.error) {
+            // Le message d'erreur du serveur suffit : l'ancienne note suggérait
+            // une piste unique (« upsert ») pour TOUTES les pannes, ce qui a
+            // envoyé chercher au mauvais endroit (19/10/2026).
             body.innerHTML = '<div class="oda-error">' + esc(res.error) + '</div>'
-              + '<p class="oda-note" style="margin-top:10px">Réessayez, ou vérifiez que la fonction <b>email-invite-create</b> accepte un compte déjà existant (upsert) et non uniquement une première connexion.</p>'
               + providerButtons(prov);
             bindProviders(); return;
           }
           body.innerHTML = '<p class="oda-note">Lien de connexion généré. Transmettez-le à l\'utilisateur — il doit l\'ouvrir <b>connecté à la bonne adresse</b> :</p>'
             + '<div class="oda-secret"><code>' + esc(res.auth_url) + '</code><button class="oda-iconbtn" data-copy title="Copier">' + ICON.copy + '</button><button class="oda-iconbtn" data-open title="Ouvrir">' + ICON.open + '</button></div>'
-            + '<p class="oda-note" style="margin-top:12px">Si l\'écran Google ne redemande pas l\'autorisation, aucun nouveau jeton de rafraîchissement ne sera émis : faire d\'abord révoquer l\'accès « One Data » sur <b>myaccount.google.com/permissions</b>.</p>';
+            // La note qui occupait cette place parlait de Google quel que soit
+            // le fournisseur choisi, et décrivait un comportement révolu : les
+            // deux URL d'autorisation forcent `prompt=consent`, l'écran est donc
+            // toujours redemandé et un jeton de rafraîchissement toujours émis.
+            // On dit à la place ce qui est vrai et utile (19/10/2026).
+            + '<p class="oda-note" style="margin-top:12px">Ce lien est valable <b>7 jours</b> et ne vaut que pour cet utilisateur. Passé ce délai, régénérez-le depuis cet écran.</p>';
           body.querySelector('[data-copy]').onclick = function () { copyText(res.auth_url); };
           body.querySelector('[data-open]').onclick = function () { frontWin().open(res.auth_url, '_blank', 'noopener'); };
         };
