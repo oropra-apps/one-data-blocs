@@ -482,6 +482,14 @@ OD.define('contacts', {
   if (!window.__contactsWatch) window.__contactsWatch = setInterval(function () {
     var c = currentIdvu();
     if (c != null && c !== state.idvu) { state.rows = null; state.loading = true; state.err = null; state.idvu = c; render(); load().then(render); }
+    // REPRISE APRES INVALIDATION EXTERNE (20/10/2026). Un autre module —
+    // l'envoi d'un email, d'un SMS — met `rows` a null pour que la
+    // timeline se recharge. Sans ce second cas, le panneau restait vide
+    // jusqu'a un rafraichissement manuel : le guetteur ne reagissait qu'au
+    // changement de client, et le client ne change pas apres un envoi.
+    // Pas de render() avant le chargement : la liste precedente reste a
+    // l'ecran le temps de la relecture, sans clignotement.
+    else if (state.rows == null && !state.loading) { state.loading = true; state.err = null; load().then(render); }
   }, 500);
   if (!getRoot()) return;
   var _cur = currentIdvu();
