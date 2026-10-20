@@ -273,7 +273,10 @@ OD.define('email', {
       // succès
       state.sending = false; api.close();
       // rafraîchit Contacts (l'email va apparaître dans la timeline)
-      try { if (window.__contactsState) { window.__contactsState.rows = null; } const cdiv = doc.getElementById('oropra-contacts-root'); if (cdiv) cdiv.innerHTML = ''; } catch (e) { }
+      // Invalider le cache SUFFIT : contacts.js s'en apercoit et recharge.
+      // On ne vide plus le DOM ici — il restait blanc, personne ne le
+      // redessinant tant que le client ne changeait pas (20/10/2026).
+      try { if (window.__contactsState) { window.__contactsState.rows = null; } } catch (e) { }
     } catch (e) { console.error('[email] send', e); state.sending = false; state.error = e.message || String(e); render(); }
   }
 
