@@ -1,4 +1,11 @@
 // ============================================================================
+//  v22 (21/10/2026) : liste VO.
+//  * colonnes figees : la case a cocher et la colonne Infos (pictos + photo)
+//    restent visibles quand on fait defiler le tableau horizontalement.
+//  * chargement allege : plus de comptage exact (count: 'exact' faisait
+//    recalculer toute la vue v_liste_vo une fois de plus, rien que pour
+//    compter). Les deux premieres pages partent en parallele ; on continue
+//    tant qu'une page revient pleine.
 //  v21 (21/10/2026) : fiche VO — deux informations ajoutees.
 //  * N° de police DBS (colonne NUMERO_POLICE de v_liste_vo) : bloc Identite,
 //    et cherchable dans la recherche libre de la liste.
@@ -1922,18 +1929,31 @@ OD.define('vo-liste', {
     // v19 : tri sur le VIN (sans tri, les pages pouvaient se recouvrir ou omettre
     // des vehicules) ; 1re page avec le total, les suivantes en parallele.
     var cols = S.cols || COLS;
-    var first = await c.from('v_liste_vo').select(cols, { count: 'exact' }).order('VIN').range(0, size - 1);
+    // v22 : plus de count 'exact' (une evaluation complete de la vue en plus).
+    // Pages 1 et 2 en parallele, puis la suite tant qu'une page revient pleine.
+    var page = function (from) { return c.from('v_liste_vo').select(cols).order('VIN').range(from, from + size - 1); };
+    var duo = await Promise.all([page(0), page(size)]);
     // v21 : base sans NUMERO_POLICE (migration pas encore passee) -> on recharge sans.
-    if (first.error && cols !== COLS_BASE && /NUMERO_POLICE/i.test(first.error.message || '')) {
+    if (duo[0].error && cols !== COLS_BASE && /NUMERO_POLICE/i.test(duo[0].error.message || '')) {
       console.warn('[vo] NUMERO_POLICE absent de v_liste_vo, chargement sans');
       S.cols = cols = COLS_BASE;
-      first = await c.from('v_liste_vo').select(cols, { count: 'exact' }).order('VIN').range(0, size - 1);
+      duo = await Promise.all([page(0), page(size)]);
     }
-    if (first.error) { S.error = first.error.message || String(first.error); await histoP; return []; }
-    var all = first.data || [], total = first.count || all.length, reqs = [];
-    for (var from = size; from < total && from < 20000; from += size) reqs.push(c.from('v_liste_vo').select(cols).order('VIN').range(from, from + size - 1));
-    var rest = await Promise.all(reqs);
-    rest.forEach(function (res) { if (res.error) S.error = res.error.message || String(res.error); else all = all.concat(res.data || []); });
+    if (duo[0].error) { S.error = duo[0].error.message || String(duo[0].error); await histoP; return []; }
+    var all = duo[0].data || [];
+    if ((duo[0].data || []).length === size) {
+      if (duo[1].error) { S.error = duo[1].error.message || String(duo[1].error); }
+      else {
+        var lot = duo[1].data || [];
+        all = all.concat(lot);
+        for (var from = 2 * size; lot.length === size && from < 20000; from += size) {
+          var res = await page(from);
+          if (res.error) { S.error = res.error.message || String(res.error); break; }
+          lot = res.data || [];
+          all = all.concat(lot);
+        }
+      }
+    }
     await histoP;
     return all;
   }
@@ -2092,6 +2112,9 @@ OD.define('vo-liste', {
     + '.vo-table td{padding:9px 12px;border-bottom:1px solid #f1f5fb;white-space:nowrap;vertical-align:middle;background:#fff}'
     + '.vo-table tbody tr:last-child td{border-bottom:none}'
     + '.vo-table tbody tr:hover td{background:#fafcff}'
+    + '.vo-table td.vo-frz{position:sticky;z-index:1}'
+    + '.vo-table th.vo-frz{position:sticky;z-index:3}'
+    + '.vo-table .vo-frz-last{box-shadow:6px 0 8px -6px rgba(31,74,133,.18)}'
     + '.vo-infos{display:flex;align-items:center;gap:5px}'
     + '.vo-iact{display:inline-flex;align-items:center;justify-content:center;width:27px;height:27px;border-radius:8px;cursor:pointer;color:#7a98c5;transition:all .15s;flex:0 0 auto}'
     + '.vo-iact svg{width:15px;height:15px}'
@@ -2157,8 +2180,8 @@ OD.define('vo-liste', {
   // ─────────────────────────────────────────────────────────── colonnes tableau
   function columns() {
     var cols = [
-      { k: '__chk', t: '', w: 40, kind: 'chk' },
-      { k: '__infos', t: 'Infos', w: 222, kind: 'infos' },
+      { k: '__chk', t: '', w: 40, kind: 'chk', frz: 0 },
+      { k: '__infos', t: 'Infos', w: 222, kind: 'infos', frz: 64, frzLast: true },
       { k: 'NO_VO', t: 'VO', w: 112, sort: true },
       { k: 'NO_IMMAT', t: 'Immat', w: 100, sort: true },
       { k: 'VIN', t: 'VIN', w: 150, sort: true },
@@ -2175,7 +2198,14 @@ OD.define('vo-liste', {
     ]);
     return cols;
   }
-  function frzAttr(c) { return c.w ? ' style="min-width:' + c.w + 'px;width:' + c.w + 'px"' : ''; }
+  // v22 : colonnes figees. Le decalage gauche de la 2e colonne = largeur reelle
+  // de la 1re (40 px de contenu + 2 x 12 px de padding = 64 px).
+  function frzAttr(c) {
+    var st = c.w ? 'min-width:' + c.w + 'px;width:' + c.w + 'px;' : '';
+    if (c.frz != null) st += 'left:' + c.frz + 'px;';
+    var cl = c.frz != null ? ' class="vo-frz' + (c.frzLast ? ' vo-frz-last' : '') + '"' : '';
+    return cl + (st ? ' style="' + st + '"' : '');
+  }
 
   // ─────────────────────────────────────────────────────────── cellules
   // v16 : clé = historique véhicule (bleue, grise sans facture) ; planète orange =
@@ -3026,18 +3056,31 @@ OD.define('vo-liste', {
     // v19 : tri sur le VIN (sans tri, les pages pouvaient se recouvrir ou omettre
     // des vehicules) ; 1re page avec le total, les suivantes en parallele.
     var cols = S.cols || COLS;
-    var first = await c.from('v_liste_vo').select(cols, { count: 'exact' }).order('VIN').range(0, size - 1);
+    // v22 : plus de count 'exact' (une evaluation complete de la vue en plus).
+    // Pages 1 et 2 en parallele, puis la suite tant qu'une page revient pleine.
+    var page = function (from) { return c.from('v_liste_vo').select(cols).order('VIN').range(from, from + size - 1); };
+    var duo = await Promise.all([page(0), page(size)]);
     // v21 : base sans NUMERO_POLICE (migration pas encore passee) -> on recharge sans.
-    if (first.error && cols !== COLS_BASE && /NUMERO_POLICE/i.test(first.error.message || '')) {
+    if (duo[0].error && cols !== COLS_BASE && /NUMERO_POLICE/i.test(duo[0].error.message || '')) {
       console.warn('[vo] NUMERO_POLICE absent de v_liste_vo, chargement sans');
       S.cols = cols = COLS_BASE;
-      first = await c.from('v_liste_vo').select(cols, { count: 'exact' }).order('VIN').range(0, size - 1);
+      duo = await Promise.all([page(0), page(size)]);
     }
-    if (first.error) { S.error = first.error.message || String(first.error); await histoP; return []; }
-    var all = first.data || [], total = first.count || all.length, reqs = [];
-    for (var from = size; from < total && from < 20000; from += size) reqs.push(c.from('v_liste_vo').select(cols).order('VIN').range(from, from + size - 1));
-    var rest = await Promise.all(reqs);
-    rest.forEach(function (res) { if (res.error) S.error = res.error.message || String(res.error); else all = all.concat(res.data || []); });
+    if (duo[0].error) { S.error = duo[0].error.message || String(duo[0].error); await histoP; return []; }
+    var all = duo[0].data || [];
+    if ((duo[0].data || []).length === size) {
+      if (duo[1].error) { S.error = duo[1].error.message || String(duo[1].error); }
+      else {
+        var lot = duo[1].data || [];
+        all = all.concat(lot);
+        for (var from = 2 * size; lot.length === size && from < 20000; from += size) {
+          var res = await page(from);
+          if (res.error) { S.error = res.error.message || String(res.error); break; }
+          lot = res.data || [];
+          all = all.concat(lot);
+        }
+      }
+    }
     await histoP;
     return all;
   }
@@ -3196,6 +3239,9 @@ OD.define('vo-liste', {
     + '.vo-table td{padding:9px 12px;border-bottom:1px solid #f1f5fb;white-space:nowrap;vertical-align:middle;background:#fff}'
     + '.vo-table tbody tr:last-child td{border-bottom:none}'
     + '.vo-table tbody tr:hover td{background:#fafcff}'
+    + '.vo-table td.vo-frz{position:sticky;z-index:1}'
+    + '.vo-table th.vo-frz{position:sticky;z-index:3}'
+    + '.vo-table .vo-frz-last{box-shadow:6px 0 8px -6px rgba(31,74,133,.18)}'
     + '.vo-infos{display:flex;align-items:center;gap:5px}'
     + '.vo-iact{display:inline-flex;align-items:center;justify-content:center;width:27px;height:27px;border-radius:8px;cursor:pointer;color:#7a98c5;transition:all .15s;flex:0 0 auto}'
     + '.vo-iact svg{width:15px;height:15px}'
@@ -3261,8 +3307,8 @@ OD.define('vo-liste', {
   // ─────────────────────────────────────────────────────────── colonnes tableau
   function columns() {
     var cols = [
-      { k: '__chk', t: '', w: 40, kind: 'chk' },
-      { k: '__infos', t: 'Infos', w: 222, kind: 'infos' },
+      { k: '__chk', t: '', w: 40, kind: 'chk', frz: 0 },
+      { k: '__infos', t: 'Infos', w: 222, kind: 'infos', frz: 64, frzLast: true },
       { k: 'NO_VO', t: 'VO', w: 112, sort: true },
       { k: 'NO_IMMAT', t: 'Immat', w: 100, sort: true },
       { k: 'VIN', t: 'VIN', w: 150, sort: true },
@@ -3279,7 +3325,14 @@ OD.define('vo-liste', {
     ]);
     return cols;
   }
-  function frzAttr(c) { return c.w ? ' style="min-width:' + c.w + 'px;width:' + c.w + 'px"' : ''; }
+  // v22 : colonnes figees. Le decalage gauche de la 2e colonne = largeur reelle
+  // de la 1re (40 px de contenu + 2 x 12 px de padding = 64 px).
+  function frzAttr(c) {
+    var st = c.w ? 'min-width:' + c.w + 'px;width:' + c.w + 'px;' : '';
+    if (c.frz != null) st += 'left:' + c.frz + 'px;';
+    var cl = c.frz != null ? ' class="vo-frz' + (c.frzLast ? ' vo-frz-last' : '') + '"' : '';
+    return cl + (st ? ' style="' + st + '"' : '');
+  }
 
   // ─────────────────────────────────────────────────────────── cellules
   // v16 : clé = historique véhicule (bleue, grise sans facture) ; planète orange =
