@@ -1,4 +1,13 @@
 // ============================================================================
+//  v21 (21/10/2026) : fiche VO — deux informations ajoutees.
+//  * N° de police DBS (colonne NUMERO_POLICE de v_liste_vo) : bloc Identite,
+//    et cherchable dans la recherche libre de la liste.
+//  * Lieu de stockage NORMALISE (LIEU_STOCKAGE_Codifie, calcule en base par
+//    lieu_stockage_normalise) : bloc Stock · Achat, au-dessus du detail brut.
+//    Le filtre « Lieu de stockage » existant porte desormais sur ces valeurs
+//    propres (VSD, BARBEREY, LEXUS MEAUX…) et non plus sur la saisie libre.
+//  * Tenant dont la base n'a pas encore la colonne NUMERO_POLICE : la liste
+//    se recharge sans elle au lieu d'echouer (champ affiche « - »).
 //  v20 (13/10/2026) : vignette de la liste VO vide alors que le vehicule a des
 //  photos (filtre Photos = Oui). La 1re photo de l'annonce ne se chargeait pas
 //  (echec passager du CDN, ou lien mort : 11 VO sur 652). Nouvel essai, puis
@@ -138,6 +147,9 @@ OD.define('vo-liste', {
     'CARROSSERIE_EUROTAX', 'LABEL_Codifie', 'LIEU_STOCKAGE_Codifie', 'DETAIL_STOCKAGE_Codifie',
     'ORIGINEACHAT_Codifie', 'MIL', 'NATCODE_SELECTED', 'INFOMEDIAIRE_Codifie'
   ].join(',');
+  // v21 : colonne absente des bases non migrees -> repli sur COLS_BASE.
+  var COLS_BASE = COLS;
+  COLS = COLS_BASE + ',NUMERO_POLICE';
 
   // ─────────────────────────────────────────────────────────── bootstrap WeWeb
   // (garde 'wwLib pas prêt' retirée : le loader ne monte le module qu'une fois wwLib et le tenant résolus)
@@ -1458,6 +1470,7 @@ OD.define('vo-liste', {
     // 3 sections : Identité / Technique / Stock-Achat
     var sIdentite = vfSection('Identité',
       vfRow('N° VO', esc(row.NO_VO || '-')) +
+      vfRow('N° de police', esc(row.NUMERO_POLICE || '-')) +
       vfRow('VIN', esc(vin || '-')) +
       vfRow('Immatriculation', esc(row.NO_IMMAT || '-')) +
       vfRow('Label', esc(row.LABEL_Codifie || '-')) +
@@ -1475,6 +1488,7 @@ OD.define('vo-liste', {
     );
     var sStock = vfSection('Stock · Achat',
       vfRow('Nb jours de stock', nbj != null ? nbj + ' jrs' : '-') +
+      vfRow('Lieu de stockage', esc(row.LIEU_STOCKAGE_Codifie || '-')) +
       vfRow('Détail Stockage', esc(row.DETAIL_STOCKAGE_Codifie || '-')) +
       vfRow('Origine Achat', esc(row.ORIGINEACHAT_Codifie || '-')) +
       vfRow('Origine légale', esc(row.ORIGINEACHAT_Codifie ? row.ORIGINEACHAT_Codifie : (row.ORIGINE_LEGALE || row.ORIGINELEG_Codifie || '-'))) +
@@ -1907,10 +1921,17 @@ OD.define('vo-liste', {
     }).catch(function (e) { console.warn('[vo] vo_historique_nb', e); S.histo = null; });
     // v19 : tri sur le VIN (sans tri, les pages pouvaient se recouvrir ou omettre
     // des vehicules) ; 1re page avec le total, les suivantes en parallele.
-    var first = await c.from('v_liste_vo').select(COLS, { count: 'exact' }).order('VIN').range(0, size - 1);
+    var cols = S.cols || COLS;
+    var first = await c.from('v_liste_vo').select(cols, { count: 'exact' }).order('VIN').range(0, size - 1);
+    // v21 : base sans NUMERO_POLICE (migration pas encore passee) -> on recharge sans.
+    if (first.error && cols !== COLS_BASE && /NUMERO_POLICE/i.test(first.error.message || '')) {
+      console.warn('[vo] NUMERO_POLICE absent de v_liste_vo, chargement sans');
+      S.cols = cols = COLS_BASE;
+      first = await c.from('v_liste_vo').select(cols, { count: 'exact' }).order('VIN').range(0, size - 1);
+    }
     if (first.error) { S.error = first.error.message || String(first.error); await histoP; return []; }
     var all = first.data || [], total = first.count || all.length, reqs = [];
-    for (var from = size; from < total && from < 20000; from += size) reqs.push(c.from('v_liste_vo').select(COLS).order('VIN').range(from, from + size - 1));
+    for (var from = size; from < total && from < 20000; from += size) reqs.push(c.from('v_liste_vo').select(cols).order('VIN').range(from, from + size - 1));
     var rest = await Promise.all(reqs);
     rest.forEach(function (res) { if (res.error) S.error = res.error.message || String(res.error); else all = all.concat(res.data || []); });
     await histoP;
@@ -1962,7 +1983,7 @@ OD.define('vo-liste', {
     var co2 = num(r.TAUX_CO2); if (f.co2Min != null && (co2 == null || co2 < f.co2Min)) return false; if (f.co2Max != null && (co2 == null || co2 > f.co2Max)) return false;
     if (f.nbjMin != null || f.nbjMax != null) { var nb = nbjDays(r); if (f.nbjMin != null && (nb == null || nb < f.nbjMin)) return false; if (f.nbjMax != null && (nb == null || nb > f.nbjMax)) return false; }
 
-    if (notEmpty(S.search)) { var q = S.search.toLowerCase(); var hay = [r.NO_VO, r.VIN, designation(r), r.MARQUE_DMS, r.MODELE_DMS, r.DESIGNATION_DMS].join(' ').toLowerCase(); if (hay.indexOf(q) === -1) return false; }
+    if (notEmpty(S.search)) { var q = S.search.toLowerCase(); var hay = [r.NO_VO, r.NUMERO_POLICE, r.VIN, designation(r), r.MARQUE_DMS, r.MODELE_DMS, r.DESIGNATION_DMS].join(' ').toLowerCase(); if (hay.indexOf(q) === -1) return false; }
     if (notEmpty(S.immat)) { var qi = S.immat.toLowerCase().replace(/[\s-]/g, ''); var im = String(r.NO_IMMAT || '').toLowerCase().replace(/[\s-]/g, ''); if (im.indexOf(qi) === -1) return false; }
     return true;
   }
@@ -2742,6 +2763,7 @@ OD.define('vo-liste', {
     // 3 sections : Identité / Technique / Stock-Achat
     var sIdentite = vfSection('Identité',
       vfRow('N° VO', esc(row.NO_VO || '-')) +
+      vfRow('N° de police', esc(row.NUMERO_POLICE || '-')) +
       vfRow('VIN', esc(vin || '-')) +
       vfRow('Immatriculation', esc(row.NO_IMMAT || '-')) +
       vfRow('Label', esc(row.LABEL_Codifie || '-')) +
@@ -2759,6 +2781,7 @@ OD.define('vo-liste', {
     );
     var sStock = vfSection('Stock · Achat',
       vfRow('Nb jours de stock', nbj != null ? nbj + ' jrs' : '-') +
+      vfRow('Lieu de stockage', esc(row.LIEU_STOCKAGE_Codifie || '-')) +
       vfRow('Détail Stockage', esc(row.DETAIL_STOCKAGE_Codifie || '-')) +
       vfRow('Origine Achat', esc(row.ORIGINEACHAT_Codifie || '-')) +
       vfRow('Origine légale', esc(row.ORIGINEACHAT_Codifie ? row.ORIGINEACHAT_Codifie : (row.ORIGINE_LEGALE || row.ORIGINELEG_Codifie || '-'))) +
@@ -3002,10 +3025,17 @@ OD.define('vo-liste', {
     }).catch(function (e) { console.warn('[vo] vo_historique_nb', e); S.histo = null; });
     // v19 : tri sur le VIN (sans tri, les pages pouvaient se recouvrir ou omettre
     // des vehicules) ; 1re page avec le total, les suivantes en parallele.
-    var first = await c.from('v_liste_vo').select(COLS, { count: 'exact' }).order('VIN').range(0, size - 1);
+    var cols = S.cols || COLS;
+    var first = await c.from('v_liste_vo').select(cols, { count: 'exact' }).order('VIN').range(0, size - 1);
+    // v21 : base sans NUMERO_POLICE (migration pas encore passee) -> on recharge sans.
+    if (first.error && cols !== COLS_BASE && /NUMERO_POLICE/i.test(first.error.message || '')) {
+      console.warn('[vo] NUMERO_POLICE absent de v_liste_vo, chargement sans');
+      S.cols = cols = COLS_BASE;
+      first = await c.from('v_liste_vo').select(cols, { count: 'exact' }).order('VIN').range(0, size - 1);
+    }
     if (first.error) { S.error = first.error.message || String(first.error); await histoP; return []; }
     var all = first.data || [], total = first.count || all.length, reqs = [];
-    for (var from = size; from < total && from < 20000; from += size) reqs.push(c.from('v_liste_vo').select(COLS).order('VIN').range(from, from + size - 1));
+    for (var from = size; from < total && from < 20000; from += size) reqs.push(c.from('v_liste_vo').select(cols).order('VIN').range(from, from + size - 1));
     var rest = await Promise.all(reqs);
     rest.forEach(function (res) { if (res.error) S.error = res.error.message || String(res.error); else all = all.concat(res.data || []); });
     await histoP;
@@ -3057,7 +3087,7 @@ OD.define('vo-liste', {
     var co2 = num(r.TAUX_CO2); if (f.co2Min != null && (co2 == null || co2 < f.co2Min)) return false; if (f.co2Max != null && (co2 == null || co2 > f.co2Max)) return false;
     if (f.nbjMin != null || f.nbjMax != null) { var nb = nbjDays(r); if (f.nbjMin != null && (nb == null || nb < f.nbjMin)) return false; if (f.nbjMax != null && (nb == null || nb > f.nbjMax)) return false; }
 
-    if (notEmpty(S.search)) { var q = S.search.toLowerCase(); var hay = [r.NO_VO, r.VIN, designation(r), r.MARQUE_DMS, r.MODELE_DMS, r.DESIGNATION_DMS].join(' ').toLowerCase(); if (hay.indexOf(q) === -1) return false; }
+    if (notEmpty(S.search)) { var q = S.search.toLowerCase(); var hay = [r.NO_VO, r.NUMERO_POLICE, r.VIN, designation(r), r.MARQUE_DMS, r.MODELE_DMS, r.DESIGNATION_DMS].join(' ').toLowerCase(); if (hay.indexOf(q) === -1) return false; }
     if (notEmpty(S.immat)) { var qi = S.immat.toLowerCase().replace(/[\s-]/g, ''); var im = String(r.NO_IMMAT || '').toLowerCase().replace(/[\s-]/g, ''); if (im.indexOf(qi) === -1) return false; }
     return true;
   }
