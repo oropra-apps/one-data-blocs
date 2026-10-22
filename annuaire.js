@@ -1,5 +1,8 @@
 // ============================================================================
-//  ANNUAIRE DU GROUPE — module One Data (OD.define)  v1 (checklist)
+//  ANNUAIRE DU GROUPE — module One Data (OD.define)  v4
+//  v4 (22/10/2026) : appel réservé aux licences Connect et Full
+//  (OD.peut('appel'), socle v29) ; sinon le numéro reste affiché, sans bouton.
+//  v1 (checklist)
 //  Rendu direct dans __anchor (pas de getElementById), ctx.supabase,
 //  doc = __anchor.ownerDocument, self-boot supprimé (loader orchestre).
 //  VoIP Twilio (wwLib.getFrontWindow) conservé.
@@ -205,6 +208,7 @@ OD.define('annuaire', {
 
   // ---------------------------------------------------------------- actions
   function callUser(u) {
+    if (!peutAppeler()) return;
     const to = normPhone(u.N_de_telephone);
     if (!to) { toast('Aucun numéro pour ' + fullName(u)); return; }
     const w = (wwLib.getFrontWindow && wwLib.getFrontWindow()) || window;
@@ -403,10 +407,14 @@ OD.define('annuaire', {
   // non des liens tel:/mailto:, pour réutiliser callUser() — qui pilote le
   // softphone — et emailUser(), et parce qu'un href tel: reste piégé dans
   // l'iframe WeWeb.
+  // v4 : appel réservé aux licences Connect et Full (socle v29 : OD.peut).
+  function peutAppeler() { return (typeof OD === 'undefined' || typeof OD.peut !== 'function' || OD.peut('appel')); }
   function contactLines(u) {
     const tel = normPhone(u.N_de_telephone), aff = prettyPhone(u.N_de_telephone);
     const mail = (u.email || '').trim();
-    const lTel = tel
+    const lTel = (tel && !peutAppeler())
+      ? '<span class="an-ct">' + I.phone + '<span>' + esc(aff) + '</span></span>'
+      : tel
       ? '<button class="an-ct" data-act="call" data-id="' + u.ID_User + '" title="Appeler ' + esc(aff) + '">' + I.phone + '<span>' + esc(aff) + '</span></button>'
       : '<span class="an-ct na">' + I.phone + '<span>Pas de téléphone</span></span>';
     const lMail = mail
@@ -417,7 +425,7 @@ OD.define('annuaire', {
   function actBtns(u) {
     const tel = normPhone(u.N_de_telephone);
     return '<div class="an-actions">' +
-      '<button class="an-act call' + (tel ? '' : ' dis') + '" data-act="call" data-id="' + u.ID_User + '">' + I.phone + 'Appeler</button>' +
+      (peutAppeler() ? '<button class="an-act call' + (tel ? '' : ' dis') + '" data-act="call" data-id="' + u.ID_User + '">' + I.phone + 'Appeler</button>' : '') +
       '<button class="an-act' + (u.email ? '' : ' dis') + '" data-act="email" data-id="' + u.ID_User + '">' + I.mail + 'Email</button>' +
       '<button class="an-act" data-act="copy" data-id="' + u.ID_User + '" title="Copier le contact">' + I.copy + '</button>' +
       '</div>';
@@ -425,7 +433,7 @@ OD.define('annuaire', {
   function iconBtns(u) {
     const tel = normPhone(u.N_de_telephone);
     return '<div class="an-row-acts">' +
-      '<button class="an-ico call' + (tel ? '' : ' dis') + '" data-act="call" data-id="' + u.ID_User + '" title="Appeler">' + I.phone + '</button>' +
+      (peutAppeler() ? '<button class="an-ico call' + (tel ? '' : ' dis') + '" data-act="call" data-id="' + u.ID_User + '" title="Appeler">' + I.phone + '</button>' : '') +
       '<button class="an-ico' + (u.email ? '' : ' dis') + '" data-act="email" data-id="' + u.ID_User + '" title="Email">' + I.mail + '</button>' +
       '<button class="an-ico" data-act="copy" data-id="' + u.ID_User + '" title="Copier">' + I.copy + '</button>' +
       '</div>';
