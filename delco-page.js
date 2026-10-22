@@ -1,5 +1,7 @@
 // ============================================================================
 //  DELCO — PAGE (brief + radar) — module One Data (OD.define)  v7 — rôles exclus par réglage du tenant (delco_roles_exclus)
+//  v8 (22/10/2026) : accès selon la licence (Intelligence, Full) — OD.peut('delco'),
+//  socle v29. Repli sur delco_roles_exclus si le socle est plus ancien.
 //  v7 (13/10/2026) : radar sans chiffre dans les bulles ; infobulle en
 //    clair sur trois lignes (le sujet · qui est concerné · « le plus ancien
 //    attend depuis 19 jours » ou « prochain dans 2 h »), sans majuscules ;
@@ -85,10 +87,10 @@ await (async function () {
       const __s = await ctx.supabase.from('app_settings').select('value').eq('key', 'delco_roles_exclus').maybeSingle();
       if (__s && __s.data && Array.isArray(__s.data.value)) __exclus = __s.data.value.map(Number);
     } catch (_) { __exclus = []; }
-    if (__exclus.includes(__r)) {
+    if ((typeof OD !== 'undefined' && typeof OD.peut === 'function') ? !OD.peut('delco') : __exclus.includes(__r)) {
       __anchor.innerHTML = '<div style="font-family:Nunito Sans,-apple-system,sans-serif;color:#1c2b45;background:#f5f7fb;padding:48px 24px;text-align:center;border-radius:12px">'
-        + '<div style="font-size:18px;font-weight:800;color:#2a5ea9;margin-bottom:8px">Delco n\u2019est pas disponible pour votre profil</div>'
-        + '<div style="font-size:14px;color:#7a8aa3">Rapprochez-vous de votre responsable pour toute question.</div></div>';
+        + '<div style="font-size:18px;font-weight:800;color:#2a5ea9;margin-bottom:8px">Delco n\u2019est pas inclus dans votre licence One Data</div>'
+        + '<div style="font-size:14px;color:#7a8aa3">Delco est compris dans les licences Intelligence et Full. Rapprochez-vous de votre responsable.</div></div>';
       return;
     }
   }
