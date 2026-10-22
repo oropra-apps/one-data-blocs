@@ -1,4 +1,15 @@
 // ============================================================================
+//  v25 (23/10/2026) : liste VO, reprise sur la v24 (BACS) des deux corrections
+//    preparees le 21/10 sur la v22 :
+//  * colonnes figees recalees. La v22 placait la colonne Infos a 64 px,
+//    largeur supposee de la case a cocher : la largeur reelle differe, d'ou un
+//    chevauchement au depart (colonne VO masquee) et un interstice en defilant
+//    (le contenu apparaissait entre les deux colonnes). Les decalages sont
+//    desormais MESURES sur l'en-tete apres chaque affichage (figerColonnes).
+//  * la liste n'attend plus l'historique vehicule. vo_historique_nb (picto
+//    cle) prenait jusqu'a 3,7 s a froid et bloquait l'affichage de toute la
+//    liste. Elle s'affiche des que le stock est charge ; les pictos cle se
+//    mettent a jour sur place a l'arrivee de l'historique (majPictosHisto).
 //  v24 (22/10/2026) : bouton « Enregistrer » verrouillé en rouge (« Bacs doit être
 //  ouvert pour pouvoir valider ») tant que BACS n'est pas ouvert ; il redevient
 //  normal dès que BACS répond (module partagé oropra-bacs-client v2).
@@ -1962,6 +1973,7 @@ OD.define('vo-liste', {
     var histoP = c.rpc('vo_historique_nb').then(function (hq) {
       if (hq.error) throw hq.error;
       S.histo = {}; (hq.data || []).forEach(function (x) { S.histo[x.vin] = x.nb; });
+      majPictosHisto();
     }).catch(function (e) { console.warn('[vo] vo_historique_nb', e); S.histo = null; });
     // v19 : tri sur le VIN (sans tri, les pages pouvaient se recouvrir ou omettre
     // des vehicules) ; 1re page avec le total, les suivantes en parallele.
@@ -1976,7 +1988,7 @@ OD.define('vo-liste', {
       S.cols = cols = COLS_BASE;
       duo = await Promise.all([page(0), page(size)]);
     }
-    if (duo[0].error) { S.error = duo[0].error.message || String(duo[0].error); await histoP; return []; }
+    if (duo[0].error) { S.error = duo[0].error.message || String(duo[0].error); return []; }
     var all = duo[0].data || [];
     if ((duo[0].data || []).length === size) {
       if (duo[1].error) { S.error = duo[1].error.message || String(duo[1].error); }
@@ -1991,7 +2003,7 @@ OD.define('vo-liste', {
         }
       }
     }
-    await histoP;
+    // v25 : on n'attend plus histoP (cf. majPictosHisto).
     return all;
   }
   // RESEAU / AFFAIRE / SITE du site sélectionné via la table SITE (référentiel).
@@ -2218,7 +2230,7 @@ OD.define('vo-liste', {
   function columns() {
     var cols = [
       { k: '__chk', t: '', w: 40, kind: 'chk', frz: 0 },
-      { k: '__infos', t: 'Infos', w: 222, kind: 'infos', frz: 64, frzLast: true },
+      { k: '__infos', t: 'Infos', w: 222, kind: 'infos', frz: 1, frzLast: true },
       { k: 'NO_VO', t: 'VO', w: 112, sort: true },
       { k: 'NO_IMMAT', t: 'Immat', w: 100, sort: true },
       { k: 'VIN', t: 'VIN', w: 150, sort: true },
@@ -2235,18 +2247,46 @@ OD.define('vo-liste', {
     ]);
     return cols;
   }
-  // v22 : colonnes figees. Le decalage gauche de la 2e colonne = largeur reelle
-  // de la 1re (40 px de contenu + 2 x 12 px de padding = 64 px).
+  // v22-v25 : colonnes figees. c.frz = rang de la colonne figee (0, 1…) ; le
+  // decalage gauche de chacune est mesure apres affichage (figerColonnes).
   function frzAttr(c) {
     var st = c.w ? 'min-width:' + c.w + 'px;width:' + c.w + 'px;' : '';
-    if (c.frz != null) st += 'left:' + c.frz + 'px;';
-    var cl = c.frz != null ? ' class="vo-frz' + (c.frzLast ? ' vo-frz-last' : '') + '"' : '';
-    return cl + (st ? ' style="' + st + '"' : '');
+    if (c.frz != null) st += 'left:0px;';
+    var at = c.frz != null ? ' class="vo-frz' + (c.frzLast ? ' vo-frz-last' : '') + '" data-frz="' + c.frz + '"' : '';
+    return at + (st ? ' style="' + st + '"' : '');
+  }
+  // Decalage de chaque colonne figee = somme des largeurs REELLES des colonnes
+  // figees qui la precedent, lues sur l'en-tete.
+  function figerColonnes(host) {
+    var ths = host.querySelectorAll('.vo-table thead th.vo-frz');
+    var left = 0;
+    for (var i = 0; i < ths.length; i++) {
+      var rang = ths[i].getAttribute('data-frz');
+      var cells = host.querySelectorAll('.vo-table [data-frz="' + rang + '"]');
+      for (var j = 0; j < cells.length; j++) cells[j].style.left = left + 'px';
+      left += ths[i].getBoundingClientRect().width;
+    }
   }
 
   // ─────────────────────────────────────────────────────────── cellules
   // v16 : clé = historique véhicule (bleue, grise sans facture) ; planète orange =
   // annonce sur teamcolin.fr (grise si non publiée) ; appareil photo = diaporama.
+  // v25 : met a jour les pictos cle deja affiches, sans re-rendre la liste.
+  function majPictosHisto() {
+    var r0 = root(); if (!r0 || !S.histo) return;
+    r0.querySelectorAll('.vo-iact.histo[data-vin]').forEach(function (el) {
+      var vin = el.getAttribute('data-vin'), nb = S.histo[vin] || 0;
+      if (nb === 0) {
+        // clone = meme picto sans l'ecouteur de clic pose au rendu
+        var mort = el.cloneNode(true);
+        mort.classList.add('disabled'); mort.removeAttribute('data-act');
+        mort.setAttribute('title', 'Aucun historique pour ce véhicule');
+        el.replaceWith(mort);
+      } else {
+        el.setAttribute('title', 'Historique véhicule · ' + nb + ' facture' + (nb > 1 ? 's' : ''));
+      }
+    });
+  }
   function pictoHisto(r) {
     var nb = S.histo ? (S.histo[r.VIN] || 0) : null;
     if (nb === 0) return '<span class="vo-iact histo disabled" title="Aucun historique pour ce véhicule">' + IC.wrench + '</span>';
@@ -2401,6 +2441,7 @@ OD.define('vo-liste', {
       var cols = columns();
       host.innerHTML = top + '<div class="vo-tablewrap"><table class="vo-table"><thead><tr>' + thHtml(cols) + '</tr></thead><tbody>'
         + slice.map(function (r) { return rowHtml(r, cols); }).join('') + '</tbody></table></div>';
+      figerColonnes(host);
     }
     bindContent(host);
   }
@@ -3089,6 +3130,7 @@ OD.define('vo-liste', {
     var histoP = c.rpc('vo_historique_nb').then(function (hq) {
       if (hq.error) throw hq.error;
       S.histo = {}; (hq.data || []).forEach(function (x) { S.histo[x.vin] = x.nb; });
+      majPictosHisto();
     }).catch(function (e) { console.warn('[vo] vo_historique_nb', e); S.histo = null; });
     // v19 : tri sur le VIN (sans tri, les pages pouvaient se recouvrir ou omettre
     // des vehicules) ; 1re page avec le total, les suivantes en parallele.
@@ -3103,7 +3145,7 @@ OD.define('vo-liste', {
       S.cols = cols = COLS_BASE;
       duo = await Promise.all([page(0), page(size)]);
     }
-    if (duo[0].error) { S.error = duo[0].error.message || String(duo[0].error); await histoP; return []; }
+    if (duo[0].error) { S.error = duo[0].error.message || String(duo[0].error); return []; }
     var all = duo[0].data || [];
     if ((duo[0].data || []).length === size) {
       if (duo[1].error) { S.error = duo[1].error.message || String(duo[1].error); }
@@ -3118,7 +3160,7 @@ OD.define('vo-liste', {
         }
       }
     }
-    await histoP;
+    // v25 : on n'attend plus histoP (cf. majPictosHisto).
     return all;
   }
   // RESEAU / AFFAIRE / SITE du site sélectionné via la table SITE (référentiel).
@@ -3345,7 +3387,7 @@ OD.define('vo-liste', {
   function columns() {
     var cols = [
       { k: '__chk', t: '', w: 40, kind: 'chk', frz: 0 },
-      { k: '__infos', t: 'Infos', w: 222, kind: 'infos', frz: 64, frzLast: true },
+      { k: '__infos', t: 'Infos', w: 222, kind: 'infos', frz: 1, frzLast: true },
       { k: 'NO_VO', t: 'VO', w: 112, sort: true },
       { k: 'NO_IMMAT', t: 'Immat', w: 100, sort: true },
       { k: 'VIN', t: 'VIN', w: 150, sort: true },
@@ -3362,18 +3404,46 @@ OD.define('vo-liste', {
     ]);
     return cols;
   }
-  // v22 : colonnes figees. Le decalage gauche de la 2e colonne = largeur reelle
-  // de la 1re (40 px de contenu + 2 x 12 px de padding = 64 px).
+  // v22-v25 : colonnes figees. c.frz = rang de la colonne figee (0, 1…) ; le
+  // decalage gauche de chacune est mesure apres affichage (figerColonnes).
   function frzAttr(c) {
     var st = c.w ? 'min-width:' + c.w + 'px;width:' + c.w + 'px;' : '';
-    if (c.frz != null) st += 'left:' + c.frz + 'px;';
-    var cl = c.frz != null ? ' class="vo-frz' + (c.frzLast ? ' vo-frz-last' : '') + '"' : '';
-    return cl + (st ? ' style="' + st + '"' : '');
+    if (c.frz != null) st += 'left:0px;';
+    var at = c.frz != null ? ' class="vo-frz' + (c.frzLast ? ' vo-frz-last' : '') + '" data-frz="' + c.frz + '"' : '';
+    return at + (st ? ' style="' + st + '"' : '');
+  }
+  // Decalage de chaque colonne figee = somme des largeurs REELLES des colonnes
+  // figees qui la precedent, lues sur l'en-tete.
+  function figerColonnes(host) {
+    var ths = host.querySelectorAll('.vo-table thead th.vo-frz');
+    var left = 0;
+    for (var i = 0; i < ths.length; i++) {
+      var rang = ths[i].getAttribute('data-frz');
+      var cells = host.querySelectorAll('.vo-table [data-frz="' + rang + '"]');
+      for (var j = 0; j < cells.length; j++) cells[j].style.left = left + 'px';
+      left += ths[i].getBoundingClientRect().width;
+    }
   }
 
   // ─────────────────────────────────────────────────────────── cellules
   // v16 : clé = historique véhicule (bleue, grise sans facture) ; planète orange =
   // annonce sur teamcolin.fr (grise si non publiée) ; appareil photo = diaporama.
+  // v25 : met a jour les pictos cle deja affiches, sans re-rendre la liste.
+  function majPictosHisto() {
+    var r0 = root(); if (!r0 || !S.histo) return;
+    r0.querySelectorAll('.vo-iact.histo[data-vin]').forEach(function (el) {
+      var vin = el.getAttribute('data-vin'), nb = S.histo[vin] || 0;
+      if (nb === 0) {
+        // clone = meme picto sans l'ecouteur de clic pose au rendu
+        var mort = el.cloneNode(true);
+        mort.classList.add('disabled'); mort.removeAttribute('data-act');
+        mort.setAttribute('title', 'Aucun historique pour ce véhicule');
+        el.replaceWith(mort);
+      } else {
+        el.setAttribute('title', 'Historique véhicule · ' + nb + ' facture' + (nb > 1 ? 's' : ''));
+      }
+    });
+  }
   function pictoHisto(r) {
     var nb = S.histo ? (S.histo[r.VIN] || 0) : null;
     if (nb === 0) return '<span class="vo-iact histo disabled" title="Aucun historique pour ce véhicule">' + IC.wrench + '</span>';
@@ -3528,6 +3598,7 @@ OD.define('vo-liste', {
       var cols = columns();
       host.innerHTML = top + '<div class="vo-tablewrap"><table class="vo-table"><thead><tr>' + thHtml(cols) + '</tr></thead><tbody>'
         + slice.map(function (r) { return rowHtml(r, cols); }).join('') + '</tbody></table></div>';
+      figerColonnes(host);
     }
     bindContent(host);
   }
