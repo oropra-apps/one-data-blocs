@@ -1,5 +1,7 @@
 // ============================================================================
-//  TOP NAV — module One Data (OD.define)  v30 — SÉLECTEUR DE PÉRIMÈTRE
+//  TOP NAV — module One Data (OD.define)  v32 — SÉLECTEUR DE PÉRIMÈTRE
+//  v32 (22/10/2026) : le lien Delco n'apparait qu'aux licences Intelligence et
+//  Full (OD.peut('delco'), socle v29).
 //  v30 (07/10/2026) : l'arbitrage des doublons n'apparait qu'aux roles qui
 //  le tranchent — administrateur (1), vendeur (4), secretaire (9) —, comme
 //  la base le fait depuis 20261007430000. Corrige aussi un defaut d'affichage
@@ -532,7 +534,8 @@ OD.define('topnav', {
 
     var __u = user();
     var __role = Number(__u.ID_Role != null ? __u.ID_Role : __u.id_role);
-    var __delcoOk = (__role !== 4 && __role !== 9);
+    // v32 : Delco suit la licence (Intelligence, Full) ; repli : ancienne règle par rôle.
+    var __delcoOk = (typeof OD !== 'undefined' && typeof OD.peut === 'function') ? OD.peut('delco') : (__role !== 4 && __role !== 9);
     // Arbitrage des doublons : administrateur, vendeur, secretaire (07/10/2026).
     var __arbOk = (__role === 1 || __role === 4 || __role === 9);
     var __userMenu = USER_MENU.filter(function (it) { return __arbOk || it.act !== 'doublons'; });
