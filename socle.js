@@ -8,6 +8,8 @@
 //  Si pas de session : on monte quand même (la page login s'affiche).
 //  Rapatrie la résolution utilisateur (ex-bloc « User connecté », supprimé).
 //  Expose window.oropraLoadUser (rappelé par auth.js après login).
+//  v29 (22/10/2026) : licences — OD.licence() et OD.peut('appel' | 'delco')
+//  d'après USER.licence (repli : gamme par défaut du rôle).
 //  v26 : le client Supabase délègue ses requêtes à window.fetch AU MOMENT de
 //  l'appel (et non au fetch capturé à sa création) : pulse peut ainsi observer
 //  les écritures réussies et en déduire les actions métier, sans toucher aux modules.
@@ -352,6 +354,24 @@ const HOST_MAP = {
 
     // ===================== 4 — Loader de modules (setup, sans monter) ========
     const OD = window.OD = window.OD || {};
+
+    // ===================== Licences (v29, 22/10/2026) =====================
+    // Gamme One Data de l'utilisateur connecté (USER.licence) et droits qu'elle
+    // ouvre. Les modules demandent OD.peut('appel') ou OD.peut('delco').
+    //   performance : le socle            intelligence : + Delco
+    //   connect     : + téléphonie         full         : tout
+    // Colonne vide ou absente : gamme par défaut du rôle, comme en base
+    // (licence_par_role). La base applique la même règle (delco_autorise,
+    // threecx-action) : masquer à l'écran est un confort, pas la sécurité.
+    OD.LICENCES = { performance: [], intelligence: ['delco'], connect: ['appel'], full: ['appel', 'delco'] };
+    OD.licenceParRole = r => ({ 1: 'performance', 9: 'performance', 4: 'connect', 10: 'connect', 3: 'full' })[Number(r)] || 'intelligence';
+    OD.licence = () => {
+        const u = FW.oropraUser || window.oropraUser;
+        if (!u) return null;
+        const l = String(u.licence || '').toLowerCase();
+        return OD.LICENCES[l] ? l : OD.licenceParRole(u.ID_Role != null ? u.ID_Role : u.id_role);
+    };
+    OD.peut = droit => { const l = OD.licence(); return !!l && OD.LICENCES[l].indexOf(droit) !== -1; };
     OD.tenant   = tenant;
     OD.supabase = sb;
     OD.cg       = OD_CG;   // barème carte grise (national)
