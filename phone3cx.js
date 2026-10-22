@@ -1,5 +1,7 @@
 // ============================================================================
-//  One Data — TELEPHONIE 3CX cote vendeur (module ambiant, sans ancre WeWeb)  v6
+//  One Data — TELEPHONIE 3CX cote vendeur (module ambiant, sans ancre WeWeb)  v7
+//  v7 (22/10/2026) : ne se monte que pour les licences Connect et Full
+//  (OD.peut('appel'), socle v29) ; threecx-action refuse aussi les autres.
 //  v6 (08/10/2026) : si la commande d'appel est refusee (pas de poste, pont
 //  injoignable, session invalide), le bandeau le dit au lieu de rester sur
 //  « Votre poste sonne » ; il se referme seul apres 8 s.
@@ -17,6 +19,8 @@
 OD.define('phone3cx', {
   mount(__anchor, ctx) {
     if (!window.wwLib) return;
+    // v7 : panneau et click-to-call réservés aux licences Connect et Full.
+    if (typeof OD !== 'undefined' && typeof OD.peut === 'function' && !OD.peut('appel')) return;
 
     const SELECTED_CLIENT_VAR = '55490583-c88b-4748-916e-4d203db07742';
     const PAGE_FICHE = '/fiche-client';
