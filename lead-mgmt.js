@@ -1,6 +1,9 @@
 // ============================================================================
 //  LEAD MANAGEMENT — module One Data (OD.define 'lead-mgmt')
-//  VERSION TEAM COLIN (v58) — déploiement CIBLÉ (publish-targets :
+//  VERSION TEAM COLIN (v59) — déploiement CIBLÉ (publish-targets :
+//  v59 (22/10/2026) : le canal « Appeler » n'apparait qu'aux licences Connect
+//  et Full (OD.peut('appel'), socle v29) ; ailleurs, les verbes de la file
+//  deviennent Prendre, Traiter, Relancer, Ouvrir.
 //  v58 (07/10/2026) : le délai de premier contact par site est une MÉDIANE
 //  (poste_site_stats, migration 20261007440000). La moyenne affichait
 //  « 5 j à Arcueil » pour une médiane de 13 min : un seul lead rappelé au
@@ -165,6 +168,9 @@
     fiche: '<rect x="4" y="3" width="16" height="18" rx="2"/><circle cx="12" cy="10" r="3"/><path d="M8 17c.8-1.8 2.2-2.6 4-2.6s3.2.8 4 2.6"/>'
   };
   function svgIc(p) { return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' + p + '</svg>'; }
+
+  // v59 : téléphonie incluse dans les licences Connect et Full (socle v29).
+  function __lmPeutAppeler() { return (typeof OD === 'undefined' || typeof OD.peut !== 'function' || OD.peut('appel')); }
 
   OD.define('lead-mgmt', {
     async mount(el, ctx) {
@@ -354,7 +360,7 @@
       var dus = S.rappels.filter(function (l) { return l.rappel_le && ts(l.rappel_le) <= Date.now() + 10 * 60000; });
       dus.filter(function (l) { return Math.abs(ts(l.rappel_le) - Date.now()) < 30 * 60000 && verrouLibre(l); }).slice(0, 4).forEach(function (l) {
         out.push({ id: 'rap-' + l.sf_lead_id + '-' + l.rappel_le, niv: 'warn', k: 'Rappel', t: l.rappel_le, titre: 'Rappeler ' + nomLead(l),
-          d: libStatut(l.statut_eff) + (l.tentatives ? ' · ' + plural(l.tentatives, 'tentative') : '') + ' · ' + demande(l), a: [['Appeler', 'prendre', l.sf_lead_id]] });
+          d: libStatut(l.statut_eff) + (l.tentatives ? ' · ' + plural(l.tentatives, 'tentative') : '') + ' · ' + demande(l), a: [[__lmPeutAppeler() ? 'Appeler' : 'Prendre', 'prendre', l.sf_lead_id]] });
       });
       var retard = dus.filter(function (l) { return ts(l.rappel_le) < Date.now() - 30 * 60000; });
       if (retard.length) {
@@ -518,7 +524,7 @@
         var cls = due <= 0 ? 'crit' : (due < 15 * 60000 ? 'warn' : 'ok');
         var b = due <= 0 ? (due > -15 * 60000 ? 'Maintenant' : 'retard ' + duree(-due / 60000)) : 'dans ' + duree(due / 60000);
         var gauche = '<span class="tm ' + cls + '"><b>' + b + '</b><small>prévu ' + (quand(l.rappel_le).length > 5 ? 'le ' : 'à ') + esc(quand(l.rappel_le)) + '</small></span>';
-        h += ligneLead(l, gauche, 'Appeler').replace('<div class="tags">', '<div class="tags"><span class="tag ' + (l.statut_eff === 'Projet Long Terme' ? 'vr' : 'warn') + '">' + esc(libStatut(l.statut_eff)) + '</span>');
+        h += ligneLead(l, gauche, __lmPeutAppeler() ? 'Appeler' : 'Traiter').replace('<div class="tags">', '<div class="tags"><span class="tag ' + (l.statut_eff === 'Projet Long Terme' ? 'vr' : 'warn') + '">' + esc(libStatut(l.statut_eff)) + '</span>');
       });
       return h + '</div>';
     }
@@ -653,7 +659,7 @@
       // Contact
       h += '<section><h3>Contact</h3>' + (l.telephone ? '<div class="tel"><b>' + esc(telAff(l.telephone)) + '</b><button type="button" class="btn sm" data-a="copier" data-id="' + esc(telAff(l.telephone)) + '">Copier</button></div>' : '<p class="hint">Aucun numéro dans BACS.</p>')
         + (l.email ? '<p class="mail">' + esc(l.email) + '</p>' : '')
-        + '<div class="canaux">' + [['Appeler', 'appel', 'call', IC.phone], ['WhatsApp', 'wa', 'wa', IC.wa], ['Email', 'mail', 'mail', IC.mail], ['SMS', 'sms', 'sms', IC.sms]].map(function (c) {
+        + '<div class="canaux">' + [['Appeler', 'appel', 'call', IC.phone], ['WhatsApp', 'wa', 'wa', IC.wa], ['Email', 'mail', 'mail', IC.mail], ['SMS', 'sms', 'sms', IC.sms]].filter(function (c) { return c[1] !== 'appel' || __lmPeutAppeler(); }).map(function (c) {
             return '<button type="button" class="fs-btn ' + c[2] + '" data-a="canal" data-id="' + c[1] + '"' + ((c[1] === 'mail' ? !l.email : !l.telephone) ? ' disabled' : '') + '>' + svgIc(c[3]) + c[0] + '</button>'; }).join('') + '</div></section>';
       // Demande
       var oui = function (v) { return v === 'true' || v === true ? 'Oui' : v === 'false' || v === false ? 'Non' : v; };
@@ -937,6 +943,7 @@
       var client = { IDVu: f.id_client, TEl_MOB: f.telephone, EMAIL: f.email, nom: nom, prenom: '' };
       try {
         if (act === 'appel') {
+          if (!__lmPeutAppeler()) return;
           var cx = pick3cx(), num = normTel(f.telephone);
           if (cx && num) { cx.appeler(num, { nom: nom, idvu: f.id_client }); return; }
           var w = (window.parent && window.parent.__VOIP_UI__) || window.__VOIP_UI__ || FW.__VOIP_UI__;
@@ -1249,7 +1256,7 @@
           d: 'Le plus pressé : ' + nomLead(hd[0]) + ', arrivé il y a ' + duree(mins(hd[0].arrive_le)) + ' (délai ' + slaTxt(slaDe(hd[0])) + ').', a: [['Ouvrir', 'open', hd[0].id_lead]] });
         mesLeads().filter(function (l) { return l.tentatives > 0 && l.tentatives < 3 && l.dernier_essai && mins(l.dernier_essai) >= 120; }).slice(0, 3).forEach(function (l) {
           out.push({ id: 'rap-' + l.id_lead + '-' + l.tentatives, niv: 'warn', k: 'Rappel', t: l.dernier_essai, titre: 'Rappeler ' + nomLead(l),
-            d: 'Tentative ' + (l.tentatives + 1) + ' sur 3 · dernier essai ' + quand(l.dernier_essai) + '.', a: [['Appeler', 'open', l.id_lead]] });
+            d: 'Tentative ' + (l.tentatives + 1) + ' sur 3 · dernier essai ' + quand(l.dernier_essai) + '.', a: [[__lmPeutAppeler() ? 'Appeler' : 'Ouvrir', 'open', l.id_lead]] });
         });
         var sol = (S.mesSollis || []).length;
         if (sol) out.push({ id: 'camp-' + sol, niv: 'info', k: 'Campagne', titre: plural(sol, 'relance de campagne', 'relances de campagne') + ' pour vous', d: 'Des clients que votre chef vous a confiés. Ils comptent dans votre travail, pas dans vos leads entrants.', a: [['Voir', 'tab', 'campagnes']] });
@@ -1423,7 +1430,7 @@
       var h = '<div class="ph"><div><h2>À faire maintenant</h2><p>Dans l\'ordre où il faut le faire : vos leads d\'abord, le plus pressé en tête, puis les relances de campagne.</p></div></div><div class="list">';
       if (!ls.length && !(S.mesSollis || []).length) h += '<div class="empty">Rien en attente. Prenez un lead dans la piscine du site.</div>';
       ls.forEach(function (l) {
-        var verbe = l.tentatives ? 'Rappeler' : 'Appeler';
+        var verbe = __lmPeutAppeler() ? (l.tentatives ? 'Rappeler' : 'Appeler') : (l.tentatives ? 'Relancer' : 'Traiter');
         var sous = l.tentatives ? 'tentative ' + (l.tentatives + 1) + ' sur 3' : 'premier contact';
         var why = l.par_plateau ? 'Qualifié par ' + (l.transfere_par_nom ? propre(l.transfere_par_nom) + ' (VROOM)' : 'le plateau VROOM') + (l.qualification ? ' : ' + l.qualification : '')
           : l.attribue_par_nom ? 'Attribué par ' + propre(l.attribue_par_nom) + (l.attribue_le ? ' il y a ' + duree(mins(l.attribue_le)) : '')
@@ -1723,7 +1730,7 @@
       // Contact
       h += '<section><h3>Contact</h3>' + (l.telephone ? '<div class="tel"><b>' + esc(telAff(l.telephone)) + '</b><button type="button" class="btn sm" data-a="copier" data-id="' + esc(telAff(l.telephone)) + '">Copier</button></div>' : '<p class="hint">Aucun numéro.</p>')
         + (l.email ? '<p class="mail">' + esc(l.email) + '</p>' : '')
-        + '<div class="canaux">' + [['Appeler', 'appel', 'call', IC.phone], ['WhatsApp', 'wa', 'wa', IC.wa], ['Email', 'mail', 'mail', IC.mail], ['SMS', 'sms', 'sms', IC.sms]].map(function (c) {
+        + '<div class="canaux">' + [['Appeler', 'appel', 'call', IC.phone], ['WhatsApp', 'wa', 'wa', IC.wa], ['Email', 'mail', 'mail', IC.mail], ['SMS', 'sms', 'sms', IC.sms]].filter(function (c) { return c[1] !== 'appel' || __lmPeutAppeler(); }).map(function (c) {
             return '<button type="button" class="fs-btn ' + c[2] + '" data-a="canal" data-id="' + c[1] + '"' + ((c[1] === 'mail' ? !l.email : !l.telephone) ? ' disabled' : '') + '>' + svgIc(c[3]) + c[0] + '</button>'; }).join('')
         + (l.id_client ? '<button type="button" class="fs-btn fiche" data-a="fiche" data-id="' + l.id_client + '">' + svgIc(IC.fiche) + 'Fiche client</button>' : '') + '</div></section>';
       // Demande
@@ -2125,6 +2132,7 @@
       var client = { IDVu: l.id_client, TEl_MOB: l.telephone, EMAIL: l.email, nom: nom, prenom: '' };
       try {
         if (act === 'appel') {
+          if (!__lmPeutAppeler()) return;
           var cx = pick3cx(), num = normTel(l.telephone);
           if (cx && num) { cx.appeler(num, { nom: nom, idvu: l.id_client }); return; }
           var w = (window.parent && window.parent.__VOIP_UI__) || window.__VOIP_UI__ || FW.__VOIP_UI__;
