@@ -1,6 +1,12 @@
 // ============================================================================
 //  LEAD MANAGEMENT — module One Data (OD.define 'lead-mgmt')
-//  VERSION TEAM COLIN (v59) — déploiement CIBLÉ (publish-targets :
+//  VERSION TEAM COLIN (v60) — déploiement CIBLÉ (publish-targets :
+//  v60 (22/10/2026) : BACS doit être ouvert CHEZ L'UTILISATEUR pour tout geste
+//  reporté dans BACS (règle d'Antoine). Plateau : les gestes BACS sont bloqués
+//  tant que la session BACS de l'opérateur lui-même ne bat pas (avant : bloqués
+//  seulement si aucun poste n'avait BACS ouvert). La base refuse de toute façon
+//  le geste (bacs_session_exiger) ; l'écran l'annonce avant. Postes site : un
+//  signal prévient quand BACS n'est pas ouvert sur ce poste.
 //  v59 (22/10/2026) : le canal « Appeler » n'apparait qu'aux licences Connect
 //  et Full (OD.peut('appel'), socle v29) ; ailleurs, les verbes de la file
 //  deviennent Prendre, Traiter, Relancer, Ouvrir.
@@ -242,9 +248,10 @@
     // ne peut pas envoyer telle quelle (le serveur la lirait comme « par défaut »).
     // ── Canal BACS ────────────────────────────────────────────────────────
     function ecritBacs() { return !!(S.bacs && S.bacs.ecrire_bacs); }
-    // Aucune session BACS vivante : rien ne partirait. On bloque AVANT le geste.
-    function bloque() { return ecritBacs() && S.bacs.canal === 'aucun'; }
-    function dis() { return bloque() ? ' disabled title="Ouvrez BACS dans un onglet pour agir"' : ''; }
+    // v60 : BACS doit être ouvert sur CE poste (session de l'opérateur). On
+    // bloque AVANT le geste ; la base le refuserait de toute façon.
+    function bloque() { return ecritBacs() && S.bacs.canal !== 'moi'; }
+    function dis() { return bloque() ? ' disabled title="Ouvrez BACS dans un onglet de ce navigateur pour agir"' : ''; }
     var GESTES_BACS = ['prendre', 'qualifier', 'injoignable', 'long-terme', 'abandonner'];
     // Réveille l'extension pour qu'elle vide la file tout de suite (sans
     // effet si elle ne connaît pas encore ce signal : elle la videra au
@@ -258,11 +265,11 @@
     }
     function bandeauBacs() {
       var b = S.bacs; if (!b || !b.ecrire_bacs) return '';
-      if (b.canal === 'aucun') return '<div class="bd crit" role="alert"><b>BACS n\'est ouvert sur aucun poste.</b>'
-        + '<span>One Data reporte chacun de vos gestes dans BACS. Ouvrez BACS dans un onglet de ce navigateur et connectez-vous : les gestes se débloquent dès que BACS répond.</span></div>';
+      if (b.canal !== 'moi') return '<div class="bd crit" role="alert"><b>BACS n\'est pas ouvert sur votre poste.</b>'
+        + '<span>' + (b.moi_bacs === false
+          ? 'Votre compte One Data n\'est pas relié à un compte BACS : demandez à l\'administrateur de renseigner votre identifiant BACS. Vos gestes restent bloqués d\'ici là.'
+          : 'One Data reporte chacun de vos gestes dans BACS, sous votre nom. Ouvrez BACS dans un onglet de ce navigateur et connectez-vous : les gestes se débloquent dès que BACS répond.') + '</span></div>';
       var h = '';
-      if (b.canal === 'autre') h += '<div class="bd info"><b>Vos gestes passent par la session BACS de ' + esc(propre(b.par || 'un collègue')) + '.</b>'
-        + '<span>' + (b.moi_bacs ? 'Ouvrez BACS sur ce poste pour qu\'ils portent votre nom.' : 'Votre compte One Data n\'est pas relié à un compte BACS : demandez à l\'administrateur de renseigner votre identifiant BACS.') + '</span></div>';
       if (b.en_attente_vieux > 0) h += '<div class="bd warn"><b>' + plural(b.en_attente_vieux, 'geste attend', 'gestes attendent') + ' d\'être appliqué' + (b.en_attente_vieux > 1 ? 's' : '') + ' dans BACS.</b>'
         + '<span>Ils partent au prochain passage de l\'extension. Si cela dure, rechargez l\'onglet BACS.</span></div>';
       return h;
@@ -436,7 +443,7 @@
                 ['Copie BACS', syncAge == null ? '—' : '<span class="txt ' + (syncAge > 1440 ? 't-crit' : syncAge > 120 ? 't-warn' : '') + '">' + (syncAge < 1 ? 'à l\'instant' : 'il y a ' + duree(syncAge)) + '</span>']];
       var b = S.bacs || {};
       kp.push(['Report dans BACS', !b.ecrire_bacs ? '<span class="txt t-mut">désactivé</span>'
-        : b.canal === 'aucun' ? '<span class="txt t-crit">bloqué</span>'
+        : b.canal !== 'moi' ? '<span class="txt t-crit">bloqué</span>'
         : b.echecs ? '<span class="txt t-crit">' + plural(b.echecs, 'échec') + '</span>'
         : b.en_attente ? '<span class="txt t-warn">' + b.en_attente + ' en attente</span>'
         : '<span class="txt t-ok">automatique</span>']);
@@ -959,7 +966,7 @@
     function memoAck() { try { FW.localStorage.setItem('lmtc-ack', JSON.stringify(Array.from(S.ack).slice(-200))); } catch (e) {} }
     async function action(a, id, ev) {
       if (GESTES_BACS.indexOf(a) !== -1 && bloque()) {
-        toast('BACS n\'est ouvert sur aucun poste : ouvrez-le dans un onglet et connectez-vous.', true); return;
+        toast('BACS n\'est pas ouvert sur votre poste : ouvrez-le dans un onglet de ce navigateur et connectez-vous.', true); return;
       }
       switch (a) {
         case 'bacs-relancer':
@@ -1238,7 +1245,8 @@
     function signaux() {
       var out = [];
       var b = S.bacs || {};
-      if (b && b.aucun_pont) out.push({ id: 'bacs-pont', niv: 'info', k: 'BACS', titre: 'BACS n\'est ouvert sur aucun poste', d: 'Les rendez-vous, rappels et clôtures des leads BACS partiront dans BACS dès qu\'un onglet BACS sera ouvert avec l\'extension One Data.', a: [] });
+      // v60 : BACS doit être ouvert sur CE poste pour agir sur un lead BACS.
+      if (b && b.joignable !== undefined && !b.par_moi) out.push({ id: 'bacs-moi', niv: 'crit', k: 'BACS', titre: 'BACS n\'est pas ouvert sur votre poste', d: 'Rendez-vous, attributions, transferts et clôtures des leads BACS, ainsi que la création d\'un client, sont refusés tant que BACS n\'est pas ouvert dans un onglet de ce navigateur, avec l\'extension One Data.', a: [] });
       if (POSTE === 'vendeur') {
         piscine(null).filter(function (l) { return l.par_plateau && !verrouAutre(l); }).slice(0, 4).forEach(function (l) {
           out.push({ id: 'vr-' + l.id_lead, niv: 'vr', k: 'Qualifié par VROOM', t: l.arrive_le, titre: nomLead(l) + ' · ' + demandeDe(l),
