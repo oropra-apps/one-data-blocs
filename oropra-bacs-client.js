@@ -1,6 +1,12 @@
 /* =====================================================================
  * oropra-bacs-client.js — création d'un client SUIVIE dans One Data ET
- * dans BACS, partagée                                  v1 (22/10/2026)
+ * dans BACS, partagée                                  v2 (22/10/2026)
+ *
+ * v2 : bouton « Enregistrer » VERROUILLÉ tant que BACS n'est pas ouvert sur
+ * le poste — grisé, en rouge, libellé « Bacs doit être ouvert pour pouvoir
+ * valider ». L'état est vérifié en continu tant que la fenêtre de création
+ * est ouverte (toutes les 2,5 s quand BACS est fermé, 8 s quand il est
+ * ouvert) : le bouton redevient normal dès que BACS répond.
  *
  * Un particulier créé par un vendeur doit exister dans BACS (règle du
  * 22/10/2026). La création se faisait en deux temps invisibles : la fiche
@@ -23,6 +29,11 @@
  *       -> même forme que supabase.rpc('client_creer') : { data, error }
  *   compte(supabase, idClient) -> { compte, url, nom, nb } | null
  *   ouvrir(url)                -> ouvre le compte BACS dans un nouvel onglet
+ *   surveiller(supabase, modal, onChange, actif)
+ *       -> suit l'état de BACS pour une fenêtre de création (modal.__bacs) ;
+ *          s'arrête dès que actif() rend false
+ *   appliquer(bouton, modal)   -> met le bouton d'enregistrement dans l'état
+ *          voulu (verrouillé en rouge, ou normal)
  *
  * Sur un tenant sans écriture BACS, ou pour une société (parcours BACS pas
  * encore relevé), creer() se réduit à l'appel client_creer habituel.
@@ -31,7 +42,7 @@
  * ===================================================================== */
 (function () {
   'use strict';
-  if (window.oropraBacsClient && window.oropraBacsClient.version >= 1) return;
+  if (window.oropraBacsClient && window.oropraBacsClient.version >= 2) return;
 
   var DELAI_BACS_MS = 250000;   // le pont laisse 4 min au geste (extension v2.4.33)
 
@@ -235,5 +246,69 @@
     return r;
   }
 
-  window.oropraBacsClient = { version: 1, creer: creer, compte: compte, ouvrir: ouvrir, urlCompte: urlCompte };
+  // ── Verrou du bouton d'enregistrement (v2) ──────────────────────────
+  var LIB_FERME = 'Bacs doit être ouvert pour pouvoir valider';
+  var LIB_NON_RELIE = 'Compte BACS non relié : validation impossible';
+
+  function bloque(m) {
+    var b = m && m.__bacs;
+    return !!(b && b.requis && (!b.ouvert || b.moi_bacs === false));
+  }
+
+  function appliquer(btn, m) {
+    if (!btn || !m) return;
+    if (m.saving) return;                              // l'écran gère son propre état « Enregistrement… »
+    var b = m.__bacs;
+    if (bloque(m)) {
+      if (btn.dataset.obcHtml == null) btn.dataset.obcHtml = btn.innerHTML;
+      btn.dataset.obcBloque = '1';
+      btn.disabled = true;
+      btn.innerHTML = '<span>' + esc(b.moi_bacs === false ? LIB_NON_RELIE : LIB_FERME) + '</span>';
+      btn.style.setProperty('background', '#fdf1f1', 'important');
+      btn.style.setProperty('border-color', '#f2c4c4', 'important');
+      btn.style.setProperty('color', '#e24b4a', 'important');
+      btn.style.setProperty('cursor', 'not-allowed', 'important');
+      btn.style.setProperty('opacity', '1', 'important');
+      btn.title = b.moi_bacs === false
+        ? "Demandez à l'administrateur de renseigner votre identifiant BACS."
+        : "Ouvrez BACS dans un onglet de ce navigateur et connectez-vous : le bouton se débloque tout seul.";
+    } else if (btn.dataset.obcBloque === '1') {
+      if (btn.dataset.obcHtml != null) btn.innerHTML = btn.dataset.obcHtml;
+      delete btn.dataset.obcHtml;
+      delete btn.dataset.obcBloque;
+      btn.disabled = false;
+      ['background', 'border-color', 'color', 'cursor', 'opacity'].forEach(function (k) { btn.style.removeProperty(k); });
+      btn.removeAttribute('title');
+    }
+  }
+
+  function surveiller(sb, m, onChange, actif) {
+    if (!m || m.__bacsSuivi) return;
+    m.__bacsSuivi = true;
+    var estActif = function () { try { return !actif || actif(); } catch (e) { return false; } };
+    (async function () {
+      var pf = null;
+      try { var r = await sb.rpc('bacs_client_preflight', { p_payload: {} }); if (!r.error) pf = r.data; } catch (e) { pf = null; }
+      if (!estActif()) return;
+      if (!pf || !pf.ecrire || m.isSoc) { m.__bacs = { requis: false }; if (onChange) onChange(m.__bacs); return; }
+      var precedent = null;
+      async function tour() {
+        if (!estActif()) return;
+        var p = await demander('ping', {}, 6000);
+        if (!estActif()) return;
+        var etat = { requis: true, ouvert: !!(p && p.ok && p.contexte !== false),
+                     moi_bacs: pf.moi_bacs !== false, raison: p && p.erreur };
+        m.__bacs = etat;
+        if (!precedent || precedent.ouvert !== etat.ouvert || precedent.moi_bacs !== etat.moi_bacs) {
+          if (onChange) onChange(etat);
+        }
+        precedent = etat;
+        setTimeout(tour, etat.ouvert ? 8000 : 2500);
+      }
+      tour();
+    })();
+  }
+
+  window.oropraBacsClient = { version: 2, creer: creer, compte: compte, ouvrir: ouvrir, urlCompte: urlCompte,
+                              surveiller: surveiller, appliquer: appliquer, bloque: bloque };
 })();
