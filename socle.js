@@ -8,6 +8,8 @@
 //  Si pas de session : on monte quand même (la page login s'affiche).
 //  Rapatrie la résolution utilisateur (ex-bloc « User connecté », supprimé).
 //  Expose window.oropraLoadUser (rappelé par auth.js après login).
+//  v31 (22/10/2026) : arrivée par le lien « mot de passe oublié » repérée avant
+//  que le client Supabase n'efface le jeton (FW.__odRecovery, lu par auth v9).
 //  v30 (22/10/2026) : chef des ventes en Intelligence par défaut (Full sur décision).
 //  v29 (22/10/2026) : licences — OD.licence() et OD.peut('appel' | 'delco')
 //  d'après USER.licence (repli : gamme par défaut du rôle).
@@ -26,6 +28,16 @@
     const FW = (wwLib.getFrontWindow && wwLib.getFrontWindow()) || window;
     const FD = (wwLib.getFrontDocument && wwLib.getFrontDocument()) || document;
     const OROPRA_USER_VAR = '8b103baa-30a5-42e5-8f17-42120781a596'; // variable globale WeWeb (Object)
+
+    // v31 : lien de réinitialisation du mot de passe. Le client Supabase lit et
+    // efface le jeton (#…type=recovery) dès sa création, avant que la page de
+    // connexion ne se monte : on note l'arrivée ici pour qu'auth.js affiche
+    // l'écran « nouveau mot de passe ».
+    try {
+        const __h = String((FW.location && FW.location.hash) || '') + String(window.location.hash || '');
+        const __q = String((FW.location && FW.location.search) || '');
+        if (/type=recovery/.test(__h) || /[?&]reinit=1/.test(__q)) FW.__odRecovery = true;
+    } catch (e) {}
 
     // ---------------------------------------------- lien externe vers page protegee
     // Un lien entrant (integration 3CX, e-mail, SMS) peut viser une page protegee
