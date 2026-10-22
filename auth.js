@@ -1,5 +1,9 @@
 // ============================================================================
-//  AUTHENTIFICATION — module One Data (OD.define)  v2 (étape B)
+//  AUTHENTIFICATION — module One Data (OD.define)  v9
+//  v9 (22/10/2026) : le lien « mot de passe oublié » ouvre bien l'écran de
+//  nouveau mot de passe (retour en ?reinit=1, repère du socle v31), puis
+//  connecte directement ; lien expiré -> nouvelle demande proposée.
+//  v2 (étape B)
 //  bootTopNav() NEUTRALISÉ : la top nav est désormais le module 'topnav'.
 //  Branding via ctx.tenant ; rendu dans __anchor ; login via ctx.supabase
 //  (repli plugin). L'historique client a été extrait -> module client-history.
@@ -140,7 +144,8 @@ OD.define('auth', {
     if (!isEmail(email)) { state.error = 'Adresse email invalide.'; render(); return; }
     state.email = email; state.busy = true; state.error = null; render();
     try {
-      const redirectTo = win.location.origin + win.location.pathname;  // revient sur cette page
+      // v9 : ?reinit=1 survit au traitement du jeton par Supabase et WeWeb (le #… est effacé).
+      const redirectTo = win.location.origin + win.location.pathname + '?reinit=1';
       const { error } = await sb().auth.resetPasswordForEmail(email.trim(), { redirectTo: redirectTo });
       state.busy = false;
       if (error) { state.error = "Impossible d'envoyer l'email. Réessayez."; render(); return; }
@@ -157,6 +162,10 @@ OD.define('auth', {
     try {
       const { error } = await sb().auth.updateUser({ password: p1 });
       if (error) { state.busy = false; state.error = 'Échec : ' + error.message; render(); return; }
+      // v9 : le lien a ouvert une session — on entre directement dans One Data.
+      try { win.__odRecovery = false; win.history.replaceState(null, '', win.location.pathname); } catch (e) {}
+      try { await sb().rpc('set_password_changed'); } catch (e) { /* mot de passe choisi : plus de changement imposé */ }
+      try { await finishLogin(); return; } catch (e) { console.warn('[auth] reset → connexion', e); }
       state.busy = false; state.view = 'login'; state.info = 'Mot de passe mis à jour. Connectez-vous.'; state.error = null; render();
     } catch (e) { console.error('[auth] reset', e); state.busy = false; state.error = 'Échec de la mise à jour.'; render(); }
   }
@@ -311,7 +320,18 @@ OD.define('auth', {
   function detectRecovery() {
     try {
       const h = win.location.hash || '';
-      if (h.indexOf('type=recovery') !== -1) { state.view = 'reset'; }
+      const q = win.location.search || '';
+      const parLien = /[?&]reinit=1/.test(q) || win.__odRecovery === true;
+      if (h.indexOf('type=recovery') !== -1 || parLien) { state.view = 'reset'; }
+      // Lien expiré ou déjà utilisé : pas de session -> on redemande l'email.
+      if (parLien && h.indexOf('type=recovery') === -1) {
+        sb().auth.getSession().then((r) => {
+          if (r && r.data && r.data.session) return;
+          state.view = 'forgot';
+          state.error = 'Ce lien a expiré ou a déjà servi. Saisissez votre email pour en recevoir un nouveau.';
+          render();
+        }).catch(() => {});
+      }
     } catch (e) {}
     try {
       sb().auth.onAuthStateChange((event) => { if (event === 'PASSWORD_RECOVERY') { state.view = 'reset'; render(); } });
