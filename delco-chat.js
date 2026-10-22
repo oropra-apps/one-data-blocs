@@ -1,5 +1,7 @@
 // ============================================================================
 //  DELCO — CHAT AGENT — module One Data (OD.define)  v11
+//  v13 (22/10/2026) : accès selon la licence (Intelligence, Full) — OD.peut('delco'),
+//  socle v29. Repli sur delco_roles_exclus si le socle est plus ancien.
 //  v11 (12/10/2026) — sous-titre : « Ne traite que les questions métier, mais
 //     avec des chiffres justes. » (remplace « Ton agent CRM360 »).
 //  v10 (09/10/2026) — boutons du vendeur (plan Delco, P4), prêts pour
@@ -43,7 +45,7 @@ OD.define('delco-chat', {
       const __s = await ctx.supabase.from('app_settings').select('value').eq('key', 'delco_roles_exclus').maybeSingle();
       if (__s && __s.data && Array.isArray(__s.data.value)) __exclus = __s.data.value.map(Number);
     } catch (_) { __exclus = []; }
-    if (__exclus.includes(__r)) { __anchor.innerHTML = ''; __anchor.style.display = 'none'; return; }
+    if ((typeof OD !== 'undefined' && typeof OD.peut === 'function') ? !OD.peut('delco') : __exclus.includes(__r)) { __anchor.innerHTML = ''; __anchor.style.display = 'none'; return; }
   }
 // ====================================================================
 //  Delco CRM360 — Chat agent (Custom JS WeWeb) — Logo Éclair — v2 responsive
