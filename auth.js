@@ -1,5 +1,7 @@
 // ============================================================================
-//  AUTHENTIFICATION — module One Data (OD.define)  v9
+//  AUTHENTIFICATION — module One Data (OD.define)  v10
+//  v10 (22/10/2026) : « mot de passe oublié » explique un refus d'envoi
+//  (limite du service d'email) au lieu d'un message générique.
 //  v9 (22/10/2026) : le lien « mot de passe oublié » ouvre bien l'écran de
 //  nouveau mot de passe (retour en ?reinit=1, repère du socle v31), puis
 //  connecte directement ; lien expiré -> nouvelle demande proposée.
@@ -148,7 +150,17 @@ OD.define('auth', {
       const redirectTo = win.location.origin + win.location.pathname + '?reinit=1';
       const { error } = await sb().auth.resetPasswordForEmail(email.trim(), { redirectTo: redirectTo });
       state.busy = false;
-      if (error) { state.error = "Impossible d'envoyer l'email. Réessayez."; render(); return; }
+      if (error) {
+        // v10 : dire pourquoi. Le service d'envoi de Supabase limite les envois
+        // (quelques emails par heure sans serveur SMTP dédié) et une même adresse
+        // ne peut redemander qu'après 60 secondes.
+        const m = String(error.message || '').toLowerCase();
+        state.error = (error.status === 429 || m.indexOf('rate limit') !== -1 || m.indexOf('security purposes') !== -1)
+          ? "Trop de demandes d'envoi pour le moment. Réessayez dans quelques minutes."
+          : "Impossible d'envoyer l'email. Réessayez.";
+        console.warn('[auth] forgot', error.status, error.message);
+        render(); return;
+      }
       state.view = 'sent'; state.info = 'Si un compte existe pour ' + email + ', un email de réinitialisation vient d\'être envoyé.'; render();
     } catch (e) { console.error('[auth] forgot', e); state.busy = false; state.error = "Impossible d'envoyer l'email."; render(); }
   }
