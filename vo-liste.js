@@ -1,4 +1,9 @@
 // ============================================================================
+//  v26 (23/10/2026) : la liste identifie les VO par leur N° DE POLICE et non
+//    plus par le numero de vehicule DBS (NO_VO) : colonne « N° police »
+//    (triable, numerique), vignette du mode photo, export Excel. Un VO sans
+//    n° de police affiche son numero DBS en grise, avec une infobulle. Le
+//    numero DBS reste dans la fiche VO et dans la recherche libre.
 //  v25 (23/10/2026) : liste VO, reprise sur la v24 (BACS) des deux corrections
 //    preparees le 21/10 sur la v22 :
 //  * colonnes figees recalees. La v22 placait la colonne Infos a 64 px,
@@ -2056,9 +2061,17 @@ OD.define('vo-liste', {
     if (notEmpty(S.immat)) { var qi = S.immat.toLowerCase().replace(/[\s-]/g, ''); var im = String(r.NO_IMMAT || '').toLowerCase().replace(/[\s-]/g, ''); if (im.indexOf(qi) === -1) return false; }
     return true;
   }
+  // v26 : n° de police ; a defaut, le n° DBS en grise.
+  function policeHtml(r) {
+    if (notEmpty(r.NUMERO_POLICE)) return '<span class="vo-novo">' + esc(r.NUMERO_POLICE) + '</span>';
+    if (notEmpty(r.NO_VO)) return '<span class="vo-novo" style="color:#9bb3d1;font-weight:600" title="Pas de n° de police dans DBS — n° de véhicule DBS">' + esc(r.NO_VO) + '</span>';
+    return '-';
+  }
   function sortVal(r, key) {
     switch (key) {
       case 'NBJ': return nbjDays(r) == null ? -1 : nbjDays(r);
+      // v26 : tri numerique ; sans n° de police, en fin de liste
+      case 'NUMERO_POLICE': return num(r.NUMERO_POLICE) == null ? -1 : num(r.NUMERO_POLICE);
       case 'PVENTE': return num(r.PVENTE) == null ? -1 : num(r.PVENTE);
       case 'PA_HT_TTC': return num(r.PA_HT_TTC) == null ? -1 : num(r.PA_HT_TTC);
       case 'KMS': return num(r.KMS) == null ? -1 : num(r.KMS);
@@ -2231,7 +2244,7 @@ OD.define('vo-liste', {
     var cols = [
       { k: '__chk', t: '', w: 40, kind: 'chk', frz: 0 },
       { k: '__infos', t: 'Infos', w: 222, kind: 'infos', frz: 1, frzLast: true },
-      { k: 'NO_VO', t: 'VO', w: 112, sort: true },
+      { k: 'NUMERO_POLICE', t: 'N° police', w: 112, sort: true },
       { k: 'NO_IMMAT', t: 'Immat', w: 100, sort: true },
       { k: 'VIN', t: 'VIN', w: 150, sort: true },
       { k: 'NBJ', t: 'NBJ', sort: true }, { k: 'MARQUE_DMS', t: 'Marque', sort: true }, { k: 'MODELE_DMS', t: 'Modèle', sort: true },
@@ -2316,7 +2329,7 @@ OD.define('vo-liste', {
   function cellInner(r, key) {
     var ca;
     switch (key) {
-      case 'NO_VO': return '<span class="vo-novo">' + esc(r.NO_VO || '-') + '</span>';
+      case 'NUMERO_POLICE': return policeHtml(r);
       case 'NO_IMMAT': return esc(r.NO_IMMAT || '-');
       case 'VIN': return '<span style="color:#9bb3d1;font-size:12px">' + esc(r.VIN || '-') + '</span>';
       case 'NBJ': var nb = nbjDays(r); return nb == null ? '-' : '<span title="Entré le ' + esc(fmtDateFR(r.D_ACHAT)) + '">' + nb + '</span>';
@@ -2385,7 +2398,7 @@ OD.define('vo-liste', {
       + '<div style="text-align:right"><div class="vo-card-price">' + esc(priceTxt(r)) + '</div>' + (S.showPA ? '<div class="vo-card-pa">PA ' + esc(eur(r.PA_HT_TTC)) + '</div>' : '') + '</div></div>'
       + '<div class="vo-card-site">' + esc(r.SITE || '-') + '</div>'
       + '<div class="vo-card-meta">'
-      + '<div>N° <b>' + esc(r.NO_VO || '-') + '</b></div><div style="text-align:right">' + esc(r.NO_IMMAT || '-') + '</div>'
+      + '<div>N° <b>' + policeHtml(r) + '</b></div><div style="text-align:right">' + esc(r.NO_IMMAT || '-') + '</div>'
       + '<div><b>' + esc(kmTxt(r)) + '</b></div><div style="text-align:right">' + esc(r.BOITEV_EUROTAX || '-') + '</div>'
       + '<div>' + esc(fmtDateFR(r.D_1MEC)) + '</div><div style="text-align:right">' + esc(r.CARBURANT_DMS || '-') + '</div>'
       + '</div>'
@@ -2588,7 +2601,7 @@ OD.define('vo-liste', {
   // ─────────────────────────────────────────────────────────── export Excel
   function xlsxCols() {
     var cols = [
-      ['N° VO', function (r) { return r.NO_VO; }], ['Immat', function (r) { return r.NO_IMMAT; }], ['VIN', function (r) { return r.VIN; }],
+      ['N° police', function (r) { return r.NUMERO_POLICE; }], ['N° VO DBS', function (r) { return r.NO_VO; }], ['Immat', function (r) { return r.NO_IMMAT; }], ['VIN', function (r) { return r.VIN; }],
       ['Marque', function (r) { return r.MARQUE_DMS; }], ['Modèle', function (r) { return r.MODELE_DMS; }], ['Désignation', function (r) { return designation(r); }],
       ['Carburant', function (r) { return r.CARBURANT_DMS; }], ['Boîte', function (r) { return r.BOITEV_EUROTAX; }],
       ['PMEC', function (r) { return fmtDateFR(r.D_1MEC); }], ['Kms', function (r) { return num(r.KMS); }], ['Prix', function (r) { return num(r.PVENTE); }]
@@ -3213,9 +3226,17 @@ OD.define('vo-liste', {
     if (notEmpty(S.immat)) { var qi = S.immat.toLowerCase().replace(/[\s-]/g, ''); var im = String(r.NO_IMMAT || '').toLowerCase().replace(/[\s-]/g, ''); if (im.indexOf(qi) === -1) return false; }
     return true;
   }
+  // v26 : n° de police ; a defaut, le n° DBS en grise.
+  function policeHtml(r) {
+    if (notEmpty(r.NUMERO_POLICE)) return '<span class="vo-novo">' + esc(r.NUMERO_POLICE) + '</span>';
+    if (notEmpty(r.NO_VO)) return '<span class="vo-novo" style="color:#9bb3d1;font-weight:600" title="Pas de n° de police dans DBS — n° de véhicule DBS">' + esc(r.NO_VO) + '</span>';
+    return '-';
+  }
   function sortVal(r, key) {
     switch (key) {
       case 'NBJ': return nbjDays(r) == null ? -1 : nbjDays(r);
+      // v26 : tri numerique ; sans n° de police, en fin de liste
+      case 'NUMERO_POLICE': return num(r.NUMERO_POLICE) == null ? -1 : num(r.NUMERO_POLICE);
       case 'PVENTE': return num(r.PVENTE) == null ? -1 : num(r.PVENTE);
       case 'PA_HT_TTC': return num(r.PA_HT_TTC) == null ? -1 : num(r.PA_HT_TTC);
       case 'KMS': return num(r.KMS) == null ? -1 : num(r.KMS);
@@ -3388,7 +3409,7 @@ OD.define('vo-liste', {
     var cols = [
       { k: '__chk', t: '', w: 40, kind: 'chk', frz: 0 },
       { k: '__infos', t: 'Infos', w: 222, kind: 'infos', frz: 1, frzLast: true },
-      { k: 'NO_VO', t: 'VO', w: 112, sort: true },
+      { k: 'NUMERO_POLICE', t: 'N° police', w: 112, sort: true },
       { k: 'NO_IMMAT', t: 'Immat', w: 100, sort: true },
       { k: 'VIN', t: 'VIN', w: 150, sort: true },
       { k: 'NBJ', t: 'NBJ', sort: true }, { k: 'MARQUE_DMS', t: 'Marque', sort: true }, { k: 'MODELE_DMS', t: 'Modèle', sort: true },
@@ -3473,7 +3494,7 @@ OD.define('vo-liste', {
   function cellInner(r, key) {
     var ca;
     switch (key) {
-      case 'NO_VO': return '<span class="vo-novo">' + esc(r.NO_VO || '-') + '</span>';
+      case 'NUMERO_POLICE': return policeHtml(r);
       case 'NO_IMMAT': return esc(r.NO_IMMAT || '-');
       case 'VIN': return '<span style="color:#9bb3d1;font-size:12px">' + esc(r.VIN || '-') + '</span>';
       case 'NBJ': var nb = nbjDays(r); return nb == null ? '-' : '<span title="Entré le ' + esc(fmtDateFR(r.D_ACHAT)) + '">' + nb + '</span>';
@@ -3542,7 +3563,7 @@ OD.define('vo-liste', {
       + '<div style="text-align:right"><div class="vo-card-price">' + esc(priceTxt(r)) + '</div>' + (S.showPA ? '<div class="vo-card-pa">PA ' + esc(eur(r.PA_HT_TTC)) + '</div>' : '') + '</div></div>'
       + '<div class="vo-card-site">' + esc(r.SITE || '-') + '</div>'
       + '<div class="vo-card-meta">'
-      + '<div>N° <b>' + esc(r.NO_VO || '-') + '</b></div><div style="text-align:right">' + esc(r.NO_IMMAT || '-') + '</div>'
+      + '<div>N° <b>' + policeHtml(r) + '</b></div><div style="text-align:right">' + esc(r.NO_IMMAT || '-') + '</div>'
       + '<div><b>' + esc(kmTxt(r)) + '</b></div><div style="text-align:right">' + esc(r.BOITEV_EUROTAX || '-') + '</div>'
       + '<div>' + esc(fmtDateFR(r.D_1MEC)) + '</div><div style="text-align:right">' + esc(r.CARBURANT_DMS || '-') + '</div>'
       + '</div>'
@@ -3745,7 +3766,7 @@ OD.define('vo-liste', {
   // ─────────────────────────────────────────────────────────── export Excel
   function xlsxCols() {
     var cols = [
-      ['N° VO', function (r) { return r.NO_VO; }], ['Immat', function (r) { return r.NO_IMMAT; }], ['VIN', function (r) { return r.VIN; }],
+      ['N° police', function (r) { return r.NUMERO_POLICE; }], ['N° VO DBS', function (r) { return r.NO_VO; }], ['Immat', function (r) { return r.NO_IMMAT; }], ['VIN', function (r) { return r.VIN; }],
       ['Marque', function (r) { return r.MARQUE_DMS; }], ['Modèle', function (r) { return r.MODELE_DMS; }], ['Désignation', function (r) { return designation(r); }],
       ['Carburant', function (r) { return r.CARBURANT_DMS; }], ['Boîte', function (r) { return r.BOITEV_EUROTAX; }],
       ['PMEC', function (r) { return fmtDateFR(r.D_1MEC); }], ['Kms', function (r) { return num(r.KMS); }], ['Prix', function (r) { return num(r.PVENTE); }]
