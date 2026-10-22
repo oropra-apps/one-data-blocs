@@ -8,6 +8,7 @@
 //  Si pas de session : on monte quand même (la page login s'affiche).
 //  Rapatrie la résolution utilisateur (ex-bloc « User connecté », supprimé).
 //  Expose window.oropraLoadUser (rappelé par auth.js après login).
+//  v30 (22/10/2026) : chef des ventes en Intelligence par défaut (Full sur décision).
 //  v29 (22/10/2026) : licences — OD.licence() et OD.peut('appel' | 'delco')
 //  d'après USER.licence (repli : gamme par défaut du rôle).
 //  v26 : le client Supabase délègue ses requêtes à window.fetch AU MOMENT de
@@ -364,7 +365,7 @@ const HOST_MAP = {
     // (licence_par_role). La base applique la même règle (delco_autorise,
     // threecx-action) : masquer à l'écran est un confort, pas la sécurité.
     OD.LICENCES = { performance: [], intelligence: ['delco'], connect: ['appel'], full: ['appel', 'delco'] };
-    OD.licenceParRole = r => ({ 1: 'performance', 9: 'performance', 4: 'connect', 10: 'connect', 3: 'full' })[Number(r)] || 'intelligence';
+    OD.licenceParRole = r => ({ 1: 'performance', 9: 'performance', 4: 'connect', 10: 'connect' })[Number(r)] || 'intelligence';
     OD.licence = () => {
         const u = FW.oropraUser || window.oropraUser;
         if (!u) return null;
