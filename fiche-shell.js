@@ -1,5 +1,8 @@
 // ============================================================================
-//  FICHE CLIENT — SHELL — module One Data (OD.define)  v1 (Lot A)
+//  FICHE CLIENT — SHELL — module One Data (OD.define)  v13
+//  v13 (22/10/2026) : le bouton « Appeler » n'apparait qu'aux licences Connect
+//  et Full (OD.peut('appel'), socle v29).
+//  v1 (Lot A)
 //  Orchestrateur : rend le squelette (en-tête + boutons + onglets) dans __anchor
 //  et fournit les divs de montage. client via ctx.supabase ; self-boot retiré ;
 //  __fsWatch (changement de client) conservé. Onglets encore par id (les briques
@@ -161,7 +164,11 @@ OD.define('fiche-shell', {
     return null;
   }
 
+  // Téléphonie incluse dans les licences Connect et Full (socle v29 : OD.peut).
+  function peutAppeler() { return (typeof OD === 'undefined' || typeof OD.peut !== 'function' || OD.peut('appel')); }
+
   function callClient() {
+    if (!peutAppeler()) return;
     const c = state.client; if (!c) return;
     const to = normPhone(c.TEl_MOB);
     if (!to) return;
@@ -310,7 +317,7 @@ OD.define('fiche-shell', {
         '<span>ID Client : ' + esc(c.IDVu) + '</span>' +
       '</div>' +
       '<div class="fs-actions">' +
-        '<button class="fs-btn call" data-btn="call">' + svg(IC.phone) + 'Appeler</button>' +
+        (peutAppeler() ? '<button class="fs-btn call" data-btn="call">' + svg(IC.phone) + 'Appeler</button>' : '') +
         '<button class="fs-btn wa" data-btn="wa">' + svg(IC.wa) + 'WhatsApp</button>' +
         '<button class="fs-btn mail" data-btn="mail">' + svg(IC.mail) + 'Email</button>' +
         '<button class="fs-btn sms" data-btn="sms">' + svg(IC.sms) + 'SMS</button>' +
