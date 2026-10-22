@@ -1,4 +1,7 @@
 // ============================================================================
+//  v67 (22/10/2026) : bouton « Enregistrer » verrouillé en rouge (« Bacs doit être
+//  ouvert pour pouvoir valider ») tant que BACS n'est pas ouvert ; il redevient
+//  normal dès que BACS répond (module partagé oropra-bacs-client v2).
 //  v66 (22/10/2026) : création de client SUIVIE — panneau d'avancement One Data
 //  puis BACS (spinners), bouton « B » vers le compte BACS ; erreur si BACS n'est
 //  pas ouvert chez le vendeur (module partagé oropra-bacs-client v1).
@@ -2269,7 +2272,7 @@ OD.define('kanban', {
         // de toute façon que BACS soit ouvert chez le vendeur.
         const _bc = await (window.__odBacsClientPret || (window.__odBacsClientPret = new Promise(function (ok) {
               if (window.oropraBacsClient) return ok(window.oropraBacsClient);
-              var sc = document.createElement('script'); sc.src = 'https://cdn.jsdelivr.net/gh/oropra-apps/one-data-blocs@oropra-bacs-client-v1/oropra-bacs-client.js'; sc.async = true;
+              var sc = document.createElement('script'); sc.src = 'https://cdn.jsdelivr.net/gh/oropra-apps/one-data-blocs@oropra-bacs-client-v2/oropra-bacs-client.js'; sc.async = true;
               sc.onload = function () { ok(window.oropraBacsClient || null); };
               sc.onerror = function () { window.__odBacsClientPret = null; ok(null); };
               document.head.appendChild(sc);
@@ -2636,7 +2639,26 @@ OD.define('kanban', {
       root.querySelectorAll('[data-vop-action="pcom"]').forEach(el => el.addEventListener('click', doPcom));
       root.querySelectorAll('[data-vop-action="close-modal"]').forEach(el => el.addEventListener('click', closeModal));
       root.querySelectorAll('[data-vop-action="close-modal-bg"]').forEach(el => el.addEventListener('click', e => { if (e.target === el) closeModal(); }));
-      root.querySelectorAll('[data-vop-action="save-modal"]').forEach(el => el.addEventListener('click', saveCreation));
+      // v67 : le bouton reste verrouillé (rouge) tant que BACS n'est pas ouvert sur ce poste.
+      root.querySelectorAll('[data-vop-action="save-modal"]').forEach(el => {
+        el.addEventListener('click', () => { if (el.dataset.obcBloque === '1') return; saveCreation(); });
+        const _m = state.modal;
+        if (!_m || _m.isSoc) return;
+        if (window.oropraBacsClient) window.oropraBacsClient.appliquer(el, _m);
+        if (_m.__bacsSuivi) return;
+        (window.__odBacsClientPret || (window.__odBacsClientPret = new Promise(function (ok) {
+          if (window.oropraBacsClient) return ok(window.oropraBacsClient);
+          var sc = document.createElement('script'); sc.src = 'https://cdn.jsdelivr.net/gh/oropra-apps/one-data-blocs@oropra-bacs-client-v2/oropra-bacs-client.js'; sc.async = true;
+          sc.onload = function () { ok(window.oropraBacsClient || null); };
+          sc.onerror = function () { window.__odBacsClientPret = null; ok(null); };
+          document.head.appendChild(sc);
+        }))).then(function (bc) {
+          if (!bc || state.modal !== _m) return;
+          bc.surveiller(ctx.supabase, _m, function () {
+            const b = root.querySelector('[data-vop-action="save-modal"]'); if (b) bc.appliquer(b, _m);
+          }, function () { return state.modal === _m; });
+        });
+      });
       root.querySelectorAll('[data-vop-action="dismiss-duplicate"], [data-od-action="dup-dismiss"]').forEach(el => el.addEventListener('click', dismissDuplicate));
       root.querySelectorAll('[data-vop-action="view-duplicate"], [data-od-action="dup-open"]').forEach(el => el.addEventListener('click', viewDuplicate));
       root.querySelectorAll('[data-od-action="dup-force"]').forEach(el => el.addEventListener('click', saveAnyway));
