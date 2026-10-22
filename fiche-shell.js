@@ -1,5 +1,7 @@
 // ============================================================================
-//  FICHE CLIENT — SHELL — module One Data (OD.define)  v13
+//  FICHE CLIENT — SHELL — module One Data (OD.define)  v14
+//  v14 (22/10/2026) : bouton « B » — ouvre le compte du client dans BACS
+//  (client_compte_bacs), affiché dès que la fiche est reliée à un compte BACS.
 //  v13 (22/10/2026) : le bouton « Appeler » n'apparait qu'aux licences Connect
 //  et Full (OD.peut('appel'), socle v29).
 //  v1 (Lot A)
@@ -100,7 +102,28 @@ OD.define('fiche-shell', {
       if (error) throw error;
       state.client = data; state.idvu = idvu;
       consulter(idvu);
+      chargerCompteBacs(idvu);
     } catch (e) { console.error('[fiche-shell] CLIENT', e); state.client = null; }
+  }
+
+  // ---------------------------------------------------------------- compte BACS (v14)
+  // Lu à part : l'en-tête s'affiche sans attendre, le bouton « B » apparaît
+  // dès que la réponse arrive. Aucun compte = aucun bouton.
+  async function chargerCompteBacs(idvu) {
+    state.bacs = null;
+    try {
+      const { data, error } = await sb.rpc('client_compte_bacs', { p_id_client: Number(idvu) });
+      if (error || !data || !data.url) return;
+      if (state.idvu !== idvu) return;            // la fiche a changé entre-temps
+      state.bacs = data;
+      const holder = __anchor && __anchor.querySelector('#fs-header-holder');
+      if (holder) { holder.innerHTML = headerHtml(); bindHeader(holder); }
+    } catch (e) { /* tenant sans BACS : pas de bouton */ }
+  }
+  function ouvrirBacs() {
+    const u = state.bacs && state.bacs.url; if (!u) return;
+    try { ((wwLib.getFrontWindow && wwLib.getFrontWindow()) || window).open(u, '_blank', 'noopener'); }
+    catch (e) { try { window.open(u, '_blank'); } catch (e2) {} }
   }
 
   // ---------------------------------------------------------------- cycle de consultation
@@ -275,6 +298,8 @@ OD.define('fiche-shell', {
 .fs-btn.mail{color:var(--dk);border-color:#d7dfe9}.fs-btn.mail:hover{background:#f2f5f9}
 .fs-btn.sms{color:var(--am);border-color:#f0dca6}.fs-btn.sms:hover{background:#fdf7e8}
 .fs-btn.rpv{color:var(--rd);border-color:#f2c4c4}.fs-btn.rpv:hover{background:#fdf1f1}
+.fs-btn.bacs{color:var(--dk);border-color:#c9d9ee}.fs-btn.bacs:hover{background:#eef4fc}
+.fs-btn .fs-b{display:inline-flex;align-items:center;justify-content:center;width:20px;height:20px;border-radius:6px;background:var(--dk);color:#fff;font-weight:900;font-size:12px;line-height:1}
 /* onglets */
 .fs-tabs-wrap{padding:14px 16px}
 .fs-tabs{display:flex;flex-wrap:wrap;gap:8px;justify-content:center}
@@ -322,6 +347,7 @@ OD.define('fiche-shell', {
         '<button class="fs-btn mail" data-btn="mail">' + svg(IC.mail) + 'Email</button>' +
         '<button class="fs-btn sms" data-btn="sms">' + svg(IC.sms) + 'SMS</button>' +
         '<button class="fs-btn rpv" data-btn="rpv">' + svg(IC.rpv) + 'RPV</button>' +
+        (state.bacs && state.bacs.url ? '<button class="fs-btn bacs" data-btn="bacs" title="Ouvrir le compte client dans BACS"><span class="fs-b">B</span>BACS</button>' : '') +
       '</div></div>';
   }
   // Entreprise n'a de sens que pour un particulier -> masqué (et onglets resserrés)
@@ -369,7 +395,7 @@ OD.define('fiche-shell', {
   function bindHeader(root) {
     root.querySelectorAll('[data-btn]').forEach(b => b.addEventListener('click', () => {
       const k = b.getAttribute('data-btn');
-      if (k === 'call') callClient(); else if (k === 'rpv') openRpv(); else if (k === 'sms') openSms(); else if (k === 'wa') openWa(); else if (k === 'mail') openMail(); else todo(k);
+      if (k === 'bacs') ouvrirBacs(); else if (k === 'call') callClient(); else if (k === 'rpv') openRpv(); else if (k === 'sms') openSms(); else if (k === 'wa') openWa(); else if (k === 'mail') openMail(); else todo(k);
     }));
   }
 
