@@ -1,5 +1,7 @@
 // ============================================================================
-//  ADMIN — module One Data (OD.define)  v12
+//  ADMIN — module One Data (OD.define)  v14
+//  v14 (22/10/2026) : licence One Data par utilisateur (USER.licence) dans les
+//  fiches de création et d'édition ; vide = gamme par défaut du rôle.
 //  v12 (08/10/2026) : un compte desactive (statut 'inactive' avec un compte de connexion) porte un
 //  badge « Désactivé » a cote du nom et sa ligne est grisee : seule l'action
 //  « Réactiver » du menu le revelait (recette Team Colin, A-91).
@@ -394,6 +396,7 @@ OD.define('admin', {
       prenom: data.prenom, nom: data.nom, email: data.email,
       telephone: data.telephone, voip_number: data.voip,
       matricule: data.matricule, fonction: data.fonction, vn_vo: data.vnvo,
+      licence: data.licence || undefined,
       id_site_main: data.id_site_main, id_role: data.id_role ? Number(data.id_role) : undefined,
       reset_password: !!data.reset_password, revoke_sessions: !!data.revoke_sessions
     });
@@ -407,6 +410,7 @@ OD.define('admin', {
       var cV = pickCol(cols, VNVO_FIELDS); if (cV && data.vnvo !== undefined) upd[cV] = data.vnvo || null;
       var cM = pickCol(cols, USER_MATRICULE_FIELDS); if (cM && data.matricule !== undefined) upd[cM] = data.matricule || null;
       var cF = pickCol(cols, USER_FONCTION_FIELDS); if (cF && data.fonction !== undefined) upd[cF] = data.fonction || null;
+      if (data.licence && cols.indexOf('licence') !== -1) upd.licence = data.licence;
       // Périmètre principal porté par la fiche USER (≠ affectations USER_SITE)
       var cS = pickCol(cols, PRINCIPAL_FIELDS); if (cS && data.id_site_main !== undefined) upd[cS] = data.id_site_main == null ? null : Number(data.id_site_main);
       var cR = pickCol(cols, USER_ROLE_FIELDS); if (cR && data.id_role !== undefined && data.id_role) upd[cR] = Number(data.id_role);
@@ -900,6 +904,12 @@ OD.define('admin', {
     };
   }
 
+  /* Licences One Data (22/10/2026) : USER.licence. Vide = gamme du rôle. */
+  var LICENCES = [['performance', 'Performance — 99 €'], ['intelligence', 'Intelligence — 129 € (Delco)'], ['connect', 'Connect — 159 € (téléphonie, conversations)'], ['full', 'Full — 174 € (tout)']];
+  function licenceOptions(cur, vide) {
+    return '<option value="">' + vide + '</option>' + LICENCES.map(function (l) { return '<option value="' + l[0] + '"' + (String(cur || '') === l[0] ? ' selected' : '') + '>' + l[1] + '</option>'; }).join('');
+  }
+
   function modalEdit(row) {
     var ov = overlay('<div class="oda-modal-head"><div><h2>Éditer le profil</h2><p>' + esc(fullName(row)) + '</p></div><button class="oda-iconbtn" data-x>' + ICON.x + '</button></div>'
       + '<div class="oda-modal-body"><div class="oda-form">'
@@ -910,6 +920,8 @@ OD.define('admin', {
       + '<div><label>VN / VO / VNVO</label><select data-f="vnvo">'
       + ['', 'VN', 'VO', 'VNVO'].map(function (o) { return '<option value="' + o + '"' + (String(rowVnvo(row)).toUpperCase() === o ? ' selected' : '') + '>' + (o || '—') + '</option>'; }).join('')
       + '</select></div>'
+      + '<div data-lic-box><label>Licence One Data</label><select data-f="licence">' + licenceOptions('', 'Gamme par défaut du rôle') + '</select>'
+      + '<p class="oda-note">Intelligence et Full ouvrent Delco ; Connect et Full ouvrent la téléphonie. Le changement compte dans la facture du mois, au prorata.</p></div>'
       + '<div class="oda-err-slot"></div></div>'
       + '<div class="oda-sep2"></div><p class="oda-subhead">Périmètre principal (fiche utilisateur)</p>'
       + '<p class="oda-note">Site et rôle portés par la table ' + esc(TABLE_USER) + ' : ils pilotent les défauts du produit (agenda, portefeuille, statistiques). Les affectations site par site se règlent dans « Périmètre et hiérarchie ».</p>'
@@ -959,10 +971,14 @@ OD.define('admin', {
       mp.cols = cols;
       var cS = pickCol(cols, PRINCIPAL_FIELDS), cR = pickCol(cols, USER_ROLE_FIELDS);
       if (!cS && !cR) { mpBox.innerHTML = '<div class="oda-warn">Colonnes de périmètre principal introuvables sur ' + esc(TABLE_USER) + '.</div>'; return; }
-      var sel = ['ID_User'].concat([cS, cR].filter(Boolean)).join(',');
+      var aLic = !!(cols && cols.indexOf('licence') !== -1);
+      var sel = ['ID_User'].concat([cS, cR].filter(Boolean)).concat(aLic ? ['licence'] : []).join(',');
       var r = await sb().from(TABLE_USER).select(sel).eq('ID_User', row.id_user).limit(1);
       if (r.error) { mpBox.innerHTML = '<div class="oda-warn">Lecture impossible : ' + esc(r.error.message) + '</div>'; return; }
       var u = (r.data && r.data[0]) || {};
+      var licSel = ov.querySelector('[data-f="licence"]'), licBox = ov.querySelector('[data-lic-box]');
+      if (aLic && licSel) { licSel.value = u.licence || ''; mp.licenceLue = true; }
+      else if (licBox) licBox.style.display = 'none';
       mp.id_site = cS && u[cS] != null ? Number(u[cS]) : null;
       mp.id_role = cR && u[cR] != null ? String(u[cR]) : '';
       var info = mp.id_site != null ? mpSiteInfo(mp.id_site) : null;
@@ -995,6 +1011,8 @@ OD.define('admin', {
       btn.disabled = true; btn.textContent = 'Enregistrement…';
       var np = ov.querySelector('[data-f="newpwd"]'), rv = ov.querySelector('[data-f="revoke"]');
       var data = { prenom: g('prenom'), nom: g('nom'), email: g('email'), telephone: g('telephone'), voip: g('voip'), matricule: g('matricule'), fonction: g('fonction'), vnvo: g('vnvo'), reset_password: !!(np && np.checked), revoke_sessions: !!(rv && rv.checked) };
+      // Licence écrite seulement si elle a été lue (colonne présente) et choisie.
+      if (mp.licenceLue && g('licence')) data.licence = g('licence');
       // On n'écrit le périmètre principal que si la lecture a abouti : sinon on
       // risquerait d'effacer une valeur qu'on n'a jamais affichée.
       if (mp.loaded) { data.id_site_main = mp.id_site; data.id_role = mp.id_role; }
@@ -1444,6 +1462,7 @@ OD.define('admin', {
       + '<div class="oda-two"><div><label>Téléphone</label><input data-f="telephone"></div><div><label>Numéro VOIP</label><input data-f="voip"></div></div>'
       + '<div class="oda-two"><div><label>Matricule</label><input data-f="matricule"></div><div><label>Fonction</label><input data-f="fonction"></div></div>'
       + '<div><label>VN / VO / VNVO</label><select data-f="vnvo"><option value="">—</option><option value="VN">VN</option><option value="VO">VO</option><option value="VNVO">VNVO</option></select></div>'
+      + '<div><label>Licence One Data</label><select data-f="licence">' + licenceOptions('', 'Gamme par défaut du rôle') + '</select></div>'
       + '</div><div class="oda-sep2"></div><p class="oda-subhead">Affectation initiale</p><div id="oda-place"></div>'
       + '<div class="oda-reqbox"><h4>Champs requis pour créer le compte</h4><div class="oda-reqlist"></div></div>'
       + '<div class="oda-err-slot"></div></div>'
@@ -1503,6 +1522,7 @@ OD.define('admin', {
         email: email, prenom: prenom, nom: nom,
         telephone: g('telephone') || null, voip_number: g('voip') || null,
         matricule: g('matricule') || null, fonction: g('fonction') || null, vn_vo: g('vnvo') || null,
+        licence: g('licence') || null,
         id_role: Number(p.id_role), id_site_main: Number(p.id_site),
         reseau: p.reseau || null, affaire: p.affaire || null, site: p.site || null,
         id_affaire: ref2 && ref2.id_affaire != null ? Number(ref2.id_affaire) : null,
