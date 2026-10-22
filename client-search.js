@@ -1,4 +1,7 @@
 // ============================================================================
+//  v17 (22/10/2026) : création de client SUIVIE — panneau d'avancement One Data
+//  puis BACS (spinners), bouton « B » vers le compte BACS ; erreur si BACS n'est
+//  pas ouvert chez le vendeur (module partagé oropra-bacs-client v1).
 //  v16 (05/10/2026) : filet d'affichage. Une valeur stockee hors referentiel
 //  ("Other", une variante d'un import) ne retombe plus sur « Selectionner » :
 //  elle est ajoutee comme option, avec son libelle propre quand on sait la
@@ -477,11 +480,19 @@ OD.define('client-search', {
       if (od2) od2.nettoyerPayload(payload);      // écarte les colonnes calculées
       delete payload.IDVu;
 
-      const { data: creation, error } = await supabase.rpc('client_creer', {
-        p_payload: payload,
-        p_id_site: idSite,
-        p_id_user: viewerId != null ? Number(viewerId) : null
-      });
+      // v17 : création suivie One Data + BACS (oropra-bacs-client). Repli sur
+      // l'appel direct si le module partagé ne se charge pas : la base exige
+      // de toute façon que BACS soit ouvert chez le vendeur.
+      const _bc = await (window.__odBacsClientPret || (window.__odBacsClientPret = new Promise(function (ok) {
+            if (window.oropraBacsClient) return ok(window.oropraBacsClient);
+            var sc = document.createElement('script'); sc.src = 'https://cdn.jsdelivr.net/gh/oropra-apps/one-data-blocs@oropra-bacs-client-v1/oropra-bacs-client.js'; sc.async = true;
+            sc.onload = function () { ok(window.oropraBacsClient || null); };
+            sc.onerror = function () { window.__odBacsClientPret = null; ok(null); };
+            document.head.appendChild(sc);
+          })));
+      const { data: creation, error } = _bc
+        ? await _bc.creer(supabase, { p_payload: payload, p_id_site: idSite, p_id_user: viewerId != null ? Number(viewerId) : null })
+        : await supabase.rpc('client_creer', { p_payload: payload, p_id_site: idSite, p_id_user: viewerId != null ? Number(viewerId) : null });
       if (error) throw error;
       const inserted = creation && creation.client ? creation.client : null;
       if (!inserted) throw new Error('création : aucune fiche renvoyée');
