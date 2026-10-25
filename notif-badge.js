@@ -1,7 +1,19 @@
 // ============================================================================
-//  NOTIF BADGE — module One Data (OD.define)  v2 — LE FEU, PAS LE COMPTEUR
+//  NOTIF BADGE — module One Data (OD.define)  v7 — LE FEU, PAS LE COMPTEUR
 //
 //  Module app-level : ancre masquée dans le header, PERSISTANT.
+//
+//  v7 (25/10/2026) — LA PASTILLE SE TAIT QUAND ELLE NE PEUT RIEN DIRE.
+//  Un chef des ventes a perdu le réseau vingt minutes avec deux onglets
+//  ouverts en arrière-plan : la pastille a continué d'interroger le serveur
+//  toutes les cinq minutes, chaque échec a été journalisé en erreur, et Pulse
+//  en a fait dix-sept « Erreurs JS » pour une seule coupure de connexion.
+//    - pas de calcul périodique quand l'onglet est masqué ou hors ligne ;
+//    - un calcul au retour (onglet de nouveau visible, ou connexion rétablie)
+//      si le dernier date de plus d'une minute ;
+//    - un échec réseau (« Failed to fetch ») est un avertissement, plus une
+//      erreur : Pulse le compte dans la coupure, pas comme un défaut du code.
+//      Une vraie réponse d'erreur du serveur (HTTP 4xx/5xx) reste une erreur.
 //
 //  CE QUI CHANGE
 //
@@ -49,6 +61,7 @@ OD.define('notif-badge', {
     /* ---- Config ----------------------------------------------------------- */
     const VAR_NB_NOTIFS = '9fc0eca4-2325-4774-8e27-4c66515a9166';   // sortie : nb_notifs (Number)
     const PERIOD_MS     = 5 * 60 * 1000;                            // rafraîchissement périodique
+    const RETOUR_MS     = 60 * 1000;                                // recalcul au retour si plus vieux
     const LOG = (...a) => console.log('%c[notif-badge]', 'color:#2a5ea9;font-weight:bold', ...a);
 
     function fwin() {
@@ -103,21 +116,47 @@ OD.define('notif-badge', {
     }
 
     /* ---- État ------------------------------------------------------------- */
-    const STATE_VERSION = 20;   // v20 : ma file seule + feu, plus de bus
+    const STATE_VERSION = 21;   // v21 : silence hors ligne / onglet masqué
     function st() {
       const cur = window.__OROPRA_NOTIF_BADGE__;
       if (!cur || cur._v !== STATE_VERSION) {
         try { if (cur && cur.tick) clearInterval(cur.tick); } catch (e) {}
         try { if (cur && cur.poll) clearInterval(cur.poll); } catch (e) {}
+        try { if (cur && cur.debounce) clearTimeout(cur.debounce); } catch (e) {}
+        try { if (cur && cur.detacher) cur.detacher(); } catch (e) {}
         window.__OROPRA_NOTIF_BADGE__ = { _v: STATE_VERSION, etat: null, debounce: null,
-                                          tick: null, ready: false, bound: false };
+                                          tick: null, ready: false, bound: false,
+                                          dernier: 0, detacher: null };
       }
       return window.__OROPRA_NOTIF_BADGE__;
     }
 
+    /* ---- Conditions ------------------------------------------------------- */
+    function horsLigne() {
+      try { return fwin().navigator.onLine === false || navigator.onLine === false; }
+      catch (e) { return false; }
+    }
+    function masque() {
+      try {
+        const d = wwLib.getFrontDocument ? wwLib.getFrontDocument() : document;
+        return d.visibilityState === 'hidden';
+      } catch (e) { return false; }
+    }
+    // « Failed to fetch » (Chrome), « NetworkError… » (Firefox), « Load failed »
+    // (Safari) : la requête n'est jamais partie. Ce n'est pas un défaut du code.
+    function echecReseau(e) {
+      const m = String((e && (e.message || e)) || '');
+      return /Failed to fetch|NetworkError|Load failed|Network request failed|ERR_(INTERNET|NETWORK)/i.test(m);
+    }
+
     /* ---- Calcul ----------------------------------------------------------- */
-    async function calculer() {
+    async function calculer(source) {
       const s = st();
+      // Le tick périodique ne sert à rien quand personne ne regarde ou que la
+      // requête ne peut pas partir. Les appels à la demande (page
+      // Notifications, rappel explicite) passent, sauf hors ligne.
+      if (horsLigne()) return;
+      if (source === 'tick' && masque()) return;
       try {
         const jwt = await getUserJwt();
         if (!jwt) return;
@@ -129,8 +168,10 @@ OD.define('notif-badge', {
         });
         if (!res.ok) throw new Error('HTTP ' + res.status);
         s.etat = await res.json();
+        s.dernier = Date.now();
       } catch (e) {
-        console.error('[notif-badge] notif_feu', e);
+        if (echecReseau(e)) console.warn('[notif-badge] notif_feu : réseau indisponible, dernier état conservé');
+        else console.error('[notif-badge] notif_feu', e);
         return;                       // on garde le dernier état connu
       }
       publier(s.etat);
@@ -155,7 +196,29 @@ OD.define('notif-badge', {
     function periodique() {
       const s = st();
       if (s.tick) return;
-      s.tick = setInterval(() => calculer(), PERIOD_MS);
+      s.tick = setInterval(() => calculer('tick'), PERIOD_MS);
+    }
+    // Retour au premier plan, ou connexion rétablie : un seul recalcul, et
+    // seulement si le dernier état a plus d'une minute.
+    function brancherRetours() {
+      const s = st();
+      if (s.detacher) return;
+      const auRetour = () => {
+        if (horsLigne() || masque()) return;
+        if (Date.now() - (st().dernier || 0) >= RETOUR_MS) bientot(1200);
+      };
+      const cibles = [];
+      try { cibles.push(wwLib.getFrontDocument ? wwLib.getFrontDocument() : document); } catch (e) {}
+      if (cibles.indexOf(document) < 0) cibles.push(document);
+      const fenetres = [];
+      try { fenetres.push(fwin()); } catch (e) {}
+      if (fenetres.indexOf(window) < 0) fenetres.push(window);
+      cibles.forEach(d => { try { d.addEventListener('visibilitychange', auRetour); } catch (e) {} });
+      fenetres.forEach(w => { try { w.addEventListener('online', auRetour); } catch (e) {} });
+      s.detacher = () => {
+        cibles.forEach(d => { try { d.removeEventListener('visibilitychange', auRetour); } catch (e) {} });
+        fenetres.forEach(w => { try { w.removeEventListener('online', auRetour); } catch (e) {} });
+      };
     }
     function brancherRappel() {
       const s = st();
@@ -196,6 +259,7 @@ OD.define('notif-badge', {
 
       periodique();
       brancherRappel();
+      brancherRetours();
     }
     demarrer();
 
