@@ -1,5 +1,5 @@
 // ============================================================================
-//  PULSE — télémétrie d'usage One Data (OD.define)  v1
+//  PULSE — télémétrie d'usage One Data (OD.define)  v6
 //  Module AMBIANT : le socle (v25+) lui crée une ancre invisible, uniquement
 //  chez les tenants à qui le registre sert 'pulse'. Persistant, sans rendu.
 //
@@ -17,7 +17,8 @@
 // ============================================================================
 OD.define('pulse', {
   mount(__anchor, ctx) {
-    const VERSION = 4;   // v4 : écran principal = module monté occupant la plus grande surface visible
+    const VERSION = 6;   // v6 : une coupure réseau = UNE friction, plus une « Erreur JS » par requête (25/10/2026)
+                         // v4 : écran principal = module monté occupant la plus grande surface visible
                          // v3 : actions métier déduites des écritures réussies (catalogue ACTIONS)
                          // v2 : rien n'est mesuré sur la page de connexion (ancre 'auth')
     const W = window;
@@ -368,6 +369,12 @@ OD.define('pulse', {
         try {
           const url = typeof entree === 'string' ? entree : (entree && entree.url) || String(entree || '');
           const methode = String((init && init.method) || (entree && typeof entree === 'object' && entree.method) || 'GET').toUpperCase();
+          // Joignabilité du tenant : une réponse, quelle qu'elle soit, ferme une
+          // coupure en cours ; une requête qui n'est jamais partie l'alimente.
+          let uT = null; try { uT = new URL(url, location.href); } catch (x) {}
+          if (uT && hotes.has(uT.host)) {
+            promesse.then(() => fermerCoupure(), (e) => { if (estReseau(e && e.message)) noterEchecReseau(pointDAcces(uT.pathname), false); });
+          }
           if (methode !== 'GET' && methode !== 'HEAD' && methode !== 'OPTIONS') {
             const k = actionDe(url, methode);
             if (k) promesse.then(r => { if (r && r.ok && utilisateur()) noterAction(k, pointDAcces(new URL(url, location.href).pathname)); }).catch(() => {});
@@ -388,11 +395,55 @@ OD.define('pulse', {
       }
     }
 
+    /* ------------------------------------------------------------ coupures réseau */
+    // Une requête jamais partie (« Failed to fetch » Chrome, « NetworkError »
+    // Firefox, « Load failed » Safari) ne dit rien du code : le poste n'avait
+    // plus de réseau. Le 25/10/2026, vingt minutes de coupure ont produit dix-sept
+    // « Erreurs JS » dans le cockpit. Les échecs sont désormais cumulés dans une
+    // coupure, ouverte au premier échec (ou à 'offline'), fermée à la première
+    // réponse du tenant, au premier envoi Pulse réussi ou à 'online' — et UNE
+    // seule friction est émise, datée du début, avec durée et requêtes perdues.
+    // Le type reste 'erreur_js' (accepté par l'edge function, compté par le
+    // cockpit) ; props.genre = 'reseau' permet au cockpit de la distinguer.
+    const RESEAU_RE = /Failed to fetch|NetworkError|Load failed|Network request failed|ERR_(INTERNET|NETWORK)|réseau indisponible/i;
+    const estReseau = (m) => RESEAU_RE.test(String(m || ''));
+    let coupure = null;
+    const hhmm = (t) => { const d = new Date(t); return String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0'); };
+    function ouvrirCoupure() {
+      if (!coupure) { const now = Date.now(); coupure = { debut: now, dernier: now, dernierFetch: 0, n: 0, points: new Set() }; }
+      return coupure;
+    }
+    // faible = signalement indirect (console, promesse) : ne compte que si aucun
+    // échec de requête n'a été vu dans les deux secondes (même panne, deux échos).
+    function noterEchecReseau(origine, faible) {
+      const c = ouvrirCoupure();
+      const now = Date.now();
+      if (faible && now - c.dernierFetch < 2000) return;
+      if (!faible) c.dernierFetch = now;
+      c.n++; c.dernier = now;
+      if (origine && c.points.size < 6) c.points.add(String(origine).slice(0, 60));
+    }
+    function fermerCoupure(enCours) {
+      if (!coupure) return;
+      const c = coupure; coupure = null;
+      const fin = enCours ? null : Date.now();
+      if (!c.n && fin && fin - c.debut < 10000) return;   // simple bascule offline/online
+      const duree_s = Math.round(((fin || Date.now()) - c.debut) / 1000);
+      const msg = `coupure réseau ${hhmm(c.debut)} → ${fin ? hhmm(fin) : 'en cours'} · ${c.n} requête${c.n > 1 ? 's' : ''} sans réponse`;
+      pousser({ ts: new Date(c.debut).toISOString(), type: 'erreur_js', module: null,
+                props: { msg, source: 'reseau', genre: 'reseau', debut: new Date(c.debut).toISOString(),
+                         fin: fin ? new Date(fin).toISOString() : null, duree_s, echecs: c.n, points: [...c.points] } });
+      erreursRecentes.push({ ts: new Date(c.debut).toISOString(), msg, source: 'reseau' }); if (erreursRecentes.length > 8) erreursRecentes.shift();
+    }
+    ecouter(W, 'offline', () => ouvrirCoupure());
+    ecouter(W, 'online', () => fermerCoupure());
+
     /* ------------------------------------------------------------ erreurs JS */
     const compteErreurs = new Map();
     function erreur(msg, source) {
       msg = String(msg || '').replace(/\s+/g, ' ').slice(0, 280);
       if (!msg || /ResizeObserver loop|Script error\.?$|chrome-extension:|moz-extension:/.test(msg + ' ' + (source || ''))) return;
+      if (estReseau(msg)) { const mod = msg.match(/^\[([\w-]+)\]/); noterEchecReseau(mod ? mod[1] : source, true); return; }
       const cle = msg + '|' + (source || '');
       const n = (compteErreurs.get(cle) || 0) + 1;
       compteErreurs.set(cle, n);
@@ -489,6 +540,7 @@ OD.define('pulse', {
           throw new Error(j.erreur || ('HTTP ' + r.status));
         }
         echecs = 0;
+        fermerCoupure();               // le réseau répond : la coupure est finie
         if (typeof j.non_lus === 'number') emettre('non_lus', j.non_lus);
         if (j.sondage) emettre('sondage', j.sondage);
       } catch (e) {
@@ -503,7 +555,7 @@ OD.define('pulse', {
     }
 
     ecouter(document, 'visibilitychange', () => { if (document.visibilityState === 'hidden') { viderActif(); viderApi(); envoyer(true); } });
-    ecouter(W, 'pagehide', () => { viderActif(); viderApi(); envoyer(true); });
+    ecouter(W, 'pagehide', () => { fermerCoupure(true); viderActif(); viderApi(); envoyer(true); });
 
     // Changement d'utilisateur dans le même onglet (déconnexion / reconnexion)
     let uPrecedent = null;
