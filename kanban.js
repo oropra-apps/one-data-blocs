@@ -1,4 +1,7 @@
 // ============================================================================
+//  v69 (25/10/2026) : filtre « Opportunités vides : affichées / masquées » dans la
+//  barre du haut (mémorisé dans le navigateur). Masquées, elles sortent aussi
+//  des compteurs et du taux de conversion.
 //  v68 (25/10/2026) : demande Team Colin — les opportunités BACS sans simulation
 //  ni commande ont leur carte, dans la colonne Simulations (Abandonné si
 //  l'opportunité est abandonnée), pour suivre le nombre total d'opportunités.
@@ -275,6 +278,11 @@ OD.define('kanban', {
   state.fClient = state.fClient || 'tous';
   state.fType = state.fType || 'tous';
   state.fFin = state.fFin || 'tous';
+  // v69 : opportunités sans simulation affichées ('oui') ou masquées ('non').
+  if (state.fOpp === undefined) {
+    state.fOpp = 'oui';
+    try { const v = localStorage.getItem('od.kanban.fOpp'); if (v === 'oui' || v === 'non') state.fOpp = v; } catch (e) {}
+  }
   state.menuFor = null;
   state.openVersions = null;
   state.selOpen = false;
@@ -455,6 +463,7 @@ OD.define('kanban', {
     if (state.fType !== 'tous' && String(c.vn_vo_effectif || c.vn_vo || '').split('+').indexOf(state.fType) < 0) return false;
     if (state.fClient !== 'tous' && c.client_type !== state.fClient) return false;
     if (state.fFin !== 'tous' && c.financement !== state.fFin) return false;
+    if (state.fOpp === 'non' && c.nature === 'opportunite') return false;
     return true;
   }
   function visibleCards() { return (state.cards || []).filter(passFilters); }
@@ -498,7 +507,11 @@ OD.define('kanban', {
     h += '<div class="k-dates"><button type="button" class="k-range" data-krange="1">\ud83d\udcc5 <span class="k-range-t">' + esc(fmtPeriodKan()) + '</span> <span class="k-caret">▾</span></button></div>';
     h += '<div class="k-filters"><div class="k-fgroup">' + chip('type', 'tous', state.fType, 'Tous') + chip('type', 'VN', state.fType, 'VN') + chip('type', 'VO', state.fType, 'VO') + '</div>';
     h += '<div class="k-fgroup">' + chip('client', 'tous', state.fClient, 'Tous clients') + chip('client', 'particulier', state.fClient, 'Particuliers') + chip('client', 'societe', state.fClient, 'Sociétés') + '</div>';
-    h += '<div class="k-fgroup">' + chip('fin', 'tous', state.fFin, 'Tous') + chip('fin', 'financement', state.fFin, 'Financement') + chip('fin', 'comptant', state.fFin, 'Comptant') + '</div></div></div>';
+    h += '<div class="k-fgroup">' + chip('fin', 'tous', state.fFin, 'Tous') + chip('fin', 'financement', state.fFin, 'Financement') + chip('fin', 'comptant', state.fFin, 'Comptant') + '</div>';
+    // v69 : seulement s'il y a des opportunités vides dans la période.
+    const nOpp = (state.cards || []).filter(c => c.nature === 'opportunite').length;
+    if (nOpp) h += '<div class="k-fgroup" title="Opportunités BACS sans simulation ni commande">' + chip('opp', 'oui', state.fOpp, 'Opportunités vides (' + nOpp + ')') + chip('opp', 'non', state.fOpp, 'Masquées') + '</div>';
+    h += '</div></div>';
     return h;
   }
 
@@ -3132,7 +3145,7 @@ OD.define('kanban', {
     if (more) { const k = more.getAttribute('data-kmore'); state.colLimit = state.colLimit || {}; state.colLimit[k] = ((state.colLimit[k]) || KAN_PAGE) + KAN_PAGE; render(); return; }
 
     const f = e.target.closest('[data-filter]');
-    if (f) { const [g, v] = f.getAttribute('data-filter').split(':'); if (g === 'type') state.fType = v; else if (g === 'client') state.fClient = v; else if (g === 'fin') state.fFin = v; render(); return; }
+    if (f) { const [g, v] = f.getAttribute('data-filter').split(':'); if (g === 'type') state.fType = v; else if (g === 'client') state.fClient = v; else if (g === 'fin') state.fFin = v; else if (g === 'opp') { state.fOpp = v; try { localStorage.setItem('od.kanban.fOpp', v); } catch (x) {} } render(); return; }
 
     const menuBtn = e.target.closest('[data-menu]');
     if (menuBtn) { const id = Number(menuBtn.getAttribute('data-menu')); state.menuFor = (state.menuFor === id) ? null : id; render(); return; }
