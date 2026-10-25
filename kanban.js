@@ -1,4 +1,10 @@
 // ============================================================================
+//  v68 (25/10/2026) : demande Team Colin — les opportunités BACS sans simulation
+//  ni commande ont leur carte, dans la colonne Simulations (Abandonné si
+//  l'opportunité est abandonnée), pour suivre le nombre total d'opportunités.
+//  Carte « opportunité » : client, mention « Aucune simulation », ancienneté,
+//  bouton « B » ; ni loupe, ni corbeille, ni déplacement. Elle compte une
+//  affaire et zéro document dans l'en-tête de colonne.
 //  v67 (22/10/2026) : bouton « Enregistrer » verrouillé en rouge (« Bacs doit être
 //  ouvert pour pouvoir valider ») tant que BACS n'est pas ouvert ; il redevient
 //  normal dès que BACS répond (module partagé oropra-bacs-client v2).
@@ -709,7 +715,7 @@ OD.define('kanban', {
       // affiche donc le nombre d'AFFAIRES (= cartes = opportunites) et, entre
       // parentheses, le nombre de DOCUMENTS reels (simulations ou commandes).
       const nbAffaires = list.length;
-      const nbDocs = list.reduce((s, c) => s + Math.max(1, Number(c.nb_versions || 1)), 0);
+      const nbDocs = list.reduce((s, c) => s + (c.nature === 'opportunite' ? 0 : Math.max(1, Number(c.nb_versions || 1))), 0);
       const compteur = (nbDocs > nbAffaires)
         ? nbAffaires + '<span class="kc-n-docs">/' + nbDocs + '</span>'
         : String(nbAffaires);
@@ -760,7 +766,24 @@ OD.define('kanban', {
   //    plus proche du clic. Sur la carte entière (v41 à v43), il captait TOUT
   //    clic — loupe, fiche client, véhicule — et ouvrait BACS à l'adresse
   //    /quote/1 (relevé le 21/09).
+  // v68 : opportunité BACS sans simulation ni commande. Rien à consulter ni à
+  // déplacer : elle dit seulement qu'une affaire est ouverte pour ce client.
+  function renderCardOpportunite(c) {
+    const j = ageJours(c.maj);
+    let h = '<div class="kc-card vt-na kc-opp" draggable="false" data-card="' + c.id_propale_bdc + '" data-from="' + c.status + '" data-kbacs="1">';
+    const cliName = esc(c.client || ('Client #' + (c.id_client || '?')));
+    h += '<div class="kc-cli">' + (c.id_client != null ? '<button type="button" class="kc-cli-link" data-fiche="' + c.id_client + '" title="Ouvrir la fiche client — Propositions commerciales">' + cliName + '</button>' : '<span>' + cliName + '</span>') + (c.client_type ? '<span class="kc-ctype">' + (c.client_type === 'societe' ? 'Société' : 'Particulier') + '</span>' : '') + '</div>';
+    h += '<div class="kc-veh" style="color:#7a8aa3;font-style:italic"><span class="kc-vdot"></span>Opportunité · aucune simulation</div>';
+    h += '<div class="kc-row"><span class="kc-eur" style="color:#9fb0c4">—</span>' + ageBadge(j) + '</div>';
+    h += '<div class="kc-actions">';
+    const cible = c.bacs_sf_id || c.id_affaire_bacs;
+    if (KAN_BACS && cible) h += '<button class="kc-ic kc-bacs" data-bacs="' + esc(cible) + '" title="Ouvrir l\'opportunité dans BACS">B</button>';
+    h += '</div>';
+    return h + '</div>';
+  }
+
   function renderCard(c) {
+    if (c.nature === 'opportunite') return renderCardOpportunite(c);
     const vnvo = c.vn_vo_effectif || c.vn_vo;   // VD/VK : l'univers du vendeur
     const vt = vnvo === 'VN' ? 'vn' : (vnvo === 'VO' ? 'vo' : 'na');
     // Plusieurs documents de meme nature dans l'affaire : on affiche leur nombre
