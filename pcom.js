@@ -1,4 +1,7 @@
-// PCOM — module One Data (OD.define) v3
+// PCOM — module One Data (OD.define) v17
+// v17 (25/10/2026) : les propositions d'un collègue (sites du périmètre) apparaissent
+//   sans détail — date, marque, modèle, finition, auteur — dans « Chez vos collègues ».
+//   La RPC les marque restreint = true et n'en transmet rien d'autre.
 /* ============================================================================
    P.COMMERCIALES — le suivi commercial d'un client.
 
@@ -248,6 +251,13 @@ OD.define('pcom', {
 '#pcom-root .fl .fdet{font-size:11px;color:#9fb0c4;white-space:nowrap}' +
 '#pcom-root .fl .fmnt{font-size:12.5px;font-weight:800;white-space:nowrap}' +
 '#pcom-root .vide{padding:30px;text-align:center;color:#9fb0c4;font-size:13px;border:0.5px dashed #e3edf9;border-radius:12px}' +
+'#pcom-root .coll{margin-top:14px}' +
+'#pcom-root .coll h4{margin:0 0 6px;font-size:11px;font-weight:800;letter-spacing:.06em;text-transform:uppercase;color:#9fb0c4}' +
+'#pcom-root .coll .cl{display:flex;align-items:center;gap:12px;padding:8px 12px;border-top:0.5px solid #eef4fb;font-size:12.5px}' +
+'#pcom-root .coll .cl:first-of-type{border-top:none}' +
+'#pcom-root .coll .cd{flex:0 0 auto;min-width:92px;color:#7a98c5;white-space:nowrap}' +
+'#pcom-root .coll .cv{flex:1;min-width:0;font-weight:700;color:#1f4a87;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}' +
+'#pcom-root .coll .cq{flex:0 0 auto;color:#9fb0c4;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:45%}' +
 '#pcom-root .err{padding:12px 14px;border-radius:10px;background:rgba(217,112,112,.14);color:#b23433;font-size:13px}' +
 '</style>';
     }
@@ -411,14 +421,43 @@ OD.define('pcom', {
       return html + '</div>';
     }
 
+    // ─── Chez vos collègues ────────────────────────────────────────────────
+    // Ce que la RPC transmet d'une proposition dont le lecteur n'est ni
+    // l'auteur ni le responsable : sa date, le véhicule, l'auteur. Une ligne
+    // par affaire, à sa date la plus récente. Rien à ouvrir, rien à cliquer.
+    function colleguesHtml(rows) {
+      if (!rows.length) return '';
+      const parCle = {}, ordre = [];
+      rows.forEach(function (r) {
+        const cle = r.id_affaire_bacs || ('od:' + r.id_propale_bdc);
+        if (!parCle[cle]) { parCle[cle] = []; ordre.push(cle); }
+        parCle[cle].push(r);
+      });
+      const lignes = ordre.map(function (cle) {
+        const docs = parCle[cle].slice().sort(function (x, y) { return String(y.created_at).localeCompare(String(x.created_at)); });
+        const d = docs.find(function (x) { return x.vehicule; }) || docs[0];
+        return { date: docs[0].created_at, veh: d.vehicule, qui: [d.vendeur, d.site].filter(Boolean).join(' · ') };
+      }).sort(function (x, y) { return String(y.date).localeCompare(String(x.date)); });
+      return '<div class="coll"><h4>Chez vos collègues</h4><div class="liste">' +
+        lignes.map(function (l) {
+          return '<div class="cl"><span class="cd">' + esc(jour(l.date)) + '</span>' +
+                 '<span class="cv">' + esc(l.veh || 'Véhicule non précisé') + '</span>' +
+                 '<span class="cq">' + esc(l.qui) + '</span></div>';
+        }).join('') + '</div></div>';
+    }
+
     function PC_render() {
       const root = doc.getElementById('pcom-root'); if (!root) return;
       if (S.loading && !S.rows) { root.innerHTML = css() + '<div class="vide">Chargement…</div>'; return; }
       if (S.error) { root.innerHTML = css() + '<div class="err">' + esc(S.error) + '</div>'; return; }
 
-      const affaires = batirAffaires(S.rows || []);
+      const tous = S.rows || [];
+      const collegues = tous.filter(function (r) { return r.restreint; });
+      const affaires = batirAffaires(tous.filter(function (r) { return !r.restreint; }));
       if (!affaires.length) {
-        root.innerHTML = css() + '<div class="vide">Aucune affaire commerciale pour ce client.</div>';
+        root.innerHTML = css() + '<div class="vide">' +
+          (collegues.length ? 'Aucune affaire à votre nom pour ce client.' : 'Aucune affaire commerciale pour ce client.') +
+          '</div>' + colleguesHtml(collegues);
         return;
       }
       // Filtres : la nature du véhicule et l'état de l'affaire. Ils portent sur
@@ -476,7 +515,8 @@ OD.define('pcom', {
       root.innerHTML = css() + filtres + res +
         (cadre.length ? '' : '<div class="vide">Aucune affaire ne correspond à ce filtre.</div>') +
         '<div class="liste">' + recentes.map(affaireHtml).join('') + '</div>' +
-        friseHtml(anciennes);
+        friseHtml(anciennes) +
+        colleguesHtml(collegues);
     }
 
     // ─── Chargement ────────────────────────────────────────────────────────
