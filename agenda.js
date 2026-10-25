@@ -1,18 +1,4 @@
 // ============================================================================
-//  v28 (25/10/2026) : AGENDA SYNCHRONISÉ AVEC BACS (Team Colin, demande de
-//  Julien Faugeras). Chaque RDV, créneau et bilatérale posé, déplacé ou
-//  supprimé ici est reporté dans l'agenda BACS de son propriétaire (la base
-//  dépose le geste, l'extension l'écrit) ; les RDV pris dans BACS arrivent
-//  ici. Dans la fenêtre : INVITÉS, comme dans BACS (BACS leur écrit), état de
-//  la synchronisation, et bouton verrouillé en rouge tant que BACS n'est pas
-//  ouvert sur le poste. Un RDV où l'on n'est qu'invité s'ouvre en lecture.
-//  BACS interdisant toute suppression, un RDV supprimé y est marqué annulé.
-//  v27 (22/10/2026) : bouton « Enregistrer » verrouillé en rouge (« Bacs doit être
-//  ouvert pour pouvoir valider ») tant que BACS n'est pas ouvert ; il redevient
-//  normal dès que BACS répond (module partagé oropra-bacs-client v2).
-//  v26 (22/10/2026) : création de client SUIVIE — panneau d'avancement One Data
-//  puis BACS (spinners), bouton « B » vers le compte BACS ; erreur si BACS n'est
-//  pas ouvert chez le vendeur (module partagé oropra-bacs-client v1).
 //  v25 (14/10/2026) : vendeurs inactifs retirés du choix « vendeur évalué »
 //   (même effectif que l'accueil : présents dans dash_lire ce mois-ci ou le
 //   mois dernier) ; bilatérales en bleu foncé #1F4A85 (charte One Data).
@@ -1012,17 +998,6 @@ OD.define('agenda', {
 #agenda-ov .agm-del{border:1.5px solid #f0b6b6;border-radius:10px;padding:12px 16px;background:#fff;color:#c0392b;font-family:inherit;font-weight:800;font-size:14px;cursor:pointer;transition:all .15s}
 #agenda-ov .agm-del:hover{background:#fcebeb}
 #agenda-ov .agm-del:disabled{opacity:.55;cursor:default}
-#agenda-ov .agm-inv{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
-#agenda-ov .agm-inv-chip{display:inline-flex;align-items:center;gap:6px;background:#eef4fc;color:#1F4A85;border:1px solid #d4e2f4;border-radius:999px;padding:4px 6px 4px 11px;font-size:12px;font-weight:700}
-#agenda-ov .agm-inv-chip button{border:none;background:#d4e2f4;color:#1F4A85;width:18px;height:18px;border-radius:50%;font-size:12px;line-height:18px;padding:0;cursor:pointer;font-family:inherit}
-#agenda-ov .agm-inv-chip button:hover{background:#2a5ea9;color:#fff}
-#agenda-ov .agm-inv-chip.nb{background:#fdf6e6;border-color:#f3dfb0}
-#agenda-ov .agm-sync{display:flex;align-items:center;gap:8px;font-size:12px;font-weight:700;color:#1F4A85;background:#f7f9fc;border:1px solid #e2eaf5;border-radius:9px;padding:8px 10px}
-#agenda-ov .agm-sync .pt{width:9px;height:9px;border-radius:50%;flex:0 0 auto;background:#acc5e4}
-#agenda-ov .agm-sync.ok .pt{background:#53bda7}
-#agenda-ov .agm-sync.att .pt{background:#e6a817}
-#agenda-ov .agm-sync.ko{color:#a32d2d;background:#fdf1f1;border-color:#f2c4c4}
-#agenda-ov .agm-sync.ko .pt{background:#e24b4a}
 #agenda-ov .agm-cli-ro{padding:10px 12px;border:1.5px solid #e2eaf5;border-radius:10px;background:#f7f9fc;color:#1F4A85;font-weight:700;font-size:13px}
 #agenda-ov .agm-confirm{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
 #agenda-ov .agm-confirm-txt{flex:1;min-width:140px;color:#a32d2d;font-weight:800;font-size:13px}
@@ -1325,93 +1300,6 @@ OD.define('agenda', {
   // ==========================================================================
   const ORIGINES = ['Initiative personnelle', 'Indication', 'Marketing Groupe', 'Campagnes Constructeur', 'Fin de financement', 'Salon - Expo'];
   const DURATIONS = [15, 30, 45, 60, 90, 120];
-  // ── v28 : synchronisation avec BACS ──────────────────────────────────────
-  //  agenda_bacs_preflight dit si l'agenda est synchronisé sur ce tenant et
-  //  si l'utilisateur a un compte BACS. Si oui, tout geste d'écriture exige
-  //  BACS ouvert sur CE poste (règle du 22/10) : le bouton reste rouge et
-  //  verrouillé tant que l'extension ne répond pas, comme à la création de
-  //  client. La base refuserait de toute façon le geste.
-  let agendaBacsPf = null;
-  async function chargerAgendaBacs() {
-    if (agendaBacsPf) return agendaBacsPf;
-    try { const r = await sb().rpc('agenda_bacs_preflight'); agendaBacsPf = (!r.error && r.data) ? r.data : { actif: false }; }
-    catch (e) { agendaBacsPf = { actif: false }; }
-    return agendaBacsPf;
-  }
-  function bacsExige() { return !!(agendaBacsPf && agendaBacsPf.actif && agendaBacsPf.moi_bacs); }
-  function bacsDemander(action, params, delaiMs) {
-    const w = frontWin();
-    const g = (w.OD && w.OD.bacs) || (window.OD && window.OD.bacs);
-    if (g && typeof g.demander === 'function') return g.demander(action, params, delaiMs);
-    return new Promise(function (resolve) {
-      const id = 'agd_' + Date.now() + '_' + Math.random().toString(16).slice(2);
-      let t = null;
-      function fin(r) { try { w.removeEventListener('message', ecoute); } catch (e) {} clearTimeout(t); resolve(r); }
-      function ecoute(e) { const m = e.data; if (m && m.__od_bacs_result && m.id === id) fin(m); }
-      w.addEventListener('message', ecoute);
-      t = setTimeout(function () { fin({ ok: false, erreur: 'delai_depasse' }); }, delaiMs || 8000);
-      try { w.postMessage({ __od_bacs: true, id: id, action: action, params: params || {} }, '*'); }
-      catch (e) { fin({ ok: false, erreur: 'extension_absente' }); }
-    });
-  }
-  let bacsOuvert = null;           // dernier état connu du poste
-  let bacsSuiviT = null;
-  function suivreBacs() {
-    clearTimeout(bacsSuiviT);
-    if (!cs || !bacsExige()) return;
-    bacsDemander('ping', {}, 6000).then(function (p) {
-      const ouvert = !!(p && p.ok && p.contexte !== false);
-      const change = ouvert !== bacsOuvert;
-      bacsOuvert = ouvert;
-      if (change && cs && !cs.saving) appliquerVerrou();
-      if (cs) bacsSuiviT = setTimeout(suivreBacs, ouvert ? 8000 : 2500);
-    });
-  }
-  function verrouille() { return bacsExige() && bacsOuvert !== true; }
-  function appliquerVerrou() {
-    const d = frontDoc();
-    ['agm-save', 'agm-start-now', 'agm-del', 'agm-del-yes', 'agm-real-now'].forEach(function (id) {
-      const b = d.getElementById(id); if (!b || cs.saving) return;
-      if (verrouille()) {
-        if (b.dataset.agvHtml == null) b.dataset.agvHtml = b.innerHTML;
-        b.dataset.agvBloque = '1'; b.disabled = true;
-        if (id === 'agm-save') b.innerHTML = 'Bacs doit être ouvert pour pouvoir valider';
-        b.style.setProperty('background', '#fdf1f1', 'important');
-        b.style.setProperty('border-color', '#f2c4c4', 'important');
-        b.style.setProperty('color', '#e24b4a', 'important');
-        b.style.setProperty('cursor', 'not-allowed', 'important');
-        b.title = 'Ouvrez BACS dans un onglet de ce navigateur et connectez-vous : le bouton se débloque tout seul.';
-      } else if (b.dataset.agvBloque === '1') {
-        if (b.dataset.agvHtml != null) b.innerHTML = b.dataset.agvHtml;
-        delete b.dataset.agvHtml; delete b.dataset.agvBloque; b.disabled = false;
-        ['background', 'border-color', 'color', 'cursor'].forEach(function (k) { b.style.removeProperty(k); });
-        b.removeAttribute('title');
-      }
-    });
-  }
-  // Après une écriture : l'extension écrit dans BACS sans attendre son tour.
-  function pousserVersBacs() { if (bacsExige()) { try { bacsDemander('vider_file', {}, 4000); } catch (e) {} } }
-
-  // Les invitables : annuaire actif du tenant (avec ou sans compte BACS).
-  let invitablesCache = null;
-  async function chargerInvitables() {
-    if (invitablesCache) return invitablesCache;
-    try { const r = await sb().rpc('agenda_invitables'); invitablesCache = (!r.error && Array.isArray(r.data)) ? r.data : []; }
-    catch (e) { invitablesCache = []; }
-    return invitablesCache;
-  }
-  function nomInvite(id) { const u = (invitablesCache || []).find(x => Number(x.id_user) === Number(id)); return u ? u.nom : ('Utilisateur ' + id); }
-  function bacsInvite(id) { const u = (invitablesCache || []).find(x => Number(x.id_user) === Number(id)); return !u || !!u.bacs; }
-  function memesInvites(a, b) { const x = (a || []).map(Number).sort().join(','), y = (b || []).map(Number).sort().join(','); return x === y; }
-  // État de la synchronisation d'un RDV existant, affiché dans la fenêtre.
-  async function chargerEtatSync(idRdv) {
-    if (!bacsExige() && !(agendaBacsPf && agendaBacsPf.actif)) return;
-    try {
-      const r = await sb().rpc('agenda_bacs_etat', { p_ids: [Number(idRdv)] });
-      if (!r.error && r.data && r.data[0] && cs && String(cs.editId) === String(idRdv)) { cs.sync = r.data[0]; renderCreate(); }
-    } catch (e) {}
-  }
-
   let rdvTypesCache = null;
   async function loadRdvTypes() {
     if (rdvTypesCache) return rdvTypesCache;
@@ -1584,19 +1472,7 @@ OD.define('agenda', {
         if (payload.BIRTHDAY === '') payload.BIRTHDAY = null;
         const _od = window.oropraDoublons; if (_od) _od.nettoyerPayload(payload);
         delete payload.IDVu;
-        // v26 : création suivie One Data + BACS (oropra-bacs-client). Repli sur
-        // l'appel direct si le module partagé ne se charge pas : la base exige
-        // de toute façon que BACS soit ouvert chez le vendeur.
-        const _bc = await (window.__odBacsClientPret || (window.__odBacsClientPret = new Promise(function (ok) {
-              if (window.oropraBacsClient) return ok(window.oropraBacsClient);
-              var sc = document.createElement('script'); sc.src = 'https://cdn.jsdelivr.net/gh/oropra-apps/one-data-blocs@oropra-bacs-client-v2/oropra-bacs-client.js'; sc.async = true;
-              sc.onload = function () { ok(window.oropraBacsClient || null); };
-              sc.onerror = function () { window.__odBacsClientPret = null; ok(null); };
-              document.head.appendChild(sc);
-            })));
-        const { data: creation, error } = _bc
-          ? await _bc.creer(supa(), { p_payload: payload, p_id_site: idSite, p_id_user: viewerId != null ? Number(viewerId) : null })
-          : await supa().rpc('client_creer', { p_payload: payload, p_id_site: idSite, p_id_user: viewerId != null ? Number(viewerId) : null });
+        const { data: creation, error } = await supa().rpc('client_creer', { p_payload: payload, p_id_site: idSite, p_id_user: viewerId != null ? Number(viewerId) : null });
         if (error) throw error;
         const inserted = creation && creation.client ? creation.client : null;
         if (!inserted) throw new Error('création : aucune fiche renvoyée');
@@ -1878,26 +1754,7 @@ OD.define('agenda', {
       root.querySelectorAll('[data-clp-action="confirm"]').forEach(el => el.addEventListener('click', () => { if (!st.selectedClient) return; const cli = st.selectedClient; closePicker(); if (typeof onPick === 'function') onPick(cli); }));
       root.querySelectorAll('[data-clp-action="close-modal"]').forEach(el => el.addEventListener('click', closeModal));
       root.querySelectorAll('[data-clp-action="close-modal-bg"]').forEach(el => el.addEventListener('click', e => { if (e.target === el) closeModal(); }));
-      // v27 : le bouton reste verrouillé (rouge) tant que BACS n'est pas ouvert sur ce poste.
-      root.querySelectorAll('[data-clp-action="save-modal"]').forEach(el => {
-        el.addEventListener('click', () => { if (el.dataset.obcBloque === '1') return; saveCreation(); });
-        const _m = st.modal;
-        if (!_m || _m.isSoc) return;
-        if (window.oropraBacsClient) window.oropraBacsClient.appliquer(el, _m);
-        if (_m.__bacsSuivi) return;
-        (window.__odBacsClientPret || (window.__odBacsClientPret = new Promise(function (ok) {
-          if (window.oropraBacsClient) return ok(window.oropraBacsClient);
-          var sc = document.createElement('script'); sc.src = 'https://cdn.jsdelivr.net/gh/oropra-apps/one-data-blocs@oropra-bacs-client-v2/oropra-bacs-client.js'; sc.async = true;
-          sc.onload = function () { ok(window.oropraBacsClient || null); };
-          sc.onerror = function () { window.__odBacsClientPret = null; ok(null); };
-          document.head.appendChild(sc);
-        }))).then(function (bc) {
-          if (!bc || st.modal !== _m) return;
-          bc.surveiller(supa(), _m, function () {
-            const b = root.querySelector('[data-clp-action="save-modal"]'); if (b) bc.appliquer(b, _m);
-          }, function () { return st.modal === _m; });
-        });
-      });
+      root.querySelectorAll('[data-clp-action="save-modal"]').forEach(el => el.addEventListener('click', saveCreation));
       root.querySelectorAll('[data-clp-action="dismiss-duplicate"], [data-od-action="dup-dismiss"]').forEach(el => el.addEventListener('click', dismissDuplicate));
       root.querySelectorAll('[data-clp-action="view-duplicate"], [data-od-action="dup-open"]').forEach(el => el.addEventListener('click', viewDuplicate));
       root.querySelectorAll('[data-od-action="dup-force"]').forEach(el => el.addEventListener('click', saveAnyway));
@@ -2407,16 +2264,14 @@ OD.define('agenda', {
     }
   }
 
-  function closeCreate() { clearTimeout(bacsSuiviT); const o = frontDoc().getElementById('agenda-ov'); if (o) o.remove(); cs = null; try { calendar && calendar.unselect(); } catch (e) {} }
+  function closeCreate() { const o = frontDoc().getElementById('agenda-ov'); if (o) o.remove(); cs = null; try { calendar && calendar.unselect(); } catch (e) {} }
   function openCreate(sel) {
     if (isPastSlot(sel.startStr || '')) { try { calendar && calendar.unselect(); } catch (e) {} hideTip(); showAgError('Impossible de placer un \u00e9v\u00e9nement dans le pass\u00e9.', 'Choisis un cr\u00e9neau \u00e0 partir de maintenant.'); return; }
     const startStr = sel.startStr || '';
     const date = startStr.slice(0, 10) || '';
     const time = (startStr.slice(11, 16)) || '09:00';
     let dur = 30; if (sel.end && sel.start) { const d = Math.round((sel.end - sel.start) / 60000); if (d >= 15) dur = d; }
-    cs = { editing: false, editId: null, idRpv: null, mode: 'rdv', date, time, dur, idClient: null, clientLabel: '', client: null, origine: ORIGINES[0], physique: true, rdvType: null, creneauType: null, bilatUser: null, bilatNom: '', comment: '', saving: false, err: '', invites: [], invitesInit: [] };
-    chargerInvitables().then(() => { if (cs) renderCreate(); });
-    chargerAgendaBacs().then(() => { if (cs) { renderCreate(); suivreBacs(); } });
+    cs = { editing: false, editId: null, idRpv: null, mode: 'rdv', date, time, dur, idClient: null, clientLabel: '', client: null, origine: ORIGINES[0], physique: true, rdvType: null, creneauType: null, bilatUser: null, bilatNom: '', comment: '', saving: false, err: '' };
     const navCli = wwVal(CFG.selectedClientVar);
     if (navCli && typeof navCli === 'object' && navCli.IDVu != null) { cs.idClient = Number(navCli.IDVu); cs.clientLabel = clientLabel(navCli); cs.client = navCli; }
     chargerResumeBilat();
@@ -2438,12 +2293,6 @@ OD.define('agenda', {
       return;
     }
     if (st !== 'rdv' && st !== 'bilat') return;            // rpv : non \u00e9ditable ici
-    // v28 : RDV d'un collègue où l'on est invité — lecture seule.
-    if (st === 'rdv' && p.can_edit === false) {
-      const x = p.extra || {};
-      showAgError('Vous êtes invité à ce rendez-vous', 'Il appartient à ' + (x.proprietaire || 'un collègue') + ' : seul son propriétaire peut le modifier.');
-      return;
-    }
     const date = (ev.startStr || '').slice(0, 10) || '';
     const time = (ev.startStr || '').slice(11, 16) || '09:00';
     let dur = 30; if (ev.end && ev.start) { const d = Math.round((ev.end - ev.start) / 60000); if (d >= 15) dur = d; }
@@ -2459,13 +2308,8 @@ OD.define('agenda', {
       creneauType: (p.id_rdv_type != null ? Number(p.id_rdv_type) : null),
       bilatUser: (st === 'bilat' && p.id_user != null ? Number(p.id_user) : null),
       bilatNom: (st === 'bilat' ? (ev.title || '').replace(/^Bilat\s*/i, '') : ''),
-      comment: (st === 'bilat' ? '' : (p.description || '')), saving: false, err: '',
-      invites: ((p.extra && Array.isArray(p.extra.invites)) ? p.extra.invites : []).map(Number),
-      invitesInit: ((p.extra && Array.isArray(p.extra.invites)) ? p.extra.invites : []).map(Number),
-      idBacs: (p.extra && p.extra.id_bacs) || null, sync: null
+      comment: (st === 'bilat' ? '' : (p.description || '')), saving: false, err: ''
     };
-    chargerInvitables().then(() => { if (cs) renderCreate(); });
-    chargerAgendaBacs().then(() => { if (!cs) return; renderCreate(); suivreBacs(); if (st === 'rdv') chargerEtatSync(p.origin_id); });
     if (st === 'bilat') chargerResumeBilat();
     loadRdvTypes().then(renderCreate);
     renderCreate();
@@ -2531,29 +2375,7 @@ OD.define('agenda', {
       + '<button data-mode="creneau" class="' + (cs.mode === 'creneau' ? 'on' : '') + '">CR\u00c9NEAU</button>'
       + '<button data-mode="bilat" class="' + (cs.mode === 'bilat' ? 'on' : '') + '">BILAT\u00c9RALE</button></div>');
     const comment = '<div><div class="agm-lbl">Commentaire</div><textarea class="agm-ta" id="agm-comment" placeholder="Commentaire\u2026">' + esc(cs.comment) + '</textarea></div>';
-    // v28 : invités, comme dans BACS (BACS leur envoie son invitation).
-    let invites = '';
-    if (cs.mode !== 'bilat') {
-      const pris = (cs.invites || []).map(Number);
-      const moi = Number(currentCollabId() || CACHED_UID);
-      const dispo = (invitablesCache || []).filter(u => pris.indexOf(Number(u.id_user)) < 0 && Number(u.id_user) !== moi);
-      invites = '<div><div class="agm-lbl">Invités</div><div class="agm-inv">'
-        + pris.map(id => '<span class="agm-inv-chip' + (bacsInvite(id) ? '' : ' nb') + '"' + (bacsInvite(id) ? '' : ' title="Sans compte BACS : invité dans One Data seulement"') + '>' + esc(nomInvite(id)) + '<button type="button" data-inv-del="' + id + '" aria-label="Retirer">\u00d7</button></span>').join('')
-        + '<select class="agm-sel" id="agm-inv-add" style="flex:1;min-width:170px"><option value="">+ Inviter un collègue\u2026</option>'
-        + dispo.map(u => '<option value="' + u.id_user + '">' + esc(u.nom) + (u.fonction ? ' \u00b7 ' + esc(u.fonction) : '') + '</option>').join('')
-        + '</select></div>'
-        + (pris.length && agendaBacsPf && agendaBacsPf.actif ? '<div class="agm-hint">BACS envoie lui-même l\u2019invitation par e-mail \u00e0 chaque invité.</div>' : '')
-        + '</div>';
-    }
-    let sync = '';
-    if (cs.editing && cs.mode !== 'bilat' && cs.sync) {
-      const e = cs.sync.etat;
-      sync = e === 'synchro' ? '<div class="agm-sync ok"><span class="pt"></span>Synchronisé avec l\u2019agenda BACS</div>'
-           : e === 'en_attente' ? '<div class="agm-sync att"><span class="pt"></span>En cours d\u2019envoi vers BACS</div>'
-           : e === 'echec' ? '<div class="agm-sync ko"><span class="pt"></span>BACS a refusé : ' + esc(cs.sync.erreur || 'raison inconnue') + '</div>'
-           : '';
-    }
-    return seg + dateRow + mid + invites + (cs.mode !== 'bilat' ? comment : '') + sync + (cs.err ? '<div class="agm-err">' + esc(cs.err) + '</div>' : '');
+    return seg + dateRow + mid + (cs.mode !== 'bilat' ? comment : '') + (cs.err ? '<div class="agm-err">' + esc(cs.err) + '</div>' : '');
   }
   function renderCreate() {
     const d = frontDoc(); let ov = d.getElementById('agenda-ov');
@@ -2581,7 +2403,6 @@ OD.define('agenda', {
       + '<div class="agm-body">' + bodyHtml() + '</div>'
       + '<div class="agm-foot' + (cs.editing && cs.mode !== 'bilat' ? ' agm-foot-edit' : '') + '">' + foot + '</div></div>';
     wireCreate();
-    appliquerVerrou();
   }
   function syncInputs() {
     const d = frontDoc(); const g = (id) => d.getElementById(id);
@@ -2617,19 +2438,10 @@ OD.define('agenda', {
     if (g('agm-real-now')) g('agm-real-now').addEventListener('click', () => { if (cs && cs.editId != null) goBilaterale(cs.editId, true); });
     if (g('agm-start-now')) g('agm-start-now').addEventListener('click', demarrerBilatMaintenant);
     if (g('agm-bvend')) g('agm-bvend').addEventListener('change', () => { syncInputs(); });
-    if (g('agm-inv-add')) g('agm-inv-add').addEventListener('change', (e) => {
-      const v = Number(e.target.value); if (!v) return;
-      syncInputs(); cs.invites = (cs.invites || []).concat([v]); renderCreate();
-    });
-    d.querySelectorAll('#agenda-ov [data-inv-del]').forEach(b => b.addEventListener('click', (e) => {
-      e.stopPropagation(); syncInputs();
-      const v = Number(b.getAttribute('data-inv-del')); cs.invites = (cs.invites || []).filter(x => Number(x) !== v); renderCreate();
-    }));
   }
   async function doSave() {
     syncInputs();
     const s = cs; s.err = '';
-    if (verrouille()) { s.err = 'BACS n\u2019est pas ouvert sur votre poste : ouvrez BACS dans un onglet de ce navigateur, connectez-vous, puis recommencez.'; return renderCreate(); }
     if (!s.date || !s.time) { s.err = 'Date et heure requises.'; return renderCreate(); }
     const site = siteValRaw(); const uid = currentCollabId();
     const startStr = s.date + ' ' + s.time + ':00';
@@ -2663,16 +2475,6 @@ OD.define('agenda', {
         res = await c.rpc('create_bilaterale', { p_id_user: Number(s.bilatUser), p_id_manager: Number(CACHED_UID), p_id_site: siteBilat(s.bilatUser), p_start: startStr, p_end: endStr, p_duree: dur });
       }
       if (res && res.error) throw res.error;
-      // v28 : invités — posés après la création (la charge envoyée à BACS est
-      // recalculée au moment de l'envoi, elle les embarque).
-      if (s.mode !== 'bilat' && !memesInvites(s.invites, s.invitesInit)) {
-        const idRdv = s.editing ? s.editId : (res && res.data);
-        if (idRdv != null) {
-          const ri = await c.rpc('rdv_invites_poser', { p_id_rdv: Number(idRdv), p_invites: (s.invites || []).map(Number) });
-          if (ri && ri.error) toast('RDV enregistré, mais les invités n\u2019ont pas été posés : ' + ri.error.message);
-        }
-      }
-      pousserVersBacs();
       const quandTxt = libQuand(startStr);
       if (!s.editing) {
         const titre = s.mode === 'bilat' ? ('Bilat ' + nomVendeurBilat(s.bilatUser))
@@ -2712,14 +2514,12 @@ OD.define('agenda', {
   }
   async function performDelete() {
     const s = cs; if (!s || !s.editing) return; s.err = '';
-    if (verrouille()) { s.confirmDel = false; s.err = 'BACS n\u2019est pas ouvert sur votre poste : ouvrez BACS dans un onglet de ce navigateur, connectez-vous, puis recommencez.'; return renderCreate(); }
     s.saving = true; renderCreate();
     try {
       const c = sb(); let res;
       if (s.mode === 'bilat') res = await c.rpc('delete_bilaterale', { p_id: s.editId });
       else res = await c.rpc('delete_rdv_client', { p_id_rdv: s.editId });
       if (res && res.error) throw res.error;
-      pousserVersBacs();
       closeCreate(); refetch();
     } catch (e) { console.error('[agenda] suppression', e); s.saving = false; s.confirmDel = false; s.err = (e && e.message) ? e.message : String(e); renderCreate(); }
   }
@@ -2769,7 +2569,6 @@ OD.define('agenda', {
         res = await c.rpc('update_bilaterale', { p_id: p.origin_id, p_id_user: Number(p.id_user), p_start: startStr, p_end: endStr, p_duree: dur });
       } else { arg.revert(); return; }
       if (res && res.error) throw res.error;
-      pousserVersBacs();
       refetch();
     } catch (e) { console.error('[agenda] d\u00e9placement', e); try { arg.revert(); } catch (x) {} toast('D\u00e9placement impossible : ' + ((e && e.message) ? e.message : String(e))); }
   }
