@@ -1,6 +1,11 @@
 // ============================================================================
 //  LEAD MANAGEMENT — module One Data (OD.define 'lead-mgmt')
-//  VERSION TEAM COLIN (v60) — déploiement CIBLÉ (publish-targets :
+//  VERSION TEAM COLIN (v61) — déploiement CIBLÉ (publish-targets :
+//  v61 (25/10/2026) : « Injoignable » — deux cases, comme dans BACS : envoyer
+//  l'e-mail au client, envoyer le SMS au client (décochées par défaut). Le
+//  geste rejoue le bouton BACS « Injoignable temporairement » : statut, date
+//  de rappel, Event de rappel dans l'agenda BACS de l'opérateur, et les
+//  messages cochés. Nécessite l'extension utilisateurs v3.1.0.
 //  v60 (22/10/2026) : BACS doit être ouvert CHEZ L'UTILISATEUR pour tout geste
 //  reporté dans BACS (règle d'Antoine). Plateau : les gestes BACS sont bloqués
 //  tant que la session BACS de l'opérateur lui-même ne bat pas (avant : bloqués
@@ -735,7 +740,9 @@
         } else if (issue === 'injoignable') {
           h += '<select id="r-quand" aria-label="Quand rappeler"><option value="2h">Dans 2 h</option><option value="demain">Demain 9 h</option><option value="apres">Après-demain 9 h</option><option value="autre">Autre date…</option></select>'
             + '<input type="datetime-local" id="r-date" value="' + dateLocale(new Date(Date.now() + 2 * 3600000)) + '" hidden>'
-            + '<button type="button" class="btn pri" data-a="injoignable"' + dis() + '>Programmer le rappel</button>';
+            + '<button type="button" class="btn pri" data-a="injoignable"' + dis() + '>Programmer le rappel</button>'
+            + (ecritBacs() ? '</div><div class="row inj-msg"><label class="hint"><input type="checkbox" id="r-email"> Envoyer l\u2019e-mail au client</label>'
+                + '<label class="hint"><input type="checkbox" id="r-sms"> Envoyer le SMS au client</label>' : '');
         } else if (issue === 'long_terme') {
           h += '<label class="hint" for="lt-date">Rappeler le</label><input type="date" id="lt-date" value="' + dateLocale(demainA(9, 30)).slice(0, 10) + '">'
             + '<button type="button" class="btn pri" data-a="long-terme"' + dis() + '>Programmer</button>';
@@ -910,8 +917,10 @@
       }
       if (!quandR || isNaN(quandR.getTime()) || quandR.getTime() < Date.now() - 60000) { toast('Choisissez une date de rappel dans le futur.', true); return; }
       var note = (($drawer.querySelector('#q-note') || {}).value || '').trim() || null;
+      var email = type === 'injoignable' && !!($drawer.querySelector('#r-email') || {}).checked;
+      var sms = type === 'injoignable' && !!($drawer.querySelector('#r-sms') || {}).checked;
       return geste(async function () {
-        await rpc('plateau_rappel', { p_sf_lead_id: D.sf, p_type: type, p_rappel_le: quandR.toISOString(), p_note: note });
+        await rpc('plateau_rappel', { p_sf_lead_id: D.sf, p_type: type, p_rappel_le: quandR.toISOString(), p_note: note, p_email: email, p_sms: sms });
         apresGeste((type === 'injoignable' ? 'Rappel programmé ' : 'Projet long terme, rappel ') + (quand(quandR).length > 5 ? 'le ' : 'à ') + quand(quandR));
       });
     }
@@ -2519,6 +2528,8 @@
 .lmtc-ov .dr-f{border-top:1.5px solid #eef2f8;padding:14px 18px;display:grid;gap:10px;background:#fff;border-radius:0 0 0 16px}
 .lmtc-ov .dr-f .row{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
 .lmtc-ov .dr-f .row.pied{justify-content:space-between;flex-wrap:nowrap}
+.lmtc-ov .dr-f .row.inj-msg{gap:16px;margin-top:6px}
+.lmtc-ov .dr-f .row.inj-msg label{display:inline-flex;align-items:center;gap:6px;cursor:pointer;color:var(--ink,#1F4A85)}
 .lmtc-ov .dr-f .row.pied .hint{flex:1}
 .lmtc-ov .hint{font-size:11.5px;color:var(--mut);font-weight:600;line-height:1.5}
 .lmtc-ov .ratt{display:grid;gap:8px;padding:12px;border:1.5px solid #c9dcf3;border-radius:12px;background:#f5f9fe}
