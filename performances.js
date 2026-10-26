@@ -1,5 +1,7 @@
 // ============================================================================
 //  PERFORMANCES ÉQUIPE — module One Data (OD.define)  v1
+//  v26 (26/10/2026) : le comparateur n'affiche plus les deux indicateurs
+//  internes (commandes hors loueurs, financements) en lignes sans titre.
 //  v25 (26/10/2026) : pastille « Clôturée » pour les commandes clôturées dans
 //  BACS, comme dans le kanban.
 //  v20 (07/10/2026) RECETTE TEAM COLIN — le site choisi dans la topnav est
@@ -1109,6 +1111,9 @@ OD.define('performances', {
       h += '<div class="pf-cmp-grid">';
       h += '<div></div><div class="pf-cmp-head">' + esc(c.items[0].label) + '</div><div class="pf-cmp-head">' + esc(c.items[1].label) + '</div>';
       for (const k of KPIS) {
+        // v26 : les indicateurs internes (dénominateurs, sans libellé) ne
+        // s'affichent pas — ils produisaient deux lignes sans titre.
+        if (k.mode === 'interne' || k.vue === 'aucune') continue;
         if (k.mode !== 'obj') {
           const v = [kpiLibre(aggs[0], k), kpiLibre(aggs[1], k)];
           const win = (v[0].score >= 0 && v[1].score >= 0 && v[0].score !== v[1].score) ? (v[0].score > v[1].score ? 0 : 1) : -1;
