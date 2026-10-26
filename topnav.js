@@ -1,5 +1,12 @@
 // ============================================================================
-//  TOP NAV — module One Data (OD.define)  v32 — SÉLECTEUR DE PÉRIMÈTRE
+//  TOP NAV — module One Data (OD.define)  v33 — SÉLECTEUR DE PÉRIMÈTRE
+//  v33 (26/10/2026) : la nav pose la FAVICON (le O de One Data). Le site
+//  déployé ne sert ni /favicon.ico ni /images/*-favicon-oropra.png : le repli
+//  SPA de l'hébergement répond par la page HTML de redirection vers /fr/, et
+//  l'onglet restait sans icône. Les icônes vivent désormais dans ce dépôt
+//  (assets/favicon/, épinglées au tag topnav-v33) et la nav remplace les
+//  balises icon et apple-touch-icon de la page. Un tenant peut porter sa
+//  propre icône via tenant.favicon_url ; à défaut, le O.
 //  v32 (22/10/2026) : le lien Delco n'apparait qu'aux licences Intelligence et
 //  Full (OD.peut('delco'), socle v29).
 //  v30 (07/10/2026) : l'arbitrage des doublons n'apparait qu'aux roles qui
@@ -116,7 +123,36 @@ OD.define('topnav', {
   const wwLib = window.wwLib;
   const doc = __anchor.ownerDocument || wwLib.getFrontDocument();
   const ROOT_ID = 'nav-root';
-  const NAV_VER = 35; // <- numéro de version (témoin de chargement)
+  const NAV_VER = 36; // <- numéro de version (témoin de chargement)
+
+  // ------------------------------------------------------------- favicon
+  // Posée une fois par chargement de l'app ; les balises existantes (icônes
+  // de l'export WeWeb, introuvables sur l'hébergement) sont remplacées.
+  (function poserFavicon() {
+    try {
+      const BASE = 'https://cdn.jsdelivr.net/gh/oropra-apps/one-data-blocs@topnav-v33/assets/favicon/';
+      const perso = (ctx && ctx.tenant && ctx.tenant.favicon_url) || '';
+      const head = doc.head || doc.getElementsByTagName('head')[0];
+      if (!head || head.querySelector('link[data-od-favicon]')) return;
+      head.querySelectorAll('link[rel~="icon"], link[rel="apple-touch-icon"]').forEach(function (l) { l.remove(); });
+      const poser = function (rel, href, type, sizes) {
+        const l = doc.createElement('link');
+        l.rel = rel; l.href = href; l.setAttribute('data-od-favicon', '1');
+        if (type) l.type = type;
+        if (sizes) l.setAttribute('sizes', sizes);
+        head.appendChild(l);
+      };
+      if (perso) {
+        poser('icon', perso);
+        poser('apple-touch-icon', perso);
+      } else {
+        poser('icon', BASE + 'favicon.svg', 'image/svg+xml');
+        poser('icon', BASE + 'favicon-32.png', 'image/png', '32x32');
+        poser('icon', BASE + 'favicon-16.png', 'image/png', '16x16');
+        poser('apple-touch-icon', BASE + 'apple-touch-icon-180.png', null, '180x180');
+      }
+    } catch (e) { /* une icône manquante ne doit jamais bloquer la nav */ }
+  })();
 
   // La barre du haut est un sélecteur de SITE, et rien d'autre.
   //
