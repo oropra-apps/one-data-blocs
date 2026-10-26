@@ -1,4 +1,6 @@
 // ============================================================================
+//  v24 (26/10/2026) : le « + » de planification est centré dans son bouton
+//  (padding par défaut du navigateur annulé, centrage flex).
 //  BILATÉRALES — v23 (14/10/2026, Team Colin) — v23 : vue vendeur refaite (prochaine, chiffres regardés, engagements, historique)
 //  v22 — v22 : direction = file des vendeurs à recevoir (plus de classement des réseaux)
 //  v21 — v21 : performance (appels en parallèle, bilat_cadence, cache)
@@ -2243,7 +2245,7 @@ const STYLE = '<style>' +
 '#bil-root .site-title .st-det{font-style:normal;font-size:12px;font-weight:600;color:#8b99b0;background:none;padding:0}' +
 '#bil-root .site-title{font-size:15px;font-weight:800;color:#1c2b45;margin:20px 0 2px;display:flex;align-items:center;gap:10px}' +
 '#bil-root .site-title span{font-size:11.5px;font-weight:700;color:#8b99b0;background:#eef2f8;border-radius:20px;padding:2px 10px}' +
-'#bil-root .v-plan{width:28px;height:28px;border-radius:8px;border:1.5px solid #2a5ea9;background:#fff;color:#1F4A85;font-size:16px;font-weight:800;line-height:1;cursor:pointer}' +
+'#bil-root .v-plan{width:28px;height:28px;padding:0;display:inline-flex;align-items:center;justify-content:center;box-sizing:border-box;border-radius:8px;border:1.5px solid #2a5ea9;background:#fff;color:#1F4A85;font-size:16px;font-weight:800;line-height:1;cursor:pointer;vertical-align:middle}' +
 '#bil-root .v-plan:hover{background:rgba(42,94,169,.08)}' +
 '#bil-root .pb-modal{max-width:640px}' +
 '#bil-root .pb-row{display:flex;align-items:center;gap:10px;padding:9px 0;border-bottom:1px solid #eef2f8;flex-wrap:wrap}' +
