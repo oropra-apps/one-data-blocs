@@ -1,5 +1,7 @@
 // ============================================================================
 //  PERFORMANCES ÉQUIPE — module One Data (OD.define)  v1
+//  v25 (26/10/2026) : pastille « Clôturée » pour les commandes clôturées dans
+//  BACS, comme dans le kanban.
 //  v20 (07/10/2026) RECETTE TEAM COLIN — le site choisi dans la topnav est
 //    suivi meme quand il n'a aucune ligne sur la periode (il etait ignore et
 //    la page restait sur le site precedent). Voir adoptBusSelectionPerf.
@@ -1961,7 +1963,8 @@ OD.define('performances', {
     'Refused':            ['Refusée', '#a32d2d', '#fcebeb'],
     'Transmitted to TFR': ['Transmise à TFR', '#1d6e5f', '#e1f5ee'],
     'Validated':          ['Validée', '#1d6e5f', '#e1f5ee'],
-    'Delivered':          ['Livrée', '#1d6e5f', '#e1f5ee']
+    'Delivered':          ['Livrée', '#1d6e5f', '#e1f5ee'],
+    'Closed':             ['Clôturée', '#5a6b86', '#eef2f8']
   };
   const DRAPEAUX_TC = [
     ['est_pro', 'Pro', 'pro_realises'], ['est_phev_ev', 'PHEV/EV', 'phev_ev_realises'],
