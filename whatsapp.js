@@ -1,4 +1,7 @@
 // WHATSAPP (canal) — module One Data (OD.define) v1 (Lot C) — overlay, ctx.tenant/ctx.supabase
+// v10 (26/10/2026) : un échec d'envoi (vocal, pièce jointe, texte) ne remplace
+// plus le fil de conversation. L'erreur s'affiche dans un bandeau refermable
+// sous les messages, avec un libellé compréhensible ; le fil reste lisible.
 OD.define('whatsapp', {
   mount(__anchor, ctx) {
   /* ==========================================================================
@@ -431,6 +434,14 @@ OD.define('whatsapp', {
       mediaRec.start(); state.recording = true; render();
     } catch (e) { console.warn('[wa] micro', e); alert('Micro indisponible'); }
   }
+  // Libellé lisible pour le vendeur ; le détail technique reste dans la console.
+  function libelleErreur(e) {
+    const t = String(e || '');
+    if (/unexpected error|HTTP 5\d\d|transcode/i.test(t)) return "Le message n'est pas parti : le serveur WhatsApp a renvoyé une erreur. Réessayez dans un instant ; si cela persiste, signalez-le avec le O.";
+    if (/HTTP 4\d\d/i.test(t)) return "Le message n'est pas parti (" + t + "). Signalez-le avec le O.";
+    return 'Erreur : ' + t;
+  }
+
   async function sendAudio(blob) {
     stopDictation();
     if (!state.conv) return;
@@ -688,7 +699,7 @@ OD.define('whatsapp', {
     let bodyHtml;
     if (state.loading) bodyHtml = '<div class="wa-msg">Chargement…</div>';
     else if (!state.conv) bodyHtml = '<div class="wa-msg">Aucune conversation WhatsApp pour ce client.<br><br>Démarre un premier contact via un template ci-dessous.</div>';
-    else if (state.error) bodyHtml = '<div class="wa-msg" style="color:#c0392b">Erreur : ' + esc(state.error) + '</div>';
+    else if (state.error && !state.items.length) bodyHtml = '<div class="wa-msg" style="color:#c0524f">' + esc(libelleErreur(state.error)) + '</div>';
     else if (!state.items.length) bodyHtml = '<div class="wa-msg">Aucun message.</div>';
     else {
       let last = '';
@@ -697,6 +708,9 @@ OD.define('whatsapp', {
         if (d !== last) { sep = '<div class="wa-daysep">' + d + '</div>'; last = d; }
         return sep + bubble(it);
       }).join('');
+      if (state.error) bodyHtml += '<div role="alert" style="position:sticky;bottom:0;margin:10px 4px 2px;padding:9px 34px 9px 12px;border-radius:10px;background:#fdecea;color:#c0524f;font-size:13px;line-height:1.4;font-weight:600">'
+        + esc(libelleErreur(state.error))
+        + '<button type="button" data-act="clr-err" aria-label="Fermer" style="position:absolute;right:6px;top:6px;width:24px;height:24px;border:0;border-radius:6px;background:transparent;color:#c0524f;font-size:16px;cursor:pointer">×</button></div>';
     }
 
     const open24 = windowOpen();
@@ -811,6 +825,7 @@ OD.define('whatsapp', {
       else if (a === 'minimize') el.onclick = () => api.minimize();
       else if (a === 'restore') el.onclick = () => { state.minimized = false; render(); };
       else if (a === 'send') el.onclick = sendText;
+      else if (a === 'clr-err') el.onclick = () => { state.error = null; render(); };
       else if (a === 'attach') el.onclick = pickFile;
       else if (a === 'rec') el.onclick = toggleRecord;
       else if (a === 'dict') el.onclick = toggleDictation;
