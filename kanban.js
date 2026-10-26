@@ -1,4 +1,7 @@
 // ============================================================================
+//  v70 (26/10/2026) : pastille « Clôturée » pour les commandes que BACS a
+//  clôturées. Elles restaient sans statut, à côté des « Transmise à TFR » et
+//  « Validée ».
 //  v69 (25/10/2026) : filtre « Opportunités vides : affichées / masquées » dans la
 //  barre du haut (mémorisé dans le navigateur). Masquées, elles sortent aussi
 //  des compteurs et du taux de conversion.
@@ -760,7 +763,8 @@ OD.define('kanban', {
     'Refused':           ['Refusée', '#a32d2d', '#fcebeb'],
     'Transmitted to TFR':['Transmise à TFR', '#1d6e5f', '#e1f5ee'],
     'Validated':         ['Validée', '#1d6e5f', '#e1f5ee'],
-    'Delivered':         ['Livrée', '#1d6e5f', '#e1f5ee']
+    'Delivered':         ['Livrée', '#1d6e5f', '#e1f5ee'],
+    'Closed':            ['Clôturée', '#5a6b86', '#eef2f8']
   };
   function pastilleBacs(c) {
     const p = KAN_BACS ? PASTILLES_BACS[c.statut_bacs] : null;
