@@ -1,4 +1,14 @@
 // ============================================================================
+//  v31 (27/10/2026) : DURÉE EN HEURES ET DÉPLACEMENT EXPLIQUÉ.
+//  - La durée se choisit en heures (¼ h, ½ h, ¾ h, 1 h, 1,5 h … 10 h) ; par
+//    défaut 1 h. Une durée hors liste (sélection de 3 h 15 à la souris, RDV
+//    BACS de 15 h) est ajoutée à la liste : avant, le menu retombait en
+//    silence sur la première valeur et le RDV était enregistré à 15 min.
+//  - Un événement qu'on ne peut pas déplacer le dit dès qu'on essaie de le
+//    tirer (activité BACS, passé, RDV d'un collègue, rapport vendeur) : le
+//    glisser-déposer restait muet et passait pour une panne.
+//  - Un déplacement réussi est confirmé par un message.
+// ============================================================================
 //  v29 (25/10/2026) : RDV BACS « NEUTRES ». L'agenda est le miroir de BACS :
 //  tout y est importé, y compris ce qui n'est pas de l'activité commerciale
 //  (Réception / Restitution, créneaux « PAS DE LIVRAISON »). Ces RDV arrivent
@@ -643,6 +653,16 @@ OD.define('agenda', {
   let typesActifs = TYPES_EVT.map(x => x.cle);
 
   function estNeutre(e) { return !!(e && e.extra && e.extra.neutre); }
+  // v31 : pourquoi un événement ne se déplace pas (null = déplaçable).
+  function raisonVerrou(e) {
+    if (!e || e._provisoire || e._groupe) return null;
+    if (estNeutre(e)) return 'Activité BACS : elle se déplace dans BACS.';
+    if (e.source_type === 'rpv') return 'Rapport vendeur : il ne se déplace pas dans l\u2019agenda.';
+    if (isPastSlot(e.event_start_time)) return 'Événement passé : il ne se déplace plus.';
+    if (e.source_type === 'bilat' && !e.can_edit) return 'Bilatérale : seul le manager qui l\u2019a posée peut la déplacer.';
+    if (e.source_type === 'rdv' && !e.can_edit) return 'RDV de ' + ((e.extra && e.extra.proprietaire) || 'un collègue') + ' : seul son propriétaire peut le déplacer.';
+    return null;
+  }
   function familleEvt(e) {
     if (estNeutre(e)) return 'bacs';
     if (e.source_type === 'bilat') return 'bilat';
@@ -1270,6 +1290,24 @@ OD.define('agenda', {
       eventClassNames: (arg) => (resteAConclure(arg.event.extendedProps) ? ['ag-aconclure'] : []),
       eventDidMount: (info) => {
         const c = info.event.extendedProps._accent; if (c) { info.el.style.borderLeft = '3px solid ' + c; }
+        // v31 : tirer un événement verrouillé affiche la raison au lieu de ne rien faire.
+        const verrou = raisonVerrou(info.event.extendedProps);
+        if (verrou && !info.el.__agVerrou) {
+          info.el.__agVerrou = true;
+          info.el.style.cursor = 'pointer';
+          const debut = (ev0) => {
+            const pt = (ev0.touches && ev0.touches[0]) || ev0; const x0 = pt.clientX, y0 = pt.clientY;
+            const W = frontWin(); let dit = false;
+            const bouge = (ev1) => {
+              const q = (ev1.touches && ev1.touches[0]) || ev1;
+              if (!dit && (Math.abs(q.clientX - x0) > 12 || Math.abs(q.clientY - y0) > 12)) { dit = true; hideTip(); toast(verrou); fin(); }
+            };
+            const fin = () => { W.removeEventListener('mousemove', bouge, true); W.removeEventListener('touchmove', bouge, true); W.removeEventListener('mouseup', fin, true); W.removeEventListener('touchend', fin, true); };
+            W.addEventListener('mousemove', bouge, true); W.addEventListener('touchmove', bouge, true);
+            W.addEventListener('mouseup', fin, true); W.addEventListener('touchend', fin, true);
+          };
+          info.el.addEventListener('mousedown', debut); info.el.addEventListener('touchstart', debut, { passive: true });
+        }
         if (resteAConclure(info.event.extendedProps)) {
           info.el.classList.add('ag-aconclure');   // ceinture ; la bretelle est eventClassNames
           try {
@@ -1345,7 +1383,22 @@ OD.define('agenda', {
   //  UI à la charte dashboard. Écrit via les RPC create_* (phase2b_creation.sql).
   // ==========================================================================
   const ORIGINES = ['Initiative personnelle', 'Indication', 'Marketing Groupe', 'Campagnes Constructeur', 'Fin de financement', 'Salon - Expo'];
-  const DURATIONS = [15, 30, 45, 60, 90, 120];
+  const DURATIONS = [15, 30, 45, 60, 90, 120, 150, 180, 240, 300, 360, 420, 480, 540, 600];
+  const DUREE_DEFAUT = 60;
+  // 30 -> « ½ h », 90 -> « 1,5 h », 75 -> « 1 h 15 »
+  function libDuree(min) {
+    min = Number(min) || 0;
+    if (min === 15) return '\u00bc h'; if (min === 30) return '\u00bd h'; if (min === 45) return '\u00be h';
+    if (min % 60 === 0) return (min / 60) + ' h';
+    if (min % 30 === 0) return String(min / 60).replace('.', ',') + ' h';
+    const h = Math.floor(min / 60), m = min % 60;
+    return h ? (h + ' h ' + String(m).padStart(2, '0')) : (m + ' min');
+  }
+  function optionsDuree(cur) {
+    const l = DURATIONS.slice(); cur = Number(cur) || DUREE_DEFAUT;
+    if (l.indexOf(cur) < 0) { l.push(cur); l.sort((a, b) => a - b); }
+    return l.map(d => '<option value="' + d + '"' + (d === cur ? ' selected' : '') + '>' + libDuree(d) + '</option>').join('');
+  }
   // ── v28 : synchronisation avec BACS ──────────────────────────────────────
   //  agenda_bacs_preflight dit si l'agenda est synchronisé sur ce tenant et
   //  si l'utilisateur a un compte BACS. Si oui, tout geste d'écriture exige
@@ -2434,7 +2487,9 @@ OD.define('agenda', {
     const startStr = sel.startStr || '';
     const date = startStr.slice(0, 10) || '';
     const time = (startStr.slice(11, 16)) || '09:00';
-    let dur = 30; if (sel.end && sel.start) { const d = Math.round((sel.end - sel.start) / 60000); if (d >= 15) dur = d; }
+    // Un clic sélectionne une case de 30 min : durée par défaut 1 h. Une
+    // plage tirée à la souris (plus d'une case) garde sa longueur.
+    let dur = DUREE_DEFAUT; if (sel.end && sel.start) { const d = Math.round((sel.end - sel.start) / 60000); if (d > 30) dur = d; }
     cs = { editing: false, editId: null, idRpv: null, mode: 'rdv', date, time, dur, idClient: null, clientLabel: '', client: null, origine: ORIGINES[0], physique: true, rdvType: null, creneauType: null, bilatUser: null, bilatNom: '', comment: '', saving: false, err: '', invites: [], invitesInit: [] };
     chargerInvitables().then(() => { if (cs) renderCreate(); });
     chargerAgendaBacs().then(() => { if (cs) { renderCreate(); suivreBacs(); } });
@@ -2521,7 +2576,7 @@ OD.define('agenda', {
     const dateRow = '<div class="agm-row">'
       + '<input type="date" class="agm-inp" id="agm-date" min="' + esc(agToday()) + '" value="' + esc(cs.date) + '" style="flex:1;min-width:130px">'
       + '<input type="time" class="agm-inp" id="agm-time" value="' + esc(cs.time) + '" step="900" style="width:104px">'
-      + '<select class="agm-sel" id="agm-dur">' + DURATIONS.map(d => '<option value="' + d + '"' + (d === cs.dur ? ' selected' : '') + '>' + d + ' min</option>').join('') + '</select>'
+      + '<select class="agm-sel" id="agm-dur" title="Durée">' + optionsDuree(cs.dur) + '</select>'
       + '</div>';
     let mid = '';
     if (cs.mode === 'rdv') {
@@ -2796,6 +2851,7 @@ OD.define('agenda', {
       } else { arg.revert(); return; }
       if (res && res.error) throw res.error;
       pousserVersBacs();
+      toast((arg.oldEvent && arg.oldEvent.startStr === ev.startStr ? 'Durée modifiée · ' : 'Déplacé au ') + libQuand(startStr), 'ok');
       refetch();
     } catch (e) { console.error('[agenda] d\u00e9placement', e); try { arg.revert(); } catch (x) {} toast('D\u00e9placement impossible : ' + ((e && e.message) ? e.message : String(e))); }
   }
