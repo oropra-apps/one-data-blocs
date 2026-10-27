@@ -1,3 +1,5 @@
+// v11 (27/10/2026) : sur mobile, la fenêtre WhatsApp occupe la partie visible
+// de l'écran (barres de Chrome et clavier exclus) : saisie et vocal accessibles.
 // WHATSAPP (canal) — module One Data (OD.define) v1 (Lot C) — overlay, ctx.tenant/ctx.supabase
 // v10 (26/10/2026) : un échec d'envoi (vocal, pièce jointe, texte) ne remplace
 // plus le fil de conversation. L'erreur s'affiche dans un bandeau refermable
@@ -643,6 +645,7 @@ OD.define('whatsapp', {
     '.wa-meta{float:right;font-size:10.5px;color:#667781;margin:6px 0 -3px 8px;display:inline-flex;align-items:center;gap:2px}' +
     '.wa-ticks{display:inline-flex}' +
     '.wa-foot{flex:0 0 auto;display:flex;align-items:flex-end;gap:6px;padding:8px 8px;background:#f0f2f5}' +
+    '@media(max-width:640px){.wa-card{left:0!important;top:0!important;right:0!important;bottom:auto!important;width:100vw;height:100vh;height:100dvh;border-radius:0}.wa-foot{padding-bottom:calc(8px + env(safe-area-inset-bottom,0px))}}' +
     '.wa-inp{flex:1;border:none;border-radius:22px;padding:10px 14px;font-size:14px;color:#111b21;outline:none;resize:none;max-height:96px;font-family:inherit;line-height:1.35;background:#fff;box-shadow:0 1px 1px rgba(0,0,0,.06)}' +
     '.wa-fbtn{width:40px;height:40px;border-radius:50%;border:none;background:none;color:#54656f;cursor:pointer;display:flex;align-items:center;justify-content:center;flex:0 0 auto}' +
     '.wa-fbtn:hover{background:#00000010}' +
@@ -772,7 +775,24 @@ OD.define('whatsapp', {
     hydrateAtt(root);
   }
 
+  // Mobile (v11) : plein écran sur la partie VISIBLE de l'écran (barres de
+  // Chrome et clavier exclus), via visualViewport.
+  function estMobile() { return (win.innerWidth || 1024) <= 640; }
+  function ajusterMobile(root) {
+    const card = root.querySelector('.wa-card'); if (!card) return;
+    if (!estMobile()) { card.style.height = ''; return; }
+    const vv = win.visualViewport;
+    card.style.left = ''; card.style.top = vv ? vv.offsetTop + 'px' : ''; card.style.right = ''; card.style.bottom = '';
+    card.style.height = Math.round(vv ? vv.height : win.innerHeight) + 'px';
+  }
+  if (!win.__waVV) {
+    win.__waVV = true;
+    const relancer = () => { const r = doc.getElementById && doc.getElementById('oropra-wa-ui'); if (r) ajusterMobile(r); };
+    try { if (win.visualViewport) { win.visualViewport.addEventListener('resize', relancer); win.visualViewport.addEventListener('scroll', relancer); } } catch (e) { }
+    win.addEventListener('resize', relancer);
+  }
   function applyPos(root) {
+    if (estMobile()) { ajusterMobile(root); return; }
     const card = root.querySelector('.wa-card'); if (!card || !state.pos) return;
     const w = card.offsetWidth || 360, h = card.offsetHeight || 600, vw = win.innerWidth, vh = win.innerHeight;
     const l = Math.max(6, Math.min(state.pos.left, vw - w - 6));
