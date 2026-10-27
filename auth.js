@@ -1,5 +1,12 @@
 // ============================================================================
-//  AUTHENTIFICATION — module One Data (OD.define)  v10
+//  AUTHENTIFICATION — module One Data (OD.define)  v11
+//  v11 (27/10/2026) : ÉTAPE BACS après la connexion. Un utilisateur dont les
+//  rendez-vous sont synchronisés avec BACS (bacs_veille_etat.requis) et qui
+//  se connecte depuis un ordinateur voit « Ouvrez BACS » tant que l'extension
+//  ne répond pas : bouton « Ouvrir BACS », passage automatique dès que BACS
+//  répond. « Continuer sans BACS » reste possible et est journalisé
+//  (bacs_veille_journal). Rien sur téléphone. La surveillance continue
+//  ensuite dans la nav (topnav v34).
 //  v10 (22/10/2026) : « mot de passe oublié » explique un refus d'envoi
 //  (limite du service d'email) au lieu d'un message générique.
 //  v9 (22/10/2026) : le lien « mot de passe oublié » ouvre bien l'écran de
@@ -97,7 +104,104 @@ OD.define('auth', {
     // Leurs observers attendent leurs conteneurs et se montent sur l'accueil.
     try { bootTopNav(); } catch (e) { console.warn('[auth] bootTopNav', e); }
     // (historique client : désormais monté par la top nav via le module 'client-history')
+    // v11 : étape BACS (ordinateur + utilisateur synchronisé uniquement).
+    try { if (await etapeBacsRequise()) { ouvrirEtapeBacs(); return; } } catch (e) { console.warn('[auth] etape BACS', e); }
     navigateAccueil();
+  }
+
+  /* ----- v11 : étape BACS ---------------------------------------------------- */
+  const URL_BACS = 'https://toyota-france.my.site.com/bacs2/s/';
+  let bacsT = null;
+  function estMobile() {
+    try {
+      if (/Android|iPhone|iPad|iPod|Mobile/i.test(win.navigator.userAgent || '')) return true;
+      return !!(win.matchMedia && win.matchMedia('(hover: none) and (pointer: coarse)').matches);
+    } catch (e) { return false; }
+  }
+  function bacsDemander(action, params, delai) {
+    const g = (win.OD && win.OD.bacs) || (window.OD && window.OD.bacs);
+    if (g && typeof g.demander === 'function') return g.demander(action, params, delai);
+    return new Promise(function (resolve) {
+      const id = 'auth_' + Date.now() + '_' + Math.random().toString(16).slice(2);
+      let t = null;
+      function fin(r) { try { win.removeEventListener('message', ecoute); } catch (e) {} clearTimeout(t); resolve(r); }
+      function ecoute(e) { const m = e.data; if (m && m.__od_bacs_result && m.id === id) fin(m); }
+      win.addEventListener('message', ecoute);
+      t = setTimeout(function () { fin({ ok: false, erreur: 'delai_depasse' }); }, delai || 4000);
+      try { win.postMessage({ __od_bacs: true, id: id, action: action, params: params || {} }, '*'); }
+      catch (e) { fin({ ok: false, erreur: 'extension_absente' }); }
+    });
+  }
+  // 'ouvert' | 'non_pret' | 'ferme' | 'sans_pont'
+  async function bacsEtatLocal() {
+    const p = await bacsDemander('ping', {}, 3500);
+    if (p && p.ok && p.contexte !== false) return 'ouvert';
+    if (p && p.ok) return 'non_pret';
+    if (p && p.erreur === 'bacs_non_ouvert') return 'ferme';
+    if (p && p.erreur === 'bacs_non_pret') return 'non_pret';
+    return 'sans_pont';
+  }
+  async function bacsServeur() {
+    try { const r = await sb().rpc('bacs_veille_etat'); return (!r.error && r.data) ? r.data : null; } catch (e) { return null; }
+  }
+  async function etapeBacsRequise() {
+    if (estMobile()) return false;
+    const srv = await bacsServeur();
+    if (!srv || !srv.requis) return false;
+    const local = await bacsEtatLocal();
+    if (local === 'ouvert') return false;
+    if (local === 'sans_pont' && srv.vivant) return false;     // BACS ouvert sur un autre navigateur
+    state.bacsMotif = local; state.bacsAttente = Number(srv.en_attente) || 0;
+    return true;
+  }
+  function ouvrirEtapeBacs() {
+    state.view = 'bacs'; state.busy = false; state.error = null; state.info = null; render();
+    clearTimeout(bacsT);
+    const verifier = async function () {
+      if (state.view !== 'bacs') return;
+      const local = await bacsEtatLocal();
+      let ok = local === 'ouvert';
+      if (!ok && local === 'sans_pont') { const srv = await bacsServeur(); ok = !!(srv && srv.vivant); }
+      if (state.view !== 'bacs') return;
+      if (ok) {
+        state.bacsOk = true; render();
+        try { bacsDemander('vider_file', {}, 4000); } catch (e) {}
+        setTimeout(function () { if (state.view === 'bacs') { state.view = 'login'; navigateAccueil(); } }, 900);
+        return;
+      }
+      if (local !== state.bacsMotif) { state.bacsMotif = local; render(); }
+      bacsT = setTimeout(verifier, 2000);
+    };
+    state.bacsOk = false;
+    bacsT = setTimeout(verifier, 1500);
+  }
+  function ouvrirBacs() {
+    try { const w = win.open(URL_BACS, 'od_bacs'); if (w) w.focus(); } catch (e) {}
+  }
+  function continuerSansBacs() {
+    clearTimeout(bacsT);
+    try { sb().rpc('bacs_veille_noter', { p_evenement: 'connexion_sans_bacs', p_detail: { motif: state.bacsMotif || null } }).then(function () {}, function () {}); } catch (e) {}
+    state.view = 'login';
+    navigateAccueil();
+  }
+  function bacsHtml() {
+    const m = state.bacsMotif;
+    const n = Number(state.bacsAttente) || 0;
+    const titre = state.bacsOk ? 'BACS est ouvert' : 'Ouvrez BACS';
+    let sous;
+    if (state.bacsOk) sous = 'Synchronisation de votre agenda en place. Ouverture de One Data…';
+    else if (m === 'non_pret') sous = 'L\u2019onglet BACS est ouvert mais ne répond pas : connectez-vous dans BACS, ou laissez la page finir de se charger.';
+    else if (m === 'sans_pont') sous = 'L\u2019extension One Data ne répond pas sur ce navigateur. Ouvrez BACS dans Chrome, où l\u2019extension est installée.';
+    else sous = 'Vos rendez-vous One Data sont reportés dans votre agenda BACS. Gardez BACS ouvert dans un onglet de ce navigateur pendant votre journée.';
+    return '<h1 class="oa-title">' + titre + '</h1>' +
+      '<p class="oa-sub">' + esc(sous) + '</p>' +
+      (n > 0 && !state.bacsOk ? '<div class="oa-alert err">' + n + ' geste' + (n > 1 ? 's' : '') + ' d\u2019agenda attend' + (n > 1 ? 'ent' : '') + ' l\u2019ouverture de BACS pour partir.</div>' : '') +
+      (state.bacsOk
+        ? '<div class="oa-alert ok">BACS répond.</div>'
+        : '<button class="oa-btn" data-act="bacs-ouvrir">Ouvrir BACS</button>' +
+          '<div class="oa-wait"><span class="oa-spin oa-spin-b"></span>En attente de BACS… One Data s\u2019ouvrira tout seul.</div>' +
+          '<div class="oa-foot"><button class="oa-link" data-act="bacs-sans">Continuer sans BACS</button>' +
+          '<div class="oa-hint" style="margin:8px 0 0">Vos rendez-vous seront gardés et partiront vers BACS à sa prochaine ouverture.</div></div>');
   }
 
   // Destination memorisee par le socle avant la redirection vers la connexion.
@@ -236,6 +340,8 @@ OD.define('auth', {
     '.oa-spin{display:inline-block;width:16px;height:16px;border:2px solid rgba(255,255,255,.5);border-top-color:#fff;border-radius:50%;animation:oa-spin .7s linear infinite}' +
     '@keyframes oa-spin{to{transform:rotate(360deg)}}' +
     '.oa-hint{font-size:12px;color:#8aa3c3;margin:-8px 0 16px}' +
+    '.oa-wait{display:flex;align-items:center;justify-content:center;gap:9px;margin-top:16px;font-size:13px;color:#5a7196;font-weight:600}' +
+    '.oa-spin-b{border-color:rgba(42,94,169,.25);border-top-color:#2a5ea9}' +
     '@media(max-width:860px){.oa-brand{display:none}.oa-pane{flex:1;background:#eef2f8}.oa-card-logo{display:flex;flex-direction:column;align-items:center;gap:14px;margin-bottom:24px;text-align:center}.oa-card-logo img{height:104px;width:auto;object-fit:contain;display:block}.oa-card-logo .g{font-size:18px;font-weight:800;color:#1F4A85}}' +
     '</style>';
 
@@ -265,6 +371,7 @@ OD.define('auth', {
   }
 
   function formHtml() {
+    if (state.view === 'bacs') return bacsHtml();
     if (state.view === 'forgot') {
       return '<h1 class="oa-title">Mot de passe oublié</h1>' +
         '<p class="oa-sub">Saisissez votre email : nous vous enverrons un lien de réinitialisation.</p>' +
@@ -314,6 +421,8 @@ OD.define('auth', {
     on('[data-act="forgot"]', doForgot);
     on('[data-act="reset"]', doReset);
     on('[data-act="setpwd"]', doSetPwd);
+    on('[data-act="bacs-ouvrir"]', ouvrirBacs);
+    on('[data-act="bacs-sans"]', continuerSansBacs);
     on('[data-act="toforgot"]', () => { state.view = 'forgot'; state.error = null; state.info = null; render(); });
     on('[data-act="tologin"]', () => { state.view = 'login'; state.error = null; render(); });
     on('[data-eye]', (e) => { const n = e.currentTarget.getAttribute('data-eye'); const inp = root.querySelector('[data-f="' + n + '"]'); if (inp) inp.type = inp.type === 'password' ? 'text' : 'password'; });
