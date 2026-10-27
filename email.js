@@ -1,3 +1,24 @@
+// v10 (27/10/2026) : signatures — les icônes collées depuis Outlook ne
+// s'affichaient pas chez le destinataire.
+//  * Outlook bureau colle des images `file:///C:/.../msohtmlclip1/...` (fichier
+//    temporaire du poste du vendeur, irrécupérable) et des blocs VML dans des
+//    commentaires conditionnels, qu'Outlook bureau du DESTINATAIRE affiche à la
+//    place de <img>. OWA / Gmail collent des images en base64, que Gmail
+//    n'affiche pas et qui alourdissaient chaque mail jusqu'à 200 Ko.
+//  * Au collage et à l'enregistrement : nettoyage (commentaires, balises
+//    Office o:p / v:*, attributs on*, images inutilisables retirées avec un
+//    avis) puis hébergement des images base64 par `email-signature-assets`
+//    (adresse https publique, dédoublonnée par empreinte). Les liens autour des
+//    icônes (Facebook, Instagram, LinkedIn, tel:, mailto:) sont conservés.
+//  * « Appliquer le modèle » : signature générée par la base
+//    (email_signature_modele_rendu) avec la fonction et le mobile saisis. Le
+//    bloc n'apparaît que si le locataire a un modèle.
+//  * Retrait de la signature dans le corps fait sur le DOM : l'ancienne
+//    expression régulière s'arrêtait au premier </div> d'une signature
+//    contenant des <div>, et laissait des morceaux dans le message.
+//  * Replis pour les locataires sans ces objets SQL : sans colonne
+//    signature_champs, sans modèle, sans email-signature-assets (images envoyées
+//    par email-attachment-upload dans email-assets, comme avant).
 // v9 (27/10/2026) : open({ mode: 'new', client, subject, body }) pré-remplit
 // l'objet et le corps (HTML) — modèles proposés par le lead management.
 // v8 (27/10/2026) : champs (destinataires, objet, corps) en 16 px sur mobile.
@@ -89,17 +110,29 @@ OD.define('email', {
   if (state.sigPanel === undefined) state.sigPanel = false;
   if (state.sigDraft === undefined) state.sigDraft = '';
   if (state.sigSaving === undefined) state.sigSaving = false;
+  if (state.sigAvis === undefined) state.sigAvis = { t: '', g: '' };   // avis du panneau signature
+  if (state.sigChamps === undefined) state.sigChamps = {};              // { fonction, mobile }
+  if (state.sigModele === undefined) state.sigModele = null;            // null = pas encore vérifié
+  if (state.sigTravail === undefined) state.sigTravail = 0;             // hébergements en cours
   window.__emailState = state;
 
   function currentAccount() { return state.accounts.find(a => a.id === state.fromId) || null; }
   function currentSignature() { const a = currentAccount(); return (a && a.signature_html) ? a.signature_html : ''; }
-  function buildSigBlock() { const sig = currentSignature(); return sig ? '<div data-oropra-sig="1"><br>--<br>' + sig + '</div>' : ''; }
+  // Nettoyée à l'injection : une signature enregistrée avant la v10 ne doit
+  // pas envoyer d'images file:/cid: ni de blocs VML au destinataire.
+  function buildSigBlock() { const sig = nettoyerSignature(currentSignature()).html; return sig ? '<div data-oropra-sig="1"><br>--<br>' + sig + '</div>' : ''; }
+  // Retire le bloc signature sur le DOM (une signature contient des <div>).
+  function sansSignature(html) {
+    const t = doc.createElement('template'); t.innerHTML = html || '';
+    t.content.querySelectorAll('[data-oropra-sig]').forEach(n => n.remove());
+    return t.innerHTML;
+  }
   // (Ré)injecte ou retire la signature selon le toggle, placée avant un éventuel
   // bloc cité (réponse/transfert).
   function applySignature() {
     const ed = getRoot() && getRoot().querySelector('.em-body');
     let html = ed ? ed.innerHTML : state.bodyHtml;
-    html = html.replace(/<div data-oropra-sig="1">[\s\S]*?<\/div>/, '');
+    html = sansSignature(html);
     if (state.sigOn) {
       const sig = buildSigBlock();
       if (sig) {
@@ -109,6 +142,191 @@ OD.define('email', {
       }
     }
     state.bodyHtml = html; if (ed) ed.innerHTML = html;
+  }
+
+  /* ---- signature : nettoyage et hébergement des images (v10) ---- */
+  const SIG_FN = '/functions/v1/email-signature-assets';
+  const SIG_IMG_MAX = 1500000; // 1,5 Mo par image (même limite que la fonction)
+  function srcUtilisable(src) { return /^https?:\/\//i.test(src) || /^data:image\//i.test(src); }
+  // Retire de la signature tout ce qui ne survivra pas chez le destinataire.
+  // Rend { html, retirees } — retirees = images inutilisables enlevées.
+  function nettoyerSignature(html) {
+    const t = doc.createElement('template'); t.innerHTML = String(html || '');
+    const racine = t.content; let retirees = 0;
+    // 1. Commentaires, dont les blocs VML <!--[if gte vml 1]>…<![endif]-->
+    const w = doc.createTreeWalker(racine, 128 /* NodeFilter.SHOW_COMMENT */);
+    const coms = []; while (w.nextNode()) coms.push(w.currentNode);
+    coms.forEach(c => c.remove());
+    // 2. Balises sans place dans une signature
+    racine.querySelectorAll('style,script,meta,link,title,xml,iframe,object,embed,form,input,button').forEach(n => n.remove());
+    // 3. Balises Office à espace de noms (o:p déballée, v:* supprimée) et attributs
+    Array.from(racine.querySelectorAll('*')).forEach(el => {
+      if (!el.isConnected && !racine.contains(el)) return;
+      const tn = el.tagName.toLowerCase();
+      if (tn.indexOf(':') >= 0) {
+        if (tn.indexOf('o:') === 0) el.replaceWith.apply(el, Array.from(el.childNodes)); else el.remove();
+        return;
+      }
+      Array.from(el.attributes).forEach(at => {
+        const n = at.name.toLowerCase();
+        if (n.indexOf('on') === 0 || n === 'class' || n === 'lang' || n.indexOf(':') >= 0 || n.indexOf('data-') === 0) el.removeAttribute(at.name);
+        else if ((n === 'href' || n === 'src') && /^\s*javascript:/i.test(at.value)) el.removeAttribute(at.name);
+      });
+    });
+    // 4. Images : https et data:image seulement ; bordure nulle (icônes en lien)
+    racine.querySelectorAll('img').forEach(img => {
+      const src = (img.getAttribute('src') || '').trim();
+      if (!srcUtilisable(src)) { img.remove(); retirees++; return; }
+      ['width', 'height'].forEach(a => { if (img.getAttribute(a) === '0') img.removeAttribute(a); });
+      img.setAttribute('border', '0');
+      const st = img.getAttribute('style') || '';
+      if (!/border\s*:/i.test(st)) img.setAttribute('style', (st.trim() ? st.trim().replace(/;?$/, ';') : '') + 'border:0');
+    });
+    // 5. Liens vidés par le retrait de leur image
+    racine.querySelectorAll('a').forEach(a => {
+      if (!a.querySelector('img') && !a.textContent.replace(/ /g, ' ').trim()) a.remove();
+    });
+    return { html: t.innerHTML.trim(), retirees: retirees };
+  }
+  function imagesSignature(html) {
+    const t = doc.createElement('template'); t.innerHTML = String(html || '');
+    let cassees = 0, incrustees = 0;
+    t.content.querySelectorAll('img').forEach(i => {
+      const s = (i.getAttribute('src') || '').trim();
+      if (/^data:image\//i.test(s)) incrustees++; else if (!/^https?:\/\//i.test(s)) cassees++;
+    });
+    // Images VML d'Outlook (dans des commentaires) : invisibles au DOM, mais cassées
+    if (/<v:imagedata[^>]+src="(?:file|cid):/i.test(String(html || ''))) cassees = Math.max(cassees, 1);
+    return { cassees: cassees, incrustees: incrustees };
+  }
+  function msgOutlook(n) {
+    return (n > 1 ? n + ' images n\'ont' : '1 image n\'a') + ' pas pu être copiée' + (n > 1 ? 's' : '') +
+      ' depuis Outlook : elles n\'existent que sur votre ordinateur et ne s\'afficheraient pas chez vos destinataires. ' +
+      (state.sigModele ? 'Utilisez le modèle de votre concession ci-dessus' : 'Réinsérez-les avec le bouton 🖼') + '.';
+  }
+  function sigEditeur() { return getRoot() && getRoot().querySelector('.em-sig-ed'); }
+  // Avis du panneau signature, mis à jour en place (pas de render : l'éditeur garde le curseur)
+  function majAvis(texte, genre) {
+    state.sigAvis = { t: texte || '', g: genre || '' };
+    const el = getRoot() && getRoot().querySelector('.em-sig-avis');
+    if (!el) return;
+    el.className = 'em-sig-avis' + (state.sigAvis.g ? ' ' + state.sigAvis.g : '');
+    el.textContent = state.sigAvis.t;
+    el.style.display = state.sigAvis.t ? '' : 'none';
+  }
+  function dataUrlVersBlob(u) {
+    const m = /^data:([^;,]+)(;base64)?,([\s\S]*)$/i.exec(u || ''); if (!m) return null;
+    const bin = m[2] ? atob(m[3].replace(/\s+/g, '')) : decodeURIComponent(m[3]);
+    const a = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) a[i] = bin.charCodeAt(i);
+    return new Blob([a], { type: m[1] });
+  }
+  // Héberge une liste d'images data: ; rend les adresses dans le même ordre (null = échec).
+  async function hebergerListe(sources) {
+    try {
+      const r = await fetch(SUPABASE_URL + SIG_FN, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', apikey: anonKey(), Authorization: 'Bearer ' + (await authToken()) },
+        body: JSON.stringify({ images: sources })
+      });
+      if (r.ok) { const j = await r.json(); if (j && Array.isArray(j.urls)) return j.urls; }
+      throw new Error('HTTP ' + r.status);
+    } catch (e) { console.warn('[email] email-signature-assets indisponible, repli', e); }
+    // Repli : locataire sans email-signature-assets -> une image à la fois dans email-assets
+    const urls = [];
+    for (const s of sources) {
+      try {
+        const b = dataUrlVersBlob(s); if (!b) { urls.push(null); continue; }
+        const fd = new FormData();
+        fd.append('file', b, 'signature.' + ((b.type.split('/')[1] || 'png').replace('jpeg', 'jpg')));
+        fd.append('bucket', 'email-assets'); fd.append('account_id', String(state.fromId || 'acc'));
+        const r = await fetch(SUPABASE_URL + '/functions/v1/email-attachment-upload', { method: 'POST', headers: { apikey: anonKey(), Authorization: 'Bearer ' + (await authToken()) }, body: fd });
+        const j = await r.json().catch(() => ({}));
+        urls.push(r.ok && j.public_url ? j.public_url : null);
+      } catch (e) { urls.push(null); }
+    }
+    return urls;
+  }
+  // Remplace, dans un conteneur, les images data: par leur adresse hébergée.
+  // Une image qui n'a pas pu l'être est retirée. Rend le nombre d'échecs.
+  function appliquerAdresses(conteneur, table) {
+    let echecs = 0;
+    conteneur.querySelectorAll('img').forEach(i => {
+      const s = i.getAttribute('src') || '';
+      if (!/^data:image\//i.test(s) || !(s in table)) return;
+      if (table[s]) i.setAttribute('src', table[s]); else { i.remove(); echecs++; }
+    });
+    return echecs;
+  }
+  async function hebergerTable(sources) {
+    const uniques = Array.from(new Set(sources)); const table = {};
+    if (!uniques.length) return table;
+    const urls = await hebergerListe(uniques);
+    uniques.forEach((s, k) => { table[s] = urls[k] || null; });
+    return table;
+  }
+  // Héberge les images data: présentes dans l'éditeur de signature. L'éditeur
+  // peut être redessiné pendant l'envoi : on relit le nœud vivant à la fin.
+  async function hebergerDansEditeur() {
+    const ed0 = sigEditeur(); if (!ed0) return;
+    const sources = Array.from(ed0.querySelectorAll('img')).map(i => i.getAttribute('src') || '').filter(s => /^data:image\//i.test(s));
+    if (!sources.length) return;
+    state.sigTravail++;
+    if (state.sigAvis.g !== 'warn') majAvis('Préparation des images…', 'info');
+    let table = {};
+    try { table = await hebergerTable(sources); } finally { state.sigTravail--; }
+    const ed = sigEditeur();
+    let echecs;
+    if (ed) { echecs = appliquerAdresses(ed, table); state.sigDraft = ed.innerHTML; }
+    else { const t = doc.createElement('template'); t.innerHTML = state.sigDraft || ''; echecs = appliquerAdresses(t.content, table); state.sigDraft = t.innerHTML; }
+    if (echecs) majAvis((echecs > 1 ? echecs + ' images n\'ont' : '1 image n\'a') + ' pas pu être hébergée' + (echecs > 1 ? 's' : '') + ' et a été retirée' + (echecs > 1 ? 's' : '') + ' (format accepté : PNG, JPEG, GIF, WebP, 1,5 Mo maximum).', 'warn');
+    else if (state.sigAvis.g === 'info') majAvis('', '');
+  }
+  // Presse-papiers HTML d'Outlook / Word : le fragment utile est balisé.
+  function extraireFragment(html) {
+    const m = /<!--StartFragment-->([\s\S]*?)<!--EndFragment-->/i.exec(html);
+    if (m) return m[1];
+    const b = /<body[^>]*>([\s\S]*)<\/body>/i.exec(html);
+    return b ? b[1] : html;
+  }
+  async function verifierModele() {
+    if (state.sigModele !== null) return;
+    try {
+      const r = await sb().from('email_signature_modele').select('id').eq('actif', true).limit(1);
+      state.sigModele = !r.error && (r.data || []).length > 0;
+    } catch (e) { state.sigModele = false; }
+  }
+  function lireChamps() {
+    const root = getRoot(); if (!root) return state.sigChamps;
+    root.querySelectorAll('[data-sigchamp]').forEach(i => { state.sigChamps[i.getAttribute('data-sigchamp')] = i.value.trim(); });
+    return state.sigChamps;
+  }
+  async function appliquerModele() {
+    const a = currentAccount(); if (!a) return;
+    const champs = lireChamps();
+    majAvis('Génération de la signature…', 'info');
+    try {
+      const r = await sb().rpc('email_signature_modele_rendu', { p_account_id: a.id, p_champs: { fonction: champs.fonction || '', mobile: champs.mobile || '' } });
+      if (r.error) throw r.error;
+      if (!r.data) { majAvis('Aucun modèle de signature n\'est défini pour votre concession.', 'warn'); return; }
+      state.sigDraft = r.data;
+      const ed = sigEditeur(); if (ed) ed.innerHTML = r.data;
+      majAvis('Modèle appliqué. Vérifiez la signature puis enregistrez.', 'ok');
+    } catch (e) { console.error('[email] modele', e); majAvis('Échec de la génération : ' + (e.message || e), 'err'); }
+  }
+  async function ouvrirPanneauSignature() {
+    const a = currentAccount();
+    state.sigChamps = Object.assign({}, (a && a.signature_champs) || {});
+    const brut = currentSignature();
+    const etat = imagesSignature(brut);
+    const n = nettoyerSignature(brut);
+    state.sigDraft = n.html;
+    state.sigAvis = { t: '', g: '' };
+    state.sigPanel = true;
+    await verifierModele();
+    if (n.retirees || etat.cassees) state.sigAvis = { t: msgOutlook(Math.max(n.retirees, etat.cassees)), g: 'warn' };
+    render();
+    // Anciennes signatures en base64 : hébergées tout de suite, à enregistrer
+    if (etat.incrustees) { await hebergerDansEditeur(); if (state.sigAvis.g !== 'warn') majAvis('Les images de votre signature ont été mises en ligne. Enregistrez pour valider.', 'ok'); }
   }
 
   function parseArr(v) { try { if (Array.isArray(v)) return v; if (typeof v === 'string' && v.trim()) return JSON.parse(v); } catch (e) { } return []; }
@@ -174,7 +392,10 @@ OD.define('email', {
   async function loadAccounts() {
     try {
       const uid = me().ID_User;
-      const res = await sb().from('email_accounts').select('id, email_address, display_name, status, id_site, signature_html').eq('id_user', Number(uid));
+      const COLS = 'id, email_address, display_name, status, id_site, signature_html';
+      let res = await sb().from('email_accounts').select(COLS + ', signature_champs').eq('id_user', Number(uid));
+      // Locataire sans la colonne signature_champs (avant la migration du 27/10)
+      if (res.error) res = await sb().from('email_accounts').select(COLS).eq('id_user', Number(uid));
       let rows = res.data || [];
       // comptes connectés d'abord
       rows.sort((a, b) => (a.status === 'connected' ? 0 : 1) - (b.status === 'connected' ? 0 : 1));
@@ -378,7 +599,21 @@ OD.define('email', {
     '.em-sig-ed:empty:before{content:attr(data-ph);color:#adc0dd}' +
     '.em-sig-ft{display:flex;align-items:center;gap:10px;padding:10px 16px;border-top:1px solid #eef2f8;background:#fafcff}' +
     '.em-sig-hint{flex:1;font-size:11.5px;color:#7a98c5}' +
-    '@media(max-width:640px){.em-in,.em-body,.em-ov textarea{font-size:16px}.em-ov{padding:0;bottom:auto;height:100vh;height:100dvh}.em-box{width:100%;height:100%;max-height:100%;border-radius:0;padding-bottom:env(safe-area-inset-bottom,0px)}.em-lbl{width:42px}}' +
+    '.em-sig-mod{padding:10px 16px;border-bottom:1px solid #eef2f8;background:#f7faff}' +
+    '.em-sig-mod-t{font-size:12.5px;font-weight:800;color:#1F4A85;margin-bottom:6px}' +
+    '.em-sig-mod-t span{font-weight:600;color:#7a98c5;margin-left:6px}' +
+    '.em-sig-mod-f{display:flex;flex-wrap:wrap;gap:8px;align-items:flex-end}' +
+    '.em-sig-mod-f label{display:flex;flex-direction:column;gap:3px;font-size:11px;font-weight:700;color:#7a98c5;flex:1;min-width:140px}' +
+    '.em-sig-mod-f input{border:1px solid #dbe6f5;border-radius:8px;padding:7px 9px;font:inherit;font-size:13px;color:#1F4A85;background:#fff;outline:none}' +
+    '.em-sig-mod-f input:focus{border-color:#2a5ea9}' +
+    '.em-sig-mod-b{border:1px solid #2a5ea9;background:#fff;color:#2a5ea9;border-radius:9px;padding:8px 12px;font:inherit;font-size:12.5px;font-weight:700;cursor:pointer;flex:0 0 auto}' +
+    '.em-sig-mod-b:hover{background:#eef4fc}' +
+    '.em-sig-avis{margin:8px 16px 0;padding:8px 11px;border-radius:9px;font-size:12px;line-height:1.45;border:1px solid #dbe6f5;background:#f2f6fc;color:#2a5ea9}' +
+    '.em-sig-avis.warn{background:#fff7e8;border-color:#f3d9a8;color:#8a5300}' +
+    '.em-sig-avis.ok{background:#eaf6ee;border-color:#bfe3cb;color:#1f6b3a}' +
+    '.em-sig-avis.err{background:#fdeeee;border-color:#f3c2c1;color:#b8302f}' +
+    '.em-sig-ed a img{border:0}' +
+    '@media(max-width:640px){.em-in,.em-body,.em-ov textarea,.em-sig-ed,.em-sig-mod-f input{font-size:16px}.em-ov{padding:0;bottom:auto;height:100vh;height:100dvh}.em-box{width:100%;height:100%;max-height:100%;border-radius:0;padding-bottom:env(safe-area-inset-bottom,0px)}.em-lbl{width:42px}}' +
     '</style>';
 
   function cmd(c, v) { try { doc.execCommand(c, false, v || null); } catch (e) { } const ed = getRoot() && getRoot().querySelector('.em-body'); if (ed) { state.bodyHtml = ed.innerHTML; ed.focus(); } }
@@ -493,6 +728,14 @@ OD.define('email', {
     const a = currentAccount(); const who = a ? (a.display_name || a.email_address) : '';
     return '<div class="em-sig-ov"><div class="em-sig-box">' +
       '<div class="em-sig-hd"><span>Signature — ' + esc(who) + '</span><button class="em-x" data-act="sigclose">&times;</button></div>' +
+      (state.sigModele ? '<div class="em-sig-mod">' +
+        '<div class="em-sig-mod-t">Signature de la concession<span>logo, adresse et icônes à jour</span></div>' +
+        '<div class="em-sig-mod-f">' +
+        '<label>Fonction<input data-sigchamp="fonction" value="' + esc(state.sigChamps.fonction || '') + '" placeholder="Conseiller commercial"></label>' +
+        '<label>Mobile<input data-sigchamp="mobile" inputmode="tel" value="' + esc(state.sigChamps.mobile || '') + '" placeholder="06 12 34 56 78"></label>' +
+        '<button class="em-sig-mod-b" data-act="sigmodele">Appliquer le modèle</button>' +
+        '</div></div>' : '') +
+      '<div class="em-sig-avis' + (state.sigAvis.g ? ' ' + state.sigAvis.g : '') + '"' + (state.sigAvis.t ? '' : ' style="display:none"') + '>' + esc(state.sigAvis.t) + '</div>' +
       sigToolbar() +
       '<div class="em-sig-ed" contenteditable="true" data-ph="Votre signature…">' + (state.sigDraft || '') + '</div>' +
       '<div class="em-sig-ft"><span class="em-sig-hint">Astuce : la signature s\'ajoute automatiquement si le bouton « Signature » est activé.</span>' +
@@ -520,31 +763,50 @@ OD.define('email', {
     inp.onchange = () => { const f = inp.files && inp.files[0]; if (f) uploadSigImage(f); };
     inp.click();
   }
-  async function uploadSigImage(file) {
-    if (file.size > 2 * 1024 * 1024) { state.error = 'Logo trop lourd (max 2 Mo).'; render(); return; }
-    state.error = null;
-    try {
-      const fd = new FormData();
-      fd.append('file', file, file.name); fd.append('bucket', 'email-assets'); fd.append('account_id', String(state.fromId || 'acc'));
-      const r = await fetch(SUPABASE_URL + '/functions/v1/email-attachment-upload', { method: 'POST', headers: { apikey: anonKey(), Authorization: 'Bearer ' + (await authToken()) }, body: fd });
-      const j = await r.json().catch(() => ({}));
-      if (!r.ok || !j.public_url) throw new Error(j.error || ('HTTP ' + r.status));
-      const ed = getRoot() && getRoot().querySelector('.em-sig-ed');
-      if (ed) { ed.focus(); try { doc.execCommand('insertHTML', false, '<img src="' + j.public_url + '" style="max-width:220px;height:auto">'); } catch (e) { } state.sigDraft = ed.innerHTML; }
-    } catch (e) { console.error('[email] sig image', e); state.error = 'Échec insertion image : ' + (e.message || e); render(); }
+  // Image insérée (bouton 🖼 ou image seule collée) : posée en data: dans
+  // l'éditeur pour un aperçu immédiat, puis hébergée par le même chemin que le
+  // collage.
+  function uploadSigImage(file) {
+    if (!/^image\/(png|jpe?g|gif|webp)$/i.test(file.type || '')) { majAvis('Format non accepté : PNG, JPEG, GIF ou WebP.', 'warn'); return; }
+    if (file.size > SIG_IMG_MAX) { majAvis('Image trop lourde (1,5 Mo maximum).', 'warn'); return; }
+    const lecteur = new FileReader();
+    lecteur.onload = () => {
+      const ed = sigEditeur(); if (!ed) return;
+      ed.focus();
+      try { doc.execCommand('insertHTML', false, '<img src="' + lecteur.result + '" border="0" style="max-width:220px;height:auto;border:0">'); } catch (e) { }
+      state.sigDraft = ed.innerHTML;
+      hebergerDansEditeur();
+    };
+    lecteur.onerror = () => majAvis('Lecture de l\'image impossible.', 'err');
+    lecteur.readAsDataURL(file);
   }
 
   async function saveSignature() {
     const a = currentAccount(); if (!a || state.sigSaving) return;
-    const ed = getRoot() && getRoot().querySelector('.em-sig-ed'); const html = ed ? ed.innerHTML : (state.sigDraft || '');
-    state.sigSaving = true; render();
+    if (state.sigTravail > 0) { majAvis('Les images sont en cours de mise en ligne, un instant…', 'info'); return; }
+    const ed = sigEditeur(); const brut = ed ? ed.innerHTML : (state.sigDraft || '');
+    const champs = lireChamps();
+    state.sigDraft = brut; state.sigSaving = true; render();
     try {
-      const r = await sb().from('email_accounts').update({ signature_html: html }).eq('id', a.id);
+      // Dernier nettoyage + hébergement (glisser-déposer, saisie manuelle…)
+      const n = nettoyerSignature(brut);
+      const t = doc.createElement('template'); t.innerHTML = n.html;
+      const sources = Array.from(t.content.querySelectorAll('img')).map(i => i.getAttribute('src') || '').filter(s => /^data:image\//i.test(s));
+      const echecs = sources.length ? appliquerAdresses(t.content, await hebergerTable(sources)) : 0;
+      const html = t.innerHTML.trim();
+      const champsPropres = { fonction: champs.fonction || '', mobile: champs.mobile || '' };
+      let r = await sb().from('email_accounts').update({ signature_html: html, signature_champs: champsPropres }).eq('id', a.id);
+      // Locataire sans la colonne signature_champs
+      if (r.error && /signature_champs/i.test(r.error.message || '')) r = await sb().from('email_accounts').update({ signature_html: html }).eq('id', a.id);
       if (r.error) throw r.error;
-      a.signature_html = html;
-      state.sigSaving = false; state.sigPanel = false;
+      a.signature_html = html; a.signature_champs = champsPropres;
+      state.sigDraft = html; state.sigSaving = false;
+      if (n.retirees || echecs) {
+        // On garde le panneau ouvert : le vendeur doit savoir ce qui a été retiré
+        state.sigAvis = { t: 'Signature enregistrée. ' + ((n.retirees + echecs) > 1 ? (n.retirees + echecs) + ' images inutilisables ont été retirées.' : '1 image inutilisable a été retirée.'), g: 'warn' };
+      } else { state.sigPanel = false; state.sigAvis = { t: '', g: '' }; }
       applySignature(); render();
-    } catch (e) { console.error('[email] saveSig', e); state.sigSaving = false; state.error = 'Échec enregistrement signature : ' + (e.message || e); render(); }
+    } catch (e) { console.error('[email] saveSig', e); state.sigSaving = false; state.sigAvis = { t: 'Échec de l\'enregistrement : ' + (e.message || e), g: 'err' }; render(); }
   }
 
   function bind(root) {
@@ -554,9 +816,32 @@ OD.define('email', {
     on('[data-act="send"]', 'click', send);
     on('[data-act="attach"]', 'click', pickFiles);
     on('[data-act="sigtoggle"]', 'click', () => { state.sigOn = !state.sigOn; applySignature(); render(); });
-    on('[data-act="sigcfg"]', 'click', () => { state.sigDraft = currentSignature(); state.sigPanel = true; render(); });
-    on('[data-act="sigclose"]', 'click', () => { state.sigPanel = false; render(); });
+    on('[data-act="sigcfg"]', 'click', ouvrirPanneauSignature);
+    on('[data-act="sigclose"]', 'click', () => { state.sigPanel = false; state.sigAvis = { t: '', g: '' }; render(); });
     on('[data-act="sigsave"]', 'click', saveSignature);
+    on('[data-act="sigmodele"]', 'click', appliquerModele);
+    on('[data-sigchamp]', 'input', (e) => { state.sigChamps[e.target.getAttribute('data-sigchamp')] = e.target.value; });
+    const sed = root.querySelector('.em-sig-ed');
+    if (sed) {
+      // La saisie était perdue au moindre redessin du panneau
+      sed.addEventListener('input', () => { state.sigDraft = sed.innerHTML; });
+      sed.addEventListener('paste', (e) => {
+        const cd = e.clipboardData; if (!cd) return;
+        const html = cd.getData('text/html');
+        if (!html) {
+          // Image seule (capture d'écran…) ; le texte simple garde le collage natif
+          const it = Array.from(cd.items || []).find(x => x.kind === 'file' && /^image\//.test(x.type));
+          if (it) { e.preventDefault(); const f = it.getAsFile(); if (f) uploadSigImage(f); }
+          return;
+        }
+        e.preventDefault();
+        const n = nettoyerSignature(extraireFragment(html));
+        try { doc.execCommand('insertHTML', false, n.html); } catch (er) { }
+        state.sigDraft = sed.innerHTML;
+        if (n.retirees) majAvis(msgOutlook(n.retirees), 'warn'); else majAvis('', '');
+        hebergerDansEditeur();
+      });
+    }
     root.querySelectorAll('.em-sig-tb').forEach(el => {
       el.addEventListener('mousedown', e => e.preventDefault());
       el.addEventListener('click', () => {
