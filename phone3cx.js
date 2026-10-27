@@ -1,5 +1,7 @@
 // ============================================================================
-//  One Data — TELEPHONIE 3CX cote vendeur (module ambiant, sans ancre WeWeb)  v7
+//  One Data — TELEPHONIE 3CX cote vendeur (module ambiant, sans ancre WeWeb)  v8
+//  v8 (27/10/2026) : « Voir la fiche » ouvre la fiche client par son chemin
+//  /fr/fiche-client ; l'ancien appel envoyait vers la page de connexion.
 //  v7 (22/10/2026) : ne se monte que pour les licences Connect et Full
 //  (OD.peut('appel'), socle v29) ; threecx-action refuse aussi les autres.
 //  v6 (08/10/2026) : si la commande d'appel est refusee (pas de poste, pont
@@ -194,14 +196,20 @@ OD.define('phone3cx', {
       return j;
     }
 
+    // v8 (27/10/2026) : navigation par CHEMIN complet, comme la barre du haut.
+    // wwLib.wwApp.goTo attend un IDENTIFIANT de page : lui passer le chemin
+    // '/fiche-client' envoyait vers une route inexistante — écran blanc derrière
+    // la fenêtre d'appel, puis retour à la page de connexion.
+    const LANG_PREFIX = '/fr';
+    const FICHE_TAB_VAR = 'fb2cad2c-cd04-42e0-8909-e3c91c8dcfac';
     function ouvrirFiche(idClient) {
       if (!idClient) return;
       try { wwLib.wwVariable.updateValue(SELECTED_CLIENT_VAR, { IDVu: Number(idClient) }); } catch (e) {}
-      try {
-        if ((win.location.pathname || '').indexOf(PAGE_FICHE) !== -1) return;
-        if (wwLib.wwApp && wwLib.wwApp.goTo) return wwLib.wwApp.goTo(PAGE_FICHE);
-        wwLib.goTo(PAGE_FICHE);
-      } catch (e) {}
+      try { wwLib.wwVariable.updateValue(FICHE_TAB_VAR, 0); } catch (e) {}
+      if ((win.location.pathname || '').indexOf(PAGE_FICHE) !== -1) return;
+      const href = LANG_PREFIX + PAGE_FICHE;
+      try { wwLib.goTo(href); return; } catch (e) {}
+      try { win.location.href = href; } catch (e) {}
     }
 
     // Composition directe par le client 3CX du vendeur : le softphone emet
