@@ -1,3 +1,9 @@
+// v11 (27/10/2026) : champ de saisie en 16 px sur mobile ; la fermeture libère
+// bien la page (en v9-v10, fermer la fenêtre laissait la fiche figée).
+// iPhone : un champ dont le texte fait moins de 16 px déclenche un ZOOM
+// automatique de Safari au toucher. La page entière devient alors plus grande que
+// l'écran : on peut la faire glisser « derrière » la fenêtre, des barres de
+// défilement apparaissent, et les bords (avatar, croix, envoi) sont coupés.
 // v10 (27/10/2026) : verrou de la page renforcé pour iPhone (body figé) — la
 // fiche client ne défile plus derrière la fenêtre SMS, plus de barres de défilement.
 // v9 (27/10/2026) : sur mobile, faire défiler le fil SMS ne fait plus défiler
@@ -306,7 +312,7 @@ OD.define('sms', {
     '.sms-spin.dark{border-color:#e7d9c2;border-top-color:' + ORANGE + '}' +
     '@keyframes sms-spin{to{transform:rotate(360deg)}}' +
     '.sms-bar{position:fixed;left:24px;bottom:24px;width:min(300px,calc(100vw - 32px));background:' + ORANGE + ';color:#fff;border-radius:12px;box-shadow:0 12px 34px rgba(0,0,0,.24);z-index:9990;display:flex;align-items:center;gap:10px;padding:10px 12px;cursor:pointer}' +
-    '@media(max-width:640px){.sms-head{position:relative;z-index:2}.sms-hbtn{padding:11px;min-width:44px;min-height:44px;justify-content:center;align-items:center}.sms-card{left:0;top:0;right:auto;bottom:auto!important;width:100%;max-width:100%;height:100vh;height:100dvh;border-radius:0}.sms-foot{padding-bottom:calc(8px + env(safe-area-inset-bottom,0px))}.sms-bar{left:0;right:0;bottom:0;width:100vw;border-radius:0;padding-bottom:env(safe-area-inset-bottom,0px)}}' +
+    '@media(max-width:640px){.sms-head{position:relative;z-index:2}.sms-hbtn{padding:11px;min-width:44px;min-height:44px;justify-content:center;align-items:center}.sms-inp{font-size:16px}.sms-card{left:0;top:0;right:auto;bottom:auto!important;width:100%;max-width:100%;height:100vh;height:100dvh;border-radius:0}.sms-foot{padding-bottom:calc(8px + env(safe-area-inset-bottom,0px))}.sms-bar{left:0;right:0;bottom:0;width:100vw;border-radius:0;padding-bottom:env(safe-area-inset-bottom,0px)}}' +
     '</style>';
 
   /* ---- rendu -------------------------------------------------------------- */
@@ -520,6 +526,7 @@ OD.define('sms', {
     if (state.unsubSite) { try { state.unsubSite(); } catch (e) {} state.unsubSite = null; }
     state.open = false; state.minimized = false; state.input = ''; state.selectedKey = null;
     const root = getRoot(); if (root) root.innerHTML = '';
+    verrouPage('sms', false);   // v11 : la page redevient défilable à la fermeture
     try { wwLib.wwVariable.updateValue(SMS_BODY_VAR_ID, ''); } catch (e) {}
     try { win.dispatchEvent(new CustomEvent('oropra-sms-close')); } catch (e) {}
   }
