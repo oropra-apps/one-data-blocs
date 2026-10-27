@@ -1,6 +1,11 @@
 // ============================================================================
 //  LEAD MANAGEMENT — module One Data (OD.define 'lead-mgmt')
-//  VERSION TEAM COLIN (v63) — déploiement CIBLÉ (publish-targets :
+//  VERSION TEAM COLIN (v64) — déploiement CIBLÉ (publish-targets :
+//  v64 (27/10/2026) : le site choisi dans la barre du haut devient le
+//  périmètre de la page (et l'inverse) ; « Bloqués chez un vendeur » devient
+//  « En souffrance », et le vendeur qui garde le lead s'affiche en grand sur
+//  chaque ligne ; le lien « Analyses détaillées » est retiré (les indicateurs
+//  sont dans Leads performances).
 //  v63 (27/10/2026) : le lien « Tableaux détaillés » est retiré : il ouvrait
 //  l'ancienne version sans chemin de retour. Le mur et le relais restent sous
 //  « Analyses détaillées », la règle d'attribution sous « Modifier la règle ».
@@ -1232,6 +1237,7 @@
         S.site = (avecLeads[0] || sitesStats()[0] || {}).id_site || null;
       }
       if (POSTE === 'vendeur' && S.site == null) S.site = (sitesStats()[0] || {}).id_site || null;
+      if (!S._busLu) { S._busLu = true; adopterSite(siteDuBus()); }
       S.erreur = null; S.charge = true;
     }
     async function rafraichir(silencieux) {
@@ -1288,6 +1294,36 @@
       if (fait) render();
     }
     function suggestion(l) { return S.sugg[l.id_lead] || null; }
+
+    // ── v64 : le site de la barre du haut EST le périmètre de la page ─────
+    function busApi() { try { return FW.oropraSite || window.oropraSite || null; } catch (e) { return window.oropraSite || null; } }
+    function siteDuBus() { var b = busApi(); try { var v = b && b.getSiteId ? b.getSiteId() : null; return v == null ? null : Number(v); } catch (e) { return null; } }
+    // Rend vrai si le périmètre a changé.
+    function adopterSite(id) {
+      if (POSTE === 'vendeur') return false;
+      if (POSTE === 'chef') {
+        if (id == null || !sitesStats().some(function (s) { return s.manager && Number(s.id_site) === Number(id); })) return false;
+        if (Number(S.site) === Number(id)) return false;
+        S.site = Number(id);
+      } else {
+        var v = id == null ? null : (siteInfo(id) ? Number(id) : null);
+        if (id != null && v == null) return false;
+        if (S.vueSite === v) return false;
+        S.vueSite = v;
+      }
+      S.cell = null; S.campagnes = null; S.suggKey = null;
+      return true;
+    }
+    var __busEcrit = false;
+    function ecrireBus(id) {
+      var b = busApi(); if (!b || !b.setSiteId || id == null) return;
+      if (siteDuBus() === Number(id)) return;
+      __busEcrit = true; try { b.setSiteId(Number(id)); } catch (e) {} setTimeout(function () { __busEcrit = false; }, 800);
+    }
+    function surBus() {
+      if (__busEcrit || !S.charge) return;
+      if (adopterSite(siteDuBus())) { render(); chargerAide(); if (S.tab === 'campagnes') chargerCampagnes().then(render); }
+    }
 
     // ── Signaux ───────────────────────────────────────────────────────────
     function signaux() {
@@ -1460,13 +1496,13 @@
         var bl = bloques(sid).length, ret = retardsEquipe(sid);
         lbl = (POSTE === 'chef' ? 'Chef des ventes' : 'Direction') + ' · ' + esc(nom);
         p = '<b>' + plural(pool.length, 'lead', 'leads') + ' dans le Pool</b>' + (hd ? ' dont <b class="t-crit">' + hd + ' hors délai</b>' : '')
-          + ' · ' + plural(bl, 'lead bloqué', 'leads bloqués') + ' chez un vendeur'
+          + (bl ? ' · <b class="t-crit">' + plural(bl, 'lead en souffrance', 'leads en souffrance') + '</b> chez un vendeur' : ' · aucun lead en souffrance')
           + (ret ? ' · <b class="t-crit">' + plural(ret, 'lead en retard', 'leads en retard') + '</b> dans l\'équipe' : '') + '.';
         if (sid != null && !manager(sid)) p += ' <span class="t-mut">Vue de pilotage : le chef des ventes du site agit sur ses leads.</span>';
         var aAttr = pool.filter(function (l) { var g = suggestion(l); return manager(l.id_site) && g && g.id_user; });
         if (aAttr.length) cta = '<button type="button" class="cta" data-a="tout-attribuer">Attribuer tout le Pool<small>' + plural(aAttr.length, 'lead', 'leads') + ' · au vendeur suggéré</small></button>';
       }
-      var analyses = POSTE !== 'vendeur' ? ' · <button type="button" class="lien" data-a="tab" data-id="' + (sitePoste() == null ? 'mursites' : 'mur') + '">Analyses détaillées</button>' : '';
+      var analyses = '';
       return '<section class="hello"><div class="hello-t">' + (POSTE !== 'vendeur' ? perimetreHtml() : '')
         + '<p class="hello-l">' + lbl + analyses + '</p>'
         + '<h1>' + (POSTE === 'vendeur' ? 'Bonjour ' + esc(pre || '') : esc(libPerim()) + ' · aujourd\'hui') + '</h1><p class="hello-p">' + p + '</p></div>' + cta + '</section>';
@@ -1487,7 +1523,7 @@
       }
       var sid = sitePoste(), pool = libres(sid);
       return [['pool', sid == null ? 'Pool' : poolNom(sid), pool.length, pool.some(function (l) { return niveau(l) === 'crit'; })],
-              ['bloques', 'Bloqués chez un vendeur', bloques(sid).length, bloques(sid).length > 0],
+              ['bloques', 'En souffrance', bloques(sid).length, bloques(sid).length > 0],
               ['campagnes', 'Campagnes', null, false]];
     }
     function renderTabs() {
@@ -1530,6 +1566,16 @@
       if (!gere) a = '<button type="button" class="btn" data-a="open" data-id="' + l.id_lead + '">Ouvrir</button>';
       else a = '<select id="sel-' + l.id_lead + '" aria-label="Vendeur">' + optionsVendeurs(l.id_site, bloque ? l.id_user_attribue : null, g && g.id_user) + '</select>'
         + '<button type="button" class="btn pri" data-a="attribuer" data-id="' + l.id_lead + '">' + (bloque ? 'Réattribuer' : 'Attribuer') + '</button>';
+      if (bloque) {
+        var vn = propre(l.vendeur_nom || 'Un vendeur');
+        var ini = vn.split(/\s+/).filter(Boolean).slice(0, 2).map(function (x) { return x[0]; }).join('').toUpperCase();
+        var depuis = (l.attribue_le ? 'depuis ' + duree(mins(l.attribue_le)) : '') + (l.tentatives ? ' · ' + plural(l.tentatives, 'tentative') : ' · pas encore appelé');
+        return '<div class="lr v2 attr souf" data-a="open" data-id="' + l.id_lead + '" tabindex="0"><div>' + rebours(l) + '</div>'
+          + '<div class="who"><span class="lr-n">' + esc(nomLead(l)) + '</span>' + (sitePoste() == null ? ' <span class="lr-v">' + esc(siteNom(l.site)) + '</span>' : '')
+          + '<p class="lr-d">' + esc(demandeDe(l)) + ' · ' + esc(l.source_libelle || l.source || 'Lead') + '</p></div>'
+          + '<div class="chez"><span class="av">' + esc(ini) + '</span><span class="chez-t"><small>En souffrance chez</small><b>' + esc(vn) + '</b><em>' + esc(depuis) + '</em></span></div>'
+          + '<div class="lr-a">' + a + '</div></div>';
+      }
       return '<div class="lr v2 attr" data-a="open" data-id="' + l.id_lead + '" tabindex="0"><div>' + rebours(l) + '</div>'
         + '<div class="who"><span class="lr-n">' + esc(nomLead(l)) + '</span>' + (sitePoste() == null ? ' <span class="lr-v">' + esc(siteNom(l.site)) + '</span>' : '')
         + '<p class="lr-d">' + esc(demandeDe(l)) + '</p>' + (why ? '<p class="why">' + esc(why) + '</p>' : '') + '</div>'
@@ -1622,9 +1668,9 @@
       var sid = sitePoste();
       var ls = bloques(sid);
       var h = '<div class="list">';
-      if (!ls.length) h += '<div class="empty">Aucun lead bloqué : chaque vendeur traite les siens dans le délai.</div>';
+      if (!ls.length) h += '<div class="empty">Aucun lead en souffrance : chaque vendeur traite les siens dans le délai.</div>';
       ls.slice(0, 150).forEach(function (l) { h += ligneAttrib(l, true); });
-      h += '</div><p class="foot">Un lead est « bloqué » quand son vendeur l\'a pris sans appeler depuis plus de 20 min, a dépassé le délai, l\'a depuis plus de 24 h, ou ne l\'a pas joint en trois essais. Ouvrez-le pour le rendre au Pool, le confier au plateau VROOM ou le clore.</p>';
+      h += '</div><p class="foot">Un lead est « en souffrance » quand son vendeur l\'a pris sans appeler depuis plus de 20 min, a dépassé le délai, l\'a depuis plus de 24 h, ou ne l\'a pas joint en trois essais. Ouvrez-le pour le rendre au Pool, le confier au plateau VROOM ou le clore.</p>';
       return h + equipeHtml(sid);
     }
     function equipeHtml(sid) {
@@ -1652,7 +1698,7 @@
       var autres = vs.filter(function (x) { return actifs.indexOf(x) === -1; });
       var carte = function (x) {
         return '<button type="button" class="mate" data-a="cell" data-id="' + x.v.id_user + '|tous"><span class="nm">' + esc(propre(x.v.nom))
-          + (x.ret ? '<span class="pill crit">' + x.ret + ' en retard</span>' : '<span class="pill ok">à jour</span>') + '</span>'
+          + (x.ret ? '<span class="pill crit">' + x.ret + ' en souffrance</span>' : '<span class="pill ok">à jour</span>') + '</span>'
           + '<span class="st"><span><b>' + x.n + '</b>en cours</span><span><b class="' + (x.critV ? 't-crit' : '') + '">' + (x.n ? duree(x.vieux) : '—') + '</b>plus ancien</span></span>'
           + '<span class="mate-lg">' + plural(x.v.contacts_jour || 0, 'premier contact', 'premiers contacts') + ' · ' + (x.v.pris_jour || 0) + ' pris aujourd\'hui' + (x.v.exclu ? ' · écarté du tour de rôle' : '') + '</span></button>';
       };
@@ -2611,6 +2657,7 @@
         case 'perim':
           S.perimOuvert = false; S.cell = null; S.campagnes = null; S.suggKey = null;
           if (POSTE === 'direction') S.vueSite = id === '' ? null : Number(id); else S.site = Number(id);
+          if (id !== '') ecrireBus(Number(id));
           if (['mur', 'mursites'].indexOf(S.tab) !== -1) S.tab = sitePoste() == null ? 'mursites' : 'mur';
           render(); chargerAide(); if (S.tab === 'campagnes') { await chargerCampagnes(); render(); } return;
         case 'site': S.site = Number(id); S.cell = null; S.campagnes = null; render(); if (S.tab === 'campagnes') { await chargerCampagnes(); render(); } return;
@@ -2706,12 +2753,19 @@
     doc.addEventListener('keydown', surTouche);
     // Accès des visites guidées (module tours).
     try { FW.__lmtcTour = { poste: POSTE, exemple: ouvrirExemple, fermer: function () { if (S.modal) fermerModal(); fermerTout(); } }; } catch (e) {}
+    // v64 : abonnement au site de la barre du haut.
+    var __desabBus = null;
+    try { var __b = busApi(); if (__b && __b.onChange) __desabBus = __b.onChange(function () { surBus(); }); } catch (e) {}
+    function __evtBus() { surBus(); }
+    try { (FW.document || doc).addEventListener('oropra-site-changed', __evtBus); } catch (e) {}
 
     // ── Cycle de vie ──────────────────────────────────────────────────────
     var minuteur = null, horloge = null;
     function detruire() {
       clearInterval(minuteur); clearInterval(horloge);
       doc.removeEventListener('keydown', surTouche);
+      try { if (typeof __desabBus === 'function') __desabBus(); } catch (e) {}
+      try { (FW.document || doc).removeEventListener('oropra-site-changed', __evtBus); } catch (e) {}
       S.dr = null;
       try { if (FW.__lmtcTour && FW.__lmtcTour.poste !== 'vroom') delete FW.__lmtcTour; } catch (e) {}
       try { ov.remove(); } catch (e) {}
@@ -3146,6 +3200,14 @@
 .lmtc .lr.v2 .src .tag{max-width:150px}
 .lmtc .lr.v2 .why{font-size:12px;color:var(--ink-3);font-weight:600;margin-top:3px}
 .lmtc .lr.attr .lr-a select{max-width:250px}
+.lmtc .lr.v2.souf{grid-template-columns:118px minmax(0,1fr) minmax(0,250px) auto}
+.lmtc .chez{display:flex;align-items:center;gap:10px;background:var(--chaud-bg);border:1.5px solid #f2c4c4;border-radius:12px;padding:8px 12px;min-width:0}
+.lmtc .chez .av{flex:none;width:34px;height:34px;border-radius:50%;background:var(--m-rouge);color:#fff;display:grid;place-items:center;font-weight:800;font-size:13px}
+.lmtc .chez-t{display:grid;min-width:0;line-height:1.25}
+.lmtc .chez-t small{font-size:10px;font-weight:800;letter-spacing:.05em;text-transform:uppercase;color:var(--m-rouge)}
+.lmtc .chez-t b{font-size:15px;font-weight:800;color:var(--ink);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.lmtc .chez-t em{font-style:normal;font-size:11.5px;font-weight:700;color:var(--m-rouge)}
+@media (max-width:760px){.lmtc .lr.v2.souf{grid-template-columns:100px minmax(0,1fr)}.lmtc .lr.v2.souf .chez{grid-column:1/-1}}
 .lmtc .lr.v2 .btn{padding:9px 15px;font-size:13px}
 @media (max-width:760px){.lmtc .lr.v2{grid-template-columns:100px minmax(0,1fr)}.lmtc .lr.v2 .src{display:none}.lmtc .lr.v2 .lr-a{grid-column:1/-1;justify-content:flex-start}}
 /* Règle d'attribution */
