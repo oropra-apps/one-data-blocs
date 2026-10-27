@@ -1,3 +1,8 @@
+// v16 (27/10/2026) : champs de saisie en 16 px sur mobile.
+// iPhone : un champ dont le texte fait moins de 16 px déclenche un ZOOM
+// automatique de Safari au toucher. La page entière devient alors plus grande que
+// l'écran : on peut la faire glisser « derrière » la fenêtre, des barres de
+// défilement apparaissent, et les bords (avatar, croix, envoi) sont coupés.
 // v15 (27/10/2026) : verrou de la page renforcé pour iPhone (body figé).
 // v14 (27/10/2026) : même verrou que les SMS — la fiche client ne défile plus
 // derrière la fenêtre WhatsApp sur mobile.
@@ -668,7 +673,7 @@ OD.define('whatsapp', {
     '.wa-meta{float:right;font-size:10.5px;color:#667781;margin:6px 0 -3px 8px;display:inline-flex;align-items:center;gap:2px}' +
     '.wa-ticks{display:inline-flex}' +
     '.wa-foot{flex:0 0 auto;display:flex;align-items:flex-end;gap:6px;padding:8px 8px;background:#f0f2f5}' +
-    '@media(max-width:640px){.wa-head{position:relative;z-index:2}.wa-hbtn{padding:11px;min-width:44px;min-height:44px;justify-content:center;align-items:center}.wa-card{left:0;top:0;right:auto;bottom:auto!important;width:100%;max-width:100%;height:100vh;height:100dvh;border-radius:0}.wa-foot{padding-bottom:calc(8px + env(safe-area-inset-bottom,0px))}}' +
+    '@media(max-width:640px){.wa-head{position:relative;z-index:2}.wa-hbtn{padding:11px;min-width:44px;min-height:44px;justify-content:center;align-items:center}.wa-inp,.wa-tpl-in{font-size:16px}.wa-card{left:0;top:0;right:auto;bottom:auto!important;width:100%;max-width:100%;height:100vh;height:100dvh;border-radius:0}.wa-foot{padding-bottom:calc(8px + env(safe-area-inset-bottom,0px))}}' +
     '.wa-inp{flex:1;border:none;border-radius:22px;padding:10px 14px;font-size:14px;color:#111b21;outline:none;resize:none;max-height:96px;font-family:inherit;line-height:1.35;background:#fff;box-shadow:0 1px 1px rgba(0,0,0,.06)}' +
     '.wa-fbtn{width:40px;height:40px;border-radius:50%;border:none;background:none;color:#54656f;cursor:pointer;display:flex;align-items:center;justify-content:center;flex:0 0 auto}' +
     '.wa-fbtn:hover{background:#00000010}' +
