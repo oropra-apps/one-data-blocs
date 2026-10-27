@@ -1,3 +1,5 @@
+// v8 (27/10/2026) : sur mobile, le O se masque quand une fenêtre SMS, WhatsApp
+// ou e-mail occupe l'écran ; il ne recouvre plus la croix de fermeture.
 // v7 (27/10/2026) : le clavier mobile réduit la page au lieu de la recouvrir :
 // le panneau « Ton avis » reste au-dessus du clavier pendant la saisie.
 // v6 (27/10/2026) : sur mobile, le panneau « Ton avis » se limite à la partie
@@ -22,7 +24,7 @@
 // ============================================================================
 OD.define('retours', {
   mount(__anchor, ctx) {
-    const VERSION = 6;   // v5 : écran courant fourni par pulse (plus grande surface visible, accessoires exclus)
+    const VERSION = 8;   // v5 : écran courant fourni par pulse (plus grande surface visible, accessoires exclus)
                          // v4 : « Montrer l'endroit » nomme la zone désignée (titre du bloc, colonne, champ, type)
     const W = window;
 
@@ -314,6 +316,16 @@ textarea:focus{border-color:#1F4A85;outline:none}
 
     const $ = (s) => R.querySelector(s);
     const lanceur = $('.lg'), badgeLanceur = $('.bd'), panneauEl = $('.pn'), ecranEl = $('.ec');
+    // v8 : sur mobile, quand une fenêtre SMS, WhatsApp ou e-mail occupe tout
+    // l'écran, le O se retire : il recouvrait la croix de fermeture.
+    const masqueO = setInterval(() => {
+      try {
+        const mobile = (window.innerWidth || 1024) <= 640;
+        const plein = mobile && !!document.querySelector('#oropra-sms-ui .sms-card, #oropra-wa-ui .wa-card, #oropra-email-ui .em-ov');
+        lanceur.style.visibility = plein ? 'hidden' : '';
+      } catch (e) { }
+    }, 700);
+    nettoyages.push(() => clearInterval(masqueO));
     const vueAvis = $('[data-v="avis"]'), vueMes = $('[data-v="mes"]'), badgeOnglet = $('.tb i');
     const grille = $('.hm'), compo = $('.cp'), ta = $('textarea'), recEl = $('.rec'), outils = $('.ou');
     const pj = $('.pj'), errEl = $('.er'), btnEnv = $('.env'), okEl = $('.ok'), liste = $('.li');
