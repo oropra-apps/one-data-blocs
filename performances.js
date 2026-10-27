@@ -1,5 +1,7 @@
 // ============================================================================
 //  PERFORMANCES ÉQUIPE — module One Data (OD.define)  v1
+//  v28 (27/10/2026) : la barre du haut (topnav v35, menu « Leads ») ouvre la
+//  page directement sur la vue Leads ou Ventes (window.__odPerfVue).
 //  v27 (27/10/2026) : onglet « Leads » (Team Colin). Les indicateurs du lead
 //  management quittent l'écran de travail pour la page Performances : six
 //  chiffres clés avec leur tendance, l'entonnoir lead → contact → RDV →
@@ -2679,7 +2681,10 @@ OD.define('performances', {
       if (v === 'leads' && !leadsCharge) { leadsCharge = true; ctlLeads.charger(); }
     };
     __bascule.addEventListener('click', (ev) => { const b = ev.target.closest('[data-vue]'); if (b) vue(b.getAttribute('data-vue')); });
+    // La barre du haut (topnav v35) bascule la vue sans recharger la page.
+    try { window.__odPerfVue = vue; const W2 = (wwLib.getFrontWindow && wwLib.getFrontWindow()) || window; W2.__odPerfVue = vue; } catch (e) { window.__odPerfVue = vue; }
     let depart = window.__OD_PERF_VUE__ || 'ventes';
+    try { const W3 = (wwLib.getFrontWindow && wwLib.getFrontWindow()) || window; if (W3.__OD_PERF_VUE__) depart = W3.__OD_PERF_VUE__; } catch (e) {}
     try { const W = (wwLib.getFrontWindow && wwLib.getFrontWindow()) || window; if (/leads/i.test(W.location.hash || '')) depart = 'leads'; } catch (e) { if (/leads/i.test(location.hash || '')) depart = 'leads'; }
     vue(depart);
   }
