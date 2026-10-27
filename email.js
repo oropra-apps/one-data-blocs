@@ -1,3 +1,4 @@
+// v6 (27/10/2026) : sur mobile, la page ne défile plus derrière la fenêtre e-mail.
 // v5 (27/10/2026) : le clavier mobile réduit la page au lieu de la recouvrir :
 // la fenêtre e-mail reste entière à l'écran pendant la saisie.
 // v4 (27/10/2026) : sur mobile, la fenêtre e-mail tient dans la partie visible
@@ -410,8 +411,29 @@ OD.define('email', {
       '<div class="em-sugg" data-suggbox="' + field + '" style="display:none"></div></div>';
   }
 
+  // Verrou du défilement de la page (mobile) : tant qu'une fenêtre de
+  // messagerie occupe l'écran, la fiche client derrière ne défile plus. Sans
+  // cela, faire glisser le doigt dans un fil vide (ou arrivé en bout) faisait
+  // défiler la page en arrière-plan. Verrou partagé entre SMS, WhatsApp et
+  // e-mail : la page n'est rendue que lorsque plus aucune fenêtre ne le tient.
+  function verrouPage(cle, actif) {
+    try {
+      const L = win.__odVerrous || (win.__odVerrous = { cles: {}, avant: null });
+      if (actif) L.cles[cle] = true; else delete L.cles[cle];
+      const h = doc.documentElement, b = doc.body;
+      const tenu = Object.keys(L.cles).length > 0;
+      if (tenu && !L.avant) {
+        L.avant = { h: h.style.overflow, b: b.style.overflow, hb: h.style.overscrollBehavior };
+        h.style.overflow = 'hidden'; b.style.overflow = 'hidden'; h.style.overscrollBehavior = 'none';
+      } else if (!tenu && L.avant) {
+        h.style.overflow = L.avant.h; b.style.overflow = L.avant.b; h.style.overscrollBehavior = L.avant.hb;
+        L.avant = null;
+      }
+    } catch (e) { }
+  }
   function render() {
     const root = getRoot(); if (!root) return;
+    verrouPage('email', !!state.open && (win.innerWidth || 1024) <= 640);
     if (!state.open) { root.innerHTML = ''; return; }
     const title = state.mode === 'reply' ? 'Répondre' : state.mode === 'forward' ? 'Transférer' : 'Nouveau message';
     const attHtml = state.attachments.length ? '<div class="em-att">' + state.attachments.map(a =>
