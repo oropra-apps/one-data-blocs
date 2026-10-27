@@ -1,3 +1,6 @@
+// v12 (27/10/2026) : sur mobile, toucher la zone de saisie ne fait plus sortir la
+// fenêtre de l'écran : le clavier réduit la page (interactive-widget) et la
+// fenêtre suit la partie visible, y compris si Chrome fait défiler la page.
 // v11 (27/10/2026) : sur mobile, la fenêtre WhatsApp occupe la partie visible
 // de l'écran (barres de Chrome et clavier exclus) : saisie et vocal accessibles.
 // WHATSAPP (canal) — module One Data (OD.define) v1 (Lot C) — overlay, ctx.tenant/ctx.supabase
@@ -24,6 +27,21 @@ OD.define('whatsapp', {
   const WINDOW_MS = 24 * 60 * 60 * 1000;
 
   const doc = (__anchor.ownerDocument || document);
+
+  // Clavier mobile (27/10/2026) : par défaut, Chrome Android ouvre le clavier
+  // PAR-DESSUS la page et la fait défiler pour montrer le champ : les fenêtres
+  // fixes (SMS, WhatsApp, e-mail, avis) partaient alors vers le haut, hors de
+  // l'écran. « interactive-widget=resizes-content » demande au navigateur de
+  // RÉDUIRE la page à la place du clavier : les fenêtres se rétrécissent et
+  // restent entières à l'écran. Posé une fois pour toute l'application.
+  (function clavierRedimensionne(d) {
+    try {
+      let m = d.querySelector('meta[name="viewport"]');
+      if (!m) { m = d.createElement('meta'); m.name = 'viewport'; m.content = 'width=device-width, initial-scale=1'; d.head.appendChild(m); }
+      const c = m.getAttribute('content') || '';
+      if (!/interactive-widget/.test(c)) m.setAttribute('content', (c ? c + ', ' : '') + 'interactive-widget=resizes-content');
+    } catch (e) { }
+  })(doc);
   const win = (wwLib.getFrontWindow && wwLib.getFrontWindow()) || window;
   function getRoot() { return doc.getElementById(ROOT_ID); }
   function ensureRoot() { let r = getRoot(); if (!r) { r = doc.createElement('div'); r.id = ROOT_ID; doc.body.appendChild(r); } return r; }
@@ -645,7 +663,7 @@ OD.define('whatsapp', {
     '.wa-meta{float:right;font-size:10.5px;color:#667781;margin:6px 0 -3px 8px;display:inline-flex;align-items:center;gap:2px}' +
     '.wa-ticks{display:inline-flex}' +
     '.wa-foot{flex:0 0 auto;display:flex;align-items:flex-end;gap:6px;padding:8px 8px;background:#f0f2f5}' +
-    '@media(max-width:640px){.wa-card{left:0!important;top:0!important;right:0!important;bottom:auto!important;width:100vw;height:100vh;height:100dvh;border-radius:0}.wa-foot{padding-bottom:calc(8px + env(safe-area-inset-bottom,0px))}}' +
+    '@media(max-width:640px){.wa-head{position:relative;z-index:2}.wa-hbtn{padding:11px;min-width:44px;min-height:44px;justify-content:center;align-items:center}.wa-card{left:0!important;top:0;right:0!important;bottom:auto!important;width:100vw;height:100vh;height:100dvh;border-radius:0}.wa-foot{padding-bottom:calc(8px + env(safe-area-inset-bottom,0px))}}' +
     '.wa-inp{flex:1;border:none;border-radius:22px;padding:10px 14px;font-size:14px;color:#111b21;outline:none;resize:none;max-height:96px;font-family:inherit;line-height:1.35;background:#fff;box-shadow:0 1px 1px rgba(0,0,0,.06)}' +
     '.wa-fbtn{width:40px;height:40px;border-radius:50%;border:none;background:none;color:#54656f;cursor:pointer;display:flex;align-items:center;justify-content:center;flex:0 0 auto}' +
     '.wa-fbtn:hover{background:#00000010}' +
@@ -782,7 +800,7 @@ OD.define('whatsapp', {
     const card = root.querySelector('.wa-card'); if (!card) return;
     if (!estMobile()) { card.style.height = ''; return; }
     const vv = win.visualViewport;
-    card.style.left = ''; card.style.top = vv ? vv.offsetTop + 'px' : ''; card.style.right = ''; card.style.bottom = '';
+    card.style.left = '0px'; card.style.top = (vv ? Math.round(vv.offsetTop) : 0) + 'px'; card.style.right = '0px'; card.style.bottom = 'auto';
     card.style.height = Math.round(vv ? vv.height : win.innerHeight) + 'px';
   }
   if (!win.__waVV) {
