@@ -1,3 +1,6 @@
+// v9 (27/10/2026) : sur mobile, faire défiler le fil SMS ne fait plus défiler
+// la fiche client en arrière-plan (page verrouillée tant que la fenêtre est
+// ouverte, défilement du fil contenu dans la fenêtre).
 // v8 (27/10/2026) : sur mobile (iPhone surtout), la fenêtre prend la largeur de
 // la zone visible : l'avatar et la croix ne sont plus coupés.
 // v7 (27/10/2026) : sur mobile, toucher la zone de saisie ne fait plus sortir la
@@ -270,7 +273,7 @@ OD.define('sms', {
     '.sms-hsub{font-size:12px;color:#fff3df;margin-top:1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}' +
     '.sms-hbtn{background:none;border:none;color:#fff;cursor:pointer;padding:6px;display:flex;border-radius:8px}' +
     '.sms-hbtn:hover{background:#ffffff22}' +
-    '.sms-body{flex:1;overflow-y:auto;padding:14px 10px 8px;background-color:#efeae2;background-image:url("data:image/svg+xml,%3Csvg xmlns=\'http://www.w3.org/2000/svg\' width=\'60\' height=\'60\' viewBox=\'0 0 60 60\'%3E%3Cg fill=\'%23d9d0c6\' fill-opacity=\'0.35\'%3E%3Ccircle cx=\'12\' cy=\'12\' r=\'1.5\'/%3E%3Ccircle cx=\'40\' cy=\'28\' r=\'1.5\'/%3E%3Ccircle cx=\'22\' cy=\'46\' r=\'1.5\'/%3E%3C/g%3E%3C/svg%3E");display:flex;flex-direction:column;gap:2px}' +
+    '.sms-body{flex:1;overflow-y:auto;overscroll-behavior:contain;-webkit-overflow-scrolling:touch;padding:14px 10px 8px;background-color:#efeae2;background-image:url("data:image/svg+xml,%3Csvg xmlns=\'http://www.w3.org/2000/svg\' width=\'60\' height=\'60\' viewBox=\'0 0 60 60\'%3E%3Cg fill=\'%23d9d0c6\' fill-opacity=\'0.35\'%3E%3Ccircle cx=\'12\' cy=\'12\' r=\'1.5\'/%3E%3Ccircle cx=\'40\' cy=\'28\' r=\'1.5\'/%3E%3Ccircle cx=\'22\' cy=\'46\' r=\'1.5\'/%3E%3C/g%3E%3C/svg%3E");display:flex;flex-direction:column;gap:2px}' +
     '.sms-daysep{align-self:center;background:#ffffffdd;color:#54656f;font-size:11px;font-weight:600;padding:4px 12px;border-radius:8px;margin:10px 0 6px;box-shadow:0 1px 1px rgba(0,0,0,.06);text-transform:uppercase;letter-spacing:.3px}' +
     '.sms-row{display:flex;margin-top:2px;align-items:center;gap:6px}' +
     '.sms-row.out{justify-content:flex-end}' +
@@ -346,8 +349,30 @@ OD.define('sms', {
     }
     return h;
   }
+
+  // Verrou du défilement de la page (mobile) : tant qu'une fenêtre de
+  // messagerie occupe l'écran, la fiche client derrière ne défile plus. Sans
+  // cela, faire glisser le doigt dans un fil vide (ou arrivé en bout) faisait
+  // défiler la page en arrière-plan. Verrou partagé entre SMS, WhatsApp et
+  // e-mail : la page n'est rendue que lorsque plus aucune fenêtre ne le tient.
+  function verrouPage(cle, actif) {
+    try {
+      const L = win.__odVerrous || (win.__odVerrous = { cles: {}, avant: null });
+      if (actif) L.cles[cle] = true; else delete L.cles[cle];
+      const h = doc.documentElement, b = doc.body;
+      const tenu = Object.keys(L.cles).length > 0;
+      if (tenu && !L.avant) {
+        L.avant = { h: h.style.overflow, b: b.style.overflow, hb: h.style.overscrollBehavior };
+        h.style.overflow = 'hidden'; b.style.overflow = 'hidden'; h.style.overscrollBehavior = 'none';
+      } else if (!tenu && L.avant) {
+        h.style.overflow = L.avant.h; b.style.overflow = L.avant.b; h.style.overscrollBehavior = L.avant.hb;
+        L.avant = null;
+      }
+    } catch (e) { }
+  }
   function render(scrollBottom) {
     const root = ensureRoot();
+    verrouPage('sms', !!state.open && !state.minimized && estMobile());
     if (!state.open) { root.innerHTML = ''; return; }
     if (state.minimized) { root.innerHTML = renderBar(); bindEvents(); return; }
     const c = state.client || {};
