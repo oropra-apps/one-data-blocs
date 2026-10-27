@@ -1,4 +1,13 @@
 // ============================================================================
+//  v32 (27/10/2026) : BACS FERMÉ NE BLOQUE PLUS L'AGENDA.
+//  Le RDV, le créneau ou la bilatérale s'enregistre toujours ; son envoi vers
+//  BACS attend en file et part dès que BACS est rouvert sur le poste du
+//  propriétaire (la base ne l'exige plus : _bacs_evt_deposer du 27/10). La
+//  fenêtre le dit en clair au lieu de griser le bouton, et chaque événement
+//  pas encore écrit dans BACS porte une pastille « BACS » (extra.bacs_attente).
+//  La veille commune (topnav v34) signale la réouverture : l'agenda se
+//  recharge alors pour retirer les pastilles.
+// ============================================================================
 //  v31 (27/10/2026) : DURÉE EN HEURES ET DÉPLACEMENT EXPLIQUÉ.
 //  - La durée se choisit en heures (¼ h, ½ h, ¾ h, 1 h, 1,5 h … 10 h) ; par
 //    défaut 1 h. Une durée hors liste (sélection de 3 h 15 à la souris, RDV
@@ -1031,6 +1040,8 @@ OD.define('agenda', {
 #agenda-ov .agm-deplace button{background:none;border:none;color:#2a5ea9;font-family:inherit;font-size:11.5px;font-weight:700;text-decoration:underline;cursor:pointer;padding:0}
 #agenda-ov .agm-done{display:flex;gap:10px;align-items:flex-start;background:#e4f4f0;border:1.5px solid #9ed8c9;border-radius:11px;padding:11px 13px;font-size:13px;color:#0b6b57;font-weight:700;line-height:1.4}
 #agenda-ov .agm-foot{padding:14px 18px;border-top:1.5px solid #eef2f8}
+#agenda-ov #agm-bacs-info{margin:0 18px 10px;padding:9px 12px;border-radius:10px;background:#fff6e6;border:1.5px solid #f3d9a4;color:#8a5d08;font-size:12.5px;font-weight:700;line-height:1.4}
+#agenda-root .fc .ag-bacs-att{display:inline-block;margin-right:4px;padding:0 4px;border-radius:4px;background:#fac055;color:#5a3d05;font:800 9px/13px "Nunito Sans",system-ui,sans-serif;letter-spacing:.02em;vertical-align:0}
 #agenda-ov .agm-save{width:100%;border:none;border-radius:10px;padding:12px;background:#53bda7;color:#fff;font-family:inherit;font-weight:800;font-size:14px;cursor:pointer;transition:background .15s}
 #agenda-ov .agm-save:hover{background:#46a892}
 #agenda-ov .agm-save:disabled{opacity:.55;cursor:default}
@@ -1290,6 +1301,19 @@ OD.define('agenda', {
       eventClassNames: (arg) => (resteAConclure(arg.event.extendedProps) ? ['ag-aconclure'] : []),
       eventDidMount: (info) => {
         const c = info.event.extendedProps._accent; if (c) { info.el.style.borderLeft = '3px solid ' + c; }
+        // v32 : pastille « BACS » tant qu'un geste n'est pas écrit dans BACS.
+        try {
+          const xp = info.event.extendedProps || {};
+          if (xp.extra && xp.extra.bacs_attente) {
+            const tt = info.el.querySelector('.fc-event-title') || info.el.querySelector('.fc-list-event-title');
+            if (tt && !tt.querySelector('.ag-bacs-att')) {
+              const pb = document.createElement('span');
+              pb.className = 'ag-bacs-att'; pb.textContent = 'BACS';
+              pb.title = 'En attente d\u2019envoi vers BACS : il partira dès que BACS sera ouvert sur le poste de son propriétaire.';
+              tt.insertBefore(pb, tt.firstChild);
+            }
+          }
+        } catch (e) {}
         // v31 : tirer un événement verrouillé affiche la raison au lieu de ne rien faire.
         const verrou = raisonVerrou(info.event.extendedProps);
         if (verrou && !info.el.__agVerrou) {
@@ -1358,6 +1382,18 @@ OD.define('agenda', {
     updateSundayBtn();
     wireLayout();
     window.__agendaRefetch = refetch;
+    // v32 : BACS rouvert -> la file part ; on recharge pour retirer les pastilles.
+    if (!window.__agendaVeilleBacs) {
+      window.__agendaVeilleBacs = true;
+      try {
+        frontWin().addEventListener('od-bacs-etat', function (e) {
+          const d = e && e.detail; if (!d) return;
+          bacsOuvert = !!d.ok;
+          if (d.ok && d.precedent === false) { setTimeout(function () { try { window.__agendaRefetch && window.__agendaRefetch(); } catch (x) {} }, 9000); }
+          if (cs && !cs.saving) appliquerVerrou();
+        });
+      } catch (e) {}
+    }
     getUserId().then(() => { renderCollab(true); refetch(); });
     wireRefresh();
   }
@@ -1441,9 +1477,19 @@ OD.define('agenda', {
       if (cs) bacsSuiviT = setTimeout(suivreBacs, ouvert ? 8000 : 2500);
     });
   }
-  function verrouille() { return bacsExige() && bacsOuvert !== true; }
+  // v32 : plus de verrou — l'envoi vers BACS est différé, jamais bloquant.
+  function verrouille() { return false; }
+  function bacsFermeIci() { return bacsExige() && bacsOuvert === false; }
   function appliquerVerrou() {
     const d = frontDoc();
+    try {
+      const foot = d.querySelector('#agenda-ov .agm-foot');
+      let info = d.getElementById('agm-bacs-info');
+      if (foot && bacsFermeIci()) {
+        if (!info) { info = d.createElement('div'); info.id = 'agm-bacs-info'; foot.parentNode.insertBefore(info, foot); }
+        info.textContent = 'BACS est fermé sur ce poste : l\u2019enregistrement se fait ici et partira vers BACS dès sa réouverture.';
+      } else if (info) { info.remove(); }
+    } catch (e) {}
     ['agm-save', 'agm-start-now', 'agm-del', 'agm-del-yes', 'agm-real-now'].forEach(function (id) {
       const b = d.getElementById(id); if (!b || cs.saving) return;
       if (verrouille()) {
@@ -2762,7 +2808,8 @@ OD.define('agenda', {
       }
       const msg = s.mode === 'bilat'
         ? (s.editing ? 'Bilat\u00e9rale d\u00e9plac\u00e9e au ' : 'Bilat\u00e9rale planifi\u00e9e avec ' + nomVendeurBilat(s.bilatUser) + ' \u00b7 ') + quandTxt
-        : (s.editing ? 'Modification enregistr\u00e9e \u00b7 ' : 'Enregistr\u00e9 dans l\u2019agenda \u00b7 ') + quandTxt;
+        : (s.editing ? 'Modification enregistr\u00e9e \u00b7 ' : 'Enregistr\u00e9 dans l\u2019agenda \u00b7 ') + quandTxt
+          + (bacsFermeIci() ? ' \u00b7 partira vers BACS \u00e0 sa r\u00e9ouverture' : '');
       closeCreate();
       toast(msg, 'ok');
       if (s.mode === 'bilat') { resumeBilatT = 0; }
