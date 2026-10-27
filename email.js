@@ -1,3 +1,8 @@
+// v8 (27/10/2026) : champs (destinataires, objet, corps) en 16 px sur mobile.
+// iPhone : un champ dont le texte fait moins de 16 px déclenche un ZOOM
+// automatique de Safari au toucher. La page entière devient alors plus grande que
+// l'écran : on peut la faire glisser « derrière » la fenêtre, des barres de
+// défilement apparaissent, et les bords (avatar, croix, envoi) sont coupés.
 // v7 (27/10/2026) : verrou de la page renforcé pour iPhone (body figé).
 // v6 (27/10/2026) : sur mobile, la page ne défile plus derrière la fenêtre e-mail.
 // v5 (27/10/2026) : le clavier mobile réduit la page au lieu de la recouvrir :
@@ -371,7 +376,7 @@ OD.define('email', {
     '.em-sig-ed:empty:before{content:attr(data-ph);color:#adc0dd}' +
     '.em-sig-ft{display:flex;align-items:center;gap:10px;padding:10px 16px;border-top:1px solid #eef2f8;background:#fafcff}' +
     '.em-sig-hint{flex:1;font-size:11.5px;color:#7a98c5}' +
-    '@media(max-width:640px){.em-ov{padding:0;bottom:auto;height:100vh;height:100dvh}.em-box{width:100%;height:100%;max-height:100%;border-radius:0;padding-bottom:env(safe-area-inset-bottom,0px)}.em-lbl{width:42px}}' +
+    '@media(max-width:640px){.em-in,.em-body,.em-ov textarea{font-size:16px}.em-ov{padding:0;bottom:auto;height:100vh;height:100dvh}.em-box{width:100%;height:100%;max-height:100%;border-radius:0;padding-bottom:env(safe-area-inset-bottom,0px)}.em-lbl{width:42px}}' +
     '</style>';
 
   function cmd(c, v) { try { doc.execCommand(c, false, v || null); } catch (e) { } const ed = getRoot() && getRoot().querySelector('.em-body'); if (ed) { state.bodyHtml = ed.innerHTML; ed.focus(); } }
