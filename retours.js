@@ -1,3 +1,8 @@
+// v10 (27/10/2026) : zone de texte du panneau « Ton avis » en 16 px sur mobile.
+// iPhone : un champ dont le texte fait moins de 16 px déclenche un ZOOM
+// automatique de Safari au toucher. La page entière devient alors plus grande que
+// l'écran : on peut la faire glisser « derrière » la fenêtre, des barres de
+// défilement apparaissent, et les bords (avatar, croix, envoi) sont coupés.
 // v9 (27/10/2026) : le O se masque aussi d'après le marqueur posé par les
 // fenêtres de messagerie (od-plein-ecran), quel que soit le document qui les porte.
 // v8 (27/10/2026) : sur mobile, le O se masque quand une fenêtre SMS, WhatsApp
@@ -26,7 +31,7 @@
 // ============================================================================
 OD.define('retours', {
   mount(__anchor, ctx) {
-    const VERSION = 9;   // v5 : écran courant fourni par pulse (plus grande surface visible, accessoires exclus)
+    const VERSION = 10;   // v5 : écran courant fourni par pulse (plus grande surface visible, accessoires exclus)
                          // v4 : « Montrer l'endroit » nomme la zone désignée (titre du bloc, colonne, champ, type)
     const W = window;
 
@@ -267,6 +272,7 @@ textarea:focus{border-color:#1F4A85;outline:none}
 .pkz.bas .pkl{bottom:auto;top:calc(100% + 5px)}
 
 @media (max-width:640px){
+  textarea,input{font-size:16px!important}
   .pn{left:0;right:0;top:auto;bottom:0;width:auto;max-height:88vh;max-height:88dvh;padding-bottom:env(safe-area-inset-bottom,0px);border-radius:18px 18px 0 0;transform:translateY(104%)}
   .pn.ouvert{transform:translateY(0)}
   .cd{right:12px;left:12px;bottom:12px;width:auto}
