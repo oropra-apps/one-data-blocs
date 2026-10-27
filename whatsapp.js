@@ -1,3 +1,5 @@
+// v14 (27/10/2026) : même verrou que les SMS — la fiche client ne défile plus
+// derrière la fenêtre WhatsApp sur mobile.
 // v13 (27/10/2026) : sur mobile (iPhone surtout), la fenêtre prend la largeur de
 // la zone visible : l'avatar et la croix ne sont plus coupés.
 // v12 (27/10/2026) : sur mobile, toucher la zone de saisie ne fait plus sortir la
@@ -643,7 +645,7 @@ OD.define('whatsapp', {
     '.wa-hsub{font-size:12px;color:#cfe9e3;margin-top:1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}' +
     '.wa-hbtn{background:none;border:none;color:#fff;cursor:pointer;padding:6px;display:flex;border-radius:8px}' +
     '.wa-hbtn:hover{background:#ffffff22}' +
-    '.wa-body{flex:1;overflow-y:auto;padding:14px 10px 8px;background-color:#efeae2;background-image:url("data:image/svg+xml,%3Csvg xmlns=\'http://www.w3.org/2000/svg\' width=\'60\' height=\'60\' viewBox=\'0 0 60 60\'%3E%3Cg fill=\'%23d9d0c6\' fill-opacity=\'0.35\'%3E%3Ccircle cx=\'12\' cy=\'12\' r=\'1.5\'/%3E%3Ccircle cx=\'40\' cy=\'28\' r=\'1.5\'/%3E%3Ccircle cx=\'22\' cy=\'46\' r=\'1.5\'/%3E%3C/g%3E%3C/svg%3E");display:flex;flex-direction:column;gap:2px}' +
+    '.wa-body{flex:1;overflow-y:auto;overscroll-behavior:contain;-webkit-overflow-scrolling:touch;padding:14px 10px 8px;background-color:#efeae2;background-image:url("data:image/svg+xml,%3Csvg xmlns=\'http://www.w3.org/2000/svg\' width=\'60\' height=\'60\' viewBox=\'0 0 60 60\'%3E%3Cg fill=\'%23d9d0c6\' fill-opacity=\'0.35\'%3E%3Ccircle cx=\'12\' cy=\'12\' r=\'1.5\'/%3E%3Ccircle cx=\'40\' cy=\'28\' r=\'1.5\'/%3E%3Ccircle cx=\'22\' cy=\'46\' r=\'1.5\'/%3E%3C/g%3E%3C/svg%3E");display:flex;flex-direction:column;gap:2px}' +
     '.wa-daysep{align-self:center;background:#ffffffdd;color:#54656f;font-size:11px;font-weight:600;padding:4px 12px;border-radius:8px;margin:10px 0 6px;box-shadow:0 1px 1px rgba(0,0,0,.06);text-transform:uppercase;letter-spacing:.3px}' +
     '.wa-row{display:flex;margin-top:2px}' +
     '.wa-row.out{justify-content:flex-end}' +
@@ -707,8 +709,30 @@ OD.define('whatsapp', {
   const IC_DICT = '<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M6 11a6 6 0 0 0 12 0M12 17v3M9 20h6"/></svg>';
   const IC_SEND = '<svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor"><path d="M2 21l21-9L2 3v7l15 2-15 2z"/></svg>';
 
+
+  // Verrou du défilement de la page (mobile) : tant qu'une fenêtre de
+  // messagerie occupe l'écran, la fiche client derrière ne défile plus. Sans
+  // cela, faire glisser le doigt dans un fil vide (ou arrivé en bout) faisait
+  // défiler la page en arrière-plan. Verrou partagé entre SMS, WhatsApp et
+  // e-mail : la page n'est rendue que lorsque plus aucune fenêtre ne le tient.
+  function verrouPage(cle, actif) {
+    try {
+      const L = win.__odVerrous || (win.__odVerrous = { cles: {}, avant: null });
+      if (actif) L.cles[cle] = true; else delete L.cles[cle];
+      const h = doc.documentElement, b = doc.body;
+      const tenu = Object.keys(L.cles).length > 0;
+      if (tenu && !L.avant) {
+        L.avant = { h: h.style.overflow, b: b.style.overflow, hb: h.style.overscrollBehavior };
+        h.style.overflow = 'hidden'; b.style.overflow = 'hidden'; h.style.overscrollBehavior = 'none';
+      } else if (!tenu && L.avant) {
+        h.style.overflow = L.avant.h; b.style.overflow = L.avant.b; h.style.overscrollBehavior = L.avant.hb;
+        L.avant = null;
+      }
+    } catch (e) { }
+  }
   function render() {
     const root = getRoot(); if (!root) return;
+    verrouPage('wa', !!state.open && !state.minimized && estMobile());
     if (!state.open) { root.innerHTML = ''; return; }
     const c = state.client;
     const name = (state.contact && state.contact.display_name) || clientLabel(c);
