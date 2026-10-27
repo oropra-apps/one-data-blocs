@@ -3317,10 +3317,12 @@
 .lmtc .stock-l{display:flex;flex-wrap:wrap;gap:8px 14px;align-items:center;justify-content:space-between;margin-top:10px;padding:10px 12px;border-radius:10px;background:var(--alerte-bg);font-size:12.5px;font-weight:700;color:#8a6d1f}
 /* L'équipe, les sites */
 .lmtc .sec-t{margin:22px 0 10px;font-size:11px;font-weight:800;letter-spacing:.06em;text-transform:uppercase;color:var(--ink-3)}
-.lmtc .team{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:10px}
+.lmtc .team{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:12px;align-items:stretch}
 .lmtc .mate{display:grid;gap:8px;text-align:left;background:var(--card);border:1.5px solid var(--line);border-radius:14px;padding:14px;font:inherit;color:var(--ink);cursor:pointer;transition:border-color .15s}
 .lmtc .mate:hover{border-color:var(--bleu-clair)}
-.lmtc .mate .nm{display:flex;justify-content:space-between;align-items:center;gap:8px;font-weight:800}
+.lmtc .mate .nm{display:flex;flex-direction:column;align-items:flex-start;gap:6px;font-weight:800;min-width:0;line-height:1.25}
+.lmtc .mate .nm > .pill{flex-shrink:0}
+.lmtc .mate{min-width:0;overflow:hidden;align-content:start}
 .lmtc .mate .st{display:flex;gap:18px}
 .lmtc .mate .st span{display:grid;font-size:11.5px;color:var(--ink-3);font-weight:600}
 .lmtc .mate .st b{font-size:19px;font-weight:800;color:var(--ink);font-variant-numeric:tabular-nums}
