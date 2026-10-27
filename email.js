@@ -1,3 +1,5 @@
+// v5 (27/10/2026) : le clavier mobile réduit la page au lieu de la recouvrir :
+// la fenêtre e-mail reste entière à l'écran pendant la saisie.
 // v4 (27/10/2026) : sur mobile, la fenêtre e-mail tient dans la partie visible
 // de l'écran (100dvh) : le bouton d'envoi n'est plus caché par Chrome.
 // EMAIL (canal) — module One Data (OD.define) v1 (Lot C) — overlay, ctx.tenant/ctx.supabase
@@ -19,6 +21,21 @@ OD.define('email', {
   const SUPABASE_URL = ctx.tenant.supabase_url;
 
   const doc = (__anchor.ownerDocument || document);
+
+  // Clavier mobile (27/10/2026) : par défaut, Chrome Android ouvre le clavier
+  // PAR-DESSUS la page et la fait défiler pour montrer le champ : les fenêtres
+  // fixes (SMS, WhatsApp, e-mail, avis) partaient alors vers le haut, hors de
+  // l'écran. « interactive-widget=resizes-content » demande au navigateur de
+  // RÉDUIRE la page à la place du clavier : les fenêtres se rétrécissent et
+  // restent entières à l'écran. Posé une fois pour toute l'application.
+  (function clavierRedimensionne(d) {
+    try {
+      let m = d.querySelector('meta[name="viewport"]');
+      if (!m) { m = d.createElement('meta'); m.name = 'viewport'; m.content = 'width=device-width, initial-scale=1'; d.head.appendChild(m); }
+      const c = m.getAttribute('content') || '';
+      if (!/interactive-widget/.test(c)) m.setAttribute('content', (c ? c + ', ' : '') + 'interactive-widget=resizes-content');
+    } catch (e) { }
+  })(doc);
   const win = (wwLib.getFrontWindow && wwLib.getFrontWindow()) || window;
   function getRoot() { return doc.getElementById(ROOT_ID); }
   function ensureRoot() { let r = getRoot(); if (!r) { r = doc.createElement('div'); r.id = ROOT_ID; doc.body.appendChild(r); } return r; }
