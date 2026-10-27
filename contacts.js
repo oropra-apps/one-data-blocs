@@ -1,4 +1,6 @@
 // CONTACTS — module One Data (OD.define) v1 (Lot B)
+// v10 (27/10/2026) : mail — le lien « voir plus » manquait quand le corps était à peine plus
+//   long que l'extrait (affichage coupé à 60 caractères sans moyen de lire la suite).
 // ============================================================================
 //  FICHE CLIENT — Onglet CONTACTS (v2, aligné sur le rendu natif)
 //  root: #oropra-contacts-root
@@ -350,7 +352,7 @@ OD.define('contacts', {
       var eid='em_'+uid, subject=item.email_subject||'(sans sujet)', snippetSrc=item.email_snippet||item.contenu_texte||'', snippetTrunc=truncate(snippetSrc,60), isInb=sens==='inbound';
       var sanitize=function(h){return h?h.replace(/<script[\s\S]*?<\/script>/gi,'').replace(/<iframe[\s\S]*?<\/iframe>/gi,'').replace(/\s+on\w+\s*=\s*"[^"]*"/gi,'').replace(/javascript:/gi,''):'';};
       var stripHtml=function(h){return h?h.replace(/<[^>]*>/g,'').replace(/\s+/g,' ').trim():'';};
-      var bodyHtml=sanitize(item.email_body_html||''), fullContent=bodyHtml||esc(item.contenu_texte||''), fullPlain=stripHtml(item.email_body_html||'')||(item.contenu_texte||''), showT3=fullPlain.length>snippetSrc.length+10;
+      var bodyHtml=sanitize(item.email_body_html||''), fullContent=bodyHtml||esc(item.contenu_texte||item.email_snippet||''), fullPlain=stripHtml(item.email_body_html||'')||(item.contenu_texte||''), showT3=(fullPlain.length>snippetTrunc.length+3)||(snippetSrc.length>snippetTrunc.length);
       var atts=(item.email_has_attachments&&Array.isArray(item.attachments))?item.attachments:[];
       var attachHtml=atts.length?'<div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:8px;">'+atts.map(function(a){return '<div id="att_'+a.id+'" data-storage-path="'+esc(a.storage_path||'')+'" onclick="window.__emDownload(\''+esc(a.id)+'\',\''+((a.filename||'fichier').replace(/'/g,"\\'"))+'\')" style="display:inline-flex;align-items:center;gap:6px;padding:5px 10px;border:1px solid #e5e7eb;border-radius:8px;background:#fff;cursor:pointer;font-size:12px;color:#374151;">'+docBadge(docExt(a),20)+'<span style="word-break:break-word;">'+esc(truncate(a.filename||'fichier',25))+'</span><span style="color:#9ca3af;font-size:11px;">'+formatSize(a.file_size)+'</span></div>';}).join('')+'</div>':'';
       headerMiddle='<span style="font-size:13px;font-weight:600;color:#111827;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="'+esc(subject)+'">'+esc(subject)+'</span>';
