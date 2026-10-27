@@ -1,5 +1,13 @@
 // ============================================================================
 //  PERFORMANCES ÉQUIPE — module One Data (OD.define)  v1
+//  v27 (27/10/2026) : onglet « Leads » (Team Colin). Les indicateurs du lead
+//  management quittent l'écran de travail pour la page Performances : six
+//  chiffres clés avec leur tendance, l'entonnoir lead → contact → RDV →
+//  commande, les leads jour par jour, « la rapidité paie » (conversion par
+//  délai de premier contact), la carte des arrivées jour × heure, puis les
+//  tableaux par source, par vendeur, par site et le plateau VROOM. Une seule
+//  fonction SQL : perf_leads(deb, fin, sites). Bascule « Ventes | Leads » en
+//  tête de page ; #leads dans l'adresse ouvre directement l'onglet Leads.
 //  v26 (26/10/2026) : le comparateur n'affiche plus les deux indicateurs
 //  internes (commandes hors loueurs, financements) en lignes sans titre.
 //  v25 (26/10/2026) : pastille « Clôturée » pour les commandes clôturées dans
@@ -89,6 +97,20 @@
 
 OD.define('performances', {
   async mount(__anchor, ctx) {
+  // v27 : deux vues, « Ventes » (le module historique) et « Leads ».
+  const __estTC = window.__OD_PERF_PROFILE__ === 'teamcolin'
+    || String((ctx.tenant || {}).supabase_url || '').indexOf('ieztupavcdnubmpbjvuq') !== -1;
+  let __leadsHote = null, __bascule = null, __ventesHote = null;
+  if (__estTC) {
+    const d0 = __anchor.ownerDocument || document;
+    __anchor.innerHTML = '';
+    __bascule = d0.createElement('div'); __bascule.className = 'pl-bascule'; __bascule.setAttribute('role', 'tablist');
+    __bascule.innerHTML = '<button type="button" role="tab" data-vue="ventes">Ventes</button><button type="button" role="tab" data-vue="leads">Leads</button>';
+    __ventesHote = d0.createElement('div');
+    __leadsHote = d0.createElement('div'); __leadsHote.className = 'pl-root';
+    __anchor.appendChild(__bascule); __anchor.appendChild(__ventesHote); __anchor.appendChild(__leadsHote);
+    __anchor = __ventesHote;
+  }
   __anchor.id = 'perf-root';
 
   const SUPABASE_URL = ctx.tenant.supabase_url;
@@ -2364,6 +2386,303 @@ OD.define('performances', {
   }
 
   bootstrap();
+
+  // ==========================================================================
+  //  v27 — ONGLET « LEADS » : les indicateurs du lead management
+  //  Rapatriés du lead management (qui reste l'écran du travail à faire) :
+  //  ici on MESURE. Une seule fonction SQL, perf_leads(deb, fin, sites).
+  //  Graphiques en SVG maison, aux couleurs de la charte (jamais de noir).
+  // ==========================================================================
+  function montageLeads(host) {
+    const C = { bleu: '#2a5ea9', bleuDk: '#1F4A85', bleuCl: '#acc5e4', bleuPale: '#eef4fc', vert: '#53bda7', vertDk: '#00997f',
+                orange: '#fac055', orangeDk: '#d2941f', rouge: '#d97070', rougeDk: '#c0524f', ink: '#1c2b45', ink2: '#5a6b86', ink3: '#8b99b0', ligne: '#e3e9f3' };
+    const L = window.__OD_PERF_LEADS__ = window.__OD_PERF_LEADS__ || { preset: 'mois', site: null };
+    let data = null, charge = false, erreur = null, jeton = 0;
+    injecterCssLeads();
+
+    function e(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])); }
+    function propre(s) { s = String(s || '').trim(); if (!s || s !== s.toUpperCase()) return s; return s.toLowerCase().replace(/(^|[\s\-'’])([a-zà-ÿ])/g, (m, a, b) => a + b.toUpperCase()); }
+    function pct(a, b) { return b ? Math.round(100 * a / b) : null; }
+    function fmtPct(v) { return v == null ? '—' : v + ' %'; }
+    function duree(m) {
+      if (m == null) return '—';
+      m = Number(m);
+      if (m < 1) return '< 1 min';
+      if (m < 60) return Math.round(m) + ' min';
+      if (m < 1440) { const h = Math.floor(m / 60), r = Math.round(m % 60); return h + ' h' + (r ? ' ' + String(r).padStart(2, '0') : ''); }
+      const j = m / 1440; return (j < 10 ? (Math.round(j * 10) / 10).toString().replace('.', ',') : Math.round(j)) + ' j';
+    }
+    function ymdL(d) { return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'); }
+    function bornes(p) {
+      const n = new Date(); n.setHours(12, 0, 0, 0);
+      const moinsJ = k => { const d = new Date(n); d.setDate(d.getDate() - k); return d; };
+      if (p === '7j') return [ymdL(moinsJ(6)), ymdL(n)];
+      if (p === '30j') return [ymdL(moinsJ(29)), ymdL(n)];
+      if (p === '90j') return [ymdL(moinsJ(89)), ymdL(n)];
+      if (p === 'moisprec') { const a = new Date(n.getFullYear(), n.getMonth() - 1, 1, 12), b = new Date(n.getFullYear(), n.getMonth(), 0, 12); return [ymdL(a), ymdL(b)]; }
+      return [ymdL(new Date(n.getFullYear(), n.getMonth(), 1, 12)), ymdL(n)];
+    }
+    const PRESETS = [['7j', '7 jours'], ['30j', '30 jours'], ['mois', 'Ce mois-ci'], ['moisprec', 'Mois dernier'], ['90j', '90 jours']];
+    function niveauDelai(p) { return p == null ? 'n' : p >= 80 ? 'ok' : p >= 50 ? 'warn' : 'crit'; }
+
+    async function charger() {
+      const t = ++jeton; charge = false; erreur = null; rendre();
+      const [d, f] = bornes(L.preset);
+      try {
+        const r = await sb.rpc('perf_leads', { p_deb: d, p_fin: f, p_sites: L.site ? [Number(L.site)] : null });
+        if (t !== jeton) return;
+        if (r.error) throw r.error;
+        data = r.data || {}; charge = true;
+      } catch (x) { if (t !== jeton) return; erreur = (x && x.message) || String(x); charge = true; }
+      rendre();
+    }
+
+    // ── Briques graphiques ─────────────────────────────────────────────────
+    function tendance(cur, prev, sens, unite) {
+      // sens : +1 = plus c'est haut mieux c'est ; -1 = plus c'est bas mieux c'est
+      if (cur == null || prev == null || !isFinite(cur) || !isFinite(prev)) return '<span class="pl-tr n">pas de comparaison</span>';
+      const d = cur - prev;
+      if (Math.abs(d) < (unite === 'pts' ? 1 : unite === 'min' ? Math.max(1, prev * 0.05) : 0.5)) return '<span class="pl-tr n">= période précédente</span>';
+      const bon = d * sens > 0;
+      const txt = unite === 'pts' ? (d > 0 ? '+' : '−') + Math.abs(Math.round(d)) + ' pts'
+        : unite === 'min' ? (d > 0 ? '+' : '−') + duree(Math.abs(d))
+        : (d > 0 ? '+' : '−') + Math.abs(Math.round(d));
+      return '<span class="pl-tr ' + (bon ? 'ok' : 'crit') + '">' + (d > 0 ? '▲' : '▼') + ' ' + txt + ' <small>vs période précédente</small></span>';
+    }
+    function tuile(titre, valeur, sous, trend, niv, aide) {
+      return '<div class="pl-tile ' + (niv || '') + '"' + (aide ? ' title="' + e(aide) + '"' : '') + '><span class="pl-tile-t">' + titre + '</span><b class="pl-tile-v">' + valeur + '</b>'
+        + (sous ? '<span class="pl-tile-s">' + sous + '</span>' : '') + trend + '</div>';
+    }
+    function sparkJours(jours) {
+      if (!jours || !jours.length) return '';
+      const W = 640, H = 170, P = { g: 30, d: 8, h: 10, b: 22 };
+      const max = Math.max(1, ...jours.map(j => j.recus));
+      const n = jours.length, bw = (W - P.g - P.d) / n;
+      const y = v => H - P.b - (H - P.b - P.h) * v / max;
+      let s = '<svg class="pl-svg" viewBox="0 0 ' + W + ' ' + H + '" role="img" aria-label="Leads reçus par jour">';
+      const pas = Math.max(1, Math.ceil(max / 4));
+      for (let v = 0; v <= max; v += pas) s += '<line x1="' + P.g + '" x2="' + (W - P.d) + '" y1="' + y(v) + '" y2="' + y(v) + '" stroke="' + C.ligne + '"/><text x="' + (P.g - 6) + '" y="' + (y(v) + 3) + '" text-anchor="end" class="pl-ax">' + v + '</text>';
+      jours.forEach((j, i) => {
+        const x = P.g + i * bw + bw * 0.14, w = Math.max(1, bw * 0.72);
+        const ok = j.dans_delai, hors = j.contactes - j.dans_delai, non = j.recus - j.contactes;
+        let base = H - P.b;
+        [[ok, C.vert], [hors, C.orange], [non, C.bleuCl]].forEach(([v, col]) => {
+          if (!v) return; const h = (H - P.b - P.h) * v / max; base -= h;
+          s += '<rect x="' + x.toFixed(1) + '" y="' + base.toFixed(1) + '" width="' + w.toFixed(1) + '" height="' + h.toFixed(1) + '" fill="' + col + '" rx="1.5"><title>' + e(j.j) + ' : ' + v + '</title></rect>';
+        });
+        const step = Math.ceil(n / 10);
+        if (i % step === 0) { const d = new Date(j.j + 'T12:00:00'); s += '<text x="' + (x + w / 2).toFixed(1) + '" y="' + (H - 6) + '" text-anchor="middle" class="pl-ax">' + d.getDate() + '/' + (d.getMonth() + 1) + '</text>'; }
+      });
+      return s + '</svg><div class="pl-leg"><span><i style="background:' + C.vert + '"></i>Contactés dans le délai</span><span><i style="background:' + C.orange + '"></i>Contactés hors délai</span><span><i style="background:' + C.bleuCl + '"></i>Pas encore contactés</span></div>';
+    }
+    function entonnoir(k) {
+      const et = [['Leads reçus', k.recus, C.bleuDk], ['Contactés', k.contactes, C.bleu], ['Rendez-vous', k.rdv, C.vert], ['Commandes', k.cde, C.vertDk]];
+      const max = Math.max(1, k.recus || 0);
+      return '<div class="pl-funnel">' + et.map((x, i) => {
+        const w = Math.max(3, 100 * (x[1] || 0) / max);
+        const tx = i === 0 ? '' : '<span class="pl-f-r">' + fmtPct(pct(x[1], et[i - 1][1])) + ' de l\'étape précédente</span>';
+        return '<div class="pl-f-row"><span class="pl-f-l">' + x[0] + '</span><div class="pl-f-bar"><i style="width:' + w + '%;background:' + x[2] + '"></i><b' + (w < 14 ? ' class="out" style="padding-left:calc(' + w + '% + 8px)"' : '') + '>' + (x[1] || 0) + '</b></div>' + tx + '</div>';
+      }).join('') + '</div>';
+    }
+    function paliers(ps) {
+      if (!ps || !ps.length) return '';
+      const vals = ps.map(p => ({ lib: p.lib, n: p.n, rdv: pct(p.rdv, p.n), cde: pct(p.cde, p.n) }));
+      const max = Math.max(5, ...vals.map(v => Math.max(v.rdv || 0, v.cde || 0)));
+      return '<div class="pl-pal">' + vals.map(v => {
+        const h1 = v.n ? 100 * (v.rdv || 0) / max : 0, h2 = v.n ? 100 * (v.cde || 0) / max : 0;
+        return '<div class="pl-pal-c"><div class="pl-pal-bars"><span class="b1" style="height:' + h1 + '%"><em>' + (v.n ? fmtPct(v.rdv) : '') + '</em></span><span class="b2" style="height:' + h2 + '%"><em>' + (v.n ? fmtPct(v.cde) : '') + '</em></span></div>'
+          + '<b>' + e(v.lib === 'jamais' ? 'Jamais contactés' : v.lib) + '</b><small>' + v.n + ' lead' + (v.n > 1 ? 's' : '') + '</small></div>';
+      }).join('') + '</div><div class="pl-leg"><span><i style="background:' + C.bleu + '"></i>% avec rendez-vous</span><span><i style="background:' + C.vert + '"></i>% avec commande</span></div>'
+        + '<p class="pl-note">Délai entre l\'arrivée du lead et le premier contact. Un lead repris vite peut aussi être un client plus décidé au départ : l\'écart montre une tendance, pas une promesse.</p>';
+    }
+    function heatmap(cells) {
+      const H0 = 7, H1 = 21, J = ['Lun', 'Mar', 'Mer', 'Jeu', 'Ven', 'Sam', 'Dim'];
+      const m = {}; let max = 1;
+      (cells || []).forEach(c => { m[c.dow + '-' + c.h] = c.n; if (c.n > max) max = c.n; });
+      let h = '<div class="pl-heat" style="grid-template-columns:38px repeat(' + (H1 - H0 + 1) + ',minmax(0,1fr))"><span></span>';
+      for (let x = H0; x <= H1; x++) h += '<span class="pl-hx">' + x + 'h</span>';
+      J.forEach((j, i) => {
+        h += '<span class="pl-hy">' + j + '</span>';
+        for (let x = H0; x <= H1; x++) {
+          const v = m[(i + 1) + '-' + x] || 0, a = v ? 0.12 + 0.88 * v / max : 0;
+          h += '<span class="pl-hc" style="background:' + (v ? 'rgba(42,94,169,' + a.toFixed(2) + ')' : '#f4f7fb') + '" title="' + j + ' ' + x + 'h : ' + v + ' lead' + (v > 1 ? 's' : '') + '">' + (v && a > 0.55 ? v : '') + '</span>';
+        }
+      });
+      const avant = (cells || []).filter(c => c.h < H0 || c.h > H1).reduce((a, c) => a + c.n, 0);
+      return h + '</div>' + (avant ? '<p class="pl-note">' + avant + ' lead' + (avant > 1 ? 's' : '') + ' reçu' + (avant > 1 ? 's' : '') + ' avant 7 h ou après 21 h, hors grille.</p>' : '');
+    }
+    function tableau(rows, libCol, opts) {
+      opts = opts || {};
+      if (!rows || !rows.length) return '<div class="pl-vide">Aucun lead sur la période.</div>';
+      const maxN = Math.max(1, ...rows.map(r => r.n));
+      return '<div class="pl-tw"><table class="pl-t"><thead><tr><th>' + libCol + '</th><th>Leads</th><th>Contactés</th><th>Délai médian</th><th>Dans le délai</th><th>RDV</th><th>Commandes</th></tr></thead><tbody>'
+        + rows.map(r => {
+          const pc = pct(r.c, r.n), pd = pct(r.dd, r.n);
+          return '<tr><td class="l">' + e(opts.nom ? opts.nom(r) : r.cle) + '</td>'
+            + '<td><span class="pl-vol"><i style="width:' + Math.max(4, 100 * r.n / maxN) + '%"></i><b>' + r.n + '</b></span></td>'
+            + '<td>' + fmtPct(pc) + '</td><td>' + duree(r.med) + '</td>'
+            + '<td><span class="pl-pill ' + niveauDelai(pd) + '">' + fmtPct(pd) + '</span></td>'
+            + '<td>' + (r.rdv || '<span class="pl-na">0</span>') + (r.rdv ? ' <small>' + pct(r.rdv, r.n) + ' %</small>' : '') + '</td>'
+            + '<td>' + (r.cde || '<span class="pl-na">0</span>') + (r.cde ? ' <small>' + pct(r.cde, r.n) + ' %</small>' : '') + '</td></tr>';
+        }).join('') + '</tbody></table></div>';
+    }
+    function carte(titre, sous, corps, large) {
+      return '<section class="pl-card' + (large ? ' large' : '') + '"><header><h3>' + titre + '</h3>' + (sous ? '<p>' + sous + '</p>' : '') + '</header>' + corps + '</section>';
+    }
+
+    // ── Rendu ──────────────────────────────────────────────────────────────
+    function rendre() {
+      if (!host.isConnected) return;
+      injecterCssLeads();
+      const sites = (data && data.sites) || [];
+      let h = '<div class="pl-bar"><span class="pl-lbl">Période</span><div class="pl-seg">'
+        + PRESETS.map(p => '<button type="button" class="' + (L.preset === p[0] ? 'on' : '') + '" data-pl-preset="' + p[0] + '">' + p[1] + '</button>').join('') + '</div>';
+      if (sites.length > 1) {
+        h += '<span class="pl-lbl">Périmètre</span><select class="pl-sel" data-pl-site><option value="">Tous mes sites</option>'
+          + sites.map(s => '<option value="' + s.id_site + '"' + (String(L.site) === String(s.id_site) ? ' selected' : '') + '>' + e(propre(s.site)) + '</option>').join('') + '</select>';
+      }
+      const [d, f] = bornes(L.preset);
+      h += '<span class="pl-per">du ' + new Date(d + 'T12:00:00').toLocaleDateString('fr-FR') + ' au ' + new Date(f + 'T12:00:00').toLocaleDateString('fr-FR') + '</span></div>';
+      if (!charge) { host.innerHTML = h + '<div class="pl-vide">Chargement des indicateurs…</div>'; lier(); return; }
+      if (erreur) { host.innerHTML = h + '<div class="pl-vide err">Les indicateurs n\'ont pas pu être chargés : ' + e(erreur) + '</div>'; lier(); return; }
+      const k = data.kpi || {}, p = data.prec || {};
+      if (!k.recus) { host.innerHTML = h + '<div class="pl-vide">Aucun lead reçu sur cette période et ce périmètre.</div>'; lier(); return; }
+      const tc = pct(k.contactes, k.recus), td = pct(k.dans_delai, k.recus), tr = pct(k.rdv, k.recus), tcd = pct(k.cde, k.recus);
+      const pc = pct(p.contactes, p.recus), pdd = pct(p.dans_delai, p.recus), pr = pct(p.rdv, p.recus), pcd = pct(p.cde, p.recus);
+      h += '<div class="pl-tiles">'
+        + tuile('Leads reçus', k.recus, k.en_attente ? k.en_attente + ' encore sans contact' : 'tous contactés', tendance(k.recus, p.recus, 0, 'n').replace(' crit', ' n').replace(' ok', ' n'), '')
+        + tuile('Contactés', fmtPct(tc), k.contactes + ' sur ' + k.recus, tendance(tc, pc, 1, 'pts'), tc >= 90 ? 'ok' : tc >= 70 ? 'warn' : 'crit')
+        + tuile('Délai du 1er contact', duree(k.mediane), 'médiane, depuis l\'arrivée', tendance(k.mediane, p.mediane, -1, 'min'), '', 'La moitié des leads contactés l\'ont été en moins de ce délai.')
+        + tuile('Dans le délai', fmtPct(td), k.dans_delai + ' leads contactés à temps', tendance(td, pdd, 1, 'pts'), niveauDelai(td), 'Part des leads reçus contactés dans le délai de leur source (2 h pour un lead du plateau). Un lead jamais contacté compte comme hors délai.')
+        + tuile('Rendez-vous', fmtPct(tr), k.rdv + ' leads avec un RDV', tendance(tr, pr, 1, 'pts'), '', 'Un rendez-vous posé pour le client, sur le site, dans les 30 jours qui suivent le lead.')
+        + tuile('Commandes', fmtPct(tcd), k.cde + ' leads devenus commande', tendance(tcd, pcd, 1, 'pts'), '', 'Un bon de commande du client, sur le site, dans les 90 jours qui suivent le lead. Les leads récents n\'ont pas encore eu le temps de se transformer.')
+        + '</div>';
+      h += '<div class="pl-grid">'
+        + carte('Du lead à la commande', 'Chaque étape, et ce qu\'elle garde de la précédente.', entonnoir(k))
+        + carte('Jour après jour', 'Leads reçus chaque jour, selon qu\'ils ont été contactés à temps, en retard, ou pas encore.', sparkJours(data.jours))
+        + carte('La rapidité paie', 'Ce que deviennent les leads, selon le temps mis à les contacter.', paliers(data.paliers))
+        + carte('Quand arrivent les leads', 'Par jour de la semaine et par heure : de quoi caler les présences.', heatmap(data.heat))
+        + '</div>';
+      h += carte('Par source', 'Les canaux qui apportent le plus, et la façon dont on leur répond.', tableau(data.sources, 'Source'), true);
+      const vend = (data.vendeurs || []).filter(v => v.role !== 10);
+      const vroom = (data.vendeurs || []).filter(v => v.role === 10);
+      h += carte('Par vendeur', 'Classés par nombre de leads. La pastille « dans le délai » se lit d\'un coup d\'œil : vert au-delà de 80 %, orange de 50 à 80 %, rouge en dessous.', tableau(vend, 'Vendeur', { nom: r => propre(r.cle) }), true);
+      if (!L.site && (data.parsite || []).length > 1) h += carte('Par site', '', tableau(data.parsite, 'Site', { nom: r => propre(r.cle) }), true);
+      if (vroom.length) {
+        const t = vroom.reduce((a, v) => ({ n: a.n + v.n, c: a.c + v.c, dd: a.dd + v.dd, rdv: a.rdv + v.rdv, cde: a.cde + v.cde }), { n: 0, c: 0, dd: 0, rdv: 0, cde: 0 });
+        h += carte('Plateau VROOM', 'Les leads traités par les opérateurs du plateau.', '<div class="pl-tiles mini">'
+          + tuile('Leads traités', t.n, '', '', '') + tuile('Contactés', fmtPct(pct(t.c, t.n)), '', '', '') + tuile('Dans le délai', fmtPct(pct(t.dd, t.n)), '', '', niveauDelai(pct(t.dd, t.n)))
+          + tuile('Rendez-vous', t.rdv, '', '', '') + tuile('Commandes', t.cde, '', '', '') + '</div>' + tableau(vroom, 'Opérateur', { nom: r => propre(r.cle) }), true);
+      }
+      h += '<p class="pl-note pied">Un lead compte dans la période où il est reçu. Exclus : doublons, fausses demandes, demandes hors périmètre et trafic atelier. Le suivi en temps réel (qui a la main, ce qui attend) reste dans le lead management.</p>';
+      host.innerHTML = h;
+      lier();
+    }
+    function lier() {
+      host.querySelectorAll('[data-pl-preset]').forEach(b => b.addEventListener('click', () => { L.preset = b.getAttribute('data-pl-preset'); charger(); }));
+      const s = host.querySelector('[data-pl-site]');
+      if (s) s.addEventListener('change', () => { L.site = s.value || null; charger(); });
+    }
+    function injecterCssLeads() {
+      if (doc.getElementById('pl-css')) return;
+      const st = doc.createElement('style'); st.id = 'pl-css';
+      st.textContent = `
+.pl-bascule{display:flex;gap:4px;background:#eef2f8;border-radius:12px;padding:4px;width:max-content;max-width:100%;margin:0 0 14px;font-family:inherit}
+.pl-bascule button{border:0;background:none;padding:8px 18px;border-radius:9px;font:inherit;font-size:13px;font-weight:800;color:#5a6b86;cursor:pointer}
+.pl-bascule button.on{background:#fff;color:#1F4A85;box-shadow:0 1px 3px rgba(28,43,69,.1)}
+.pl-root{font-size:13px;color:#1c2b45;line-height:1.45}
+.pl-root *{box-sizing:border-box}
+.pl-bar{display:flex;flex-wrap:wrap;gap:8px 12px;align-items:center;background:#fff;border:1px solid #e3e9f3;border-radius:12px;padding:10px 14px;margin-bottom:14px}
+.pl-lbl{font-size:10.5px;font-weight:800;letter-spacing:.06em;text-transform:uppercase;color:#8b99b0}
+.pl-seg{display:inline-flex;border:1px solid #acc5e4;border-radius:8px;overflow:hidden}
+.pl-seg button{border:0;background:#fff;padding:6px 11px;font:inherit;font-size:12px;font-weight:700;color:#2a5ea9;cursor:pointer}
+.pl-seg button + button{border-left:1px solid #acc5e4}
+.pl-seg button.on{background:#2a5ea9;color:#fff}
+.pl-sel{border:1px solid #acc5e4;border-radius:8px;padding:6px 10px;font:inherit;font-size:12px;font-weight:700;color:#1F4A85;background:#fff}
+.pl-per{margin-left:auto;font-size:12px;color:#8b99b0;font-weight:600}
+.pl-tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(165px,1fr));gap:10px;margin-bottom:14px}
+.pl-tiles.mini{grid-template-columns:repeat(auto-fit,minmax(120px,1fr));margin-bottom:10px}
+.pl-tile{background:#fff;border:1px solid #e3e9f3;border-radius:14px;padding:14px 16px;display:grid;gap:3px;box-shadow:inset 3px 0 0 #acc5e4}
+.pl-tile.ok{box-shadow:inset 3px 0 0 #53bda7}.pl-tile.warn{box-shadow:inset 3px 0 0 #fac055}.pl-tile.crit{box-shadow:inset 3px 0 0 #d97070}
+.pl-tile-t{font-size:10.5px;font-weight:800;letter-spacing:.05em;text-transform:uppercase;color:#8b99b0}
+.pl-tile-v{font-size:28px;font-weight:800;color:#1F4A85;line-height:1.1;font-variant-numeric:tabular-nums}
+.pl-tile.ok .pl-tile-v{color:#00997f}.pl-tile.warn .pl-tile-v{color:#d2941f}.pl-tile.crit .pl-tile-v{color:#c0524f}
+.pl-tiles.mini .pl-tile-v{font-size:21px}
+.pl-tile-s{font-size:11.5px;color:#5a6b86;font-weight:600}
+.pl-tr{font-size:11px;font-weight:800;margin-top:2px}
+.pl-tr small{font-weight:600;color:#8b99b0}
+.pl-tr.ok{color:#00997f}.pl-tr.crit{color:#c0524f}.pl-tr.n{color:#8b99b0;font-weight:600}
+.pl-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px;margin-bottom:14px}
+@media (max-width:980px){.pl-grid{grid-template-columns:minmax(0,1fr)}}
+.pl-card{background:#fff;border:1px solid #e3e9f3;border-radius:14px;padding:16px 18px;min-width:0}
+.pl-card.large{margin-bottom:14px}
+.pl-card header{margin-bottom:12px}
+.pl-card h3{margin:0;font-size:14.5px;font-weight:800;color:#1F4A85}
+.pl-card header p{margin:2px 0 0;font-size:12px;color:#7a98c5;font-weight:600}
+.pl-svg{width:100%;height:auto;display:block}
+.pl-ax{font-size:10px;fill:#8b99b0;font-family:inherit}
+.pl-leg{display:flex;flex-wrap:wrap;gap:6px 16px;margin-top:8px;font-size:11.5px;color:#5a6b86;font-weight:600}
+.pl-leg i{display:inline-block;width:10px;height:10px;border-radius:3px;margin-right:6px;vertical-align:-1px}
+.pl-funnel{display:grid;gap:12px}
+.pl-f-row{display:grid;grid-template-columns:96px minmax(0,1fr);gap:4px 12px;align-items:center}
+.pl-f-l{font-size:12px;font-weight:800;color:#5a6b86}
+.pl-f-bar{position:relative;height:28px;background:#f4f7fb;border-radius:8px;overflow:hidden}
+.pl-f-bar i{position:absolute;inset:0 auto 0 0;border-radius:8px}
+.pl-f-bar b{position:relative;display:block;line-height:28px;padding-left:10px;color:#fff;font-weight:800;font-size:13px;text-shadow:0 0 3px rgba(28,43,69,.25)}
+.pl-f-bar b.out{color:#1F4A85;text-shadow:none}
+.pl-f-r{grid-column:2;font-size:11px;color:#8b99b0;font-weight:700;margin-top:-6px}
+.pl-pal{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:10px;align-items:end}
+.pl-pal-c{display:grid;gap:3px;text-align:center}
+.pl-pal-bars{height:150px;display:flex;align-items:flex-end;justify-content:center;gap:5px;border-bottom:1.5px solid #e3e9f3}
+.pl-pal-bars span{width:38%;max-width:26px;border-radius:6px 6px 0 0;position:relative;min-height:2px}
+.pl-pal-bars .b1{background:#2a5ea9}.pl-pal-bars .b2{background:#53bda7}
+.pl-pal-bars em{position:absolute;bottom:100%;left:50%;transform:translateX(-50%);font-style:normal;font-size:10.5px;font-weight:800;color:#1F4A85;white-space:nowrap;margin-bottom:2px}
+.pl-pal-c b{font-size:11.5px;color:#1c2b45;margin-top:4px}
+.pl-pal-c small{font-size:10.5px;color:#8b99b0;font-weight:600}
+.pl-heat{display:grid;gap:3px}
+.pl-hx,.pl-hy{font-size:10px;color:#8b99b0;font-weight:700;text-align:center;align-self:center}
+.pl-hy{text-align:left}
+.pl-hc{height:22px;border-radius:4px;font-size:10px;font-weight:800;color:#fff;display:grid;place-items:center}
+.pl-tw{overflow-x:auto}
+.pl-t{width:100%;border-collapse:separate;border-spacing:0;min-width:640px}
+.pl-t th{font-size:10px;font-weight:800;letter-spacing:.05em;text-transform:uppercase;color:#8b99b0;text-align:center;padding:8px 6px;background:#f4f7fb}
+.pl-t th:first-child{text-align:left;border-radius:8px 0 0 8px}.pl-t th:last-child{border-radius:0 8px 8px 0}
+.pl-t td{border-top:1px solid #e3e9f3;padding:8px 6px;text-align:center;font-variant-numeric:tabular-nums;color:#1c2b45;font-weight:600}
+.pl-t tbody tr:first-child td{border-top:0}
+.pl-t td.l{text-align:left;font-weight:800;color:#1F4A85;min-width:170px}
+.pl-t td small{color:#8b99b0;font-weight:700;font-size:10.5px}
+.pl-vol{display:flex;align-items:center;gap:8px;min-width:120px}
+.pl-vol i{display:block;height:8px;border-radius:4px;background:#acc5e4}
+.pl-vol b{font-weight:800;color:#1F4A85}
+.pl-pill{display:inline-block;min-width:54px;border-radius:999px;padding:3px 9px;font-size:12px;font-weight:800}
+.pl-pill.ok{background:#e4f4f0;color:#00997f}.pl-pill.warn{background:#fdf3de;color:#d2941f}.pl-pill.crit{background:#fbeceb;color:#c0524f}.pl-pill.n{background:#eef2f8;color:#8b99b0}
+.pl-na{color:#8b99b0}
+.pl-note{font-size:11.5px;color:#7a98c5;font-weight:600;margin:10px 0 0}
+.pl-note.pied{margin:6px 0 20px}
+.pl-vide{background:#fff;border:1px solid #e3e9f3;border-radius:14px;padding:26px;text-align:center;color:#7a98c5;font-weight:700}
+.pl-vide.err{color:#c0524f}
+@media (max-width:640px){.pl-pal{grid-template-columns:repeat(5,minmax(52px,1fr));overflow-x:auto}.pl-per{margin-left:0;width:100%}.pl-tile-v{font-size:24px}}
+`;
+      (doc.head || doc.documentElement).appendChild(st);
+    }
+    return { charger, rendre };
+  }
+
+  if (__estTC) {
+    const ctlLeads = montageLeads(__leadsHote);
+    let leadsCharge = false;
+    const vue = (v) => {
+      window.__OD_PERF_VUE__ = v;
+      __bascule.querySelectorAll('[data-vue]').forEach(b => { const on = b.getAttribute('data-vue') === v; b.classList.toggle('on', on); b.setAttribute('aria-selected', on); });
+      __ventesHote.style.display = v === 'leads' ? 'none' : '';
+      __leadsHote.style.display = v === 'leads' ? '' : 'none';
+      if (v === 'leads' && !leadsCharge) { leadsCharge = true; ctlLeads.charger(); }
+    };
+    __bascule.addEventListener('click', (ev) => { const b = ev.target.closest('[data-vue]'); if (b) vue(b.getAttribute('data-vue')); });
+    let depart = window.__OD_PERF_VUE__ || 'ventes';
+    try { const W = (wwLib.getFrontWindow && wwLib.getFrontWindow()) || window; if (/leads/i.test(W.location.hash || '')) depart = 'leads'; } catch (e) { if (/leads/i.test(location.hash || '')) depart = 'leads'; }
+    vue(depart);
+  }
 
   // ensureRenderedPerf retiré : le loader possède le cycle de vie et re-monte
   // le module à chaque navigation SPA.
