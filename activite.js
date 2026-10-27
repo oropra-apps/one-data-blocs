@@ -1,1365 +1,816 @@
 // ============================================================================
-//  SUIVI ACTIVITÉ v3 — module One Data (OD.define)  v1
-//  Rendu dans __anchor ; SUPABASE_URL/clé/JWT via ctx (tenant + session runtime) ;
-//  RPC via ctx.supabase ; export-xslx tenant-correct ; user via socle oropraUser.
-// ============================================================================
-// ============================================================================
-// SUIVI ACTIVITÉ v3 — Arbre hiérarchique navigable (marque>affaire>site>type>vendeur)
+//  SUIVI D'ACTIVITÉ v4 (28/10/2026) — un écran par rôle, une question par écran
 //
-//  - Charge get_activite_equipe(viewer, from, to) via RPC Supabase (1 appel).
-//  - Tout le drill-down se fait en JS : clic sur une ligne => KPIs + graphes
-//    recalculés instantanément, zéro refetch.
-//  - Vendeurs sans activité (jour=NULL) : présents dans l'arbre à 0, ignorés des graphes.
-//  - v3 BUS DE SITE (oropra-site-bus.js) : le bus porte le SITE, la page porte
-//    l'EXPLORATION.
-//      * à l'arrivée, la sélection se focalise sur le site global (bus), ancêtres
-//        dépliés ; "✕" pour revenir à tout le périmètre ;
-//      * sélectionner une ligne SITE pousse ce site dans le bus (header, badge,
-//        autres pages suivent) ; réseau/affaire/type/vendeur = local ;
-//      * changement de site ailleurs -> refocalisation SANS re-fetch.
-//  - v3 TYPE VN/VO/VNVO (catégorie du VENDEUR) :
-//      * toggle Type : Tous | VN | VO | VNVO (affiché seulement si le RPC
-//        renvoie la colonne vn_vo — sinon l'UI reste identique à la v2) ;
-//      * niveau TYPE inséré entre site et vendeurs dans l'arbre (aplati si le
-//        site n'a qu'un type), sélectionnable (clé "id_site~~TYPE") ;
-//      * vendeurs triés par type puis contacts décroissants ;
-//      * le pipeline/transfo suit le filtre : agrégé sur les couples
-//        vendeur×site du périmètre filtré (et non plus le site entier).
-//    PRÉREQUIS SQL : ajouter au SELECT de get_activite_equipe la colonne
-//    vn_vo (catégorie du vendeur, ex. U."VN_VO"). Sans elle, tout reste fonctionnel
-//    mais sans la dimension type.
-//  - v3 EXPORT EXCEL : logo Excel cliquable -> edge function export-xslx
-//    (une ligne par vendeur×site×type du périmètre courant, filtres appliqués).
-//  - v3.1 :
-//      * HEATMAP CADENCE : grille jour × vendeur (intensité = nb de contacts,
-//        jours calendaires de la période, dimanches signalés), affichée pour
-//        une sélection site/type/vendeur ;
-//      * COMPARATEUR : "⇄ Comparer" -> cliquer 2 lignes de l'arbre (tout
-//        niveau) les met côte à côte (contacts, chocs, pipeline, transfo) ;
-//        en mode comparaison, les clics ne touchent ni la sélection ni le bus ;
-//      * MOYENNE MOBILE 7 J : toggle "MM 7j" sur le graphe contacts pour
-//        lisser le bruit quotidien et lire la tendance.
-//  - Remplace intégralement le script #act-root.
+//    Vendeur           « Que dois-je faire aujourd'hui ? »
+//    Chef des ventes   « Avec qui, sur quoi, avec quel levier ? » (point du matin)
+//    Directeur de site « Le mois se joue-t-il, et où ça fuit ? »
+//    Direction         « Quel site, quel écart ? »
+//
+//  Remplace intégralement la v3 (arbre marque > affaire > site > vendeur,
+//  grille jour par jour, comparateur) : elle montrait la même chose à tout le
+//  monde sans dire quoi faire.
+//
+//  Données : fonctions SQL act_* (migration 20261028080000_suivi_activite_roles)
+//    act_contexte()              rôle, écrans permis, sites du périmètre
+//    act_vendeur(id?)            journée, affaires, mois d'un vendeur
+//    act_chef(site, deb, fin)    l'équipe d'un site sur une période
+//    act_site(sites, deb, fin)   leads, motifs de perte, sources, mois
+//    act_entonnoir(sites,d,f)    affaires BACS créées -> devis -> gagnées
+//    act_groupe(deb, fin)        les sites côte à côte
+//  Actions : notif_alerter (note au vendeur), ouverture de la fiche client.
+//
+//  Charte One Data (celle de dashboard.js). Graphiques en SVG dessinés à la
+//  largeur réelle de leur bloc : le texte garde sa taille sur tout écran.
+//  Le site suit le bus de site (oropra-site-bus.js).
 // ============================================================================
-
-// Tout le script est encapsulé dans une IIFE : en prod (build WeWeb/Cloudflare),
-// un `return;` au niveau racine provoque une SyntaxError ("Illegal return
-// statement") qui empêche TOUT le script de s'exécuter (loader figé). Dans une
-// fonction, les `return` de garde sont parfaitement légaux.
 OD.define('activite', {
   async mount(__anchor, ctx) {
     __anchor.id = 'act-root';
-const SUPABASE_URL = ctx.tenant.supabase_url;
-function getSupabaseKey() { return ctx.tenant.supabase_anon_key; }
-async function getUserJwt(){ try { const s = await ctx.supabase.auth.getSession(); return s?.data?.session?.access_token || null; } catch(e){ return null; } }
+    const doc = __anchor.ownerDocument || document;
+    const FW = () => { try { return (wwLib.getFrontWindow && wwLib.getFrontWindow()) || window; } catch (e) { return window; } };
+    const sb = () => ctx.supabase;
+    const SUPABASE_URL = ctx.tenant.supabase_url;
 
-const doc  = __anchor.ownerDocument || document;
-// IMPORTANT : ne PAS capturer #act-root dans une const figée. WeWeb recrée le
-// nœud DOM quand il re-render le composant ; une référence figée pointerait alors
-// vers un ancien nœud détaché et render() écrirait dans le vide. On le re-cible
-// donc à chaque utilisation via getRoot().
-function getRoot() { return __anchor; }
-if (!getRoot()) return;
-
-// L'utilisateur applicatif est chargé par le Shell AVANT le mount initial ; en
-// navigation SPA le module peut toutefois monter à un instant limite -> on
-// patiente brièvement et on gère le cas tableau.
-{
-  const _w = (wwLib.getFrontWindow && wwLib.getFrontWindow()) || window;
-  const _uid = () => { let d = _w.oropraUser; if (Array.isArray(d)) d = d[0]; return d && d.ID_User; };
-  for (let i = 0; i < 40 && _uid() == null; i++) { await new Promise(r => setTimeout(r, 250)); }
-}
-let userConnected = (((wwLib.getFrontWindow && wwLib.getFrontWindow()) || window).oropraUser || {});
-if (Array.isArray(userConnected)) userConnected = userConnected[0] || {};
-const viewerId = userConnected.ID_User;
-const userRole = userConnected.ID_Role;
-if (viewerId == null) { const r0 = getRoot(); if (r0) r0.innerHTML = '<div style="padding:20px;color:#7a9cc4">Utilisateur non identifié.</div>'; return; }
-
-// --- Bus de site (oropra-site-bus.js) ----------------------------------------
-function siteBus() {
-  try { const w = wwLib.getFrontWindow(); if (w && w.oropraSite) return w.oropraSite; } catch (e) {}
-  return window.oropraSite || null;
-}
-
-// --- État -------------------------------------------------------------------
-const state = window.__act || {};
-// Periode TOUJOURS reinitialisee a l'arrivee sur la page (13/08/2026).
-// L'etat vit sur window et survit donc aux navigations SPA : avec un test
-// `=== undefined`, une periode choisie suivait l'utilisateur de page en page.
-// Regle produit : par defaut, du 1er du mois courant a aujourd'hui, aucune
-// persistance.
-{
-  const now = new Date();
-  const from = new Date(now.getFullYear(), now.getMonth(), 1);
-  state.period = { from: ymd(from), to: ymd(now) };
-}
-if (state.rawData === undefined)   state.rawData = null;   // null = pas encore chargé
-if (state.error === undefined)     state.error = null;
-if (state.selection === undefined) state.selection = { level: 'all', key: null, label: 'Tout le périmètre' };
-if (state.expanded === undefined)  state.expanded = {};
-if (state.loadKey === undefined)   state.loadKey = null;
-if (state.pipelineMode === undefined) state.pipelineMode = 'cumul';   // 'cumul' | 'jour'
-if (state.contactsSens === undefined) state.contactsSens = 'total';   // 'total' | 'entrants' | 'sortants'
-if (state.contactsMM7 === undefined) state.contactsMM7 = true;        // moyenne mobile 7 jours (par défaut)
-if (state.compare === undefined)   state.compare = { active:false, items:[] };  // comparateur
-if (state.vnvo === undefined)      state.vnvo = 'ALL';                // ALL | VN | VO | VNVO
-if (state.busSite === undefined)       state.busSite = null;
-if (state.busSelPending === undefined) state.busSelPending = true;
-// IMPORTANT : on réinitialise toujours loading à false au (re)chargement du script.
-state.loading = false;
-// Invalidation du cache si l'utilisateur connecté a changé.
-if (state.viewerId !== undefined && String(state.viewerId) !== String(viewerId)) {
-  state.rawData = null;
-  state.loadKey = null;
-  state.transfo = null;
-  state.selection = { level: 'all', key: null, label: 'Tout le périmètre' };
-  state.expanded = {};
-  state.busSelPending = true;
-}
-state.viewerId = viewerId;
-window.__act = state;
-
-// --- Synchronisation avec le bus ---------------------------------------------
-function applyBusSiteAct(siteId) {
-  const st = window.__act; if (!st) return;
-  const id = siteId != null ? String(siteId) : null;
-  if (id == null) return;
-  const changed = st.busSite !== id;
-  st.busSite = id;
-  if (changed) st.busSelPending = true;
-  adoptBusSelectionAct();
-  if (window.__renderActivite) { window.__renderActivite(); setTimeout(() => { if (window.__actDrawCharts) window.__actDrawCharts(); }, 0); }
-}
-// Focalise la sélection sur le site du bus (niveau 'site'), ancêtres dépliés.
-function adoptBusSelectionAct() {
-  const st = window.__act; if (!st || !st.busSelPending) return;
-  if (st.busSite == null || st.rawData === null) return;   // données pas prêtes (retenté plus tard)
-  let row = (st.rawData || []).find(r => String(r.id_site) === String(st.busSite));
-  // 07/10/2026 (recette Team Colin) : un site sans ligne sur la periode etait
-  // ignore, la page restait sur le site precedent alors que la topnav en
-  // affichait un autre. Libelle et branche viennent alors du bus ; les
-  // indicateurs tombent a zero.
-  if (!row) {
-    const b = siteBus();
-    const s = b && b.getSites ? (b.getSites() || []).find(x => String(x.id_site) === String(st.busSite)) : null;
-    if (!s) return;
-    row = { id_site: s.id_site, nom_site: s.site, reseau: s.reseau, id_affaire: s.id_affaire };
-  }
-  st.busSelPending = false;
-  st.selection = { level: 'site', key: String(row.id_site), label: row.nom_site || ('Site ' + row.id_site) };
-  const rKey = 'r:' + row.reseau;
-  const aKey = rKey + '|a:' + row.id_affaire;
-  st.expanded[rKey] = true;
-  st.expanded[aKey] = true;
-}
-(function bindActBus(tries) {
-  tries = tries || 0;
-  const b = siteBus();
-  if (!b) { if (tries < 120) setTimeout(() => bindActBus(tries + 1), 250); return; }
-  if (window.__actBusBound) {
-    const id = b.getSiteId();
-    if (id != null) applyBusSiteAct(id);   // réexécution : simple recalage
-    return;
-  }
-  window.__actBusBound = true;
-  b.onChange(({ siteId }) => applyBusSiteAct(siteId));
-})();
-
-// --- Helpers date -----------------------------------------------------------
-function ymd(d) {
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, '0');
-  const day = String(d.getDate()).padStart(2, '0');
-  return y + '-' + m + '-' + day;
-}
-function periodKey() { return viewerId + '_' + state.period.from + '_' + state.period.to; }
-function fmtPeriod() {
-  const f = (s) => { const d = new Date(s + 'T12:00:00'); return d.toLocaleDateString('fr-FR', { day: '2-digit', month: 'short' }); };
-  return f(state.period.from) + ' → ' + f(state.period.to);
-}
-
-// --- Helpers HTML / type ------------------------------------------------------
-function esc(s) {
-  if (s === null || s === undefined) return '';
-  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
-}
-// Normalisation du type ('VN' | 'VO' | 'VNVO' | '—').
-function normType(v) {
-  const s = (v == null ? '' : String(v)).trim().toUpperCase().replace(/[^A-Z]/g, '');
-  if (s === 'VN' || s === 'VO' || s === 'VNVO') return s;
-  return s || '—';
-}
-const TYPE_ORDER = { VN: 0, VO: 1, VNVO: 2 };
-// La dimension type n'est active que si le RPC renvoie réellement la colonne.
-function hasTypes() {
-  return (state.rawData || []).some(r => r.vn_vo && r.vn_vo !== '—');
-}
-const KPI_KEYS = ['nb_contacts','nb_entrants','nb_sortants','nb_whatsapp','nb_rpv','nb_voip','nb_sms','nb_chocs','nb_relances','nb_abandons','nb_propales_creees','nb_bdc','nb_wins'];
-function emptyKpi() { const o = {}; for (const k of KPI_KEYS) o[k] = 0; return o; }
-function addKpi(target, row) { for (const k of KPI_KEYS) target[k] += Number(row[k]) || 0; }
-
-// --- Chargement RPC ---------------------------------------------------------
-async function loadData() {
-  const key = periodKey();
-  if (state.loadKey === key && state.rawData !== null) return;
-  // Verrou anti-doublon : si un chargement pour la même clé est déjà en vol,
-  // on réutilise sa promesse au lieu de relancer les RPC.
-  if (window.__actLoadPromise && window.__actLoadKeyInflight === key) {
-    return window.__actLoadPromise;
-  }
-  state.loading = true;
-  state.error = null;
-  state.loadKey = key;
-  window.__actLoadKeyInflight = key;
-  render();
-  window.__actLoadPromise = (async () => {
-  try {
-    const supabase = ctx.supabase;
-    // Deux RPC en parallèle : l'activité (par jour, created_at) et le taux de
-    // transfo unifié (updated_at, même définition que le dashboard).
-    const [actRes, txRes] = await Promise.all([
-      supabase.rpc('get_activite_equipe', { p_viewer_id_user: Number(viewerId), p_date_from: state.period.from, p_date_to: state.period.to }),
-      supabase.rpc('get_transfo', { p_viewer_id_user: Number(viewerId), p_date_from: state.period.from, p_date_to: state.period.to })
-    ]);
-    const { data, error } = actRes;
-    if (error) throw error;
-    if (!txRes.error) {
-      state.transfo = (txRes.data || []).map(r => ({
-        jour: r.jour || null,
-        id_user: r.id_user != null ? Number(r.id_user) : null,
-        id_site: r.id_site != null ? Number(r.id_site) : null,
-        nb_propale: Number(r.nb_propale) || 0,
-        nb_bdc: Number(r.nb_bdc) || 0,
-        nb_wins: Number(r.nb_wins) || 0,
-        nb_lose: Number(r.nb_lose) || 0,
-        nb_wins_tx: Number(r.nb_wins_tx) || 0,
-        nb_propales_tx: Number(r.nb_propales_tx) || 0
-      }));
-    } else { state.transfo = []; }
-    // Depuis 20260821210000, get_activite_equipe remonte aussi les chefs
-    // des ventes (id_role = 3), parce que le dashboard a besoin de leur
-    // volume. Cette page reste un suivi d'activité VENDEURS : on filtre
-    // ici pour ne rien changer à son affichage. Le jour où tu veux une
-    // bascule « inclure l'encadrement », la donnée est déjà là — retire
-    // le filtre et branche-le sur state.
-    state.rawData = (data || []).filter(r => r.id_role == null || Number(r.id_role) === 4).map(r => ({
-      id_user: Number(r.id_user),
-      id_role: r.id_role != null ? Number(r.id_role) : null,
-      nom_complet: r.nom_complet || ('Vendeur ' + r.id_user),
-      id_site: r.id_site != null ? Number(r.id_site) : null,
-      nom_site: r.nom_site || ('Site ' + r.id_site),
-      reseau: r.reseau || '(Sans réseau)',
-      affaire: r.affaire || '(Sans affaire)',
-      id_affaire: r.id_affaire != null ? Number(r.id_affaire) : null,
-      id_manager: r.id_manager != null ? Number(r.id_manager) : null,
-      vn_vo: normType(r.vn_vo),   // catégorie du vendeur ('—' si le RPC ne la renvoie pas)
-      jour: r.jour,  // peut être null (vendeur inactif)
-      nb_contacts: Number(r.nb_contacts)||0, nb_entrants: Number(r.nb_entrants)||0, nb_sortants: Number(r.nb_sortants)||0,
-      nb_whatsapp: Number(r.nb_whatsapp)||0, nb_rpv: Number(r.nb_rpv)||0, nb_voip: Number(r.nb_voip)||0, nb_sms: Number(r.nb_sms)||0,
-      nb_chocs: Number(r.nb_chocs)||0, nb_relances: Number(r.nb_relances)||0, nb_abandons: Number(r.nb_abandons)||0,
-      nb_propales_creees: Number(r.nb_propales_creees)||0, nb_bdc: Number(r.nb_bdc)||0, nb_wins: Number(r.nb_wins)||0
-    }));
-    adoptBusSelectionAct();   // focalise sur le site du bus dès que les données sont là
-  } catch (e) {
-    console.error('[activite] RPC get_activite_equipe', e);
-    state.error = (e && e.message) ? e.message : 'Erreur de chargement';
-    state.rawData = [];
-  } finally {
-    state.loading = false;
-    window.__actLoadPromise = null;
-    window.__actLoadKeyInflight = null;
-    render();
-    setTimeout(drawCharts, 0);
-  }
-  })();
-  return window.__actLoadPromise;
-}
-
-// --- Filtrage : type (vendeur) + périmètre (drill-down en mémoire) -----------
-// Lignes après filtre Type (base de TOUT : arbre, KPIs, graphes, export).
-function baseRows() {
-  let rows = state.rawData || [];
-  if (state.vnvo !== 'ALL' && hasTypes()) rows = rows.filter(r => r.vn_vo === state.vnvo);
-  return rows;
-}
-// Lignes d'une entité quelconque (réutilisé par la sélection ET le comparateur).
-function entityRowsAct(level, key) {
-  const all = baseRows();
-  if (level === 'all')     return all;
-  if (level === 'reseau')  return all.filter(r => r.reseau === key);
-  if (level === 'affaire') return all.filter(r => String(r.id_affaire) === String(key));
-  if (level === 'site')    return all.filter(r => String(r.id_site) === String(key));
-  // Niveau VN/VO/VNVO au sein d'un site : clé qualifiée "id_site~~TYPE".
-  if (level === 'vntype') {
-    const parts = String(key).split('~~');
-    if (parts.length === 2) return all.filter(r => String(r.id_site) === parts[0] && r.vn_vo === parts[1]);
-    return all;
-  }
-  if (level === 'vendeur') return all.filter(r => String(r.id_user) === String(key));
-  return all;
-}
-function rowsForSelection() { return entityRowsAct(state.selection.level, state.selection.key); }
-function sumKpi(rows) { const o = emptyKpi(); for (const r of rows) addKpi(o, r); return o; }
-
-// Couples (id_user|id_site) couverts par un jeu de lignes. C'est par EUX
-// qu'on filtre la transfo : ainsi le filtre Type (catégorie vendeur) et le
-// drill-down s'appliquent aussi au pipeline, sans toucher au RPC get_transfo.
-function couplesOf(rows) {
-  const set = new Set();
-  for (const r of rows) set.add(String(r.id_user) + '|' + String(r.id_site));
-  return set;
-}
-function selCouples() { return couplesOf(rowsForSelection()); }
-
-// Taux de transfo unifié (updated_at), agrégé sur un jeu de lignes.
-// Renvoie { wins, total, pct, totalPropales, nbPropale, nbBdc, nbWins, nbLose }.
-function transfoAggFor(rows) {
-  const couples = couplesOf(rows);
-  const tx = state.transfo || [];
-  let wins = 0, total = 0, nbPropale = 0, nbBdc = 0, nbWins = 0, nbLose = 0;
-  for (const t of tx) {
-    if (!couples.has(String(t.id_user) + '|' + String(t.id_site))) continue;
-    wins += t.nb_wins_tx; total += t.nb_propales_tx;
-    nbPropale += t.nb_propale; nbBdc += t.nb_bdc; nbWins += t.nb_wins; nbLose += t.nb_lose;
-  }
-  return {
-    wins, total, pct: total > 0 ? Math.round(wins / total * 100) : 0,
-    totalPropales: nbPropale + nbBdc + nbWins + nbLose,
-    nbPropale, nbBdc, nbWins, nbLose
-  };
-}
-function transfoForSelection() { return transfoAggFor(rowsForSelection()); }
-
-// Séries du pipeline par JOUR (updated_at), filtrées par le périmètre courant.
-function transfoByJour() {
-  const couples = selCouples();
-  const tx = state.transfo || [];
-  const data = {};
-  for (const t of tx) {
-    if (!t.jour) continue;
-    if (!couples.has(String(t.id_user) + '|' + String(t.id_site))) continue;
-    if (!data[t.jour]) data[t.jour] = { propales: 0, bdc: 0, wins: 0, abandons: 0 };
-    const d = data[t.jour];
-    d.bdc += t.nb_bdc; d.wins += t.nb_wins; d.abandons += t.nb_lose;
-    d.propales += t.nb_propale + t.nb_bdc + t.nb_wins + t.nb_lose;  // total du jour
-  }
-  const jours = Object.keys(data).sort();
-  return { jours, data };
-}
-
-// Agrégat par jour pour le graphe contacts : trace les PAIRS de l'entité
-// sélectionnée (les enfants du parent), avec la moyenne du parent.
-//   sélection vendeur  -> courbes des vendeurs du SITE      + moyenne du site
-//   sélection vntype   -> courbes des vendeurs du TYPE      + moyenne du type
-//   sélection site     -> courbes des sites de l'AFFAIRE    + moyenne de l'affaire
-//   sélection affaire  -> courbes des affaires du RÉSEAU    + moyenne du réseau
-//   sélection réseau   -> courbes des réseaux (TOUT)        + moyenne groupe
-//   sélection tout     -> APLATISSEMENT auto (descend tant qu'un niveau n'a
-//                         qu'une seule valeur).
-function byJourPairs(allRows) {
-  const sel = state.selection;
-  const lvl = sel.level;
-
-  let parentRows, dimKey, dimLabel, selectedKey = null;
-
-  const distinct = (rows, fn) => { const s = new Set(); for (const r of rows){ const v=fn(r); if(v!=null&&v!=='') s.add(String(v)); } return s; };
-
-  if (lvl === 'vendeur') {
-    const vRow = allRows.find(r => String(r.id_user) === String(sel.key));
-    const siteId = vRow ? vRow.id_site : null;
-    parentRows = allRows.filter(r => String(r.id_site) === String(siteId));
-    dimKey = r => String(r.id_user);
-    dimLabel = r => r.nom_complet || ('Vendeur '+r.id_user);
-    selectedKey = String(sel.key);
-  } else if (lvl === 'vntype') {
-    // Vendeurs du type au sein du site, comparés entre eux.
-    const parts = String(sel.key).split('~~');
-    parentRows = parts.length === 2
-      ? allRows.filter(r => String(r.id_site) === parts[0] && r.vn_vo === parts[1])
-      : allRows;
-    dimKey = r => String(r.id_user);
-    dimLabel = r => r.nom_complet || ('Vendeur '+r.id_user);
-    selectedKey = null;
-  } else if (lvl === 'site') {
-    const sRow = allRows.find(r => String(r.id_site) === String(sel.key));
-    const affId = sRow ? sRow.id_affaire : null;
-    parentRows = allRows.filter(r => String(r.id_affaire) === String(affId));
-    dimKey = r => String(r.id_site);
-    dimLabel = r => r.nom_site || ('Site '+r.id_site);
-    selectedKey = String(sel.key);
-  } else if (lvl === 'affaire') {
-    const aRow = allRows.find(r => String(r.id_affaire) === String(sel.key));
-    const res = aRow ? aRow.reseau : null;
-    parentRows = allRows.filter(r => r.reseau === res);
-    dimKey = r => String(r.id_affaire);
-    dimLabel = r => r.affaire || '(Sans affaire)';
-    selectedKey = String(sel.key);
-  } else if (lvl === 'reseau') {
-    parentRows = allRows;
-    dimKey = r => r.reseau || '(Sans réseau)';
-    dimLabel = r => r.reseau || '(Sans réseau)';
-    selectedKey = String(sel.key);
-  } else {
-    // TOUT : aplatissement auto, comme le tableau.
-    parentRows = allRows;
-    const chain = [
-      { key:r=>r.reseau||'(Sans réseau)',      label:r=>r.reseau||'(Sans réseau)' },
-      { key:r=>String(r.id_affaire),           label:r=>r.affaire||'(Sans affaire)' },
-      { key:r=>String(r.id_site),              label:r=>r.nom_site||('Site '+r.id_site) },
-      { key:r=>String(r.id_user),              label:r=>r.nom_complet||('Vendeur '+r.id_user) }
-    ];
-    let chosen = chain[0];
-    for (let i = 0; i < chain.length; i++) {
-      const n = distinct(parentRows, chain[i].key).size;
-      if (n > 1 || i === chain.length - 1) { chosen = chain[i]; break; }
+    // L'utilisateur est chargé par le Shell ; en navigation SPA on patiente un peu.
+    for (let i = 0; i < 40; i++) {
+      let u = FW().oropraUser; if (Array.isArray(u)) u = u[0];
+      if (u && u.ID_User != null) break;
+      await new Promise(r => setTimeout(r, 250));
     }
-    dimKey = chosen.key;
-    dimLabel = chosen.label;
-    selectedKey = null;
-  }
 
-  // Agrège par (jour, clé de dimension).
-  const data = {};
-  const serieMap = {};
-  const joursSet = {};
-  for (const r of parentRows) {
-    if (!r.jour) continue;
-    const k = dimKey(r);
-    if (k == null || k === 'null' || k === '') continue;
-    joursSet[r.jour] = true;
-    if (!serieMap[k]) serieMap[k] = { key:k, label:dimLabel(r), selected: selectedKey != null && k === selectedKey };
-    if (!data[r.jour]) data[r.jour] = {};
-    if (!data[r.jour][k]) data[r.jour][k] = { entrants:0, sortants:0, total:0 };
-    const cell = data[r.jour][k];
-    cell.entrants += r.nb_entrants;
-    cell.sortants += r.nb_sortants;
-    cell.total    += r.nb_contacts;
-  }
-  const jours = Object.keys(joursSet).sort();
-  const series = Object.values(serieMap).sort((a,b) => String(a.label).localeCompare(String(b.label)));
-  return { jours, series, data };
-}
+    // ------------------------------------------------------------------ état
+    const S = window.__act4 || {};
+    window.__act4 = S;
+    S.ctx = null; S.err = null;
+    S.ecran = S.ecran || null;
+    S.periode = S.periode || { chef: 'mois', site: 'mois', groupe: 'mois' };
+    S.plage = S.plage || null;           // { deb, fin } quand dates libres (chef)
+    S.vendeur = S.vendeur || null;       // vendeur sélectionné au point du matin
+    S.data = {};                         // réponses par clé de chargement
+    S.charge = {};
 
-// Agrégat par vendeur (pour le tableau détail)
-function byVendeur(rows) {
-  const m = {};
-  for (const r of rows) {
-    if (!m[r.id_user]) { m[r.id_user] = { id_user:r.id_user, nom_complet:r.nom_complet, vn_vo:r.vn_vo, ...emptyKpi() }; }
-    addKpi(m[r.id_user], r);
-  }
-  return Object.values(m).sort((a,b) => b.nb_contacts - a.nb_contacts);
-}
+    // ------------------------------------------------------------------ utilitaires
+    const esc = s => s == null ? '' : String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+    const nf = n => Math.round(Number(n) || 0).toLocaleString('fr-FR');
+    const eur = n => n == null ? '—' : nf(n) + ' €';
+    const keur = n => n == null ? '—' : (Math.abs(n) >= 1e6 ? (Math.round(n / 1e5) / 10).toLocaleString('fr-FR') + ' M€' : Math.abs(n) >= 10000 ? nf(n / 1000) + ' k€' : nf(n) + ' €');
+    const pct = (a, b) => b ? Math.round(a / b * 100) : null;
+    const pctTxt = (a, b) => { const p = pct(a, b); return p == null ? '—' : p + ' %'; };
+    const ymd = d => d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+    const auj = () => new Date();
+    const plus = (d, n) => { const x = new Date(d); x.setDate(x.getDate() + n); return x; };
+    const MOIS = ['janvier', 'février', 'mars', 'avril', 'mai', 'juin', 'juillet', 'août', 'septembre', 'octobre', 'novembre', 'décembre'];
+    const JOURS = ['dimanche', 'lundi', 'mardi', 'mercredi', 'jeudi', 'vendredi', 'samedi'];
+    const prenom = p => (p && (p.prenom || '').split(' ').pop()) || '';
+    const initiales = p => ((p.prenom || '').charAt(0) + (p.nom || '').charAt(0)).toUpperCase();
+    const nomCourt = p => (prenom(p) + ' ' + (p.nom || '').charAt(0) + '.').trim();
+    const plur = (n, s, p) => n + ' ' + (n > 1 ? (p || s + 's') : s);
+    const heure = iso => { const d = new Date(iso); return isNaN(d) ? '' : String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0'); };
 
-// --- Construction de l'arbre marque>affaire>site>type>vendeur ----------------
-function buildTree(rows) {
-  const byReseau = {};
-  for (const r of rows) {
-    if (!byReseau[r.reseau]) byReseau[r.reseau] = { label:r.reseau, key:r.reseau, kpi:emptyKpi(), affaires:{} };
-    const R = byReseau[r.reseau];
-    addKpi(R.kpi, r);
-    const aKey = r.id_affaire;
-    if (!R.affaires[aKey]) R.affaires[aKey] = { label:r.affaire, key:aKey, kpi:emptyKpi(), sites:{} };
-    const A = R.affaires[aKey];
-    addKpi(A.kpi, r);
-    if (!A.sites[r.id_site]) A.sites[r.id_site] = { label:r.nom_site, key:r.id_site, kpi:emptyKpi(), types:{} };
-    const S = A.sites[r.id_site];
-    addKpi(S.kpi, r);
-    // Niveau TYPE (catégorie du vendeur)
-    const tk = r.vn_vo || '—';
-    if (!S.types[tk]) S.types[tk] = { key:tk, label:tk, kpi:emptyKpi(), vendeurs:{} };
-    const T = S.types[tk];
-    addKpi(T.kpi, r);
-    if (!T.vendeurs[r.id_user]) T.vendeurs[r.id_user] = { label:r.nom_complet, key:r.id_user, id_site:r.id_site, kpi:emptyKpi() };
-    addKpi(T.vendeurs[r.id_user].kpi, r);
-  }
-  // Tri : réseaux/affaires/sites alpha ; types VN/VO/VNVO ; vendeurs contacts desc.
-  const reseaux = Object.values(byReseau).sort((a,b)=> (a.label||'').localeCompare(b.label||''));
-  for (const R of reseaux) {
-    R.affaires = Object.values(R.affaires).sort((a,b)=> (a.label||'').localeCompare(b.label||''));
-    for (const A of R.affaires) {
-      A.sites = Object.values(A.sites).sort((a,b)=> (a.label||'').localeCompare(b.label||''));
-      for (const S of A.sites) {
-        S.types = Object.values(S.types).sort((a,b)=> (TYPE_ORDER[a.key] ?? 9) - (TYPE_ORDER[b.key] ?? 9));
-        for (const T of S.types) {
-          T.vendeurs = Object.values(T.vendeurs).sort((a,b)=> (b.kpi.nb_contacts||0) - (a.kpi.nb_contacts||0));
+    function bornes(code) {
+      const d = auj(), y = d.getFullYear(), m = d.getMonth();
+      switch (code) {
+        case 'jour': return { deb: ymd(d), fin: ymd(d), lib: "aujourd'hui" };
+        case 'hier': { const h = plus(d, -1); return { deb: ymd(h), fin: ymd(h), lib: 'hier' }; }
+        case '7j': return { deb: ymd(plus(d, -6)), fin: ymd(d), lib: '7 derniers jours' };
+        case 'mois_prec': return { deb: ymd(new Date(y, m - 1, 1)), fin: ymd(new Date(y, m, 0)), lib: MOIS[(m + 11) % 12] };
+        case '3mois': return { deb: ymd(new Date(y, m - 2, 1)), fin: ymd(d), lib: '3 derniers mois' };
+        case 'annee': return { deb: ymd(new Date(y, 0, 1)), fin: ymd(d), lib: String(y) };
+        case 'libre': return S.plage ? { deb: S.plage.deb, fin: S.plage.fin, lib: 'du ' + S.plage.deb.split('-').reverse().join('/') + ' au ' + S.plage.fin.split('-').reverse().join('/') } : bornes('mois');
+        default: return { deb: ymd(new Date(y, m, 1)), fin: ymd(d), lib: MOIS[m] };
+      }
+    }
+
+    // ------------------------------------------------------------------ bus de site
+    function bus() { try { return FW().oropraSite || window.oropraSite || null; } catch (e) { return null; } }
+    function siteBus() { const b = bus(); try { return b && b.getSiteId ? b.getSiteId() : null; } catch (e) { return null; } }
+    function siteUnique() {
+      const c = S.ctx; if (!c) return null;
+      const ids = (c.sites || []).map(s => Number(s.id));
+      const b = siteBus();
+      if (b != null && ids.indexOf(Number(b)) >= 0) return Number(b);
+      if (c.site != null && ids.indexOf(Number(c.site)) >= 0) return Number(c.site);
+      return ids[0] != null ? ids[0] : null;
+    }
+    function nomSite(id) { const s = ((S.ctx && S.ctx.sites) || []).find(x => Number(x.id) === Number(id)); return s ? s.nom : 'Site ' + id; }
+
+    // ------------------------------------------------------------------ données
+    async function rpc(nom, args) {
+      const r = await sb().rpc(nom, args || {});
+      if (r.error) throw new Error(r.error.message || nom);
+      return r.data;
+    }
+    async function charger(cle, fn) {
+      if (S.data[cle] !== undefined || S.charge[cle]) return;
+      S.charge[cle] = true;
+      try { S.data[cle] = await fn(); } catch (e) { console.error('[activite]', cle, e); S.data[cle] = { __err: e.message || String(e) }; }
+      S.charge[cle] = false;
+      rendre();
+    }
+
+    // ------------------------------------------------------------------ fiche client et note
+    const SELECTED_CLIENT_VAR = '55490583-c88b-4748-916e-4d203db07742';
+    const FICHE_WORKFLOW_ID = 'ec8bcc55-a733-4982-a946-13e10ba3b09b';
+    const FICHE_PAGE_ID = '259f1951-a2d4-4b90-ac83-0b3febe1d4ec';
+    async function ouvrirFiche(idvu) {
+      if (idvu == null) return;
+      const id = Number(idvu);
+      let client = null;
+      try { const r = await sb().from('CLIENT').select('*').eq('IDVu', id).limit(1); client = (r.data && r.data[0]) || null; } catch (e) { }
+      const obj = client ? Object.assign({}, client) : { IDVu: id };
+      try { wwLib.wwVariable.updateValue(SELECTED_CLIENT_VAR, obj); } catch (e) { }
+      try {
+        const w = FW(); w.__odSelectedClient = obj;
+        try { sessionStorage.setItem('od_selected_client', JSON.stringify(obj)); } catch (e2) { }
+        try { w.dispatchEvent(new CustomEvent('oropra-client-selected', { detail: obj })); } catch (e2) { }
+      } catch (e) { }
+      try { wwLib.wwWorkflow.executeGlobal(FICHE_WORKFLOW_ID, { IDVu: id }); } catch (e) { }
+      let editeur = false; try { editeur = window.self !== window.top; } catch (e) { editeur = true; }
+      if (editeur) { try { wwLib.wwApp.goTo(FICHE_PAGE_ID); return; } catch (e) { } return; }
+      try { wwLib.goTo('/fr/fiche-client'); return; } catch (e) { }
+      try { FW().location.href = '/fr/fiche-client'; } catch (e) { }
+    }
+    async function envoyerNote(idUser, idClient, message) {
+      const r = await sb().rpc('notif_alerter', { p_id_user_cible: Number(idUser), p_id_client: idClient != null ? Number(idClient) : null, p_message: message });
+      if (r.error) throw new Error(r.error.message);
+      if (r.data && r.data.ok === false) throw new Error(r.data.erreur || 'refus');
+    }
+
+    // ------------------------------------------------------------------ styles (charte One Data)
+    const CSS = `
+#act-root{--bleu:#2a5ea9;--bleu-fonce:#1F4A85;--bleu-clair:#acc5e4;--vert:#53bda7;--orange:#fac055;--rouge:#d97070;
+  --m-vert:#00997f;--m-orange:#d2941f;--m-bleu:#3f7cba;--m-rouge:#c0524f;
+  --ground:#f4f7fb;--card:#fff;--line:#e3e9f3;--line-2:#cfd9e9;--ink:#1c2b45;--ink-2:#5a6b86;--ink-3:#8b99b0;
+  --ok-bg:#e4f4f0;--alerte-bg:#fdf3de;--chaud-bg:#fbeceb;--calme-bg:#eef2f8;
+  --ombre:0 1px 2px rgba(28,43,69,.05),0 8px 24px rgba(28,43,69,.06);
+  --ui:"Nunito Sans",system-ui,-apple-system,"Segoe UI",Arial,sans-serif;
+  display:block;width:100%;box-sizing:border-box;padding:18px 16px 48px;background:var(--ground);color:var(--ink);
+  font-family:var(--ui);font-size:14px;line-height:1.5;font-variant-numeric:tabular-nums}
+#act-root *{box-sizing:border-box}
+#act-root [hidden]{display:none !important}
+#act-root button,#act-root input,#act-root textarea{font-family:inherit}
+#act-root .aw{max-width:1180px;margin:0 auto;display:flex;flex-direction:column;gap:16px}
+#act-root .rail{display:flex;flex-wrap:wrap;align-items:center;gap:10px 14px}
+#act-root .rail h1{margin:0;font-size:19px;font-weight:800;letter-spacing:-.015em}
+#act-root .badge{font-size:11px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--ink-3);background:var(--calme-bg);border-radius:20px;padding:5px 11px}
+#act-root .droite{margin-left:auto;display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+#act-root .seg{display:inline-flex;gap:2px;background:var(--calme-bg);border-radius:9px;padding:2px;flex-wrap:wrap}
+#act-root .seg button{background:none;border:0;font-size:12px;font-weight:700;color:var(--ink-3);padding:5px 11px;border-radius:7px;cursor:pointer}
+#act-root .seg button:hover{color:var(--ink)}
+#act-root .seg button[aria-pressed="true"]{background:var(--card);color:var(--ink);box-shadow:0 1px 2px rgba(28,43,69,.08)}
+#act-root .ecrans button{font-size:12.5px;padding:6px 13px}
+#act-root .plage{display:inline-flex;align-items:center;gap:6px;background:var(--calme-bg);border-radius:9px;padding:3px 10px;font-size:12px;font-weight:700;color:var(--ink-3)}
+#act-root .plage input{border:0;background:transparent;font-size:12px;font-weight:700;color:var(--ink);width:122px}
+#act-root .band{background:var(--card);border:1px solid var(--line);border-radius:14px;box-shadow:var(--ombre);padding:20px 22px;display:grid;grid-template-columns:minmax(0,1fr) auto;gap:18px 30px;align-items:center}
+@media(max-width:760px){#act-root .band{grid-template-columns:minmax(0,1fr)}}
+#act-root .q{font-size:10.5px;font-weight:700;letter-spacing:.09em;text-transform:uppercase;color:var(--ink-3)}
+#act-root .band h2{margin:6px 0 0;font-size:20px;line-height:1.38;font-weight:600;max-width:56ch}
+#act-root .band h2 b{font-weight:800}
+#act-root .pouls{display:flex;gap:26px;flex-wrap:wrap;margin-top:16px}
+#act-root .pouls .n{font-size:22px;font-weight:600;line-height:1}
+#act-root .pouls .l{font-size:11px;color:var(--ink-3);margin-top:5px;line-height:1.25}
+#act-root .baisse{color:var(--m-rouge)}#act-root .hausse{color:var(--m-vert)}
+#act-root .chart.anneau{width:168px}
+#act-root .cols{display:grid;grid-template-columns:minmax(0,1.5fr) minmax(0,1fr);gap:16px;align-items:start}
+#act-root .cols.eq{grid-template-columns:minmax(0,1fr) minmax(0,1fr)}
+@media(max-width:920px){#act-root .cols,#act-root .cols.eq{grid-template-columns:minmax(0,1fr)}}
+#act-root .pile{display:flex;flex-direction:column;gap:16px;min-width:0}
+#act-root .card{background:var(--card);border:1px solid var(--line);border-radius:14px;box-shadow:var(--ombre);padding:16px 18px 14px;min-width:0}
+#act-root .ch{display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:12px}
+#act-root .ch h3{margin:0;font-size:11px;font-weight:800;letter-spacing:.07em;text-transform:uppercase;color:var(--ink-2)}
+#act-root .ch span{font-size:11.5px;color:var(--ink-3);font-weight:600}
+#act-root .lecture{margin-top:12px;background:var(--alerte-bg);border-radius:11px;padding:11px 14px;font-size:13px;line-height:1.5}
+#act-root .lecture .t{font-size:10px;font-weight:700;letter-spacing:.09em;text-transform:uppercase;color:var(--ink-3);margin-bottom:3px}
+#act-root .lecture b{font-weight:800}
+#act-root .note{font-size:11.5px;color:var(--ink-3);margin-top:10px;line-height:1.5}
+#act-root .vide{color:var(--ink-3);font-size:13px;padding:12px 0}
+#act-root .pill{display:inline-flex;align-items:center;font-size:11px;font-weight:700;padding:3px 9px;border-radius:20px;white-space:nowrap}
+#act-root .pill.rouge{background:var(--chaud-bg);color:var(--m-rouge)}
+#act-root .pill.orange{background:var(--alerte-bg);color:var(--m-orange)}
+#act-root .pill.vert{background:var(--ok-bg);color:var(--m-vert)}
+#act-root .pill.bleu{background:var(--calme-bg);color:var(--m-bleu)}
+#act-root .pill.attente{border:1px dashed var(--line-2);color:var(--ink-3);background:transparent}
+#act-root .chart{width:100%;min-height:24px}
+#act-root svg{display:block;overflow:visible}
+#act-root svg text{font-family:var(--ui)}
+#act-root .tl{display:grid;grid-template-columns:48px 14px minmax(0,1fr) auto;gap:10px;align-items:start;padding:8px 0}
+#act-root .tl time{font-size:12.5px;font-weight:700;color:var(--ink-2);text-align:right;padding-top:1px}
+#act-root .tl .pin{position:relative;align-self:stretch}
+#act-root .tl .pin::before{content:"";position:absolute;left:6px;top:0;bottom:-16px;width:2px;background:var(--line)}
+#act-root .tl:last-child .pin::before{bottom:auto;height:10px}
+#act-root .tl .pin i{position:absolute;left:1px;top:4px;width:12px;height:12px;border-radius:50%;background:var(--card);border:2.5px solid var(--bleu)}
+#act-root .tl.retard .pin i{border-color:var(--m-rouge);background:var(--rouge)}
+#act-root .tl.retard time{color:var(--m-rouge)}
+#act-root .tl .tx{min-width:0}
+#act-root .tl .tx b{font-weight:800;display:block;font-size:13.5px}
+#act-root .tl .tx small{display:block;color:var(--ink-2);font-size:12.5px;margin-top:1px}
+#act-root .tl .tx .lien{display:block}
+#act-root .lien{background:none;border:0;padding:0;color:inherit;font:inherit;cursor:pointer;text-align:left}
+#act-root .lien:hover b,#act-root .lien:hover{color:var(--bleu)}
+#act-root .team{display:flex;gap:8px;flex-wrap:wrap}
+#act-root .who{display:flex;align-items:center;gap:9px;border:1px solid var(--line);background:var(--card);border-radius:12px;padding:6px 12px 6px 6px;cursor:pointer;color:var(--ink);box-shadow:var(--ombre);text-align:left}
+#act-root .who .av{width:30px;height:30px;border-radius:50%;display:grid;place-items:center;font-size:11px;font-weight:800;color:var(--bleu-fonce);background:var(--calme-bg);flex:0 0 auto}
+#act-root .who b{font-weight:800;font-size:13px;display:block;line-height:1.2}
+#act-root .who small{font-size:11px;color:var(--ink-3);font-weight:600}
+#act-root .who small.r{color:var(--m-rouge)}
+#act-root .who[aria-selected="true"]{border-color:var(--bleu);box-shadow:0 0 0 2px rgba(42,94,169,.22),var(--ombre)}
+#act-root .who[aria-selected="true"] .av{background:var(--bleu);color:#fff}
+#act-root .deal{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:2px 14px;padding:14px 0;border-top:1px solid var(--line)}
+#act-root .deal:first-child{border-top:0;padding-top:2px}
+#act-root .deal h4{margin:0;font-size:14.5px;font-weight:800}
+#act-root .deal .car{color:var(--ink-2);font-size:12.5px}
+#act-root .deal .val{grid-row:1/3;grid-column:2;text-align:right;display:flex;flex-direction:column;align-items:flex-end;gap:4px}
+#act-root .deal .val b{font-size:17px;font-weight:600}
+#act-root .deal .jours{grid-column:1/-1;margin-top:8px}
+#act-root .cases{display:flex;flex-wrap:wrap;gap:2px;max-width:100%}
+#act-root .cases i{width:9px;height:9px;border-radius:2px}
+#act-root .cases i.ok{background:var(--bleu-clair)}
+#act-root .cases i.ko{background:var(--rouge)}
+#act-root .jrow{display:flex;flex-wrap:wrap;align-items:center;gap:6px 12px}
+#act-root .jl{font-size:12px;color:var(--ink-2)}
+#act-root .jl b{font-weight:800;color:var(--ink)}
+#act-root .jl b.r{color:var(--m-rouge)}
+#act-root .levier{grid-column:1/-1;display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin-top:10px;background:var(--calme-bg);border-radius:11px;padding:9px 12px}
+#act-root .levier p{margin:0;flex:1 1 220px;font-size:12.5px;color:var(--ink-2)}
+#act-root .levier p b{color:var(--ink)}
+#act-root .btn{border:0;border-radius:9px;padding:7px 12px;font-weight:800;font-size:12.5px;cursor:pointer;background:var(--bleu);color:#fff}
+#act-root .btn:hover{background:var(--bleu-fonce)}
+#act-root .btn.sec{background:var(--card);color:var(--bleu);box-shadow:inset 0 0 0 1px var(--line-2)}
+#act-root .btn:disabled{opacity:.55;cursor:default}
+#act-root .notebox{grid-column:1/-1;display:flex;flex-direction:column;gap:8px;margin-top:8px}
+#act-root .notebox textarea{width:100%;min-height:62px;border:1px solid var(--line-2);border-radius:10px;padding:9px 11px;font-size:13px;color:var(--ink);resize:vertical;outline:none}
+#act-root .notebox textarea:focus{border-color:var(--bleu)}
+#act-root .notebox .act{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+#act-root .ok-msg{font-size:12.5px;font-weight:700;color:var(--m-vert)}
+#act-root .ko-msg{font-size:12.5px;font-weight:700;color:var(--m-rouge)}
+#act-root .plus{margin-top:10px;font-size:12.5px;color:var(--ink-2)}
+#act-root .scroll{overflow-x:auto}
+#act-root table{width:100%;border-collapse:collapse;font-size:12.5px}
+#act-root th{font-size:9.5px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--ink-3);text-align:right;padding:0 8px 6px;white-space:nowrap}
+#act-root th:first-child{text-align:left;padding-left:0}
+#act-root td{padding:7px 8px;border-top:1px solid var(--line);text-align:right;white-space:nowrap}
+#act-root td:first-child{text-align:left;padding-left:0}
+#act-root td:last-child,#act-root th:last-child{padding-right:0}
+#act-root td b{font-weight:800}
+#act-root .mini{display:inline-block;vertical-align:middle;width:64px;height:6px;border-radius:9px;background:var(--calme-bg);overflow:hidden;margin-left:8px}
+#act-root .mini i{display:block;height:100%;background:var(--bleu);border-radius:9px}
+#act-root .mosaic{display:flex;height:112px;gap:6px}
+#act-root .mosaic div{min-width:84px;display:flex;flex-direction:column;justify-content:space-between;padding:9px 11px;min-width:0;border-radius:11px}
+#act-root .mosaic b{font-size:22px;font-weight:600;line-height:1}
+#act-root .mosaic span{font-size:11.5px;font-weight:700;line-height:1.25}
+#act-root .dots{display:flex;flex-direction:column;gap:13px}
+#act-root .dotrow{display:grid;grid-template-columns:150px minmax(0,1fr) 44px;gap:12px;align-items:center;font-size:12.5px;font-weight:600}
+#act-root .dotrow .g{display:grid;grid-template-columns:repeat(25,minmax(0,1fr));gap:3px;max-width:300px}
+#act-root .dotrow .g i{aspect-ratio:1;border-radius:50%;background:var(--calme-bg)}
+#act-root .dotrow .g i.f{background:var(--bleu)}
+#act-root .dotrow b{text-align:right;font-weight:800}
+#act-root .dotrow small{display:block;color:var(--ink-3);font-weight:600;font-size:11px}
+#act-root .kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:12px}
+#act-root .kpis .n{font-size:20px;font-weight:600;line-height:1.1}
+#act-root .kpis .l{font-size:11px;color:var(--ink-3);margin-top:3px}
+#act-root .sites{display:grid;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:16px}
+#act-root .site{display:flex;flex-direction:column;gap:10px;cursor:pointer}
+#act-root .site:hover{border-color:var(--line-2)}
+#act-root .site .top{display:flex;justify-content:space-between;align-items:center;gap:8px}
+#act-root .site h4{margin:0;font-size:14px;font-weight:800}
+#act-root .site dl{display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin:0}
+#act-root .site dt{font-size:9.5px;color:var(--ink-3);font-weight:700;text-transform:uppercase;letter-spacing:.06em}
+#act-root .site dd{margin:0;font-size:16px;font-weight:600}
+#act-root .signal{display:grid;grid-template-columns:30px minmax(0,1fr);gap:12px;padding:11px 0;border-top:1px solid var(--line)}
+#act-root .signal:first-child{border-top:0;padding-top:0}
+#act-root .signal .lv{width:30px;height:30px;border-radius:9px;display:grid;place-items:center;font-weight:800;font-size:13px}
+#act-root .signal p{margin:0;font-weight:800;font-size:13.5px}
+#act-root .signal small{display:block;color:var(--ink-2);font-weight:600;font-size:12.5px}
+#act-root .charge{display:flex;align-items:center;gap:10px;color:var(--ink-3);font-size:13px;padding:28px 4px}
+#act-root .charge i{width:16px;height:16px;border:2px solid var(--line-2);border-top-color:var(--bleu);border-radius:50%;animation:act-tourne .7s linear infinite}
+@keyframes act-tourne{to{transform:rotate(360deg)}}
+#act-root .erreur{background:var(--chaud-bg);color:var(--m-rouge);border-radius:11px;padding:12px 14px;font-weight:700}
+#act-root :focus-visible{outline:2px solid var(--bleu);outline-offset:2px}
+@media(max-width:560px){
+  #act-root .tl{grid-template-columns:42px 14px minmax(0,1fr)}
+  #act-root .tl .pill{grid-column:3;justify-self:start}
+  #act-root .dotrow{grid-template-columns:100px minmax(0,1fr) 38px}
+  #act-root .mosaic{height:auto;flex-wrap:wrap}#act-root .mosaic div{flex:1 1 40% !important;min-height:76px}
+  #act-root .chart.anneau{width:140px;justify-self:center}
+  #act-root .band h2{font-size:18px}
+}`;
+    function poserStyle() {
+      let st = doc.getElementById('act4-style');
+      if (!st) { st = doc.createElement('style'); st.id = 'act4-style'; (doc.head || doc.body).appendChild(st); }
+      if (st.textContent !== CSS) st.textContent = CSS;
+    }
+
+    // ------------------------------------------------------------------ graphiques
+    const C = { bleu: '#2a5ea9', fonce: '#1F4A85', clair: '#acc5e4', vert: '#53bda7', orange: '#fac055', rouge: '#d97070',
+      mvert: '#00997f', morange: '#d2941f', mbleu: '#3f7cba', mrouge: '#c0524f', line: '#e3e9f3', line2: '#cfd9e9',
+      ink: '#1c2b45', ink2: '#5a6b86', ink3: '#8b99b0', okbg: '#e4f4f0', alerte: '#fdf3de', chaud: '#fbeceb', calme: '#eef2f8', card: '#ffffff' };
+    const NS = 'http://www.w3.org/2000/svg';
+    function el(n, a, p) { const e = doc.createElementNS(NS, n); for (const k in a) e.setAttribute(k, a[k]); if (p) p.appendChild(e); return e; }
+    function tx(p, x, y, s, o) { o = o || {}; const t = el('text', { x: x, y: y, fill: o.c || C.ink, 'text-anchor': o.a || 'start', 'font-size': o.s || 11.5, 'font-weight': o.w || 700 }, p); t.textContent = s; return t; }
+    function svgIn(box, W, H, label) { box.innerHTML = ''; const s = el('svg', { width: W, height: H, viewBox: '0 0 ' + W + ' ' + H, role: 'img' }, box); if (label) s.setAttribute('aria-label', label); return s; }
+    const G = {};   // dessinateurs ; la donnée est posée sur box.__d
+
+    G.anneau = function (box) {
+      const d = box.__d, S2 = box.clientWidth, s = svgIn(box, S2, S2, d.label), cx = S2 / 2, cy = S2 / 2, r = S2 / 2 - 11, Cf = 2 * Math.PI * r;
+      const arc = (f, col) => el('circle', { cx, cy, r, fill: 'none', stroke: col, 'stroke-width': 13, 'stroke-linecap': 'round', transform: 'rotate(-90 ' + cx + ' ' + cy + ')', 'stroke-dasharray': (Cf * Math.max(0, Math.min(f, 1))) + ' ' + Cf }, s);
+      el('circle', { cx, cy, r, fill: 'none', stroke: C.calme, 'stroke-width': 13 }, s);
+      if (d.cible > 0) {
+        if (d.proj > d.fait) arc(d.proj / d.cible, C.clair);
+        if (d.fait > 0) arc(d.fait / d.cible, C.bleu);
+        if (d.proj != null) {
+          const a = -Math.PI / 2 + 2 * Math.PI * Math.min(d.proj / d.cible, 1);
+          el('circle', { cx: cx + r * Math.cos(a), cy: cy + r * Math.sin(a), r: 5, fill: C.card, stroke: C.morange, 'stroke-width': 3 }, s);
         }
-      }
-    }
-  }
-  return reseaux;
-}
-
-// --- EXPORT EXCEL (edge function export-xslx) ---------------------------------
-// Une ligne par vendeur × site (× type) du périmètre courant, filtres appliqués.
-function exportRows() {
-  const rows = rowsForSelection();
-  const m = {};
-  for (const r of rows) {
-    const k = String(r.id_user) + '|' + String(r.id_site);
-    if (!m[k]) m[k] = {
-      reseau: r.reseau, affaire: r.affaire, site: r.nom_site,
-      type: r.vn_vo || '—', vendeur: r.nom_complet, kpi: emptyKpi()
-    };
-    addKpi(m[k].kpi, r);
-  }
-  const withTypes = hasTypes();
-  return Object.values(m)
-    .sort((a, b) => {
-      const s = a.site.localeCompare(b.site, 'fr'); if (s !== 0) return s;
-      const t = (TYPE_ORDER[a.type] ?? 9) - (TYPE_ORDER[b.type] ?? 9); if (t !== 0) return t;
-      return (b.kpi.nb_contacts||0) - (a.kpi.nb_contacts||0);
-    })
-    .map(x => {
-      const o = { 'Réseau': x.reseau, 'Affaire': x.affaire, 'Site': x.site };
-      if (withTypes) o['Type'] = x.type;
-      o['Vendeur'] = x.vendeur;
-      o['Contacts'] = x.kpi.nb_contacts; o['Entrants'] = x.kpi.nb_entrants; o['Sortants'] = x.kpi.nb_sortants;
-      o['WhatsApp'] = x.kpi.nb_whatsapp; o['VOIP'] = x.kpi.nb_voip; o['SMS'] = x.kpi.nb_sms; o['RPV'] = x.kpi.nb_rpv;
-      o['Chocs'] = x.kpi.nb_chocs; o['Relances'] = x.kpi.nb_relances; o['Abandons'] = x.kpi.nb_abandons;
-      o['Propales'] = x.kpi.nb_propales_creees; o['BDC'] = x.kpi.nb_bdc; o['Wins'] = x.kpi.nb_wins;
-      return o;
-    });
-}
-async function exportExcel(btn) {
-  const rows = exportRows();
-  if (!rows.length) return;
-  btn.disabled = true; btn.classList.add('is-busy'); btn.classList.remove('is-err');
-  try {
-    const key = getSupabaseKey();
-    const jwt = await getUserJwt();
-    const scope = (state.selection.level === 'all' ? 'perimetre' : state.selection.label)
-      .normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-zA-Z0-9]+/g, '_').slice(0, 40);
-    // NB : le slug déployé contient une coquille historique ("xslx", pas "xlsx").
-    const res = await fetch(SUPABASE_URL + '/functions/v1/export-xslx', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'apikey': key, 'Authorization': 'Bearer ' + (jwt || key) },
-      body: JSON.stringify({
-        rows,
-        fileName: 'activite_' + scope + '_' + state.period.from + '_' + state.period.to + '.xlsx',
-        sheetName: 'Activité',
-        expiresIn: 300
-      })
-    });
-    const j = await res.json();
-    if (!res.ok || !j.url) throw new Error(j.error || ('HTTP ' + res.status));
-    const a = doc.createElement('a'); a.href = j.url; a.target = '_blank'; a.rel = 'noopener';
-    doc.body.appendChild(a); a.click(); a.remove();
-  } catch (e) {
-    console.error('[activite] export xlsx', e);
-    btn.classList.remove('is-busy'); btn.classList.add('is-err');
-    btn.title = 'Erreur export — voir console';
-    setTimeout(() => { btn.classList.remove('is-err'); btn.title = 'Exporter en Excel'; btn.disabled = false; }, 2500);
-    return;
-  }
-  btn.classList.remove('is-busy'); btn.disabled = false;
-}
-
-// --- COMPARATEUR ---------------------------------------------------------------
-const CMP_METRICS = [
-  { label:'Contacts',  get:(k,t)=>k.nb_contacts },
-  { label:'Entrants',  get:(k,t)=>k.nb_entrants },
-  { label:'Sortants',  get:(k,t)=>k.nb_sortants },
-  { label:'Chocs',     get:(k,t)=>k.nb_chocs },
-  { label:'Propales',  get:(k,t)=>t.totalPropales },
-  { label:'BDC',       get:(k,t)=>t.nbBdc },
-  { label:'Wins',      get:(k,t)=>t.nbWins },
-  { label:'Abandons',  get:(k,t)=>t.nbLose, lowerBetter:true },
-  { label:'Transfo',   get:(k,t)=>t.pct, fmt:(v)=>v+'%' }
-];
-function renderCompare() {
-  const c = state.compare;
-  let h = '<div class="act-card">';
-  h += shead('var(--orange)', 'Comparateur', c.items.length < 2 ? 'sélectionnez 2 lignes dans l\'arbre' : 'même période · mêmes filtres');
-  h += '<div class="act-cmp-chips">';
-  c.items.forEach((it, i) => {
-    h += '<span class="act-cmp-chip">'+esc(it.label)+' <b data-cmp-del="'+i+'">✕</b></span>';
-  });
-  if (!c.items.length) h += '<span style="color:var(--text-mut);font-size:11px;font-style:italic">Cliquez 2 lignes de l\'arbre (réseau, affaire, site, type ou vendeur) pour les mettre côte à côte.</span>';
-  else if (c.items.length === 1) h += '<span style="color:var(--text-mut);font-size:11px;font-style:italic">… et une seconde ligne.</span>';
-  h += '</div>';
-  if (c.items.length === 2) {
-    const data = c.items.map(it => {
-      const rows = entityRowsAct(it.level, it.key);
-      return { kpi: sumKpi(rows), tx: transfoAggFor(rows) };
-    });
-    h += '<div class="act-cmp-grid">';
-    h += '<div></div><div class="act-cmp-head">'+esc(c.items[0].label)+'</div><div class="act-cmp-head">'+esc(c.items[1].label)+'</div>';
-    for (const m of CMP_METRICS) {
-      const v = [m.get(data[0].kpi, data[0].tx), m.get(data[1].kpi, data[1].tx)];
-      let win = -1;
-      if (v[0] !== v[1]) win = m.lowerBetter ? (v[0] < v[1] ? 0 : 1) : (v[0] > v[1] ? 0 : 1);
-      h += '<div class="act-cmp-lbl">'+esc(m.label)+'</div>';
-      for (let i = 0; i < 2; i++) {
-        h += '<div class="act-cmp-cell'+(win === i ? ' is-win' : '')+'">'+(m.fmt ? m.fmt(v[i]) : v[i])+'</div>';
-      }
-    }
-    h += '</div>';
-  }
-  h += '</div>';
-  return h;
-}
-
-// --- HEATMAP CADENCE (jour × vendeur) -------------------------------------------
-// Intensité = contacts du jour. Jours CALENDAIRES de la période (les trous se
-// voient), dimanches signalés. Affichée pour une sélection site/type/vendeur,
-// bornée à 120 jours et 40 vendeurs pour rester lisible.
-function renderHeatmap(rows) {
-  const days = [];
-  const d = new Date(state.period.from + 'T12:00:00');
-  const end = new Date(state.period.to + 'T12:00:00');
-  while (d <= end && days.length < 120) { days.push(ymd(d)); d.setDate(d.getDate() + 1); }
-  if (!days.length) return '';
-  // Agrégat user × jour (contacts) + total par vendeur
-  const cell = {};
-  const vend = {};
-  for (const r of rows) {
-    if (!vend[r.id_user]) vend[r.id_user] = { id: r.id_user, nom: r.nom_complet, tot: 0 };
-    if (!r.jour) continue;
-    cell[r.id_user + '|' + r.jour] = (cell[r.id_user + '|' + r.jour] || 0) + r.nb_contacts;
-    vend[r.id_user].tot += r.nb_contacts;
-  }
-  const vendeurs = Object.values(vend).sort((a, b) => b.tot - a.tot).slice(0, 40);
-  if (!vendeurs.length) return '';
-  let max = 1;
-  for (const k in cell) if (cell[k] > max) max = cell[k];
-
-  const fmtJ = (j) => { const dd = new Date(j + 'T12:00:00'); return dd.getDate() + '/' + (dd.getMonth() + 1); };
-  const isSun = (j) => new Date(j + 'T12:00:00').getDay() === 0;
-
-  let h = '<div class="act-card">';
-  h += shead('var(--green)', 'Cadence — contacts par jour', 'intensité = nb de contacts · dimanches en rouge');
-  h += '<div class="act-hm-wrap"><table class="act-hm"><thead><tr><th class="nm"></th>';
-  for (const j of days) {
-    const dd = new Date(j + 'T12:00:00');
-    h += '<th class="'+(isSun(j) ? 'sun' : '')+'" title="'+fmtJ(j)+'">'+dd.getDate()+'</th>';
-  }
-  h += '<th class="tot">Σ</th></tr></thead><tbody>';
-  for (const v of vendeurs) {
-    h += '<tr><td class="nm" title="'+esc(v.nom)+'">'+esc(v.nom)+'</td>';
-    for (const j of days) {
-      const n = cell[v.id + '|' + j] || 0;
-      const bg = n === 0
-        ? (isSun(j) ? '#faf7f0' : '#f1efe8')
-        : 'rgba(83,189,167,' + (0.18 + 0.82 * n / max).toFixed(2) + ')';
-      h += '<td class="cell" style="background:'+bg+'" title="'+esc(v.nom)+' — '+fmtJ(j)+' : '+n+' contact'+(n>1?'s':'')+'"></td>';
-    }
-    h += '<td class="tot">'+v.tot+'</td></tr>';
-  }
-  h += '</tbody></table></div></div>';
-  return h;
-}
-
-// --- SÉLECTEUR DE PLAGE : un calendrier, deux clics ---------------------------
-// 1er clic = date de début, 2e clic = date de fin (inversées si besoin), puis
-// rechargement AUTOMATIQUE (plus de bouton Appliquer). Survol = aperçu de la
-// plage. Clic en dehors = fermeture sans changement. Le popup vit dans body
-// (au-dessus de tout), son CSS est donc préfixé #act-dp et non #act-root.
-function closeRangePicker() {
-  const e = doc.getElementById('act-dp'); if (e) e.remove();
-  if (window.__actDpOutside) { doc.removeEventListener('mousedown', window.__actDpOutside, true); window.__actDpOutside = null; }
-}
-function applyPeriod(from, to) {
-  closeRangePicker();
-  if (!from || !to) return;
-  if (from === state.period.from && to === state.period.to) return;
-  state.period.from = from; state.period.to = to;
-  state.rawData = null; state.loadKey = null;
-  state.selection = { level:'all', key:null, label:'Tout le périmètre' };
-  state.busSelPending = true;   // re-focalisation sur le site global après refetch
-  loadData();
-}
-function openRangePicker(anchor) {
-  closeRangePicker();
-  const pk = { month: null, start: null, end: null, hover: null };
-  const m0 = new Date(state.period.from + 'T12:00:00');
-  pk.month = new Date(m0.getFullYear(), m0.getMonth(), 1);
-
-  const pop = doc.createElement('div'); pop.id = 'act-dp';
-  const r = anchor.getBoundingClientRect();
-  pop.style.cssText = 'position:fixed;z-index:9999;top:' + (r.bottom + 6) + 'px;left:' + Math.max(8, r.left) + 'px';
-  injectDpStyle();
-  doc.body.appendChild(pop);
-
-  function calHtml() {
-    const y = pk.month.getFullYear(), m = pk.month.getMonth();
-    const first = new Date(y, m, 1);
-    const startIdx = (first.getDay() + 6) % 7;       // semaine qui commence lundi
-    const nbDays = new Date(y, m + 1, 0).getDate();
-    const today = ymd(new Date());
-    // Aperçu de plage : début sélectionné + (fin OU jour survolé)
-    const selA = pk.start, selB = pk.end || pk.hover;
-    const lo = selA && selB ? (selA < selB ? selA : selB) : null;
-    const hi = selA && selB ? (selA < selB ? selB : selA) : null;
-    let h = '<div class="act-dp-box">';
-    h += '<div class="act-dp-head"><button type="button" data-nav="-1">‹</button>'+
-         '<span>' + esc(first.toLocaleDateString('fr-FR', { month:'long', year:'numeric' })) + '</span>'+
-         '<button type="button" data-nav="1">›</button></div>';
-    h += '<div class="act-dp-grid">';
-    for (const d of ['L','M','M','J','V','S','D']) h += '<span class="act-dp-dow">' + d + '</span>';
-    for (let i = 0; i < startIdx; i++) h += '<span></span>';
-    for (let d = 1; d <= nbDays; d++) {
-      const ds = y + '-' + String(m + 1).padStart(2, '0') + '-' + String(d).padStart(2, '0');
-      let cls = 'act-dp-day';
-      if (ds === today) cls += ' today';
-      if (pk.start === ds || pk.end === ds) cls += ' sel';
-      else if (lo && hi && ds > lo && ds < hi) cls += ' inr';
-      h += '<span class="' + cls + '" data-d="' + ds + '">' + d + '</span>';
-    }
-    h += '</div>';
-    h += '<div class="act-dp-foot">' + (pk.start ? 'Cliquez la date de fin' : 'Cliquez la date de début') + '</div>';
-    h += '</div>';
-    return h;
-  }
-  function wire() {
-    pop.querySelectorAll('[data-nav]').forEach(b => b.addEventListener('click', (e) => {
-      e.stopPropagation();
-      pk.month = new Date(pk.month.getFullYear(), pk.month.getMonth() + Number(b.getAttribute('data-nav')), 1);
-      paint();
-    }));
-    pop.querySelectorAll('.act-dp-day').forEach(c => {
-      c.addEventListener('click', () => {
-        const ds = c.getAttribute('data-d');
-        if (!pk.start || pk.end) { pk.start = ds; pk.end = null; pk.hover = null; paint(); return; }
-        pk.end = ds;
-        let a = pk.start, b = pk.end;
-        if (b < a) { const t = a; a = b; b = t; }   // clic à l'envers : on inverse
-        applyPeriod(a, b);
-      });
-      c.addEventListener('mouseenter', () => {
-        if (pk.start && !pk.end && pk.hover !== c.getAttribute('data-d')) { pk.hover = c.getAttribute('data-d'); paint(); }
-      });
-    });
-  }
-  function paint() { pop.innerHTML = calHtml(); wire(); }
-  paint();
-  window.__actDpOutside = (e) => {
-    if (!pop.contains(e.target) && e.target !== anchor && !anchor.contains(e.target)) closeRangePicker();
-  };
-  setTimeout(() => doc.addEventListener('mousedown', window.__actDpOutside, true), 0);
-}
-function injectDpStyle() {
-  if (doc.getElementById('act-dp-style')) return;
-  const st = doc.createElement('style'); st.id = 'act-dp-style';
-  st.textContent = `
-#act-dp .act-dp-box { background:#fff; border:1px solid #eaf0f9; border-radius:10px; box-shadow:0 8px 30px rgba(42,94,169,.18); padding:12px; width:262px; font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; }
-#act-dp .act-dp-head { display:flex; align-items:center; justify-content:space-between; margin-bottom:8px; }
-#act-dp .act-dp-head span { font-size:12px; font-weight:600; color:#2a5ea9; text-transform:capitalize; }
-#act-dp .act-dp-head button { width:24px; height:24px; border:1px solid #eaf0f9; background:#fff; border-radius:6px; cursor:pointer; color:#2a5ea9; font-size:13px; line-height:1; padding:0; }
-#act-dp .act-dp-head button:hover { background:#f5f8fc; }
-#act-dp .act-dp-grid { display:grid; grid-template-columns:repeat(7,33px); gap:2px; }
-#act-dp .act-dp-dow { font-size:9px; color:#acc5e4; text-align:center; font-weight:700; padding-bottom:3px; }
-#act-dp .act-dp-day { height:29px; line-height:29px; text-align:center; font-size:11px; color:#2c2c2a; border-radius:6px; cursor:pointer; }
-#act-dp .act-dp-day:hover { background:#eaf0f9; }
-#act-dp .act-dp-day.today { box-shadow:inset 0 0 0 1px #acc5e4; }
-#act-dp .act-dp-day.sel { background:#2a5ea9; color:#fff; font-weight:700; }
-#act-dp .act-dp-day.inr { background:#e6f1fb; }
-#act-dp .act-dp-foot { margin-top:8px; text-align:center; font-size:10px; color:#7a9cc4; font-style:italic; }
-`;
-  doc.head.appendChild(st);
-}
-
-// --- STYLE ------------------------------------------------------------------
-function injectStyle() {
-  const ID = 'act-style';
-  const ex = doc.getElementById(ID);
-  if (ex) ex.remove();
-  const st = doc.createElement('style');
-  st.id = ID;
-  st.textContent = `
-#act-root { --green:#53bda7; --blue-lt:#acc5e4; --orange:#fac055; --blue-dk:#2a5ea9;
-  --bg:#fafbfd; --card:#fff; --border:#eaf0f9; --text:#2a5ea9; --text-mut:#7a9cc4; --text-soft:#4a6a8a; --red:#c4554a;
-  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; font-size:13px; color:var(--text); }
-#act-root *, #act-root *::before, #act-root *::after { box-sizing:border-box; }
-#act-root .act-bar { background:var(--card); border:1px solid var(--border); border-radius:10px; padding:12px 15px; margin-bottom:16px; display:flex; align-items:center; gap:14px; flex-wrap:wrap; }
-#act-root .act-bar-label { font-size:11px; color:var(--text-mut); font-weight:500; text-transform:uppercase; letter-spacing:.5px; }
-#act-root .act-range { border:1px solid var(--blue-lt); border-radius:6px; padding:6px 12px; font-size:11px; color:var(--blue-dk); background:#fff; cursor:pointer; font-family:inherit; font-weight:600; display:inline-flex; align-items:center; gap:6px; }
-#act-root .act-range:hover { background:#f5f8fc; border-color:var(--blue-dk); }
-#act-root .act-range-car { font-size:9px; color:var(--text-mut); }
-#act-root .act-date { border:1px solid var(--blue-lt); border-radius:6px; padding:5px 10px; font-size:11px; color:var(--blue-dk); outline:none; font-family:inherit; }
-#act-root .act-date:focus { border-color:var(--blue-dk); }
-#act-root .act-btn { padding:6px 14px; border-radius:6px; font-size:11px; border:1px solid var(--blue-dk); background:var(--blue-dk); color:#fff; cursor:pointer; font-family:inherit; font-weight:600; }
-#act-root .act-btn:hover { background:#1f4a87; }
-#act-root .act-sep { width:1px; height:20px; background:var(--border); }
-#act-root .act-toggle { display:flex; border:1px solid var(--blue-lt); border-radius:6px; overflow:hidden; }
-#act-root .act-toggle button { padding:5px 12px; font-size:11px; border:none; cursor:pointer; background:#fff; color:var(--blue-dk); font-family:inherit; }
-#act-root .act-toggle button.active { background:var(--blue-dk); color:#fff; }
-#act-root .act-toggle button:not(:last-child) { border-right:1px solid var(--blue-lt); }
-#act-root .act-ico-btn { border:1px solid var(--border); background:#fff; border-radius:6px; padding:4px 7px; cursor:pointer; display:inline-flex; align-items:center; line-height:0; }
-#act-root .act-ico-btn:hover { background:#f0f7f3; border-color:#9ad9c5; }
-#act-root .act-ico-btn.is-busy { opacity:.45; cursor:wait; pointer-events:none; }
-#act-root .act-ico-btn.is-err { outline:2px solid #e24b4a; }
-#act-root .act-period-resume { font-size:11px; color:var(--text-mut); font-style:italic; margin-left:auto; }
-#act-root .act-sel-banner { display:inline-flex; align-items:center; gap:8px; background:var(--blue-dk); color:#fff; padding:6px 12px; border-radius:6px; font-size:12px; }
-#act-root .act-sel-banner button { background:rgba(255,255,255,.18); color:#fff; border:none; padding:3px 9px; border-radius:4px; cursor:pointer; font-size:11px; font-weight:600; }
-#act-root .act-sel-banner button:hover { background:rgba(255,255,255,.3); }
-#act-root .act-bus-chip { font-size:10px; color:#085041; background:#e1f5ee; border:1px solid #9ad9c5; border-radius:999px; padding:1px 8px; font-weight:600; }
-
-#act-root .act-card { background:var(--card); border:1px solid var(--border); border-radius:10px; padding:15px; margin-bottom:16px; }
-#act-root .act-shead { display:flex; align-items:center; gap:8px; margin-bottom:14px; }
-#act-root .act-shead .bar { width:3px; height:17px; flex-shrink:0; }
-#act-root .act-shead .title { font-size:13px; font-weight:500; }
-#act-root .act-shead .sub { margin-left:auto; font-size:10px; color:var(--blue-lt); }
-
-#act-root .act-kpi-grid { display:grid; grid-template-columns:repeat(6,1fr); gap:10px; }
-#act-root .act-kpi { background:#f5f8fc; border-radius:8px; padding:10px 12px; }
-#act-root .act-kpi-label { font-size:10px; color:var(--text-mut); margin-bottom:4px; }
-#act-root .act-kpi-value { font-size:20px; font-weight:500; line-height:1.1; font-variant-numeric:tabular-nums; }
-#act-root .act-kpi-sub { font-size:10px; color:var(--blue-lt); margin-top:2px; }
-@media (max-width:1100px){ #act-root .act-kpi-grid{ grid-template-columns:repeat(3,1fr);} }
-@media (max-width:900px){ #act-root .act-kpi-grid{ grid-template-columns:repeat(2,1fr);} }
-
-#act-root .act-charts { display:grid; grid-template-columns:1fr 1fr; gap:16px; margin-bottom:16px; }
-#act-root .act-chart-wrap { position:relative; height:240px; }
-#act-root .act-chart-head { display:flex; align-items:center; justify-content:space-between; gap:8px; margin-bottom:8px; }
-#act-root .act-chart-head .act-sh { margin-bottom:0; }
-#act-root .act-mini-toggle { display:flex; border:1px solid #eaf0f9; border-radius:6px; overflow:hidden; flex-shrink:0; }
-#act-root .act-mini-btn { padding:3px 9px; font-size:10px; border:none; cursor:pointer; background:#fff; color:#7a9cc4; font-family:inherit; }
-#act-root .act-mini-btn.active { background:#2a5ea9; color:#fff; }
-#act-root .act-mini-btn:not(:last-child) { border-right:1px solid #eaf0f9; }
-@media (max-width:900px){ #act-root .act-charts{ grid-template-columns:1fr;} }
-
-#act-root .act-tree { width:100%; border-collapse:collapse; }
-#act-root .act-tree th { font-size:10px; font-weight:600; color:var(--text-mut); text-transform:uppercase; letter-spacing:.4px; padding:8px 10px; background:#f9fbfd; border-bottom:1px solid var(--border); text-align:center; }
-#act-root .act-tree th:first-child { text-align:left; }
-#act-root .act-tree td { padding:7px 10px; font-size:12px; text-align:center; font-variant-numeric:tabular-nums; border-bottom:.5px solid var(--border); }
-#act-root .act-tree td:first-child { text-align:left; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:340px; }
-#act-root .act-tree tr { cursor:pointer; }
-#act-root .act-tree tr.lv-reseau  { background:#f5f8fc; }
-#act-root .act-tree tr.lv-affaire { background:#fafbfd; }
-#act-root .act-tree tr.lv-site    { background:#fff; }
-#act-root .act-tree tr.lv-type    { background:#fff; }
-#act-root .act-tree tr.lv-vendeur { background:#fff; }
-#act-root .act-tree tr:hover { filter:brightness(.97); }
-#act-root .act-tree tr.is-selected { background:var(--blue-lt) !important; }
-#act-root .act-tree tr.is-selected td:first-child { font-weight:700; color:var(--blue-dk); }
-#act-root .act-tree .lv-reseau  td:first-child { color:var(--blue-dk); font-weight:600; }
-#act-root .act-tree .lv-affaire td:first-child { color:var(--blue-dk); font-weight:500; padding-left:24px; }
-#act-root .act-tree .lv-site    td:first-child { color:var(--text-soft); font-weight:500; padding-left:44px; }
-#act-root .act-tree .lv-type    td:first-child { padding-left:64px; }
-#act-root .act-tree .lv-vendeur td:first-child { color:var(--text-soft); padding-left:64px; }
-#act-root .act-tree .lv-vendeur.deep td:first-child { padding-left:84px; }
-#act-root .act-type-chip { font-size:10px; font-weight:700; border-radius:4px; padding:1px 8px; letter-spacing:.4px; }
-#act-root .act-type-VN   { background:#e6f1fb; color:#0c447c; }
-#act-root .act-type-VO   { background:#faeeda; color:#633806; }
-#act-root .act-type-VNVO { background:#e1f5ee; color:#085041; }
-#act-root .act-exp { display:inline-flex; align-items:center; justify-content:center; width:16px; height:16px; border-radius:3px; background:#eaf0f9; font-size:9px; color:var(--text-mut); margin-right:6px; }
-#act-root .act-kpi-warn { color:#b8851a; font-weight:600; }
-#act-root .act-kpi-good { color:var(--green); font-weight:600; }
-#act-root .act-kpi-zero { color:var(--text-mut); }
-
-#act-root .act-vtable { width:100%; border-collapse:collapse; font-size:12px; table-layout:fixed; }
-#act-root .act-vtable th { color:#fff; font-weight:400; padding:7px 10px; font-size:10px; background:var(--blue-dk); }
-#act-root .act-vtable th:first-child { text-align:left; border-radius:5px 0 0 5px; }
-#act-root .act-vtable th:last-child { border-radius:0 5px 5px 0; }
-#act-root .act-vtable td { padding:8px 10px; border-bottom:.5px solid var(--border); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-#act-root .act-vtable tr:hover { background:#f5f8fc; }
-#act-root .act-bars { display:flex; align-items:flex-end; gap:3px; height:20px; }
-#act-root .act-bars .b { width:8px; border-radius:2px 2px 0 0; }
-#act-root .act-empty { text-align:center; padding:30px; color:var(--text-mut); font-size:12px; font-style:italic; }
-#act-root .act-loading { text-align:center; padding:40px; color:var(--text-mut); font-size:13px; }
-#act-root .act-btn2 { padding:6px 12px; border-radius:6px; font-size:11px; border:1px solid var(--blue-lt); background:#fff; color:var(--blue-dk); cursor:pointer; font-family:inherit; font-weight:600; }
-#act-root .act-btn2:hover { background:#f5f8fc; }
-#act-root .act-btn2.on { background:var(--orange); border-color:var(--orange); color:#633806; }
-#act-root .act-tree tr.is-compared { outline:2px solid var(--orange); outline-offset:-2px; }
-#act-root .act-cmp-chips { display:flex; gap:8px; flex-wrap:wrap; align-items:center; margin-bottom:12px; }
-#act-root .act-cmp-chip { display:inline-flex; align-items:center; gap:7px; background:#faeeda; color:#633806; border:1px solid var(--orange); border-radius:14px; padding:4px 11px; font-size:11px; font-weight:600; }
-#act-root .act-cmp-chip b { cursor:pointer; font-weight:700; }
-#act-root .act-cmp-grid { display:grid; grid-template-columns:110px 1fr 1fr; gap:6px 14px; align-items:center; }
-#act-root .act-cmp-head { font-size:12px; font-weight:700; color:var(--blue-dk); text-align:center; padding-bottom:4px; border-bottom:1px solid var(--border); }
-#act-root .act-cmp-lbl { font-size:11px; color:var(--text-mut); text-transform:uppercase; letter-spacing:.4px; }
-#act-root .act-cmp-cell { background:#f5f8fc; border-radius:8px; padding:8px 11px; text-align:center; font-size:14px; font-weight:600; color:var(--blue-dk); font-variant-numeric:tabular-nums; }
-#act-root .act-cmp-cell.is-win { background:#e1f5ee; box-shadow:inset 0 0 0 1.5px #53bda7; color:#085041; }
-@media (max-width:900px){ #act-root .act-cmp-grid{ grid-template-columns:84px 1fr 1fr; } }
-#act-root .act-hm-wrap { overflow-x:auto; }
-/* 07/10/2026 (recette, largeur mobile) : les deux tableaux debordaient la
-   page entiere (936 px de large sur un ecran de 375). Sous 900 px ils
-   defilent dans leur propre cadre ; la page ne bouge plus. */
-@media (max-width:900px){ #act-root .act-vtable, #act-root .act-tree { display:block; overflow-x:auto; -webkit-overflow-scrolling:touch; } }
-#act-root .act-hm { border-collapse:collapse; }
-#act-root .act-hm th { font-size:8px; color:var(--text-mut); font-weight:500; padding:0 1px 4px; text-align:center; min-width:15px; }
-#act-root .act-hm th.sun { color:#c4554a; font-weight:700; }
-#act-root .act-hm th.nm, #act-root .act-hm td.nm { text-align:left; font-size:11px; color:var(--text-soft); padding-right:10px; max-width:150px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; min-width:90px; }
-#act-root .act-hm td.cell { width:15px; height:15px; min-width:15px; padding:0; border:1.5px solid #fff; border-radius:3px; }
-#act-root .act-hm th.tot, #act-root .act-hm td.tot { font-size:10px; color:var(--blue-dk); font-weight:600; padding-left:8px; text-align:right; }
-`;
-  doc.head.appendChild(st);
-}
-
-// --- KPI helpers visuels ----------------------------------------------------
-function shead(color, title, sub) {
-  return '<div class="act-shead"><div class="bar" style="background:'+color+'"></div>'+
-    '<div class="title" style="color:'+color+'">'+esc(title)+'</div>'+
-    (sub ? '<div class="sub">'+esc(sub)+'</div>' : '')+'</div>';
-}
-function kpiCellsTree(k) {
-  const cls = (v, kind) => {
-    if (!v) return 'act-kpi-zero';
-    if (kind==='chocs' && v>=10) return 'act-kpi-good';
-    if (kind==='wins'  && v>=1)  return 'act-kpi-good';
-    return '';
-  };
-  return '<td>'+(k.nb_contacts||0)+'</td>'+
-    '<td>'+(k.nb_entrants||0)+'</td>'+
-    '<td>'+(k.nb_sortants||0)+'</td>'+
-    '<td class="'+cls(k.nb_chocs,'chocs')+'">'+(k.nb_chocs||0)+'</td>'+
-    '<td>'+(k.nb_propales_creees||0)+'</td>'+
-    '<td class="'+cls(k.nb_wins,'wins')+'">'+(k.nb_wins||0)+'</td>';
-}
-function expIcon(open) { return '<span class="act-exp">'+(open?'▼':'▶')+'</span>'; }
-
-// --- RENDER -----------------------------------------------------------------
-function render() {
-  const root = getRoot();
-  if (!root) return;
-  adoptBusSelectionAct();   // adopte le site du bus dès que possible
-  injectStyle();
-  let html = '';
-
-  // 1. Barre période + Type + export
-  html += '<div class="act-bar">';
-  html += '<span class="act-bar-label">Période</span>';
-  // Sélecteur de plage : un calendrier, deux clics, rechargement automatique.
-  html += '<button type="button" class="act-range" id="act-range">📅 '+esc(fmtPeriod())+' <span class="act-range-car">▾</span></button>';
-  if (hasTypes()) {
-    html += '<span class="act-sep"></span>';
-    html += '<span class="act-bar-label">Type</span>';
-    html += '<div class="act-toggle">';
-    for (const o of [{k:'ALL',l:'Tous'},{k:'VN',l:'VN'},{k:'VO',l:'VO'},{k:'VNVO',l:'VNVO'}])
-      html += '<button type="button" class="'+(state.vnvo===o.k?'active':'')+'" data-vnvo="'+o.k+'">'+o.l+'</button>';
-    html += '</div>';
-  }
-  if (state.rawData !== null && !state.loading) {
-    html += '<span class="act-sep"></span>';
-    html += '<button type="button" class="act-ico-btn" id="act-export" title="Exporter en Excel">'+
-      '<svg width="22" height="22" viewBox="0 0 24 24" aria-hidden="true">'+
-        '<rect x="2" y="2" width="20" height="20" rx="3.5" fill="#217346"/>'+
-        '<path d="M8 7.2l8 9.6M16 7.2l-8 9.6" stroke="#fff" stroke-width="2.5" stroke-linecap="round"/>'+
-      '</svg></button>';
-    html += '<button type="button" class="act-btn2 '+(state.compare.active?'on':'')+'" id="act-cmp-toggle">⇄ Comparer</button>';
-  }
-  if (state.selection.level !== 'all') {
-    const isBusScope = state.selection.level==='site' && String(state.selection.key)===String(state.busSite);
-    html += '<span class="act-sel-banner">'+esc(state.selection.label)+
-      (isBusScope?' <span class="act-bus-chip">📍 site global</span>':'')+
-      ' <button type="button" id="act-clear">✕</button></span>';
-  }
-  html += '<span class="act-period-resume">'+fmtPeriod()+'</span>';
-  html += '</div>';
-
-  if (state.loading || state.rawData === null) {
-    html += '<div class="act-loading">Chargement de l\'activité…</div>';
-    root.innerHTML = html;
-    bind();
-    return;
-  }
-  if (state.error) {
-    html += '<div class="act-card"><div class="act-empty">Erreur : '+esc(state.error)+'</div></div>';
-    root.innerHTML = html;
-    bind();
-    return;
-  }
-
-  const selRows = rowsForSelection();
-  const kpi = sumKpi(selRows);
-  const scopeLabel = state.selection.level === 'all' ? 'Tout le périmètre' : state.selection.label;
-  const typeSuffix = (state.vnvo !== 'ALL' && hasTypes()) ? ' · ' + state.vnvo : '';
-
-  // 1bis. Comparateur (si actif)
-  if (state.compare.active) html += renderCompare();
-
-  // 2. KPIs
-  html += '<div class="act-card">';
-  html += shead('var(--blue-dk)', 'Résumé — ' + scopeLabel + typeSuffix, fmtPeriod());
-  html += '<div class="act-kpi-grid">';
-  html += '<div class="act-kpi"><div class="act-kpi-label">Contacts totaux</div><div class="act-kpi-value" style="color:var(--blue-dk)">'+kpi.nb_contacts+'</div><div class="act-kpi-sub">'+kpi.nb_entrants+' entrants · '+kpi.nb_sortants+' sortants</div></div>';
-  const pctChoc = kpi.nb_contacts>0 ? Math.round(kpi.nb_chocs/kpi.nb_contacts*100)+'% des contacts' : '—';
-  html += '<div class="act-kpi"><div class="act-kpi-label">RDV Choc</div><div class="act-kpi-value" style="color:var(--green)">'+kpi.nb_chocs+'</div><div class="act-kpi-sub">'+pctChoc+'</div></div>';
-  const tx = transfoForSelection();
-  // Propales créées (total, updated_at) = propale+bdc+win+lose ; décomposé en BDC/Wins/Abandons.
-  html += '<div class="act-kpi"><div class="act-kpi-label">Propales créées</div><div class="act-kpi-value" style="color:var(--blue-dk)">'+tx.totalPropales+'</div><div class="act-kpi-sub">'+tx.nbPropale+' en cours</div></div>';
-  const pctBdc = tx.totalPropales>0 ? Math.round(tx.nbBdc/tx.totalPropales*100)+'% des propales' : '—';
-  html += '<div class="act-kpi"><div class="act-kpi-label">BDC</div><div class="act-kpi-value" style="color:var(--orange)">'+tx.nbBdc+'</div><div class="act-kpi-sub">'+pctBdc+'</div></div>';
-  const tauxWin = tx.total > 0 ? 'Transfo ' + tx.pct + '%' : '—';
-  html += '<div class="act-kpi"><div class="act-kpi-label">Wins</div><div class="act-kpi-value" style="color:var(--green)">'+tx.nbWins+'</div><div class="act-kpi-sub">'+tauxWin+'</div></div>';
-  const pctAb = tx.totalPropales>0 ? Math.round(tx.nbLose/tx.totalPropales*100)+'% des propales' : '—';
-  html += '<div class="act-kpi"><div class="act-kpi-label">Abandons</div><div class="act-kpi-value" style="color:var(--red)">'+tx.nbLose+'</div><div class="act-kpi-sub">'+pctAb+'</div></div>';
-  html += '</div></div>';
-
-  // 3. Graphes
-  const sensBtns = [['total','Total'],['entrants','Entrants'],['sortants','Sortants']]
-    .map(o => '<button type="button" class="act-mini-btn '+(state.contactsSens===o[0]?'active':'')+'" data-csens="'+o[0]+'">'+o[1]+'</button>').join('');
-  const mm7Btn = '<div class="act-mini-toggle" style="margin-left:6px"><button type="button" class="act-mini-btn '+(state.contactsMM7?'active':'')+'" data-mm7="1" title="Moyenne mobile 7 jours : lisse le bruit quotidien pour lire la tendance">MM 7j</button></div>';
-  const pipeBtns = [['cumul','Cumulé'],['jour','Quotidien']]
-    .map(o => '<button type="button" class="act-mini-btn '+(state.pipelineMode===o[0]?'active':'')+'" data-pmode="'+o[0]+'">'+o[1]+'</button>').join('');
-
-  html += '<div class="act-charts">';
-  html += '<div class="act-card" style="margin-bottom:0">'+
-            '<div class="act-chart-head">'+shead('var(--blue-dk)','Contacts / jour / vendeur')+'<div style="display:flex;align-items:center"><div class="act-mini-toggle">'+sensBtns+'</div>'+mm7Btn+'</div></div>'+
-            '<div class="act-chart-wrap"><canvas id="act-c1"></canvas></div></div>';
-  html += '<div class="act-card" style="margin-bottom:0">'+
-            '<div class="act-chart-head">'+shead('var(--green)','Pipeline dans le temps')+'<div class="act-mini-toggle">'+pipeBtns+'</div></div>'+
-            '<div class="act-chart-wrap"><canvas id="act-c2"></canvas></div></div>';
-  html += '</div>';
-
-  // 4. Arbre hiérarchique
-  html += '<div class="act-card">';
-  html += shead('var(--blue-dk)', 'Périmètre',
-    state.compare.active ? 'MODE COMPARAISON : cliquez 2 lignes' : 'Cliquez une ligne pour filtrer · un SITE devient le site global');
-  html += renderTree();
-  html += '</div>';
-
-  // 5. Heatmap cadence + détail vendeur si site/type/vendeur
-  if (state.selection.level === 'site' || state.selection.level === 'vntype' || state.selection.level === 'vendeur') {
-    html += renderHeatmap(selRows);
-    html += '<div class="act-card">';
-    html += shead('#b8851a', 'Activité par vendeur — ' + scopeLabel, 'Trié par contacts décroissant');
-    html += renderVendeurTable(byVendeur(selRows));
-    html += '</div>';
-  }
-
-  root.innerHTML = html;
-  bind();
-  setTimeout(drawCharts, 0);
-}
-
-function renderTree() {
-  const tree = buildTree(baseRows());
-  if (!tree.length) return '<div class="act-empty">Aucune donnée sur la période.</div>';
-  const sel = state.selection;
-  const isSel = (level, key) => sel.level === level && String(sel.key) === String(key);
-  const isCmp = (level, key) => state.compare.active && state.compare.items.some(x => x.level === level && String(x.key) === String(key));
-  const cls2 = (level, key) => (isSel(level,key)?'is-selected':'')+(isCmp(level,key)?' is-compared':'');
-  const collapseReseau = tree.length === 1;
-
-  let rows = '';
-  for (const R of tree) {
-    const rKey = 'r:'+R.key;
-    const rOpen = !!state.expanded[rKey] || collapseReseau;
-    if (!collapseReseau) {
-      rows += '<tr class="lv-reseau '+cls2('reseau',R.key)+'" data-exp="'+esc(rKey)+'" data-sel-level="reseau" data-sel-key="'+esc(R.key)+'" data-sel-label="'+esc(R.label)+'">'+
-        '<td>'+expIcon(rOpen)+esc(R.label)+'</td>'+kpiCellsTree(R.kpi)+'</tr>';
-    }
-    if (!rOpen) continue;
-    const collapseAff = collapseReseau && R.affaires.length === 1;
-    for (const A of R.affaires) {
-      const aKey = rKey+'|a:'+A.key;
-      const aOpen = !!state.expanded[aKey] || collapseAff;
-      if (!collapseAff) {
-        rows += '<tr class="lv-affaire '+cls2('affaire',A.key)+'" data-exp="'+esc(aKey)+'" data-sel-level="affaire" data-sel-key="'+esc(A.key)+'" data-sel-label="'+esc(A.label)+'">'+
-          '<td>'+expIcon(aOpen)+esc(A.label)+'</td>'+kpiCellsTree(A.kpi)+'</tr>';
-      }
-      if (!aOpen) continue;
-      for (const S of A.sites) {
-        const sKey = aKey+'|s:'+S.key;
-        const sOpen = !!state.expanded[sKey];
-        rows += '<tr class="lv-site '+cls2('site',S.key)+'" data-exp="'+esc(sKey)+'" data-sel-level="site" data-sel-key="'+esc(S.key)+'" data-sel-label="'+esc(S.label)+'">'+
-          '<td>'+expIcon(sOpen)+esc(S.label)+'</td>'+kpiCellsTree(S.kpi)+'</tr>';
-        if (!sOpen) continue;
-        // Niveau TYPE (VN/VO/VNVO) : affiché seulement si le site en compte
-        // plusieurs ; sinon aplati (vendeurs directement sous le site).
-        const collapseT = S.types.length === 1;
-        let anyVendeur = false;
-        for (const T of S.types) {
-          const tKey = sKey+'|t:'+T.key;
-          const tOpen = !!state.expanded[tKey] || collapseT;
-          const tSelKey = S.key+'~~'+T.key;
-          if (!collapseT) {
-            rows += '<tr class="lv-type '+cls2('vntype',tSelKey)+'" data-exp="'+esc(tKey)+'" data-sel-level="vntype" data-sel-key="'+esc(tSelKey)+'" data-sel-label="'+esc(T.label+' — '+S.label)+'">'+
-              '<td>'+expIcon(tOpen)+'<span class="act-type-chip act-type-'+esc(T.key)+'">'+esc(T.label)+'</span></td>'+kpiCellsTree(T.kpi)+'</tr>';
-          }
-          if (!tOpen) continue;
-          for (const V of T.vendeurs) {
-            anyVendeur = true;
-            rows += '<tr class="lv-vendeur'+(collapseT?'':' deep')+' '+cls2('vendeur',V.key)+'" data-sel-level="vendeur" data-sel-key="'+esc(V.key)+'" data-sel-label="'+esc(V.label)+'">'+
-              '<td>'+esc(V.label)+'</td>'+kpiCellsTree(V.kpi)+'</tr>';
-          }
-        }
-        if (!anyVendeur && S.types.every(t => !state.expanded[sKey+'|t:'+t.key] && S.types.length === 1)) {
-          rows += '<tr class="lv-vendeur"><td style="font-style:italic;color:var(--text-mut)">Aucun vendeur</td><td colspan="5"></td></tr>';
-        }
-      }
-    }
-  }
-  return '<table class="act-tree"><thead><tr><th>Périmètre</th><th>Contacts</th><th>Entrants</th><th>Sortants</th><th>Chocs</th><th>Propales</th><th>Wins</th></tr></thead><tbody>'+rows+'</tbody></table>';
-}
-
-function renderVendeurTable(vendeurs) {
-  if (!vendeurs.length) return '<div class="act-empty">Aucun vendeur dans ce périmètre.</div>';
-  const showType = hasTypes();
-  const maxCanal = (v) => Math.max(v.nb_voip, v.nb_whatsapp, v.nb_sms, v.nb_rpv, 1);
-  let rows = '';
-  for (const v of vendeurs) {
-    const scale = 18 / maxCanal(v);
-    const bar = (val,color) => '<div class="b" style="background:'+color+';height:'+Math.max(2,Math.round((val||0)*scale))+'px"></div>';
-    const bars = '<div class="act-bars">'+bar(v.nb_voip,'#2a5ea9')+bar(v.nb_whatsapp,'#53bda7')+bar(v.nb_sms,'#fac055')+bar(v.nb_rpv,'#c4554a')+'</div>';
-    const typeChip = showType && v.vn_vo && v.vn_vo !== '—'
-      ? ' <span class="act-type-chip act-type-'+esc(v.vn_vo)+'">'+esc(v.vn_vo)+'</span>' : '';
-    rows += '<tr>'+
-      '<td style="font-weight:500;color:var(--blue-dk)">'+esc(v.nom_complet)+typeChip+'</td>'+
-      '<td style="text-align:center;font-weight:500;color:var(--blue-dk)">'+v.nb_contacts+'</td>'+
-      '<td style="text-align:center;color:var(--green)">'+v.nb_entrants+'</td>'+
-      '<td style="text-align:center;color:var(--text-soft)">'+v.nb_sortants+'</td>'+
-      '<td>'+bars+'</td>'+
-      '<td style="text-align:center;color:var(--green);font-weight:500">'+v.nb_chocs+'</td>'+
-      '<td style="text-align:center;color:var(--text-soft)">'+v.nb_relances+'</td>'+
-      '<td style="text-align:center;color:var(--red)">'+v.nb_abandons+'</td>'+
-      '<td style="text-align:center;color:var(--blue-dk);font-weight:500">'+v.nb_propales_creees+'</td>'+
-      '<td style="text-align:center;color:var(--blue-dk)">'+v.nb_bdc+'</td>'+
-      '<td style="text-align:center;color:var(--green);font-weight:500">'+v.nb_wins+'</td>'+
-    '</tr>';
-  }
-  return '<table class="act-vtable"><colgroup>'+
-    '<col style="width:170px"><col style="width:70px"><col style="width:80px"><col style="width:80px"><col style="width:90px"><col style="width:70px"><col style="width:80px"><col style="width:80px"><col style="width:80px"><col style="width:60px"><col style="width:60px">'+
-    '</colgroup><thead><tr><th>Vendeur</th><th>Contacts</th><th>Entrants</th><th>Sortants</th><th>Mix canal</th><th>Chocs</th><th>Relances</th><th>Abandons</th><th>Propales</th><th>BDC</th><th>Wins</th></tr></thead><tbody>'+rows+'</tbody></table>';
-}
-
-// --- GRAPHES Chart.js -------------------------------------------------------
-let __c1 = null, __c2 = null;
-function loadChartJs() {
-  const win = doc.defaultView || window;
-  if (win.Chart) return Promise.resolve(win.Chart);
-  if (window.__chartjsPromise) return window.__chartjsPromise;
-  window.__chartjsPromise = new Promise((resolve, reject) => {
-    const s = doc.createElement('script');
-    s.src = 'https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js';
-    s.onload = () => resolve((doc.defaultView || window).Chart);
-    s.onerror = (e) => { window.__chartjsPromise = null; reject(e); };
-    doc.head.appendChild(s);
-  });
-  return window.__chartjsPromise;
-}
-async function ensureChart() {
-  if (state.loading || state.rawData === null) return null;
-  try { return await loadChartJs(); } catch(e){ console.error('[activite] Chart.js', e); return null; }
-}
-
-// ----- Graphe 1 : Contacts / jour — PAIRS du niveau + moyenne parent -----
-async function drawContactsChart() {
-  const Chart = await ensureChart();
-  if (!Chart) return;
-  if (__c1) { try{__c1.destroy();}catch(e){} __c1=null; }
-  const c1 = doc.getElementById('act-c1');
-  if (!c1) return;
-
-  const sens = state.contactsSens; // 'total' | 'entrants' | 'sortants'
-  const bjp = byJourPairs(baseRows());
-  const cl = bjp.jours.map(j => { const d=new Date(j+'T12:00:00'); return d.getDate()+'/'+(d.getMonth()+1); });
-  const palette = ['#2a5ea9','#53bda7','#acc5e4','#7a9cc4','#c4554a','#0c447c','#085041','#5b7fb0','#8aa9d6','#3d8f7d','#b07fc4','#c49a55','#7dc4a0','#a0b8e0','#d6857d'];
-  const datasets = [];
-  // Moyenne mobile 7 jours (fenêtre glissante sur les jours affichés).
-  const mm7 = (arr) => arr.map((_, i) => {
-    const w = arr.slice(Math.max(0, i - 6), i + 1);
-    return Math.round(w.reduce((a, b) => a + b, 0) / w.length * 10) / 10;
-  });
-  const smooth = (arr) => state.contactsMM7 ? mm7(arr) : arr;
-
-  bjp.series.forEach((s, i) => {
-    const col = palette[i % palette.length];
-    datasets.push({
-      label: s.label + (s.selected ? '  ◄' : ''),
-      data: smooth(bjp.jours.map(j => (bjp.data[j] && bjp.data[j][s.key]) ? bjp.data[j][s.key][sens] : 0)),
-      borderColor: col, backgroundColor: col,
-      tension:.3, pointRadius:0, pointHoverRadius:4,
-      borderWidth: s.selected ? 3.5 : 1.25,
-      order: s.selected ? 0 : 2
-    });
-  });
-
-  // Moyenne du parent (total du jour / nb d'enfants actifs ce jour) — en ORANGE.
-  const moyenne = smooth(bjp.jours.map(j => {
-    const dayData = bjp.data[j];
-    if (!dayData) return 0;
-    const ids = Object.keys(dayData);
-    if (!ids.length) return 0;
-    let s = 0; for (const id of ids) s += dayData[id][sens];
-    return Math.round(s / ids.length * 10) / 10;
-  }));
-  datasets.push({
-    label: 'Moyenne',
-    data: moyenne,
-    borderColor: '#fac055', backgroundColor: '#fac055',
-    tension:.3, pointRadius:0, pointHoverRadius:4, borderWidth:3, borderDash:[6,3], order:1
-  });
-
-  __c1 = new Chart(c1.getContext('2d'), {
-    type:'line',
-    data:{ labels: cl, datasets },
-    options:{ responsive:true, maintainAspectRatio:false,
-      interaction:{ mode:'nearest', intersect:false },
-      plugins:{ legend:{ display:true, position:'bottom', maxHeight:80, labels:{ font:{size:9}, color:'#4a6a8a', usePointStyle:true, pointStyle:'circle', boxWidth:6, boxHeight:6, padding:5 } },
-                tooltip:{ callbacks:{ title:items=>'Jour '+items[0].label } } },
-      scales:{ x:{ ticks:{font:{size:9},color:'#7a9cc4',maxRotation:0,autoSkip:true,maxTicksLimit:12}, grid:{display:false} },
-               y:{ beginAtZero:true, ticks:{font:{size:9},color:'#7a9cc4'}, grid:{color:'#eaf0f9'} } } }
-  });
-}
-
-// ----- Graphe 2 : Pipeline dans le temps (cumulé ou quotidien) -----
-async function drawPipelineChart() {
-  const Chart = await ensureChart();
-  if (!Chart) return;
-  if (__c2) { try{__c2.destroy();}catch(e){} __c2=null; }
-  const c2 = doc.getElementById('act-c2');
-  if (!c2) return;
-
-  const { jours, data } = transfoByJour();
-  if (!jours.length) return;
-  const labels = jours.map(j => { const d=new Date(j+'T12:00:00'); return d.getDate()+'/'+(d.getMonth()+1); });
-  const cumul = state.pipelineMode === 'cumul';
-  const serie = (key) => {
-    let acc = 0;
-    return jours.map(j => { const v = data[j][key]; if (cumul) { acc += v; return acc; } return v; });
-  };
-  __c2 = new Chart(c2.getContext('2d'), {
-    type:'line',
-    data:{ labels, datasets:[
-      { label:'Propales créées', data:serie('propales'), borderColor:'#2a5ea9', backgroundColor:'rgba(42,94,169,.08)', tension:.3, pointRadius:cumul?0:3, pointHoverRadius:4, pointBackgroundColor:'#2a5ea9', fill:cumul },
-      { label:'BDC', data:serie('bdc'), borderColor:'#fac055', backgroundColor:'rgba(250,192,85,.10)', tension:.3, pointRadius:cumul?0:3, pointHoverRadius:4, pointBackgroundColor:'#fac055', borderDash:[5,3], fill:cumul },
-      { label:'Wins', data:serie('wins'), borderColor:'#53bda7', backgroundColor:'rgba(83,189,167,.10)', tension:.3, pointRadius:cumul?0:3, pointHoverRadius:4, pointBackgroundColor:'#53bda7', fill:cumul },
-      { label:'Abandons', data:serie('abandons'), borderColor:'#c4554a', backgroundColor:'rgba(196,85,74,.08)', tension:.3, pointRadius:cumul?0:3, pointHoverRadius:4, pointBackgroundColor:'#c4554a', borderDash:[2,2], fill:cumul }
-    ]},
-    options:{ responsive:true, maintainAspectRatio:false,
-      plugins:{ legend:{ display:true, position:'bottom', maxHeight:60, labels:{ font:{size:9}, color:'#4a6a8a', usePointStyle:true, pointStyle:'circle', boxWidth:6, boxHeight:6, padding:6 } } },
-      scales:{ x:{ ticks:{font:{size:9},color:'#7a9cc4',maxRotation:0,autoSkip:true,maxTicksLimit:12}, grid:{display:false} },
-               y:{ beginAtZero:true, ticks:{font:{size:9},color:'#7a9cc4',stepSize:1}, grid:{color:'#eaf0f9'} } } }
-  });
-}
-
-// Dessine les DEUX graphes (render initial, changement de période ou de sélection).
-async function drawCharts() {
-  await drawContactsChart();
-  await drawPipelineChart();
-}
-window.__actDrawCharts = drawCharts;
-
-// --- BINDINGS ---------------------------------------------------------------
-function bind() {
-  const root = getRoot();
-  if (!root) return;
-  // Sélecteur de plage : ouvre le calendrier ; la sélection des deux dates
-  // déclenche applyPeriod() qui recharge automatiquement.
-  const rangeBtn = root.querySelector('#act-range');
-  if (rangeBtn) rangeBtn.addEventListener('click', () => openRangePicker(rangeBtn));
-  const clear = root.querySelector('#act-clear');
-  if (clear) clear.addEventListener('click', () => { state.selection = { level:'all', key:null, label:'Tout le périmètre' }; render(); setTimeout(drawCharts,0); });
-
-  // Toggle Type (VN/VO/VNVO) : re-render complet (arbre, KPIs, graphes suivent).
-  root.querySelectorAll('[data-vnvo]').forEach(b => b.addEventListener('click', () => {
-    state.vnvo = b.getAttribute('data-vnvo');
-    render(); setTimeout(drawCharts, 0);
-  }));
-
-  // Export Excel
-  const exp = root.querySelector('#act-export');
-  if (exp) exp.addEventListener('click', () => exportExcel(exp));
-
-  // Comparateur : toggle + suppression de chips
-  const cmpT = root.querySelector('#act-cmp-toggle');
-  if (cmpT) cmpT.addEventListener('click', () => {
-    state.compare.active = !state.compare.active;
-    if (!state.compare.active) state.compare.items = [];
-    render(); setTimeout(drawCharts, 0);
-  });
-  root.querySelectorAll('[data-cmp-del]').forEach(b => b.addEventListener('click', () => {
-    state.compare.items.splice(Number(b.getAttribute('data-cmp-del')), 1);
-    render(); setTimeout(drawCharts, 0);
-  }));
-
-  // Moyenne mobile 7 jours : redessine seulement le graphe contacts.
-  root.querySelectorAll('[data-mm7]').forEach(b => b.addEventListener('click', () => {
-    state.contactsMM7 = !state.contactsMM7;
-    b.classList.toggle('active', state.contactsMM7);
-    drawContactsChart();
-  }));
-
-  // Toggles des graphes : pas de re-render complet, juste le graphe concerné.
-  root.querySelectorAll('[data-csens]').forEach(b => b.addEventListener('click', () => {
-    state.contactsSens = b.getAttribute('data-csens');
-    root.querySelectorAll('[data-csens]').forEach(x => x.classList.toggle('active', x === b));
-    drawContactsChart();
-  }));
-  root.querySelectorAll('[data-pmode]').forEach(b => b.addEventListener('click', () => {
-    state.pipelineMode = b.getAttribute('data-pmode');
-    root.querySelectorAll('[data-pmode]').forEach(x => x.classList.toggle('active', x === b));
-    drawPipelineChart();
-  }));
-
-  // Expand/collapse (icône) + sélection (ligne)
-  root.querySelectorAll('.act-tree tr[data-sel-level]').forEach(tr => {
-    tr.addEventListener('click', (e) => {
-      const expKey = tr.getAttribute('data-exp');
-      const onIcon = e.target.closest('.act-exp');
-      if (onIcon && expKey) {
-        e.stopPropagation();
-        state.expanded[expKey] = !state.expanded[expKey];
-        render(); setTimeout(drawCharts,0);
-        return;
-      }
-      const level = tr.getAttribute('data-sel-level');
-      const key   = tr.getAttribute('data-sel-key');
-      const label = tr.getAttribute('data-sel-label');
-      // MODE COMPARAISON : le clic ajoute/retire l'entité (max 2), sans toucher
-      // ni la sélection ni le site global.
-      if (state.compare.active) {
-        const items = state.compare.items;
-        const idx = items.findIndex(x => x.level === level && String(x.key) === String(key));
-        if (idx >= 0) items.splice(idx, 1);
-        else if (items.length < 2) items.push({ level, key, label });
-        else items[1] = { level, key, label };
-        render(); setTimeout(drawCharts, 0);
-        return;
-      }
-      // Toggle : reclic sur la sélection courante => retour à 'all'
-      if (state.selection.level === level && String(state.selection.key) === String(key)) {
-        state.selection = { level:'all', key:null, label:'Tout le périmètre' };
+        tx(s, cx, cy + 4, d.fait + ' / ' + nf(d.cible), { a: 'middle', s: Math.round(S2 * ((String(d.fait) + nf(d.cible)).length > 5 ? .11 : .15)), w: 600 });
       } else {
-        state.selection = { level, key, label };
-        if (expKey) state.expanded[expKey] = true; // ouvre le niveau cliqué
-        // Niveau SITE : on le définit aussi comme SITE GLOBAL (bus). Les autres
-        // niveaux (réseau/affaire/type/vendeur) restent de l'exploration locale.
-        if (level === 'site') {
-          try { const b = siteBus(); if (b) b.setSiteId(Number(key)); } catch(x) {}
-        }
+        tx(s, cx, cy + 4, nf(d.fait), { a: 'middle', s: Math.round(S2 * (nf(d.fait).length > 4 ? .15 : .19)), w: 600 });
       }
-      render(); setTimeout(drawCharts,0);
-    });
-  });
-}
+      tx(s, cx, cy + 24, d.sous, { a: 'middle', s: 11, c: C.ink3 });
+      if (d.proj != null && d.cible > 0) tx(s, cx, cy + 40, 'projection ' + d.proj, { a: 'middle', s: 11, c: C.morange, w: 800 });
+      else if (!(d.cible > 0)) tx(s, cx, cy + 40, d.vide || 'pas d\'objectif saisi', { a: 'middle', s: 10.5, c: C.ink3 });
+    };
 
-// --- GO ---------------------------------------------------------------------
-window.__renderActivite = render;
-
-// Démarrage robuste face au cycle de montage WeWeb (voir v2 pour le détail).
-loadData();
-
-(function ensureRendered() {
-  const delays = [0, 60, 150, 300, 600, 1000, 1500];
-  delays.forEach(function(ms) {
-    setTimeout(function() {
-      const root = getRoot();
-      if (!root) return;
-      if (!root.querySelector('.act-bar')) {
-        render();
-        setTimeout(drawCharts, 0);
-      }
-    }, ms);
-  });
-
-  try {
-    const target = getRoot();
-    if (target && window.MutationObserver) {
-      if (window.__actObserver) { try { window.__actObserver.disconnect(); } catch(e){} }
-      const obs = new MutationObserver(function() {
-        const root = getRoot();
-        if (root && !root.querySelector('.act-bar') && !state.loading) {
-          render();
-          setTimeout(drawCharts, 0);
+    // Carte des affaires : stade x jours depuis la dernière activité.
+    const STADES = [
+      { cle: 'commande', lib: 'Commande', col: C.vert },
+      { cle: 'devis', lib: 'Devis remis', col: C.orange },
+      { cle: 'affaire', lib: 'Sans devis', col: C.mbleu }];
+    G.carte = function (box) {
+      const A = box.__d || [], W = box.clientWidth, H = 250, s = svgIn(box, W, H, 'Affaires par stade et jours sans activité'),
+        L = W < 460 ? 94 : 104, R = W - 6, T = 6, B = H - 34, maxD = 28, bh = (B - T) / STADES.length;
+      const X = d => L + (R - L) * Math.min(d, maxD) / maxD;
+      const delai = { commande: 3, devis: 3, affaire: 7 };
+      STADES.forEach((b, i) => {
+        const y = T + i * bh;
+        el('rect', { x: L, y: y + 2, width: R - L, height: bh - 4, rx: 8, fill: C.calme }, s);
+        const dl = delai[b.cle];
+        el('rect', { x: X(dl), y: y + 2, width: R - X(dl), height: bh - 4, rx: 8, fill: C.chaud }, s);
+        el('line', { x1: X(dl), y1: y + 4, x2: X(dl), y2: y + bh - 4, stroke: C.mrouge, 'stroke-width': 1.5, 'stroke-dasharray': '3 3' }, s);
+        el('circle', { cx: 8, cy: y + bh / 2, r: 5, fill: b.col }, s);
+        tx(s, 19, y + bh / 2 + 4, b.lib, { s: 11.5, w: 800 });
+        const n = A.filter(a => a.etape === b.cle).length;
+        tx(s, 19, y + bh / 2 + 18, plur(n, 'affaire'), { s: 10, c: C.ink3, w: 600 });
+      });
+      [0, 7, 14, 21, 28].forEach(d => tx(s, X(d), B + 16, d === 28 ? '28 j +' : d + ' j', { a: 'middle', s: 10.5, c: C.ink3 }));
+      tx(s, R, B + 31, 'jours depuis la dernière activité', { a: 'end', s: 10.5, c: C.ink3 });
+      const mx = Math.max(1, ...A.map(a => Number(a.montant) || 0));
+      const lignes = {}, poses = []; const etiquetees = new Set(A.filter(a => a.etat === 'bloquee' && a.montant).sort((a, b) => b.montant - a.montant).slice(0, 3).map(a => a.id_affaire));
+      A.slice().sort((a, b) => (Number(b.montant) || 0) - (Number(a.montant) || 0)).forEach((a, k) => {
+        const i = STADES.findIndex(b => b.cle === a.etape); if (i < 0) return;
+        const st = STADES[i], j = (lignes[i] = (lignes[i] || 0) + 1);
+        const y = T + i * bh + bh / 2 + ((j % 3) - 1) * 7, x = X(Number(a.jours) || 0), r = a.montant ? 3.5 + 8 * Math.sqrt(a.montant / mx) : 4;
+        const late = a.etat === 'bloquee', froid = a.etat === 'froide';
+        const c = el('circle', { cx: x, cy: y, r, fill: st.col, 'fill-opacity': froid ? .3 : (late ? 1 : .75), stroke: late ? C.mrouge : C.card, 'stroke-width': late ? 2 : 1.2 }, s);
+        const t = el('title', {}, c); t.textContent = a.client + (a.montant ? ' · ' + eur(a.montant) : '') + ' · ' + a.jours + ' j';
+        if (etiquetees.has(a.id_affaire)) {
+          const mot = (a.client || '').split(' ').slice(-1)[0], lx = Math.min(Math.max(x, L + 30), R - 34), lw = mot.length * 6.5 + 8;
+          if (!poses.some(o => Math.abs(o.x - lx) < (o.w + lw) / 2 && Math.abs(o.y - (y - r)) < 14)) { poses.push({ x: lx, y: y - r, w: lw }); tx(s, lx, y - r - 4, mot, { a: 'middle', s: 10.5, w: 800, c: C.mrouge }); }
         }
       });
-      obs.observe(target, { childList: true });
-      window.__actObserver = obs;
-    }
-  } catch(e) { /* observer non critique */ }
-})();
+    };
 
-}
+    G.quad = function (box) {
+      const P = box.__d || [], W = box.clientWidth, H = 240, s = svgIn(box, W, H, 'Équipe : objectif atteint et affaires bloquées'), L = 30, R = W - 8, T = 8, B = H - 36;
+      const maxB = Math.max(4, ...P.map(p => p.bloquees));
+      const X = p => L + (R - L) * Math.min(p, 120) / 120, Y = n => B - (B - T) * Math.min(n, maxB) / maxB;
+      el('rect', { x: L, y: T, width: X(80) - L, height: Y(maxB * .35) - T, rx: 10, fill: C.chaud }, s);
+      el('rect', { x: X(80), y: Y(maxB * .35), width: R - X(80), height: B - Y(maxB * .35), rx: 10, fill: C.okbg }, s);
+      el('line', { x1: X(100), y1: T, x2: X(100), y2: B, stroke: C.line2, 'stroke-dasharray': '3 4' }, s);
+      el('line', { x1: L, y1: B, x2: R, y2: B, stroke: C.line2 }, s);
+      tx(s, L + 8, T + 16, 'À accompagner', { s: 11, w: 800, c: C.mrouge });
+      tx(s, R - 8, B - 8, 'En rythme', { a: 'end', s: 11, w: 800, c: C.mvert });
+      [0, 50, 100].forEach(p => tx(s, X(p), B + 15, p + ' %', { a: 'middle', s: 10.5, c: C.ink3 }));
+      tx(s, R, B + 30, 'objectif atteint', { a: 'end', s: 10.5, c: C.ink3 });
+      [0, Math.round(maxB / 2), maxB].forEach(n => tx(s, L - 8, Y(n) + 4, n, { a: 'end', s: 10.5, c: C.ink3 }));
+      P.forEach(p => {
+        const g = el('g', { style: 'cursor:pointer' }, s);
+        const sel = String(p.id) === String(S.vendeur);
+        el('circle', { cx: X(p.x), cy: Y(p.bloquees), r: 15, fill: sel ? C.bleu : C.card, stroke: sel ? C.card : C.bleu, 'stroke-width': 2 }, g);
+        tx(g, X(p.x), Y(p.bloquees) + 4, p.ini, { a: 'middle', s: 10.5, w: 800, c: sel ? '#ffffff' : C.bleu });
+        const t = el('title', {}, g); t.textContent = p.nom + ' · ' + (p.objectif ? p.x + ' % de l\'objectif' : 'pas d\'objectif') + ' · ' + plur(p.bloquees, 'affaire bloquée', 'affaires bloquées');
+        g.addEventListener('click', () => choisirVendeur(p.id));
+      });
+    };
+
+    G.ecart = function (box) {
+      const R = box.__d || [], W = box.clientWidth, H = R.length * 38 + 20, s = svgIn(box, W, H, 'Écart à la moyenne de l\'équipe'),
+        lab = 104, val = 58, mid = lab + (W - lab - val) / 2, half = (W - lab - val) / 2 - 4;
+      R.forEach((r, i) => {
+        const y = i * 38, d = r.moy > 0 ? Math.max(-1, Math.min(1, r.v / r.moy - 1)) : 0, w = d * half;
+        tx(s, 0, y + 18, r.lib, { s: 12, w: 700 });
+        el('rect', { x: mid - half, y: y + 6, width: half * 2, height: 16, rx: 8, fill: C.calme }, s);
+        if (r.moy > 0) el('rect', { x: w < 0 ? mid + w : mid, y: y + 6, width: Math.max(3, Math.abs(w)), height: 16, rx: 8, fill: w < 0 ? C.rouge : C.vert }, s);
+        tx(s, W, y + 18, nf(r.v) + ' / ' + (Math.round(r.moy * 10) / 10).toLocaleString('fr-FR'), { a: 'end', s: 11.5, w: 800, c: C.ink2 });
+      });
+      el('line', { x1: mid, y1: 0, x2: mid, y2: R.length * 38 - 6, stroke: C.ink, 'stroke-width': 1.5 }, s);
+      tx(s, mid, H - 4, 'moyenne équipe', { a: 'middle', s: 10.5, c: C.ink3 });
+    };
+
+    // Flux aligné en haut : la part qui avance continue, la perte tombe.
+    G.flux = function (box) {
+      const st = box.__d.etapes, loss = box.__d.pertes, W = box.clientWidth, n = st.length, nw = 10, step = (W - nw - 70) / (n - 1),
+        y0 = 62, maxH = W < 640 ? 96 : 128, drop = y0 + maxH + 44, H = drop + 40, s = svgIn(box, W, H, 'Parcours des affaires'), top = Math.max(1, st[0][1]);
+      const hh = v => Math.max(4, maxH * v / top);
+      st.forEach((p, i) => {
+        const x = i * step, h = hh(p[1]);
+        if (i < n - 1) {
+          const nx = (i + 1) * step, hn = hh(st[i + 1][1]), lost = p[1] - st[i + 1][1], lw = h - hn;
+          el('rect', { x: x + nw, y: y0, width: nx - x - nw, height: hn, fill: C.clair, 'fill-opacity': .55 }, s);
+          const sx = x + nw, sy = y0 + hn + lw / 2, dx = x + nw + Math.min(step * .42, 90);
+          if (lost > 0) {
+            el('path', { d: 'M' + sx + ' ' + sy + ' C' + (dx - 10) + ' ' + sy + ' ' + dx + ' ' + (sy + 10) + ' ' + dx + ' ' + (drop - 8), fill: 'none', stroke: C.rouge, 'stroke-opacity': .38, 'stroke-width': Math.max(2, lw) }, s);
+            el('circle', { cx: dx, cy: drop - 4, r: 3, fill: C.mrouge }, s);
+          }
+          tx(s, dx, drop + 14, '−' + nf(lost), { a: 'middle', s: 13, w: 800, c: C.mrouge });
+          tx(s, dx, drop + 28, loss[i], { a: 'middle', s: 10.5, c: C.ink2 });
+        }
+        el('rect', { x, y: y0, width: nw, height: h, rx: 3, fill: i === n - 1 ? C.mvert : C.fonce }, s);
+        tx(s, x, y0 - 36, p[0].toUpperCase(), { s: 9.5, w: 700, c: C.ink3 });
+        tx(s, x, y0 - 14, nf(p[1]), { s: 20, w: 600 });
+        if (i > 0) tx(s, x + nf(p[1]).length * 11 + 8, y0 - 14, pctTxt(p[1], st[i - 1][1]), { s: 11.5, w: 800, c: C.ink3 });
+      });
+    };
+
+    G.constellation = function (box) {
+      const P = box.__d.points, W = box.clientWidth, H = 320, s = svgIn(box, W, H, 'Sites : transformation et financement'), L = 44, R = W - 10, T = 10, B = H - 40;
+      const xs = P.map(p => p.x), ys = P.map(p => p.y);
+      const x0 = Math.max(0, Math.floor((Math.min(...xs) - 5) / 5) * 5), x1 = Math.min(100, Math.ceil((Math.max(...xs) + 5) / 5) * 5);
+      const y0 = Math.max(0, Math.floor((Math.min(...ys) - 10) / 10) * 10), y1 = Math.min(100, Math.ceil((Math.max(...ys) + 10) / 10) * 10);
+      const X = v => L + (R - L) * (v - x0) / Math.max(1, x1 - x0), Y = v => B - (B - T) * (v - y0) / Math.max(1, y1 - y0);
+      const mx = box.__d.moyX, my = box.__d.moyY;
+      el('rect', { x: X(mx), y: T, width: R - X(mx), height: Y(my) - T, rx: 10, fill: C.okbg }, s);
+      tx(s, R - 10, T + 18, 'au-dessus des deux moyennes', { a: 'end', s: 10.5, w: 800, c: C.mvert });
+      for (let v = y0; v <= y1; v += 10) { el('line', { x1: L, y1: Y(v), x2: R, y2: Y(v), stroke: C.line }, s); tx(s, L - 8, Y(v) + 4, v + ' %', { a: 'end', s: 10.5, c: C.ink3 }); }
+      for (let v = x0; v <= x1; v += 5) tx(s, X(v), B + 16, v + ' %', { a: 'middle', s: 10.5, c: C.ink3 });
+      el('line', { x1: X(mx), y1: T, x2: X(mx), y2: B, stroke: C.line2, 'stroke-dasharray': '4 4' }, s);
+      el('line', { x1: L, y1: Y(my), x2: R, y2: Y(my), stroke: C.line2, 'stroke-dasharray': '4 4' }, s);
+      tx(s, R, B + 32, 'affaires transformées en commande', { a: 'end', s: 10.5, c: C.ink3 });
+      tx(s, L, T - 0, 'part financée', { s: 10.5, c: C.ink3 });
+      const mxV = Math.max(1, ...P.map(p => p.v)), poses = [];
+      const libre = (x, y, w) => { const bx = { x1: x, x2: x + w, y1: y - 11, y2: y + 3 }; if (bx.x1 < 0 || bx.x2 > W) return false; if (poses.some(o => bx.x1 < o.x2 && bx.x2 > o.x1 && bx.y1 < o.y2 && bx.y2 > o.y1)) return false; poses.push(bx); return true; };
+      P.forEach(p => { const r = 6 + 16 * Math.sqrt(p.v / mxV); poses.push({ x1: X(p.x) - r, x2: X(p.x) + r, y1: Y(p.y) - r, y2: Y(p.y) + r }); });
+      P.slice().sort((a, b) => b.v - a.v).forEach(p => {
+        const r = 6 + 16 * Math.sqrt(p.v / mxV), x = X(p.x), y = Y(p.y), left = x > W * .66;
+        const g = el('g', { style: 'cursor:pointer' }, s);
+        el('circle', { cx: x, cy: y, r: r + 5, fill: C.bleu, 'fill-opacity': .1 }, g);
+        el('circle', { cx: x, cy: y, r, fill: C.bleu, 'fill-opacity': .9, stroke: C.card, 'stroke-width': 1.5 }, g);
+        if (r > 11) tx(g, x, y + 4, p.v, { a: 'middle', s: 11, w: 800, c: '#ffffff' });
+        const lw = p.nom.length * 6.6;
+        if (libre(left ? x - r - 6 - lw : x + r + 6, y + 4, lw)) tx(g, left ? x - r - 6 : x + r + 6, y + 4, p.nom, { a: left ? 'end' : 'start', s: 11, w: 800 });
+        else if (libre(left ? x + r + 6 : x - r - 6 - lw, y + 4, lw)) tx(g, left ? x + r + 6 : x - r - 6, y + 4, p.nom, { a: left ? 'start' : 'end', s: 11, w: 800 });
+        const t = el('title', {}, g); t.textContent = p.nom + ' · ' + p.v + ' commandes · ' + p.x + ' % transformées · ' + p.y + ' % financées';
+        g.addEventListener('click', () => allerSite(p.id));
+      });
+    };
+
+    G.spark = function (box) {
+      const pts = box.__d || [], W = box.clientWidth, H = 46, s = svgIn(box, W, H, 'Commandes par semaine'), mx = Math.max(1, ...pts), st = (W - 8) / Math.max(1, pts.length - 1);
+      let p = ''; pts.forEach((v, i) => { p += (i ? 'L' : 'M') + (i * st).toFixed(1) + ' ' + (H - 4 - (v / mx) * (H - 10)).toFixed(1); });
+      el('path', { d: p + ' L' + ((pts.length - 1) * st) + ' ' + H + ' L0 ' + H + ' Z', fill: C.bleu, 'fill-opacity': .1 }, s);
+      el('path', { d: p, fill: 'none', stroke: C.bleu, 'stroke-width': 2, 'stroke-linejoin': 'round' }, s);
+      el('circle', { cx: (pts.length - 1) * st, cy: H - 4 - (pts[pts.length - 1] / mx) * (H - 10), r: 4, fill: C.bleu, stroke: C.card, 'stroke-width': 2 }, s);
+    };
+
+    G.aire = function (box) {
+      const M = box.__d, W = box.clientWidth, H = 200, s = svgIn(box, W, H, 'Commandes du groupe par semaine'), L = 36, R = W - 60, T = 10, B = H - 26, st = (R - L) / Math.max(1, M.length - 1);
+      const mx = Math.max(10, ...M.map(m => m.v)), top = Math.ceil(mx / 50) * 50, Y = v => B - (B - T) * v / top;
+      [0, top / 2, top].forEach(v => { el('line', { x1: L, y1: Y(v), x2: W, y2: Y(v), stroke: C.line }, s); tx(s, L - 8, Y(v) + 4, nf(v), { a: 'end', s: 10.5, c: C.ink3 }); });
+      let p = ''; M.forEach((m, i) => { p += (i ? 'L' : 'M') + (L + i * st) + ' ' + Y(m.v); if (W > 520 || i % 2 === 1) tx(s, L + i * st, B + 17, m.lib, { a: 'middle', s: 10.5, c: C.ink3 }); });
+      const g = el('linearGradient', { id: 'act-ga', x1: 0, y1: 0, x2: 0, y2: 1 }, el('defs', {}, s));
+      el('stop', { offset: '0', 'stop-color': C.bleu, 'stop-opacity': .22 }, g); el('stop', { offset: '1', 'stop-color': C.bleu, 'stop-opacity': 0 }, g);
+      el('path', { d: p + ' L' + R + ' ' + B + ' L' + L + ' ' + B + ' Z', fill: 'url(#act-ga)' }, s);
+      el('path', { d: p, fill: 'none', stroke: C.bleu, 'stroke-width': 2.5, 'stroke-linejoin': 'round' }, s);
+      const last = M[M.length - 1];
+      el('circle', { cx: R, cy: Y(last.v), r: 5.5, fill: C.bleu, stroke: C.card, 'stroke-width': 2.5 }, s);
+      tx(s, R + 10, Y(last.v) + 4, nf(last.v), { s: 13, w: 800 });
+      tx(s, R + 10, Y(last.v) + 18, 'en cours', { s: 10, c: C.ink3 });
+    };
+
+    function dessiner() {
+      __anchor.querySelectorAll('[data-g]').forEach(b => { const f = G[b.getAttribute('data-g')]; if (f && b.clientWidth && b.__d !== undefined) { try { f(b); } catch (e) { console.error('[activite] graphique', e); } } });
+    }
+    let rt; const auRedim = () => { clearTimeout(rt); rt = setTimeout(dessiner, 120); };
+    try { FW().addEventListener('resize', auRedim); } catch (e) { window.addEventListener('resize', auRedim); }
+
+    // ------------------------------------------------------------------ blocs communs
+    const charge = msg => '<div class="charge"><i></i>' + esc(msg || 'Chargement…') + '</div>';
+    const erreur = d => '<div class="erreur">Les données n\'ont pas pu être chargées : ' + esc(d.__err) + '</div>';
+    const graph = (nom, cls) => '<div class="chart' + (cls ? ' ' + cls : '') + '" data-g="' + nom + '"></div>';
+    function lecture(html) { return '<div class="lecture"><div class="t">Lecture</div>' + html + '</div>'; }
+    function seg(nom, options, actuel) {
+      return '<div class="seg" role="group" data-seg="' + nom + '">' + options.map(o => '<button data-v="' + o[0] + '" aria-pressed="' + (o[0] === actuel) + '">' + esc(o[1]) + '</button>').join('') + '</div>';
+    }
+    function projection(m) {
+      if (!m || !m.jours_ecoules) return null;
+      return Math.round(m.cdes * m.jours_total / m.jours_ecoules);
+    }
+    function cases(a) {
+      const d = Math.max(0, Number(a.jours) || 0), l = Number(a.delai) || 0;
+      if (a.statut_commande === 'Refused') return '<div class="jrow"><span class="jl"><b class="r">Commande refusée</b> · dernière activité il y a ' + plur(d, 'jour') + '</span></div>';
+      let c = ''; for (let i = 0; i < Math.min(d, 40); i++) c += '<i class="' + (i < l ? 'ok' : 'ko') + '"></i>';
+      const quoi = { devis: 'depuis le dernier échange sur le devis', affaire: 'sans contact', commande: a.statut_commande === 'Awaiting Approval' ? 'en attente de validation' : 'commande à finaliser' }[a.etape] || '';
+      return '<div class="jrow"><div class="cases" aria-hidden="true">' + c + '</div><span class="jl"><b>' + plur(d, 'jour') + '</b> ' + quoi + ' · délai ' + l + ' j' + (d > l ? ' · <b class="r">' + (d - l) + ' j de retard</b>' : '') + '</span></div>';
+    }
+    const LEVIERS = {
+      'Devis sans suite': 'Relance à deux : <b>appel du chef des ventes</b> ou geste commercial sur le devis.',
+      'Sans contact': 'Reprendre la main : <b>invitation à l\'essai</b> ou nouvelle proposition.',
+      'En attente de validation': 'C\'est à vous : <b>valider le bon de commande</b> dans BACS.',
+      'Commande à finaliser': '<b>Finaliser le bon de commande</b> avec le vendeur.',
+      'Commande refusée': 'Revoir <b>le financement ou les conditions</b> avant de relancer.' };
+    const PILL = { 'Devis sans suite': 'rouge', 'Sans contact': 'orange', 'En attente de validation': 'orange', 'Commande à finaliser': 'bleu', 'Commande refusée': 'rouge' };
+
+    // ------------------------------------------------------------------ écran VENDEUR
+    function ecranVendeur() {
+      const d = S.data['v:moi'];
+      if (d === undefined) { charger('v:moi', () => rpc('act_vendeur', {})); return charge('Votre journée se prépare…'); }
+      if (d && d.__err) return erreur(d);
+      if (!d) return '<div class="vide">Aucune donnée.</div>';
+      const m = d.mois || {}, aff = d.affaires || [], bloq = aff.filter(a => a.etat === 'bloquee');
+      const reste = Math.max(0, (Number(m.objectif) || 0) - (Number(m.cdes) || 0));
+      const pj = projection(m), now = auj();
+      let titre = prenom(d.user) + ', ';
+      titre += bloq.length ? '<b>' + plur(bloq.length, 'affaire attend', 'affaires attendent') + '</b> une relance' : 'aucune affaire ne vous attend en retard';
+      titre += m.objectif > 0 ? (reste > 0 ? ' et vous êtes à <b>' + plur(reste, 'commande') + '</b> de votre objectif.' : ' et votre objectif du mois est <b>atteint</b>.') : '.';
+      // Journée : RDV du jour, leads à contacter, relances en retard (les plus grosses)
+      const items = [];
+      (d.rdv || []).forEach(r => items.push({ t: heure(r.debut), tri: r.debut, retard: false, titre: (r.type || 'RDV') + (r.client ? ' · ' + r.client : ''), sous: r.traite ? 'Compte rendu fait' : (new Date(r.debut) < now ? 'Compte rendu à faire' : 'À venir'), pill: ['vert', 'RDV'], client: r.id_client }));
+      (d.leads || []).slice(0, 4).forEach(l => items.push({ t: 'Lead', tri: '0', retard: true, titre: 'Contacter ' + l.client, sous: l.source + ' · reçu le ' + new Date(l.recu_le).toLocaleDateString('fr-FR'), pill: ['rouge', 'Jamais joint'], client: l.id_client }));
+      bloq.slice().sort((a, b) => (Number(b.montant) || 0) - (Number(a.montant) || 0)).slice(0, 5).forEach(a => items.push({ t: 'Retard', tri: '1', retard: true, titre: 'Relancer ' + a.client, sous: a.motif + (a.vehicule ? ' · ' + a.vehicule : '') + (a.montant ? ' · ' + eur(a.montant) : ''), pill: ['rouge', a.jours + ' j'], client: a.id_client }));
+      const jour = JOURS[now.getDay()] + ' ' + now.getDate() + ' ' + MOIS[now.getMonth()];
+      setTimeout(() => {
+        const g1 = __anchor.querySelector('[data-g="anneau"]'); if (g1) g1.__d = { fait: Number(m.cdes) || 0, cible: Number(m.objectif) || 0, proj: pj, sous: 'commandes', label: m.cdes + ' commandes sur ' + m.objectif };
+        const g2 = __anchor.querySelector('[data-g="carte"]'); if (g2) g2.__d = aff;
+      });
+      return '<div class="rail"><h1>Ma journée</h1><span class="badge">' + esc(d.user && d.user.site || '') + '</span></div>' +
+        '<div class="band"><div><div class="q">' + esc(jour) + '</div><h2>' + titre + '</h2>' +
+        '<div class="pouls">' +
+        '<div><div class="n">' + nf(m.cdes) + (m.objectif > 0 ? ' / ' + nf(m.objectif) : '') + '</div><div class="l">commandes du mois</div></div>' +
+        '<div><div class="n' + (bloq.length ? ' baisse' : '') + '">' + bloq.length + '</div><div class="l">relances en retard</div></div>' +
+        '<div><div class="n">' + aff.filter(a => a.etat !== 'froide').length + '</div><div class="l">affaires actives</div></div>' +
+        '<div><div class="n">' + nf(m.jours_restants) + '</div><div class="l">jours ouvrés restants</div></div>' +
+        '</div></div>' + graph('anneau', 'anneau') + '</div>' +
+        '<div class="cols"><div class="card"><div class="ch"><h3>La carte de mes affaires</h3><span>Bulle = une affaire · taille = montant</span></div>' +
+        (aff.length ? graph('carte') + lecture('Dans la zone rouge, l\'affaire a dépassé son délai de relance (devis et commande 3 j, affaire sans devis 7 j). Les bulles pâles n\'ont plus bougé depuis plus de 21 jours.') : '<div class="vide">Aucune affaire ouverte sur les 90 derniers jours.</div>') + '</div>' +
+        '<div class="card"><div class="ch"><h3>Aujourd\'hui</h3><span>' + plur(items.length, 'action') + '</span></div>' +
+        (items.length ? '<div>' + items.map(i => '<div class="tl' + (i.retard ? ' retard' : '') + '"><time>' + esc(i.t) + '</time><div class="pin"><i></i></div><div class="tx">' +
+          (i.client ? '<button class="lien" data-fiche="' + esc(i.client) + '"><b>' + esc(i.titre) + '</b></button>' : '<b>' + esc(i.titre) + '</b>') +
+          '<small>' + esc(i.sous) + '</small></div><span class="pill ' + i.pill[0] + '">' + esc(i.pill[1]) + '</span></div>').join('') + '</div>' : '<div class="vide">Rien d\'urgent aujourd\'hui.</div>') +
+        (d.leads_n > 4 ? '<div class="plus">+ ' + plur(d.leads_n - 4, 'autre lead') + ' à contacter dans le lead management.</div>' : '') +
+        '<div class="note">Cette semaine : ' + nf(d.semaine && d.semaine.appels) + ' appels, ' + nf(d.semaine && d.semaine.rdv) + ' RDV, ' + nf(d.semaine && d.semaine.devis) + ' devis, ' + nf(d.semaine && d.semaine.cdes) + ' commandes.</div></div></div>';
+    }
+
+    // ------------------------------------------------------------------ écran CHEF DES VENTES
+    function choisirVendeur(id) { S.vendeur = String(id); rendre(); }
+    function ecranChef() {
+      const site = siteUnique();
+      if (site == null) return '<div class="vide">Aucun site dans votre périmètre.</div>';
+      const per = S.periode.chef, b = bornes(per);
+      const cle = 'c:' + site + ':' + b.deb + ':' + b.fin;
+      const d = S.data[cle];
+      const rail = '<div class="rail"><h1>Point du matin</h1><span class="badge">' + esc(nomSite(site)) + '</span><div class="droite">' +
+        seg('chef', [['jour', 'Aujourd\'hui'], ['hier', 'Hier'], ['7j', '7 jours'], ['mois', 'Ce mois']], per) +
+        '<label class="plage">Du <input type="date" data-plage="deb" value="' + esc(b.deb) + '"> au <input type="date" data-plage="fin" value="' + esc(b.fin) + '"></label></div></div>';
+      if (d === undefined) { charger(cle, () => rpc('act_chef', { p_id_site: site, p_deb: b.deb, p_fin: b.fin })); return rail + charge('Préparation du point du matin…'); }
+      if (d && d.__err) return rail + erreur(d);
+      const eq = (d.equipe || []).filter(p => p.role === 4 || p.cdes > 0 || p.ouvertes > 0);
+      if (!eq.length) return rail + '<div class="card"><div class="vide">Personne à suivre sur ce site.</div></div>';
+      if (!S.vendeur || !eq.some(p => String(p.id) === String(S.vendeur))) S.vendeur = String(eq[0].id);
+      const v = eq.find(p => String(p.id) === String(S.vendeur));
+      const cv = 'v:' + v.id;
+      const dv = S.data[cv];
+      if (dv === undefined) charger(cv, () => rpc('act_vendeur', { p_id_user: Number(v.id) }));
+      // moyenne équipe (vendeurs seulement)
+      const vend = eq.filter(p => p.role === 4);
+      const moy = k => vend.length ? vend.reduce((a, p) => a + (Number(p[k]) || 0), 0) / vend.length : 0;
+      const atteinte = p => p.objectif > 0 ? Math.round(p.cdes / p.objectif * 100) : 0;
+      setTimeout(() => {
+        const q = __anchor.querySelector('[data-g="quad"]'); if (q) q.__d = eq.map(p => ({ id: p.id, ini: initiales(p), nom: nomCourt(p), x: atteinte(p), objectif: p.objectif, bloquees: p.bloquees }));
+        const e = __anchor.querySelector('[data-g="ecart"]'); if (e) e.__d = [['Appels', 'appels'], ['RDV tenus', 'rdv'], ['Devis', 'devis'], ['Commandes', 'cdes'], ['Leads joints', 'leads_contactes']].map(x => ({ lib: x[0], v: Number(v[x[1]]) || 0, moy: moy(x[1]) }));
+        const a = __anchor.querySelector('[data-g="anneau"]'); if (a) a.__d = { fait: v.cdes, cible: v.objectif, proj: per === 'mois' && dv && dv.mois ? projection(dv.mois) : null, sous: prenom(v) + ' · ' + b.lib, label: v.cdes + ' commandes' };
+      });
+      const team = '<div class="team" role="tablist" aria-label="Vendeur">' + eq.map(p => '<button class="who" role="tab" data-vendeur="' + p.id + '" aria-selected="' + (String(p.id) === String(S.vendeur)) + '"><span class="av">' + esc(initiales(p)) + '</span><span><b>' + esc(nomCourt(p)) + '</b><small' + (p.bloquees ? ' class="r"' : '') + '>' + (p.bloquees ? plur(p.bloquees, 'bloquée', 'bloquées') : 'rien de bloqué') + '</small></span></button>').join('') + '</div>';
+      const reste = Math.max(0, v.objectif - v.cdes);
+      const band = '<div class="band"><div><div class="q">' + esc(prenom(v) + ' ' + v.nom) + ' · ' + esc(b.lib) + '</div><h2>' +
+        (v.bloquees ? '<b>' + plur(v.bloquees, 'affaire bloque', 'affaires bloquent') + '</b>, <b>' + keur(v.valeur_bloquee) + '</b> en jeu.' : 'Aucune affaire bloquée.') +
+        (v.objectif > 0 ? (reste > 0 ? ' Il manque <b>' + plur(reste, 'commande') + '</b> pour l\'objectif.' : ' Objectif <b>atteint</b>.') : '') + '</h2>' +
+        '<div class="pouls"><div><div class="n">' + nf(v.cdes) + (v.objectif > 0 ? ' / ' + nf(v.objectif) : '') + '</div><div class="l">commandes · équipe ' + nf(eq.reduce((a, p) => a + p.cdes, 0)) + '</div></div>' +
+        '<div><div class="n">' + nf(v.devis_ouverts) + '</div><div class="l">devis en cours</div></div>' +
+        '<div><div class="n">' + pctTxt(v.leads_contactes, v.leads) + '</div><div class="l">leads joints (' + nf(v.leads_contactes) + ' / ' + nf(v.leads) + ')</div></div></div></div>' +
+        graph('anneau', 'anneau') + '</div>';
+      let liste;
+      if (dv === undefined) liste = charge('Chargement des affaires…');
+      else if (dv && dv.__err) liste = erreur(dv);
+      else {
+        const bl = (dv.affaires || []).filter(a => a.etat === 'bloquee').sort((a, b2) => (Number(b2.montant) || 0) - (Number(a.montant) || 0));
+        const vis = bl.slice(0, 6);
+        liste = vis.length ? vis.map(a => '<div class="deal" data-aff="' + esc(a.id_affaire) + '">' +
+          '<div><h4><button class="lien" data-fiche="' + esc(a.id_client) + '">' + esc(a.client) + '</button></h4><div class="car">' + esc([a.vehicule, a.etape === 'devis' ? 'devis' : a.etape === 'commande' ? 'bon de commande' : 'affaire sans devis', 'ouverte le ' + new Date(a.ouverte_le).toLocaleDateString('fr-FR')].filter(Boolean).join(' · ')) + '</div></div>' +
+          '<div class="val"><b>' + (a.montant ? eur(a.montant) : '—') + '</b><span class="pill ' + (PILL[a.motif] || 'orange') + '">' + esc(a.motif) + '</span></div>' +
+          '<div class="jours">' + cases(a) + '</div>' +
+          '<div class="levier"><p>' + (LEVIERS[a.motif] || '') + '</p><button class="btn" data-fiche="' + esc(a.id_client) + '">Ouvrir la fiche</button><button class="btn sec" data-note="' + esc(a.id_affaire) + '">Note pour ' + esc(prenom(v)) + '</button></div>' +
+          '<div class="notebox" data-notebox="' + esc(a.id_affaire) + '" hidden><textarea aria-label="Note pour ' + esc(prenom(v)) + '">' + esc(a.client + ' : ') + '</textarea><div class="act"><button class="btn" data-envoyer="' + esc(a.id_affaire) + '" data-client="' + esc(a.id_client) + '">Envoyer à ' + esc(prenom(v)) + '</button><button class="btn sec" data-annuler="' + esc(a.id_affaire) + '">Annuler</button><span class="etat"></span></div></div>' +
+          '</div>').join('') + (bl.length > 6 ? '<div class="plus">+ ' + plur(bl.length - 6, 'autre affaire bloquée', 'autres affaires bloquées') + ', de plus petite valeur.</div>' : '')
+          : '<div class="vide">Aucune affaire bloquée pour ' + esc(prenom(v)) + '.</div>';
+      }
+      const mins = eq.filter(p => p.objectif > 0 && atteinte(p) < 80 && p.bloquees > 0).map(p => prenom(p));
+      return rail + team + band +
+        '<div class="cols"><div class="card"><div class="ch"><h3>Affaires qui bloquent</h3><span>Par valeur en jeu · état actuel</span></div>' + liste +
+        '<div class="note">Bloquée : délai de relance dépassé (devis et bon de commande 3 j, affaire sans devis 7 j, validation 2 j), commande refusée. Au-delà de 21 jours sans activité, l\'affaire est considérée comme froide.</div></div>' +
+        '<div class="pile"><div class="card"><div class="ch"><h3>L\'équipe en un regard</h3><span>Objectif × affaires bloquées</span></div>' + graph('quad') +
+        lecture(mins.length ? 'À accompagner en priorité : <b>' + esc(mins.join(', ')) + '</b>, en retard sur l\'objectif avec des affaires qui coincent.' : 'Personne n\'est à la fois en retard sur l\'objectif et bloqué sur des affaires.') + '</div>' +
+        '<div class="card"><div class="ch"><h3>' + esc(prenom(v)) + ' sur la période</h3><span>Écart à la moyenne des vendeurs</span></div>' + graph('ecart') + '</div></div></div>';
+    }
+
+    // ------------------------------------------------------------------ écran SITE
+    const MOSAIQUE = { 'Refus de financement': ['var(--chaud-bg)', 'var(--m-rouge)'], 'Hors budget': ['var(--alerte-bg)', 'var(--m-orange)'], 'Acheté ailleurs': ['var(--calme-bg)', 'var(--m-bleu)'], 'Délai de livraison': ['var(--calme-bg)', 'var(--ink-2)'], 'Produit indisponible': ['var(--calme-bg)', 'var(--ink-2)'], 'Autre ou non précisé': ['var(--ground)', 'var(--ink-3)'] };
+    function ecranSite() {
+      const bus1 = siteBus(); const sites = bus1 != null && S.ctx.sites.some(s => Number(s.id) === Number(bus1)) ? [Number(bus1)] : null;
+      const per = S.periode.site, b = bornes(per);
+      const k1 = 's:' + (sites || 'tout') + ':' + b.deb + ':' + b.fin, k2 = 'e:' + (sites || 'tout') + ':' + b.deb + ':' + b.fin;
+      const titre = sites ? nomSite(sites[0]) : (S.ctx.sites.length === 1 ? S.ctx.sites[0].nom : 'Tout le périmètre');
+      const rail = '<div class="rail"><h1>' + esc(titre) + '</h1><span class="badge">Directeur de site</span><div class="droite">' +
+        seg('site', [['mois', 'Ce mois'], ['mois_prec', 'Mois dernier'], ['3mois', '3 mois'], ['annee', 'Année']], per) + '</div></div>';
+      const d = S.data[k1], e = S.data[k2];
+      if (d === undefined) charger(k1, () => rpc('act_site', { p_sites: sites, p_deb: b.deb, p_fin: b.fin }));
+      if (e === undefined) charger(k2, () => rpc('act_entonnoir', { p_sites: sites, p_deb: b.deb, p_fin: b.fin }));
+      if (d === undefined || e === undefined) return rail + charge('Calcul du mois…');
+      if (d.__err) return rail + erreur(d);
+      if (e.__err) return rail + erreur(e);
+      const m = d.mois || {}, t = (e && e.total) || { affaires: 0, devis: 0, gagnees: 0 }, L = d.entonnoir || {}, P = d.precedent || {};
+      const pj = projection(m), enCours = per === 'mois';
+      const tr = pct(t.gagnees, t.affaires);
+      const fuite = (t.affaires - t.devis) >= (t.devis - t.gagnees) ? 'avant le devis' : 'entre le devis et la commande';
+      setTimeout(() => {
+        const a = __anchor.querySelector('[data-g="anneau"]'); if (a) a.__d = { fait: Number(m.cdes) || 0, cible: Number(m.objectif) || 0, proj: pj, sous: 'commandes · ' + MOIS[new Date(b.fin).getMonth()], label: m.cdes + ' commandes' };
+        const f = __anchor.querySelector('[data-g="flux"]'); if (f) f.__d = { etapes: [['Affaires créées', t.affaires], ['Devis remis', t.devis], ['Commandes', t.gagnees]], pertes: ['sans devis', 'devis non signés'] };
+      });
+      const h2 = enCours && m.objectif > 0
+        ? 'Le mois finira à <b>' + plur(pj, 'commande') + ' sur ' + nf(m.objectif) + '</b> si le rythme se maintient. Les affaires se perdent surtout <b>' + fuite + '</b>.'
+        : '<b>' + plur(Number(d.cdes) || 0, 'commande') + '</b> sur la période. Les affaires se perdent surtout <b>' + fuite + '</b>.';
+      const motifs0 = d.motifs || [];
+      const totM = motifs0.reduce((a, x) => a + x.n, 0);
+      const autreN = motifs0.filter(x => x.motif === 'Autre' || x.n / totM < .025).reduce((a, x) => a + x.n, 0);
+      const motifs = motifs0.filter(x => x.motif !== 'Autre' && x.n / totM >= .025).concat(autreN ? [{ motif: 'Autre ou non précisé', n: autreN }] : []);
+      const precis = totM ? Math.round((totM - (motifs0.find(x => x.motif === 'Autre') || { n: 0 }).n) / totM * 100) : 0;
+      const sources = (d.sources || []).slice(0, 6);
+      const ev = (e.par_vendeur || []).filter(x => x.affaires >= 3);
+      const cdesV = {}; (d.vendeurs || []).forEach(x => { cdesV[x.id] = x.cdes; });
+      return rail +
+        '<div class="band"><div><div class="q">' + esc(b.lib) + '</div><h2>' + h2 + '</h2><div class="pouls">' +
+        '<div><div class="n">' + (tr == null ? '—' : tr + ' %') + '</div><div class="l">affaires transformées</div></div>' +
+        '<div><div class="n">' + pctTxt(d.fi, d.cdes) + '</div><div class="l">ventes financées par nos soins</div></div>' +
+        '<div><div class="n">' + (L.delai_cde != null ? L.delai_cde + ' j' : '—') + '</div><div class="l">délai lead → commande</div></div>' +
+        '</div></div>' + graph('anneau', 'anneau') + '</div>' +
+        '<div class="card"><div class="ch"><h3>Le parcours des ' + plur(t.affaires, 'affaire créée', 'affaires créées') + '</h3><span>Ce qui avance, ce qui tombe à chaque étape</span></div>' +
+        (t.affaires ? graph('flux') : '<div class="vide">Aucune affaire créée sur la période.</div>') + '</div>' +
+        '<div class="cols eq"><div class="card"><div class="ch"><h3>Pourquoi on perd</h3><span>Affaires abandonnées · 90 jours</span></div>' +
+        (totM ? '<div class="mosaic">' + motifs.slice(0, 6).map(x => { const c = MOSAIQUE[x.motif] || ['var(--calme-bg)', 'var(--ink-2)']; return '<div style="flex:' + x.n + ' 1 0;background:' + c[0] + ';color:' + c[1] + '"><b>' + Math.round(x.n / totM * 100) + ' %</b><span>' + esc(x.motif) + '</span></div>'; }).join('') + '</div>' +
+          '<div class="note">Motif d\'abandon saisi dans BACS sur ' + plur(totM, 'affaire') + ' (doublons exclus). Seules ' + precis + ' % portent un motif précis : un levier de qualité de saisie.</div>' : '<div class="vide">Aucun motif d\'abandon saisi sur 90 jours.</div>') + '</div>' +
+        '<div class="card"><div class="ch"><h3>Leads web : ce que donne chaque source</h3><span>1 point = 2 % des leads · part obtenant un RDV</span></div>' +
+        (sources.length ? '<div class="dots">' + sources.map(s => { const p2 = pct(s.rdv, s.n) || 0; let g = ''; for (let i = 0; i < 50; i++) g += '<i' + (i < Math.round(p2 / 2) ? ' class="f"' : '') + '></i>'; return '<div class="dotrow"><span>' + esc(s.source) + '<small>' + plur(s.n, 'lead') + '</small></span><div class="g">' + g + '</div><b>' + p2 + ' %</b></div>'; }).join('') + '</div>' : '<div class="vide">Pas assez de leads sur la période.</div>') +
+        '<div class="note">' + nf(L.recus) + ' leads reçus, ' + pctTxt(L.contactes, L.recus) + ' joints' + (P.recus ? ' (période précédente : ' + nf(P.recus) + ' reçus)' : '') + '.</div></div></div>' +
+        '<div class="cols"><div class="card"><div class="ch"><h3>Les vendeurs côte à côte</h3><span>' + esc(b.lib) + '</span></div>' +
+        (ev.length ? '<div class="scroll"><table><thead><tr><th>Vendeur</th><th>Affaires</th><th>Devis</th><th>Gagnées</th><th>Transformation</th><th>Commandes</th></tr></thead><tbody>' +
+          ev.map(x => { const p3 = pct(x.gagnees, x.affaires) || 0; return '<tr><td><b>' + esc(x.nom) + '</b></td><td>' + nf(x.affaires) + '</td><td>' + nf(x.devis) + '</td><td>' + nf(x.gagnees) + '</td><td><b>' + p3 + ' %</b><span class="mini"><i style="width:' + Math.min(100, p3 * 2) + '%"></i></span></td><td>' + nf(cdesV[x.id_user] != null ? cdesV[x.id_user] : x.gagnees) + '</td></tr>'; }).join('') +
+          '</tbody></table></div>' : '<div class="vide">Pas d\'activité vendeur sur la période.</div>') + '</div>' +
+        '<div class="card"><div class="ch"><h3>Anatomie d\'une vente</h3><span class="pill attente">À brancher · ventes DMS</span></div>' +
+        '<div class="vide">La marge par vente (véhicule, financement, services, remise) s\'affichera ici dès que le flux des ventes du DMS sera validé.</div>' +
+        '<div class="kpis"><div><div class="n">' + nf(d.cdes) + '</div><div class="l">commandes sur la période</div></div><div><div class="n">' + nf(d.fi) + '</div><div class="l">avec financement</div></div></div></div></div>';
+    }
+    function allerSite(id) {
+      const b = bus(); try { if (b && b.setSiteId) b.setSiteId(Number(id)); } catch (e) { }
+      S.ecran = 'site'; rendre();
+    }
+
+    // ------------------------------------------------------------------ écran GROUPE
+    function ecranGroupe() {
+      const per = S.periode.groupe, b = bornes(per);
+      const k1 = 'g:' + b.deb + ':' + b.fin, k2 = 'e:tout:' + b.deb + ':' + b.fin;
+      const rail = '<div class="rail"><h1>' + esc(S.ctx.sites.length > 3 ? 'Groupe' : 'Mes sites') + '</h1><span class="badge">Direction</span><div class="droite">' +
+        seg('groupe', [['mois', 'Ce mois'], ['mois_prec', 'Mois dernier'], ['3mois', '3 mois'], ['annee', 'Année']], per) + '</div></div>';
+      const d = S.data[k1], e = S.data[k2];
+      if (d === undefined) charger(k1, () => rpc('act_groupe', { p_deb: b.deb, p_fin: b.fin }));
+      if (e === undefined) charger(k2, () => rpc('act_entonnoir', { p_sites: null, p_deb: b.deb, p_fin: b.fin }));
+      if (d === undefined || e === undefined) return rail + charge('Consolidation des sites…');
+      if (d.__err) return rail + erreur(d);
+      if (e.__err) return rail + erreur(e);
+      const es = {}; (e.par_site || []).forEach(x => { es[x.id_site] = x; });
+      const S2 = (d.sites || []).filter(s => s.cdes > 0 || s.leads > 0 || (es[s.id] && es[s.id].affaires > 0)).map(s => {
+        const x = es[s.id] || { affaires: 0, gagnees: 0 };
+        return Object.assign({}, s, { aff: x.affaires, gag: x.gagnees, tr: pct(x.gagnees, x.affaires), fip: pct(s.fi, s.cdes) });
+      });
+      if (!S2.length) return rail + '<div class="card"><div class="vide">Aucune activité sur la période.</div></div>';
+      const tot = S2.reduce((a, s) => ({ cdes: a.cdes + s.cdes, fi: a.fi + s.fi, obj: a.obj + Number(s.objectif_mois || 0), cm: a.cm + s.cdes_mois, bloq: a.bloq + s.bloquees, val: a.val + Number(s.valeur_bloquee || 0) }), { cdes: 0, fi: 0, obj: 0, cm: 0, bloq: 0, val: 0 });
+      const T = (e.total) || { affaires: 0, gagnees: 0 };
+      const moyX = pct(T.gagnees, T.affaires) || 0, moyY = pct(tot.fi, tot.cdes) || 0;
+      const pts = S2.filter(s => s.aff >= 5 && s.cdes >= 3).map(s => ({ id: s.id, nom: s.nom, v: s.cdes, x: s.tr || 0, y: s.fip || 0 }));
+      const avecObj = S2.filter(s => Number(s.objectif_mois) > 0), objComplet = avecObj.length === S2.length;
+      const mois = d.mois || {}, pjG = mois.jours_ecoules ? Math.round(tot.cm * mois.jours_total / mois.jours_ecoules) : null;
+      // Signaux
+      const sig = [];
+      const avecTr = pts.slice().sort((a, b2) => a.x - b2.x);
+      if (avecTr.length >= 3) {
+        const bas = avecTr[0], haut = avecTr[avecTr.length - 1];
+        if (bas.x < moyX - 3) sig.push(['!', 'rouge', bas.nom + ' : ' + bas.x + ' % des affaires transformées', 'Contre ' + moyX + ' % en moyenne sur le groupe.']);
+        if (haut.x > moyX + 3) sig.push(['✓', 'vert', haut.nom + ' : ' + haut.x + ' % des affaires transformées', 'Le meilleur taux du groupe : une méthode à regarder de près.']);
+        const fiBas = pts.slice().sort((a, b2) => a.y - b2.y)[0];
+        if (fiBas && fiBas.y < moyY - 8) sig.push(['€', 'orange', fiBas.nom + ' : ' + fiBas.y + ' % de ventes financées', 'Contre ' + moyY + ' % en moyenne.']);
+      }
+      const bq = S2.slice().sort((a, b2) => b2.valeur_bloquee - a.valeur_bloquee)[0];
+      if (bq && bq.bloquees > 0) sig.push(['⏱', 'orange', bq.nom + ' : ' + plur(bq.bloquees, 'affaire bloquée', 'affaires bloquées'), keur(bq.valeur_bloquee) + ' en jeu, relances en retard.']);
+      const sansObj = S2.filter(s => !(Number(s.objectif_mois) > 0)).length;
+      // Série hebdomadaire du groupe
+      const nbS = (S2[0].semaines || []).length, lundi = new Date(); lundi.setDate(lundi.getDate() - ((lundi.getDay() + 6) % 7));
+      const serie = []; for (let i = 0; i < nbS; i++) { const dd = plus(lundi, -7 * (nbS - 1 - i)); serie.push({ lib: dd.getDate() + '/' + (dd.getMonth() + 1), v: S2.reduce((a, s) => a + (Number((s.semaines || [])[i]) || 0), 0) }); }
+      setTimeout(() => {
+        const a = __anchor.querySelector('[data-g="anneau"]'); if (a) a.__d = { fait: tot.cm, cible: objComplet ? tot.obj : 0, proj: objComplet ? pjG : null, sous: 'commandes du mois', label: tot.cm + ' commandes', vide: objComplet ? null : (avecObj.length ? 'objectif : ' + plur(avecObj.length, 'site') + ' sur ' + S2.length : null) };
+        const c = __anchor.querySelector('[data-g="constellation"]'); if (c) c.__d = { points: pts, moyX, moyY };
+        const r = __anchor.querySelector('[data-g="aire"]'); if (r) r.__d = serie;
+        __anchor.querySelectorAll('[data-g="spark"]').forEach(x => { const s = S2.find(y => String(y.id) === x.getAttribute('data-site')); x.__d = s ? s.semaines : []; });
+      });
+      const meilleur = avecTr.length ? avecTr[avecTr.length - 1] : null, pire = avecTr.length ? avecTr[0] : null;
+      return rail +
+        '<div class="band"><div><div class="q">' + esc(b.lib) + ' · ' + plur(S2.length, 'site actif', 'sites actifs') + '</div><h2><b>' + plur(tot.cdes, 'commande') + '</b>, ' + (moyX ? '<b>' + moyX + ' %</b> des affaires transformées' : '') +
+        (meilleur && pire && meilleur !== pire ? ', de <b>' + pire.x + ' %</b> à ' + esc(pire.nom) + ' à <b>' + meilleur.x + ' %</b> à ' + esc(meilleur.nom) : '') + '.</h2>' +
+        '<div class="pouls"><div><div class="n">' + pctTxt(tot.fi, tot.cdes) + '</div><div class="l">ventes financées par nos soins</div></div>' +
+        '<div><div class="n">' + nf(tot.bloq) + '</div><div class="l">affaires bloquées · ' + keur(tot.val) + '</div></div>' +
+        (pjG != null && per === 'mois' ? '<div><div class="n">' + nf(pjG) + '</div><div class="l">commandes projetées fin de mois</div></div>' : '') + '</div></div>' +
+        graph('anneau', 'anneau') + '</div>' +
+        '<div class="cols"><div class="card"><div class="ch"><h3>Transformation et financement</h3><span>Bulle = commandes · clic pour ouvrir le site</span></div>' +
+        (pts.length >= 2 ? graph('constellation') + lecture('En vert : les sites au-dessus de la moyenne du groupe sur les deux axes. Plus la bulle est à droite, plus les affaires deviennent des commandes ; plus elle est haute, plus les ventes passent par notre financement.') : '<div class="vide">Pas assez de sites actifs pour les comparer.</div>') + '</div>' +
+        '<div class="card"><div class="ch"><h3>Ce qui mérite une question</h3><span>Détecté automatiquement</span></div>' +
+        (sig.length ? '<div>' + sig.map(x => '<div class="signal"><span class="lv" style="background:var(--' + (x[1] === 'rouge' ? 'chaud-bg' : x[1] === 'vert' ? 'ok-bg' : 'alerte-bg') + ');color:var(--m-' + x[1] + ')">' + x[0] + '</span><p>' + esc(x[2]) + '<small>' + esc(x[3]) + '</small></p></div>').join('') + '</div>' : '<div class="vide">Aucun écart marquant.</div>') +
+        (sansObj ? '<div class="note">' + plur(sansObj, 'site n\'a', 'sites n\'ont') + ' pas d\'objectif saisi ce mois-ci.</div>' : '') + '</div></div>' +
+        '<div class="sites">' + S2.map(s => '<div class="card site" data-site-go="' + s.id + '"><div class="top"><h4>' + esc(s.nom) + '</h4>' +
+          (s.objectif_mois > 0 ? '<span class="pill ' + (s.cdes_mois / s.objectif_mois >= (mois.jours_ecoules / mois.jours_total) * .95 ? 'vert">Dans l\'objectif' : 'orange">En retard') + '</span>' : '<span class="pill bleu">' + esc(s.reseau || '') + '</span>') + '</div>' +
+          '<div class="chart" data-g="spark" data-site="' + s.id + '"></div><div class="note" style="margin-top:0">Commandes par semaine, 12 semaines</div>' +
+          '<dl><div><dt>Commandes</dt><dd>' + nf(s.cdes) + (s.objectif > 0 ? ' / ' + nf(s.objectif) : '') + '</dd></div><div><dt>Transfo</dt><dd>' + (s.tr == null ? '—' : s.tr + ' %') + '</dd></div><div><dt>Bloquées</dt><dd>' + nf(s.bloquees) + '</dd></div></dl></div>').join('') + '</div>' +
+        '<div class="card"><div class="ch"><h3>Commandes du groupe, 12 dernières semaines</h3><span>La marge s\'ajoutera avec le flux des ventes DMS</span></div>' + graph('aire') + '</div>';
+    }
+
+    // ------------------------------------------------------------------ rendu
+    const LIB_ECRAN = { vendeur: 'Ma journée', chef: 'Point du matin', site: 'Site', groupe: 'Groupe' };
+    function rendre() {
+      poserStyle();
+      let corps;
+      if (S.err) corps = '<div class="erreur">' + esc(S.err) + '</div>';
+      else if (!S.ctx) corps = charge();
+      else if (!(S.ctx.ecrans || []).length) corps = '<div class="card"><div class="vide">Le suivi d\'activité concerne les équipes commerciales. Votre poste de travail reste votre point d\'entrée.</div></div>';
+      else {
+        if (!S.ecran || S.ctx.ecrans.indexOf(S.ecran) < 0) S.ecran = S.ctx.ecrans[0];
+        const onglets = S.ctx.ecrans.length > 1 ? '<div>' + seg('ecran', S.ctx.ecrans.map(e => [e, LIB_ECRAN[e]]), S.ecran).replace('class="seg"', 'class="seg ecrans"') + '</div>' : '';
+        const f = { vendeur: ecranVendeur, chef: ecranChef, site: ecranSite, groupe: ecranGroupe }[S.ecran];
+        corps = onglets + f();
+      }
+      __anchor.innerHTML = '<div class="aw">' + corps + '</div>';
+      lier();
+      setTimeout(dessiner, 0);
+    }
+
+    function lier() {
+      __anchor.querySelectorAll('[data-seg]').forEach(g => g.addEventListener('click', ev => {
+        const b = ev.target.closest('button'); if (!b) return;
+        const nom = g.getAttribute('data-seg'), v = b.getAttribute('data-v');
+        if (nom === 'ecran') S.ecran = v; else { S.periode[nom] = v; if (nom === 'chef') S.plage = null; }
+        rendre();
+      }));
+      __anchor.querySelectorAll('[data-plage]').forEach(inp => inp.addEventListener('change', () => {
+        const deb = __anchor.querySelector('[data-plage="deb"]').value, fin = __anchor.querySelector('[data-plage="fin"]').value;
+        if (!deb || !fin || deb > fin) return;
+        S.plage = { deb, fin }; S.periode.chef = 'libre'; rendre();
+      }));
+      __anchor.querySelectorAll('[data-vendeur]').forEach(b => b.addEventListener('click', () => choisirVendeur(b.getAttribute('data-vendeur'))));
+      __anchor.querySelectorAll('[data-fiche]').forEach(b => b.addEventListener('click', () => ouvrirFiche(b.getAttribute('data-fiche'))));
+      __anchor.querySelectorAll('[data-site-go]').forEach(c => c.addEventListener('click', () => allerSite(c.getAttribute('data-site-go'))));
+      __anchor.querySelectorAll('[data-note]').forEach(b => b.addEventListener('click', () => {
+        const box = __anchor.querySelector('[data-notebox="' + b.getAttribute('data-note') + '"]'); if (!box) return;
+        box.hidden = !box.hidden; if (!box.hidden) { const t = box.querySelector('textarea'); t.focus(); t.setSelectionRange(t.value.length, t.value.length); }
+      }));
+      __anchor.querySelectorAll('[data-annuler]').forEach(b => b.addEventListener('click', () => { const box = __anchor.querySelector('[data-notebox="' + b.getAttribute('data-annuler') + '"]'); if (box) box.hidden = true; }));
+      __anchor.querySelectorAll('[data-envoyer]').forEach(b => b.addEventListener('click', async () => {
+        const box = b.closest('.notebox'), t = box.querySelector('textarea'), etat = box.querySelector('.etat');
+        const msg = (t.value || '').trim(); if (!msg) return;
+        b.disabled = true; etat.className = 'etat'; etat.textContent = 'Envoi…';
+        try { await envoyerNote(S.vendeur, b.getAttribute('data-client'), msg); etat.className = 'etat ok-msg'; etat.textContent = 'Note envoyée'; t.disabled = true; }
+        catch (e) { etat.className = 'etat ko-msg'; etat.textContent = 'Échec : ' + (e.message || e); b.disabled = false; }
+      }));
+    }
+
+    // Changement de site dans la barre du haut : on recharge l'écran courant.
+    (function lierBus(n) {
+      const b = bus();
+      if (!b || !b.onChange) { if ((n || 0) < 120) setTimeout(() => lierBus((n || 0) + 1), 250); return; }
+      if (window.__act4Bus) return;
+      window.__act4Bus = true;
+      b.onChange(() => { const st = window.__act4; if (st && st.ctx && window.__act4Rendre) { st.vendeur = null; window.__act4Rendre(); } });
+    })();
+    window.__act4Rendre = rendre;
+
+    // ------------------------------------------------------------------ démarrage
+    rendre();
+    try { S.ctx = await rpc('act_contexte', {}); }
+    catch (e) { S.err = 'Le suivi d\'activité n\'a pas pu démarrer : ' + (e.message || e); }
+    if (S.ctx && !S.ctx.sites) S.ctx.sites = [];
+    rendre();
+  }
 });
