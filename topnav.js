@@ -1,5 +1,10 @@
 // ============================================================================
-//  TOP NAV — module One Data (OD.define)  v33 — SÉLECTEUR DE PÉRIMÈTRE
+//  TOP NAV — module One Data (OD.define)  v34 — SÉLECTEUR DE PÉRIMÈTRE
+//  v34 (27/10/2026) : VEILLE BACS commune à toute l'application (voir le
+//  bloc « VEILLE BACS » en fin de module) : bandeau rouge sous la nav quand
+//  BACS est fermé, expiré ou injoignable pour un utilisateur synchronisé,
+//  bouton « Ouvrir BACS », vidage de la file à la réouverture, événement
+//  'od-bacs-etat' pour les modules. Rien sur téléphone.
 //  v33 (26/10/2026) : la nav pose la FAVICON (le O de One Data). Le site
 //  déployé ne sert ni /favicon.ico ni /images/*-favicon-oropra.png : le repli
 //  SPA de l'hébergement répond par la page HTML de redirection vers /fr/, et
@@ -123,7 +128,7 @@ OD.define('topnav', {
   const wwLib = window.wwLib;
   const doc = __anchor.ownerDocument || wwLib.getFrontDocument();
   const ROOT_ID = 'nav-root';
-  const NAV_VER = 36; // <- numéro de version (témoin de chargement)
+  const NAV_VER = 37; // <- numéro de version (témoin de chargement)
 
   // ------------------------------------------------------------- favicon
   // Posée une fois par chargement de l'app ; les balises existantes (icônes
@@ -1843,6 +1848,201 @@ OD.define('topnav', {
       setTimeout(go, 6000);
     })();
   }
+  // ============================ VEILLE BACS (v34) ============================
+  // Une seule surveillance de BACS pour toute l'application (27/10/2026).
+  // Avant, chaque fenêtre (création de client, agenda) pingait l'extension de
+  // son côté, et le vendeur ne découvrait BACS fermé qu'au moment
+  // d'enregistrer. La nav étant présente sur toutes les pages connectées, elle
+  // porte la veille :
+  //   - qui : bacs_veille_etat dit si les gestes de l'utilisateur partent vers
+  //     BACS (site synchronisé + identifiant BACS). Sur téléphone : jamais —
+  //     pas d'extension possible, les gestes attendent en file ;
+  //   - quoi : ping de l'extension sur ce navigateur toutes les 10 s (5 s quand
+  //     BACS est fermé) et au retour sur l'onglet ; battement serveur de
+  //     l'extension (bacs_presence) en second avis ;
+  //   - signal : un bandeau rouge sous la nav « BACS est fermé… » avec
+  //     « Ouvrir BACS » ; à la réouverture, la file d'envoi est vidée et un
+  //     bandeau vert le confirme ;
+  //   - diffusion : événement 'od-bacs-etat' sur la fenêtre (detail : ok,
+  //     precedent, motif, en_attente) et W.__odBacsVeille.etat().
+  // Deux échecs de suite avant de déclarer BACS fermé : une page BACS qui se
+  // recharge ne doit pas faire clignoter le bandeau.
+  (function veilleBacs() {
+    const W = (wwLib.getFrontWindow && wwLib.getFrontWindow()) || window;
+    if (W.__odBacsVeille) return;
+    const URL_BACS = 'https://toyota-france.my.site.com/bacs2/s/';
+    const MOBILE = (function () {
+      try {
+        if (/Android|iPhone|iPad|iPod|Mobile/i.test(W.navigator.userAgent || '')) return true;
+        return !!(W.matchMedia && W.matchMedia('(hover: none) and (pointer: coarse)').matches);
+      } catch (e) { return false; }
+    })();
+    const etat = { requis: null, ok: null, motif: null, vivant: false, en_attente: 0, depuis: null };
+    let echecs = 0, tTour = null, enCours = false, dernierServeur = 0, masqueJusqu = 0, uidVu = null;
+
+    function sbc() {
+      try { return (ctx && ctx.supabase) || (wwLib.wwPlugins && wwLib.wwPlugins.supabase && wwLib.wwPlugins.supabase.instance) || null; }
+      catch (e) { return null; }
+    }
+    function uid() { try { const u = W.oropraUser; return u && u.ID_User != null ? Number(u.ID_User) : null; } catch (e) { return null; } }
+    function demander(action, params, delai) {
+      const g = (W.OD && W.OD.bacs) || (window.OD && window.OD.bacs);
+      if (g && typeof g.demander === 'function') return g.demander(action, params, delai);
+      return new Promise(function (resolve) {
+        const id = 'veille_' + Date.now() + '_' + Math.random().toString(16).slice(2);
+        let t = null;
+        function fin(r) { try { W.removeEventListener('message', ecoute); } catch (e) {} clearTimeout(t); resolve(r); }
+        function ecoute(e) { const m = e.data; if (m && m.__od_bacs_result && m.id === id) fin(m); }
+        W.addEventListener('message', ecoute);
+        t = setTimeout(function () { fin({ ok: false, erreur: 'delai_depasse' }); }, delai || 4000);
+        try { W.postMessage({ __od_bacs: true, id: id, action: action, params: params || {} }, '*'); }
+        catch (e) { fin({ ok: false, erreur: 'extension_absente' }); }
+      });
+    }
+    function noter(ev, det) { try { const c = sbc(); if (c) c.rpc('bacs_veille_noter', { p_evenement: ev, p_detail: det || null }).then(function () {}, function () {}); } catch (e) {} }
+
+    async function lireServeur() {
+      const c = sbc(); if (!c) return;
+      try {
+        const r = await c.rpc('bacs_veille_etat');
+        if (!r.error && r.data) {
+          etat.requis = !!r.data.requis && !MOBILE;
+          etat.vivant = !!r.data.vivant;
+          etat.en_attente = Number(r.data.en_attente) || 0;
+        }
+      } catch (e) {}
+      dernierServeur = Date.now();
+    }
+    async function pinger() {
+      const p = await demander('ping', {}, 4000);
+      if (p && p.ok && p.contexte !== false) return 'ouvert';
+      if (p && p.ok) return 'non_pret';
+      if (p && p.erreur === 'bacs_non_ouvert') return 'ferme';
+      if (p && p.erreur === 'bacs_non_pret') return 'non_pret';
+      return 'sans_pont';                 // pas de réponse : pas d'extension sur ce navigateur
+    }
+
+    function diffuser(precedent) {
+      const detail = { ok: etat.ok, precedent: precedent, motif: etat.motif, en_attente: etat.en_attente };
+      [W, window].forEach(function (w, i) {
+        if (i === 1 && w === W) return;
+        try { w.dispatchEvent(new CustomEvent('od-bacs-etat', { detail: detail })); } catch (e) {}
+      });
+    }
+
+    async function tour() {
+      clearTimeout(tTour);
+      if (enCours) return; enCours = true;
+      try {
+        const u = uid();
+        if (u == null) { etat.requis = null; etat.ok = null; rendre(); return; }   // déconnecté : on se tait
+        if (u !== uidVu) { uidVu = u; etat.requis = null; etat.ok = null; echecs = 0; }
+        if (etat.requis === null || Date.now() - dernierServeur > 30000) await lireServeur();
+        if (!etat.requis) { rendre(); tTour = setTimeout(tour, 120000); return; }
+
+        const local = await pinger();
+        let okMaintenant;
+        if (local === 'ouvert') okMaintenant = true;
+        else if (local === 'sans_pont') okMaintenant = etat.vivant;     // BACS ouvert ailleurs ?
+        else okMaintenant = false;                                       // l'extension d'ici dit : fermé / pas prêt
+
+        if (okMaintenant) echecs = 0; else echecs++;
+        const nouveau = okMaintenant ? true : (echecs >= 2 ? false : etat.ok);
+        if (nouveau !== etat.ok && nouveau !== null) {
+          const precedent = etat.ok;
+          etat.ok = nouveau; etat.motif = okMaintenant ? null : local; etat.depuis = Date.now();
+          if (nouveau === false) {
+            noter(local === 'non_pret' ? 'session_expiree' : 'bacs_ferme', { motif: local });
+          } else if (precedent === false) {
+            noter('bacs_rouvert', { en_attente: etat.en_attente });
+            try { demander('vider_file', {}, 4000); } catch (e) {}
+            confirmerReouverture();
+            setTimeout(function () { lireServeur(); }, 12000);
+          }
+          diffuser(precedent);
+        } else if (!okMaintenant && etat.ok === false && etat.motif !== local) {
+          etat.motif = local;
+        }
+        rendre();
+        tTour = setTimeout(tour, etat.ok === true ? 10000 : 5000);
+      } catch (e) {
+        tTour = setTimeout(tour, 15000);
+      } finally { enCours = false; }
+    }
+
+    // ------------------------------------------------------------ bandeau
+    function posTop() {
+      try { const n = root(); const r = n && n.getBoundingClientRect(); return r && r.bottom > 0 ? Math.round(r.bottom) + 8 : 8; }
+      catch (e) { return 8; }
+    }
+    function styleBandeau(b, fond, ombre) {
+      b.style.cssText = 'position:fixed;left:50%;transform:translateX(-50%);top:' + posTop() + 'px;z-index:950;'
+        + 'width:calc(100% - 24px);max-width:920px;box-sizing:border-box;display:flex;align-items:center;gap:12px;'
+        + 'padding:10px 12px 10px 16px;border-radius:12px;background:' + fond + ';color:#fff;'
+        + 'font-family:"Nunito Sans",system-ui,sans-serif;font-size:13.5px;font-weight:600;line-height:1.4;'
+        + 'box-shadow:0 10px 28px ' + ombre + ';';
+    }
+    function texte() {
+      const n = etat.en_attente;
+      const attente = n > 0
+        ? (n + ' geste' + (n > 1 ? 's' : '') + ' d’agenda en attente : ' + (n > 1 ? 'ils partiront' : 'il partira') + ' vers BACS dès sa réouverture.')
+        : 'Vos rendez-vous restent enregistrés ici et partiront vers BACS dès sa réouverture.';
+      if (etat.motif === 'non_pret') return ['La session BACS a expiré ou la page BACS ne répond pas.', 'Reconnectez-vous dans l’onglet BACS. ' + attente];
+      if (etat.motif === 'sans_pont') return ['Le pont BACS ne répond pas sur ce navigateur.', 'Ouvrez BACS dans Chrome avec l’extension One Data. ' + attente];
+      return ['BACS est fermé sur ce poste.', attente];
+    }
+    function rendre() {
+      const d = doc;
+      let b = d.getElementById('od-bacs-veille');
+      const montrer = etat.requis === true && etat.ok === false && Date.now() >= masqueJusqu;
+      if (!montrer) { if (b && !b.dataset.vert) b.remove(); return; }
+      if (!b || b.dataset.vert) {
+        if (b) b.remove();
+        b = d.createElement('div'); b.id = 'od-bacs-veille'; b.setAttribute('role', 'alert');
+        (d.body || d.documentElement).appendChild(b);
+      }
+      styleBandeau(b, '#e24b4a', 'rgba(226,75,74,.32)');
+      const t = texte();
+      b.innerHTML = '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="flex:0 0 auto"><path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/><path d="M12 9v4M12 17h.01"/></svg>'
+        + '<div style="flex:1 1 auto;min-width:0"><b style="font-weight:800">' + t[0] + '</b> <span style="opacity:.92">' + t[1] + '</span></div>'
+        + '<button type="button" data-ouvrir style="flex:0 0 auto;border:none;border-radius:9px;background:#fff;color:#e24b4a;font:inherit;font-weight:800;padding:8px 14px;cursor:pointer;white-space:nowrap">Ouvrir BACS</button>'
+        + '<button type="button" data-masquer title="Masquer 10 minutes" aria-label="Masquer" style="flex:0 0 auto;border:none;background:none;color:#fff;font-size:20px;line-height:1;cursor:pointer;padding:2px 6px;opacity:.85">×</button>';
+      b.querySelector('[data-ouvrir]').addEventListener('click', ouvrirBacs);
+      b.querySelector('[data-masquer]').addEventListener('click', function () { masqueJusqu = Date.now() + 600000; rendre(); });
+    }
+    function confirmerReouverture() {
+      const d = doc;
+      let b = d.getElementById('od-bacs-veille'); if (b) b.remove();
+      b = d.createElement('div'); b.id = 'od-bacs-veille'; b.dataset.vert = '1';
+      (d.body || d.documentElement).appendChild(b);
+      styleBandeau(b, '#53bda7', 'rgba(83,189,167,.32)');
+      b.innerHTML = '<span style="font-weight:800">✓ BACS est de nouveau ouvert.</span>'
+        + '<span style="opacity:.92">' + (etat.en_attente > 0 ? 'Les gestes en attente partent vers BACS.' : 'La synchronisation reprend.') + '</span>';
+      setTimeout(function () { try { if (b.dataset.vert) b.remove(); } catch (e) {} }, 5000);
+    }
+    function ouvrirBacs() {
+      try { const w = W.open(URL_BACS, 'od_bacs'); if (w) w.focus(); } catch (e) {}
+      echecs = 0;
+      setTimeout(tour, 4000);
+    }
+
+    // Retour sur l'onglet One Data (le vendeur revient de BACS) : vérification immédiate.
+    let tRetour = null;
+    const auRetour = function () { if (doc.visibilityState !== 'visible') return; clearTimeout(tRetour); tRetour = setTimeout(tour, 300); };
+    try { doc.addEventListener('visibilitychange', auRetour); } catch (e) {}
+    try { W.addEventListener('focus', auRetour); } catch (e) {}
+    try { W.addEventListener('oropra-user-ready', function () { setTimeout(tour, 500); }); } catch (e) {}
+    try { W.addEventListener('resize', function () { const b = doc.getElementById('od-bacs-veille'); if (b) b.style.top = posTop() + 'px'; }); } catch (e) {}
+
+    const api = {
+      etat: function () { return Object.assign({ mobile: MOBILE }, etat); },
+      verifier: function () { echecs = 0; return tour(); },
+      ouvrirBacs: ouvrirBacs,
+    };
+    W.__odBacsVeille = api; try { window.__odBacsVeille = api; } catch (e) {}
+    setTimeout(tour, 2500);
+  })();
+
   boot();
 })();
     // La nav s'est peut-être construite AVANT que oropraUser soit à jour (event
