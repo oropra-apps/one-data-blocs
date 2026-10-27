@@ -1,3 +1,5 @@
+// v12 (27/10/2026) : open({ client, text }) pré-remplit le message (modèles
+// proposés par le lead management). Sans « text », comportement inchangé.
 // v11 (27/10/2026) : champ de saisie en 16 px sur mobile ; la fermeture libère
 // bien la page (en v9-v10, fermer la fenêtre laissait la fiche figée).
 // iPhone : un champ dont le texte fait moins de 16 px déclenche un ZOOM
@@ -495,7 +497,7 @@ OD.define('sms', {
   function open(opts) {
     ensureRoot();
     const c = (opts && opts.client) || readVar(SELECTED_CLIENT_VAR_ID) || {};
-    state.open = true; state.minimized = false; state.client = c; state.error = null; state.input = ''; state.selectedKey = null; state._scrolled = false;
+    state.open = true; state.minimized = false; state.client = c; state.error = null; state.input = (opts && typeof opts.text === 'string') ? opts.text : ''; state.selectedKey = null; state._scrolled = false;
     state.site = siteCourant();
     render();
     if (c.IDVu != null) { loadThread(c.IDVu, state.site).then(() => subscribeRealtime(c.IDVu, state.site)); }
