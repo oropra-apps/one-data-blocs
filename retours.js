@@ -1,3 +1,5 @@
+// v7 (27/10/2026) : le clavier mobile réduit la page au lieu de la recouvrir :
+// le panneau « Ton avis » reste au-dessus du clavier pendant la saisie.
 // v6 (27/10/2026) : sur mobile, le panneau « Ton avis » se limite à la partie
 // visible de l'écran (dvh) et dégage la barre système du bas.
 // ============================================================================
@@ -20,9 +22,24 @@
 // ============================================================================
 OD.define('retours', {
   mount(__anchor, ctx) {
-    const VERSION = 5;   // v5 : écran courant fourni par pulse (plus grande surface visible, accessoires exclus)
+    const VERSION = 6;   // v5 : écran courant fourni par pulse (plus grande surface visible, accessoires exclus)
                          // v4 : « Montrer l'endroit » nomme la zone désignée (titre du bloc, colonne, champ, type)
     const W = window;
+
+    // Clavier mobile (27/10/2026) : par défaut, Chrome Android ouvre le clavier
+    // PAR-DESSUS la page et la fait défiler pour montrer le champ : les fenêtres
+    // fixes (SMS, WhatsApp, e-mail, avis) partaient alors vers le haut, hors de
+    // l'écran. « interactive-widget=resizes-content » demande au navigateur de
+    // RÉDUIRE la page à la place du clavier : les fenêtres se rétrécissent et
+    // restent entières à l'écran. Posé une fois pour toute l'application.
+    (function clavierRedimensionne(d) {
+      try {
+        let m = d.querySelector('meta[name="viewport"]');
+        if (!m) { m = d.createElement('meta'); m.name = 'viewport'; m.content = 'width=device-width, initial-scale=1'; d.head.appendChild(m); }
+        const c = m.getAttribute('content') || '';
+        if (!/interactive-widget/.test(c)) m.setAttribute('content', (c ? c + ', ' : '') + 'interactive-widget=resizes-content');
+      } catch (e) { }
+    })(document);
     const prev = W.__OD_RETOURS__;
     if (prev && prev.v === VERSION && document.getElementById('od-retours')) return;
     if (prev && typeof prev.detruire === 'function') { try { prev.detruire(); } catch (e) {} }
