@@ -1,3 +1,5 @@
+// v8 (27/10/2026) : sur mobile (iPhone surtout), la fenêtre prend la largeur de
+// la zone visible : l'avatar et la croix ne sont plus coupés.
 // v7 (27/10/2026) : sur mobile, toucher la zone de saisie ne fait plus sortir la
 // fenêtre de l'écran : le clavier réduit la page (interactive-widget) et la
 // fenêtre suit la partie visible, y compris si Chrome fait défiler la page.
@@ -299,7 +301,7 @@ OD.define('sms', {
     '.sms-spin.dark{border-color:#e7d9c2;border-top-color:' + ORANGE + '}' +
     '@keyframes sms-spin{to{transform:rotate(360deg)}}' +
     '.sms-bar{position:fixed;left:24px;bottom:24px;width:min(300px,calc(100vw - 32px));background:' + ORANGE + ';color:#fff;border-radius:12px;box-shadow:0 12px 34px rgba(0,0,0,.24);z-index:9990;display:flex;align-items:center;gap:10px;padding:10px 12px;cursor:pointer}' +
-    '@media(max-width:640px){.sms-head{position:relative;z-index:2}.sms-hbtn{padding:11px;min-width:44px;min-height:44px;justify-content:center;align-items:center}.sms-card{left:0!important;top:0;right:0!important;bottom:auto!important;width:100vw;height:100vh;height:100dvh;border-radius:0}.sms-foot{padding-bottom:calc(8px + env(safe-area-inset-bottom,0px))}.sms-bar{left:0;right:0;bottom:0;width:100vw;border-radius:0;padding-bottom:env(safe-area-inset-bottom,0px)}}' +
+    '@media(max-width:640px){.sms-head{position:relative;z-index:2}.sms-hbtn{padding:11px;min-width:44px;min-height:44px;justify-content:center;align-items:center}.sms-card{left:0;top:0;right:auto;bottom:auto!important;width:100%;max-width:100%;height:100vh;height:100dvh;border-radius:0}.sms-foot{padding-bottom:calc(8px + env(safe-area-inset-bottom,0px))}.sms-bar{left:0;right:0;bottom:0;width:100vw;border-radius:0;padding-bottom:env(safe-area-inset-bottom,0px)}}' +
     '</style>';
 
   /* ---- rendu -------------------------------------------------------------- */
@@ -380,9 +382,14 @@ OD.define('sms', {
   function estMobile() { return (win.innerWidth || 1024) <= 640; }
   function ajusterMobile(root) {
     const card = root.querySelector('.sms-card'); if (!card) return;
-    if (!estMobile()) { card.style.height = ''; return; }
+    if (!estMobile()) { card.style.height = ''; card.style.width = ''; return; }
     const vv = win.visualViewport;
-    card.style.left = '0px'; card.style.top = (vv ? Math.round(vv.offsetTop) : 0) + 'px'; card.style.right = '0px'; card.style.bottom = 'auto';
+    // Largeur ET position prises sur la zone visible : sur iPhone, 100vw et
+    // left:0/right:0 suivent la page entière, plus large que l'écran si un
+    // contenu déborde — avatar et croix sortaient alors de chaque côté.
+    card.style.left = (vv ? Math.round(vv.offsetLeft) : 0) + 'px'; card.style.top = (vv ? Math.round(vv.offsetTop) : 0) + 'px';
+    card.style.right = 'auto'; card.style.bottom = 'auto';
+    card.style.width = Math.round(vv ? vv.width : (doc.documentElement.clientWidth || win.innerWidth)) + 'px';
     card.style.height = Math.round(vv ? vv.height : win.innerHeight) + 'px';
   }
   if (!win.__smsVV) {
