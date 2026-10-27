@@ -1,3 +1,5 @@
+// v6 (27/10/2026) : sur mobile, le panneau « Ton avis » se limite à la partie
+// visible de l'écran (dvh) et dégage la barre système du bas.
 // ============================================================================
 //  RETOURS — avis des utilisateurs One Data (OD.define)  v1
 //  Module AMBIANT : le socle (v25+) lui crée une ancre invisible, uniquement
@@ -244,7 +246,7 @@ textarea:focus{border-color:#1F4A85;outline:none}
 .pkz.bas .pkl{bottom:auto;top:calc(100% + 5px)}
 
 @media (max-width:640px){
-  .pn{left:0;right:0;top:auto;bottom:0;width:auto;max-height:88vh;border-radius:18px 18px 0 0;transform:translateY(104%)}
+  .pn{left:0;right:0;top:auto;bottom:0;width:auto;max-height:88vh;max-height:88dvh;padding-bottom:env(safe-area-inset-bottom,0px);border-radius:18px 18px 0 0;transform:translateY(104%)}
   .pn.ouvert{transform:translateY(0)}
   .cd{right:12px;left:12px;bottom:12px;width:auto}
   .pkb{top:auto;bottom:18px}
