@@ -1,5 +1,11 @@
 // ============================================================================
-//  TOP NAV — module One Data (OD.define)  v34 — SÉLECTEUR DE PÉRIMÈTRE
+//  TOP NAV — module One Data (OD.define)  v35 — SÉLECTEUR DE PÉRIMÈTRE
+//  v35 (27/10/2026) : entrée « Leads » à part entière dans la barre, avec
+//  deux pages : Leads management (le travail à faire) et Leads performances
+//  (l'onglet Leads de la page Performances). Compteur sur l'entrée pour les
+//  vendeurs (4) et les chefs des ventes (3) : les leads libres dans le Pool
+//  de leurs sites (lead_pool_compte), rouge dès qu'un lead est hors délai,
+//  orange sinon. Rafraîchi chaque minute et au retour sur l'onglet.
 //  v34 (27/10/2026) : VEILLE BACS commune à toute l'application (voir le
 //  bloc « VEILLE BACS » en fin de module) : bandeau rouge sous la nav quand
 //  BACS est fermé, expiré ou injoignable pour un utilisateur synchronisé,
@@ -128,7 +134,7 @@ OD.define('topnav', {
   const wwLib = window.wwLib;
   const doc = __anchor.ownerDocument || wwLib.getFrontDocument();
   const ROOT_ID = 'nav-root';
-  const NAV_VER = 37; // <- numéro de version (témoin de chargement)
+  const NAV_VER = 38; // <- numéro de version (témoin de chargement)
 
   // ------------------------------------------------------------- favicon
   // Posée une fois par chargement de l'app ; les balises existantes (icônes
@@ -378,13 +384,16 @@ OD.define('topnav', {
     ] },
     { label: 'Ventes', items: [
       { t: 'Gestion des ventes', p: P.pipe },
-      { t: 'Performances', p: P.perf },
+      { t: 'Performances', p: P.perf, vue: 'ventes' },
       { t: 'Objectifs', p: P.objectifs }
     ] },
     { label: 'Management', items: [
       { t: 'Bilatérales', p: P.bilat },
-      { t: 'Suivi activité', p: P.activite },
-      { t: 'Lead Management', p: P.marketing }
+      { t: 'Suivi activité', p: P.activite }
+    ] },
+    { label: 'Leads', leads: true, items: [
+      { t: 'Leads management', p: P.marketing, leads: true },
+      { t: 'Leads performances', p: P.perf, vue: 'leads' }
     ] },
     { label: 'Véhicules', items: [
       { t: 'Stock VN', p: P.vnListe },
@@ -560,16 +569,20 @@ OD.define('topnav', {
     // en base ; ce filtre évite seulement d'ouvrir des pages vides.
     var __roleMenu = Number((user() || {}).ID_Role != null ? user().ID_Role : (user() || {}).id_role);
     var __masque = (__roleMenu === 10) ? [P.pipe, P.perf, P.objectifs, P.bilat, P.activite, P.vnConfig] : [];
+    // v35 : compteur du Pool pour les vendeurs et les chefs des ventes.
+    var __leadsBadge = (__roleMenu === 3 || __roleMenu === 4);
     MENUS.forEach(function (m, mi) {
       if (!m.items.some(function (it) { return __masque.indexOf(it.p) === -1; })) return;
       let items = '';
       m.items.forEach(function (it) {
         if (__masque.indexOf(it.p) !== -1) return;
-        items += '<a data-page="' + it.p + '">' + esc(it.t) +
-          (it.badge ? '<span class="od-pill od-notifs-pill" style="display:none"></span>' : '') + '</a>';
+        items += '<a data-page="' + it.p + '"' + (it.vue ? ' data-vue="' + it.vue + '"' : '') + '>' + esc(it.t) +
+          (it.badge ? '<span class="od-pill od-notifs-pill" style="display:none"></span>' : '') +
+          (it.leads && __leadsBadge ? '<span class="od-pill od-leads-pill" style="display:none"></span>' : '') + '</a>';
       });
       menusHtml += '<div class="od-m" data-mi="' + mi + '"><button data-toggle="' + mi + '">' + esc(m.label) +
         (m.badge ? '<span class="od-pill od-notifs-pill" style="display:none"></span>' : '') +
+        (m.leads && __leadsBadge ? '<span class="od-pill od-leads-pill" style="display:none"></span>' : '') +
         '</button><div class="od-drop">' + items + '</div></div>';
     });
 
@@ -630,6 +643,7 @@ OD.define('topnav', {
     r.setAttribute('data-nav-ver', String(NAV_VER));
     refreshClient();
     refreshNotifs();
+    refreshLeads(true);
     mountSite();
     watchHistoryIcon();
     kickDelco();
@@ -654,7 +668,17 @@ OD.define('topnav', {
     });
     // navigation par data-page
     r.querySelectorAll('[data-page]').forEach(function (el) {
-      el.addEventListener('click', function (e) { e.preventDefault(); e.stopPropagation(); closeAll(); closeBurger(); goPage(el.getAttribute('data-page')); });
+      el.addEventListener('click', function (e) {
+        e.preventDefault(); e.stopPropagation(); closeAll(); closeBurger();
+        // v35 : Performances s'ouvre sur la vue demandée (Ventes ou Leads).
+        var vue = el.getAttribute('data-vue');
+        if (vue) {
+          try { window.__OD_PERF_VUE__ = vue; } catch (x) {}
+          try { var fw = (wwLib.getFrontWindow && wwLib.getFrontWindow()) || window; fw.__OD_PERF_VUE__ = vue; if (typeof fw.__odPerfVue === 'function' && /\/performances/.test(fw.location.pathname || '')) { fw.__odPerfVue(vue); return; } } catch (x) {}
+          try { if (typeof window.__odPerfVue === 'function' && /\/performances/.test(location.pathname || '')) { window.__odPerfVue(vue); return; } } catch (x) {}
+        }
+        goPage(el.getAttribute('data-page'));
+      });
     });
     // actions
     r.querySelectorAll('[data-act]').forEach(function (el) {
@@ -747,6 +771,43 @@ OD.define('topnav', {
     } catch (e) {}
     fixHistoryIcon();
   }
+
+  // ---------------------------------------------------------------- badge Leads (v35)
+  // Leads libres dans le Pool des sites de l'utilisateur. Rouge dès qu'un lead
+  // a dépassé son délai, orange sinon. Le dernier compte est gardé pour
+  // repeindre sans requête quand la nav se reconstruit.
+  var __leadsCompte = window.__odLeadsCompte || null;
+  var __leadsEnCours = false;
+  function peindreLeads() {
+    var c = __leadsCompte;
+    (root() ? root().querySelectorAll('.od-leads-pill') : []).forEach(function (p) {
+      var n = c ? Number(c.n || 0) : 0;
+      if (n > 0) {
+        p.textContent = n > 99 ? '99+' : String(n); p.style.display = '';
+        p.setAttribute('data-feu', Number(c.hors_delai || 0) > 0 ? 'chaud' : 'tiede');
+        p.setAttribute('title', n + (n > 1 ? ' leads libres' : ' lead libre') + ' dans le Pool' + (Number(c.hors_delai || 0) > 0 ? ', dont ' + c.hors_delai + ' hors délai' : ''));
+      } else { p.style.display = 'none'; }
+    });
+  }
+  async function refreshLeads(depuisCache) {
+    peindreLeads();
+    if (depuisCache && __leadsCompte) return;
+    if (__leadsEnCours || !(root() && root().querySelector('.od-leads-pill'))) return;
+    var sb = null; try { sb = (ctx && ctx.supabase) || arbSb(); } catch (e) {}
+    if (!sb) return;
+    __leadsEnCours = true;
+    try {
+      var r = await sb.rpc('lead_pool_compte');
+      if (!r.error && r.data) { __leadsCompte = r.data; window.__odLeadsCompte = r.data; }
+    } catch (e) {}
+    __leadsEnCours = false;
+    peindreLeads();
+  }
+  if (!window.__navLeadsPoll) {
+    window.__navLeadsPoll = setInterval(function () { if (doc.visibilityState !== 'hidden') refreshLeads(false); }, 60000);
+    try { doc.addEventListener('visibilitychange', function () { if (doc.visibilityState === 'visible') refreshLeads(false); }); } catch (e) {}
+  }
+  setTimeout(function () { refreshLeads(false); }, 1500);
 
   // ---------------------------------------------------------------- badge Clients/Notifs
   // Le nombre vient de la variable historique ; l'ETAT (calme / tiede / chaud)
