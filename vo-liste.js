@@ -1,4 +1,23 @@
 // ============================================================================
+//  v27 (27/10/2026) : LISTE VO FAÇON PLANET VO² + COMMENTAIRE PVO² EN CONTINU.
+//  * La liste reprend la présentation de la liste de stock Planet VO² : une
+//    ligne par VO (photo, identité, statut / prix, lieu / emplacement, canal,
+//    commentaire, actions). Responsive : 4 colonnes sous 1 180 px, une seule
+//    sous 640 px. Le tableau large et le MODE PHOTO sont retirés.
+//  * « Lieu de stockage » / « Détail stockage » deviennent « Lieu » /
+//    « Emplacement », comme dans Planet VO².
+//  * Canal de vente Planet VO² (Particuliers, Marchands, Enchères,
+//    Destructions, Sans canal, Hors PVO²) : boutons au-dessus de la liste,
+//    PARTICULIERS seuls par défaut. Sans données Planet VO² chez le tenant,
+//    le filtre n'apparaît pas.
+//  * COMMENTAIRE saisi sur la voiture dans Planet VO² (public.vo_pvo, relu par
+//    le robot toutes les 15 min) : affiché sur chaque ligne avec son âge ;
+//    surligné quand il annonce une vente / réservation, marqué « nouveau »
+//    moins de 48 h après sa modification. La liste se met à jour seule toutes
+//    les 2 minutes, sans recharger le stock.
+//  * Pagination en haut ET en bas, nombre de VO par page au choix
+//    (10 à 200, retenu sur le poste) ; tri par menu.
+// ============================================================================
 //  v26 (23/10/2026) : la liste identifie les VO par leur N° DE POLICE et non
 //    plus par le numero de vehicule DBS (NO_VO) : colonne « N° police »
 //    (triable, numerique), vignette du mode photo, export Excel. Un VO sans
@@ -178,7 +197,9 @@ OD.define('vo-liste', {
   ].join(',');
   // v21 : colonne absente des bases non migrees -> repli sur COLS_BASE.
   var COLS_BASE = COLS;
-  COLS = COLS_BASE + ',NUMERO_POLICE';
+  // v27 : colonnes Planet VO² (v_liste_vo du 27/10/2026) ; repli sans elles.
+  var COLS_PVO = ',PVO_CANAUX,PVO_COMMENTAIRE,PVO_COMMENTAIRE_LE,PVO_EN_STOCK,PVO_VU_LE,PVO_ID,COULEUR_DMS';
+  COLS = COLS_BASE + ',NUMERO_POLICE' + COLS_PVO;
 
   // ─────────────────────────────────────────────────────────── bootstrap WeWeb
   // (garde 'wwLib pas prêt' retirée : le loader ne monte le module qu'une fois wwLib et le tenant résolus)
@@ -194,7 +215,9 @@ OD.define('vo-liste', {
   // ─────────────────────────────────────────────────────────── état module
   var S = {
     raw: [], loading: true, error: null,
-    view: 'table', search: '', immat: '', page: 1,
+    view: 'liste', search: '', immat: '', page: 1,
+    perPage: (function () { try { var v = Number(localStorage.getItem('od_vo_parpage')); return [10, 20, 30, 50, 100, 200].indexOf(v) >= 0 ? v : 20; } catch (e) { return 20; } })(),
+    pvoActif: false,
     sortKey: 'NBJ', sortDir: 'desc',
     cmCache: {}, sel: {}, showPA: false,
     photoCache: {},  // cache signed URLs par VIN
@@ -206,10 +229,11 @@ OD.define('vo-liste', {
       tvaRecup: null, pretVente: null, destination: null,
       prixMin: null, prixMax: null, milMin: null, milMax: null,
       kmsMin: null, kmsMax: null, nbjMin: null, nbjMax: null, co2Min: null, co2Max: null,
-      carrosserie: null, carburant: null, boite: null
+      carrosserie: null, carburant: null, boite: null,
+      canaux: ['particulier']          // v27 : canal Planet VO², particuliers par défaut
     }
   };
-  function defaultPerPage() { return 12; }
+  function defaultPerPage() { return S.perPage || 20; }
 
   // ─────────────────────────────────────────────────────────── helpers
   function esc(s) { if (s == null) return ''; return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;'); }
@@ -1548,8 +1572,10 @@ OD.define('vo-liste', {
     );
     var sStock = vfSection('Stock · Achat',
       vfRow('Nb jours de stock', nbj != null ? nbj + ' jrs' : '-') +
-      vfRow('Lieu de stockage', esc(row.LIEU_STOCKAGE_Codifie || '-')) +
-      vfRow('Détail Stockage', esc(row.DETAIL_STOCKAGE_Codifie || '-')) +
+      vfRow('Lieu', esc(row.LIEU_STOCKAGE_Codifie || '-')) +
+      vfRow('Emplacement', esc(row.DETAIL_STOCKAGE_Codifie || '-')) +
+      vfRow('Canal PVO²', esc(libCanaux(row))) +
+      vfRow('Commentaire PVO²', row.PVO_COMMENTAIRE ? '<span style="white-space:pre-line">' + esc(row.PVO_COMMENTAIRE) + '</span>' : '-') +
       vfRow('Origine Achat', esc(row.ORIGINEACHAT_Codifie || '-')) +
       vfRow('Origine légale', esc(row.ORIGINEACHAT_Codifie ? row.ORIGINEACHAT_Codifie : (row.ORIGINE_LEGALE || row.ORIGINELEG_Codifie || '-'))) +
       vfRow('Garantie', esc(garantieTxt(row))) +
@@ -2466,7 +2492,7 @@ OD.define('vo-liste', {
     add('reseau', 'Réseau', f.reseau); add('affaire', 'Affaire', f.affaire); add('site', 'Site', f.site);
     add('societe', 'Société', f.societe); add('pointVente', 'Point de vente', f.pointVente);
     add('marque', 'Marque', f.marque); add('modele', 'Modèle', f.modele); add('version', 'Version', f.version);
-    add('label', 'Label', f.label); add('stockage', 'Stockage', f.stockage);
+    add('label', 'Label', f.label); add('stockage', 'Lieu', f.stockage);
     add('carrosserie', 'Carrosserie', f.carrosserie); add('carburant', 'Carburant', f.carburant); add('boite', 'Boîte', f.boite);
     if (f.photos != null) add('photos', 'Photos', f.photos ? 'Oui' : 'Non');
     if (f.contremarque != null) add('contremarque', 'Contremarqué', f.contremarque ? 'Oui' : 'Non');
@@ -2540,7 +2566,7 @@ OD.define('vo-liste', {
         + '<div><div class="vo-lab">Site</div><select class="vo-sel" id="f_site">' + selHtml('SITE', f.site, siteBase(), 'Tous les sites') + '</select></div>'
         + '<div class="vo-fsec g">Localisation</div>'
         + '<div><div class="vo-lab">Label</div><select class="vo-sel" id="f_label">' + selHtml('LABEL_Codifie', f.label, S.raw, 'Tous les labels') + '</select></div>'
-        + '<div><div class="vo-lab">Lieu de stockage</div><select class="vo-sel" id="f_stockage">' + selHtml('LIEU_STOCKAGE_Codifie', f.stockage, S.raw, 'Tous les lieux') + '</select></div>'
+        + '<div><div class="vo-lab">Lieu</div><select class="vo-sel" id="f_stockage">' + selHtml('LIEU_STOCKAGE_Codifie', f.stockage, S.raw, 'Tous les lieux') + '</select></div>'
         + '<div class="vo-fsec o">Véhicule</div>'
         + '<div><div class="vo-lab">Marque</div><select class="vo-sel" id="f_marque">' + selHtml('MARQUE_DMS', f.marque, S.raw, 'Toutes les marques') + '</select></div>'
         + '<div><div class="vo-lab">Modèle</div><select class="vo-sel" id="f_modele">' + selHtml('MODELE_DMS', f.modele, modeleBase(), 'Tous les modèles') + '</select></div>'
@@ -2902,8 +2928,10 @@ OD.define('vo-liste', {
     );
     var sStock = vfSection('Stock · Achat',
       vfRow('Nb jours de stock', nbj != null ? nbj + ' jrs' : '-') +
-      vfRow('Lieu de stockage', esc(row.LIEU_STOCKAGE_Codifie || '-')) +
-      vfRow('Détail Stockage', esc(row.DETAIL_STOCKAGE_Codifie || '-')) +
+      vfRow('Lieu', esc(row.LIEU_STOCKAGE_Codifie || '-')) +
+      vfRow('Emplacement', esc(row.DETAIL_STOCKAGE_Codifie || '-')) +
+      vfRow('Canal PVO²', esc(libCanaux(row))) +
+      vfRow('Commentaire PVO²', row.PVO_COMMENTAIRE ? '<span style="white-space:pre-line">' + esc(row.PVO_COMMENTAIRE) + '</span>' : '-') +
       vfRow('Origine Achat', esc(row.ORIGINEACHAT_Codifie || '-')) +
       vfRow('Origine légale', esc(row.ORIGINEACHAT_Codifie ? row.ORIGINEACHAT_Codifie : (row.ORIGINE_LEGALE || row.ORIGINELEG_Codifie || '-'))) +
       vfRow('Garantie', esc(garantieTxt(row))) +
@@ -3153,6 +3181,12 @@ OD.define('vo-liste', {
     var page = function (from) { return c.from('v_liste_vo').select(cols).order('VIN').range(from, from + size - 1); };
     var duo = await Promise.all([page(0), page(size)]);
     // v21 : base sans NUMERO_POLICE (migration pas encore passee) -> on recharge sans.
+    // v27 : vue sans les colonnes Planet VO² (tenant non migré) -> sans elles.
+    if (duo[0].error && /PVO_/i.test(duo[0].error.message || '')) {
+      console.warn('[vo] colonnes Planet VO² absentes de v_liste_vo, chargement sans');
+      S.cols = cols = COLS_BASE + ',NUMERO_POLICE';
+      duo = await Promise.all([page(0), page(size)]);
+    }
     if (duo[0].error && cols !== COLS_BASE && /NUMERO_POLICE/i.test(duo[0].error.message || '')) {
       console.warn('[vo] NUMERO_POLICE absent de v_liste_vo, chargement sans');
       S.cols = cols = COLS_BASE;
@@ -3207,6 +3241,7 @@ OD.define('vo-liste', {
     if (f.carrosserie && r.CARROSSERIE_EUROTAX !== f.carrosserie) return false;
     if (f.carburant && r.CARBURANT_DMS !== f.carburant) return false;
     if (f.boite && r.BOITEV_EUROTAX !== f.boite) return false;
+    if (!canalOk(r, f.canaux)) return false;
 
     if (f.photos != null && hasPhoto(r) !== f.photos) return false;
     if (f.contremarque != null && contremarque(r) !== f.contremarque) return false;
@@ -3225,6 +3260,38 @@ OD.define('vo-liste', {
     if (notEmpty(S.search)) { var q = S.search.toLowerCase(); var hay = [r.NO_VO, r.NUMERO_POLICE, r.VIN, designation(r), r.MARQUE_DMS, r.MODELE_DMS, r.DESIGNATION_DMS].join(' ').toLowerCase(); if (hay.indexOf(q) === -1) return false; }
     if (notEmpty(S.immat)) { var qi = S.immat.toLowerCase().replace(/[\s-]/g, ''); var im = String(r.NO_IMMAT || '').toLowerCase().replace(/[\s-]/g, ''); if (im.indexOf(qi) === -1) return false; }
     return true;
+  }
+  // ── v27 : canal de vente Planet VO² ──────────────────────────────────────
+  var CANAUX_PVO = [
+    { k: 'particulier', t: 'Particuliers' }, { k: 'marchand', t: 'Marchands' },
+    { k: 'encheres', t: 'Enchères' }, { k: 'destruction', t: 'Destructions' },
+    { k: 'sans', t: 'Sans canal' }, { k: 'hors', t: 'Hors PVO²' }
+  ];
+  function canauxDe(r) { var c = r.PVO_CANAUX; if (typeof c === 'string') c = c.replace(/[{}]/g, '').split(',').filter(Boolean); return Array.isArray(c) ? c : []; }
+  function canalDe(r, k) {
+    if (k === 'hors') return r.PVO_EN_STOCK !== true;
+    if (r.PVO_EN_STOCK !== true) return false;
+    var c = canauxDe(r);
+    return k === 'sans' ? c.length === 0 : c.indexOf(k) !== -1;
+  }
+  function canalOk(r, sel) {
+    if (!S.pvoActif || !sel || !sel.length) return true;
+    for (var i = 0; i < sel.length; i++) if (canalDe(r, sel[i])) return true;
+    return false;
+  }
+  function libCanaux(r) {
+    if (r.PVO_EN_STOCK !== true) return r.PVO_EN_STOCK === false ? 'Sorti du stock Planet VO²' : 'Absent de Planet VO²';
+    var c = canauxDe(r); if (!c.length) return 'Sans canal';
+    return c.map(function (k) { var d = CANAUX_PVO.find(function (x) { return x.k === k; }); return d ? d.t : k; }).join(' · ');
+  }
+  // Commentaire PVO² : annonce de vente / réservation, et fraîcheur.
+  var RX_VENDU = /\b(vendue?s?|r[ée]serv[ée]e?s?|r[ée]sa|bdc|command[ée]e?|option)\b/i;
+  function commentAge(r) { if (!r.PVO_COMMENTAIRE_LE) return null; var t = new Date(r.PVO_COMMENTAIRE_LE).getTime(); return isNaN(t) ? null : Date.now() - t; }
+  function depuisTxt(ms) {
+    if (ms == null) return '';
+    var m = Math.round(ms / 60000); if (m < 1) return "à l'instant"; if (m < 60) return 'il y a ' + m + ' min';
+    var h = Math.round(m / 60); if (h < 24) return 'il y a ' + h + ' h';
+    var j = Math.round(h / 24); return j < 31 ? 'il y a ' + j + ' j' : 'il y a ' + Math.round(j / 30) + ' mois';
   }
   // v26 : n° de police ; a defaut, le n° DBS en grise.
   function policeHtml(r) {
@@ -3246,6 +3313,7 @@ OD.define('vo-liste', {
       case 'CRITAIR': return critairNum(r);
       case 'DESIGN': return designation(r).toLowerCase();
       case 'GAR': return num(r.CODE_GARANTIE) == null ? -1 : num(r.CODE_GARANTIE);
+      case 'COMMENT': return String(r.PVO_COMMENTAIRE_LE || '');
       default: return String(r[key] || '').toLowerCase();
     }
   }
@@ -3256,7 +3324,7 @@ OD.define('vo-liste', {
     return arr;
   }
   function distinct(field, base) { var set = {}; (base || S.raw).forEach(function (r) { if (notEmpty(r[field])) set[r[field]] = 1; }); return Object.keys(set).sort(function (a, b) { return a.localeCompare(b, 'fr'); }); }
-  function activeFilterCount() { var f = S.f, n = 0; for (var k in f) if (f[k] != null) n++; return n; }
+  function activeFilterCount() { var f = S.f, n = 0; for (var k in f) if (f[k] != null && k !== 'canaux') n++; return n; }
 
   // ─────────────────────────────────────────────────────────── sélection
   function selVins() { return Object.keys(S.sel).filter(function (v) { return S.sel[v]; }); }
@@ -3328,6 +3396,52 @@ OD.define('vo-liste', {
     // pager
     + '.vo-pager{display:flex;align-items:center;justify-content:flex-end;gap:6px;flex-wrap:wrap}'
     + '.vo-pager.top{margin:16px 2px 0}'
+    // v27 : barre de pagination (haut et bas) + liste façon Planet VO²
+    + '.vl-pbar{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;margin:14px 2px 0}'
+    + '.vl-pbar.bas{margin:14px 2px 0}'
+    + '.vl-pinfo{display:flex;align-items:center;gap:10px;flex-wrap:wrap;font-size:13px;font-weight:700;color:#7a98c5}'
+    + '.vl-pinfo select{border:1.5px solid #e2eaf5;border-radius:9px;padding:7px 9px;font:inherit;font-size:13px;font-weight:700;color:#1F4A85;background:#fff;cursor:pointer;outline:none}'
+    + '.vl-pbar .vo-pager{margin:0}'
+    + '.vl-canaux{display:flex;flex-wrap:wrap;gap:7px;margin:12px 4px 0}'
+    + '.vl-can{display:inline-flex;align-items:center;gap:6px;border:1.5px solid #d6e2f2;background:#fff;color:#2a5ea9;font:inherit;font-size:12.5px;font-weight:700;padding:6px 11px;border-radius:20px;cursor:pointer;transition:all .15s}'
+    + '.vl-can:hover{border-color:#53bda7}.vl-can.on{background:#2a5ea9;border-color:#2a5ea9;color:#fff}'
+    + '.vl-can i{font-style:normal;font-size:11px;font-weight:800;opacity:.75}'
+    + '.vl-can-lab{font-size:11px;font-weight:800;letter-spacing:.05em;text-transform:uppercase;color:#7a98c5;align-self:center;margin-right:2px}'
+    + '.vl-head{display:flex;align-items:center;gap:12px;padding:10px 16px;background:#f7faff;border-bottom:1px solid #e8eef7;font-size:12.5px;font-weight:700;color:#7a98c5;flex-wrap:wrap}'
+    + '.vl-head label{display:inline-flex;align-items:center;gap:8px;cursor:pointer}'
+    + '.vl-head .vl-tri{margin-left:auto;display:flex;align-items:center;gap:7px}'
+    + '.vl-head select{border:1.5px solid #e2eaf5;border-radius:9px;padding:6px 9px;font:inherit;font-size:12.5px;font-weight:700;color:#1F4A85;background:#fff;outline:none;cursor:pointer}'
+    + '.vl-dir{border:1.5px solid #e2eaf5;background:#fff;color:#2a5ea9;border-radius:9px;width:32px;height:31px;cursor:pointer;font-size:13px;font-weight:800}'
+    + '.vl-list{margin-top:12px;background:#fff;border:1px solid #e8eef7;border-radius:16px;overflow:hidden;box-shadow:0 6px 20px rgba(31,74,133,.05)}'
+    + '.vl-row{display:grid;grid-template-columns:24px 128px minmax(210px,1.5fr) minmax(150px,1fr) minmax(150px,1fr) minmax(220px,1.7fr) auto;grid-template-areas:"chk img id st loc com act";gap:14px;align-items:start;padding:14px 16px;border-bottom:1px solid #eef2f8}'
+    + '.vl-row:last-child{border-bottom:none}.vl-row:hover{background:#fafcff}.vl-row.sel{background:#f2f7fe}'
+    + '.vl-chk{grid-area:chk;padding-top:30px}.vl-img{grid-area:img}.vl-id{grid-area:id;min-width:0}.vl-st{grid-area:st;min-width:0}.vl-loc{grid-area:loc;min-width:0}.vl-com{grid-area:com;min-width:0}.vl-act{grid-area:act}'
+    + '.vl-ph{position:relative;width:128px;height:86px;border-radius:10px;overflow:hidden;background:#eef2f8;display:flex;align-items:center;justify-content:center;color:#c0cee0;cursor:pointer}'
+    + '.vl-ph img{width:100%;height:100%;object-fit:cover;display:block}.vl-ph svg{width:40px;height:40px}'
+    + '.vl-ph .vl-nb{position:absolute;right:6px;bottom:6px;display:inline-flex;align-items:center;gap:4px;background:rgba(31,74,133,.85);color:#fff;font-size:11px;font-weight:800;padding:2px 7px;border-radius:7px}.vl-ph .vl-nb svg{width:12px;height:12px;color:#fff}'
+    + '.vl-t{display:flex;align-items:center;gap:7px;font-size:15px;font-weight:800;color:#1F4A85;line-height:1.25}'
+    + '.vl-v{font-size:12.5px;font-weight:600;color:#54678a;margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}'
+    + '.vl-m{font-size:12px;color:#7a98c5;font-weight:600;margin-top:3px;line-height:1.4;overflow-wrap:anywhere}'
+    + '.vl-m b{color:#1F4A85;font-weight:700}'
+    + '.vl-site{font-size:12px;font-weight:800;color:#2a5ea9;margin-top:4px;text-transform:uppercase;letter-spacing:.02em}'
+    + '.vl-badge{display:inline-block;font-size:11.5px;font-weight:800;padding:3px 9px;border-radius:7px;background:#fdecec;color:#c0392b}'
+    + '.vl-badge.ok{background:#e7f6f1;color:#1e7a4d}.vl-badge.mid{background:#fff4dc;color:#8a5d08}'
+    + '.vl-prix{font-size:17px;font-weight:800;color:#1F4A85;margin-top:6px}'
+    + '.vl-pa{font-size:12px;font-weight:700;color:#9a6b00;margin-top:2px}'
+    + '.vl-lbl{font-size:10.5px;font-weight:800;letter-spacing:.05em;text-transform:uppercase;color:#9bb3d1;margin-bottom:3px}'
+    + '.vl-lieu{font-size:13px;font-weight:800;color:#1F4A85}'
+    + '.vl-cb{display:flex;flex-wrap:wrap;gap:5px;margin-top:8px}'
+    + '.vl-cbg{font-size:11px;font-weight:800;padding:2px 8px;border-radius:7px;background:#eef4fc;color:#2a5ea9}'
+    + '.vl-cbg.marchand{background:#fff4dc;color:#8a5d08}.vl-cbg.hors{background:#f0f2f6;color:#7a8aa3}.vl-cbg.sans{background:#fdecec;color:#c0392b}'
+    + '.vl-ctxt{font-size:12.5px;color:#1F4A85;font-weight:600;line-height:1.45;white-space:pre-line;display:-webkit-box;-webkit-line-clamp:4;-webkit-box-orient:vertical;overflow:hidden;overflow-wrap:anywhere}'
+    + '.vl-com.vide .vl-ctxt{color:#c0cee0;font-weight:600}'
+    + '.vl-com.vendu{background:#fdf1f1;border-left:3px solid #e24b4a;border-radius:8px;padding:7px 9px}'
+    + '.vl-com.vendu .vl-ctxt{color:#a32d2d}'
+    + '.vl-com.neuf{border-left:3px solid #fac055;padding-left:9px}'
+    + '.vl-new{display:inline-block;margin-left:5px;font-size:10px;font-weight:800;padding:1px 6px;border-radius:6px;background:#fac055;color:#5a3d05;letter-spacing:0;text-transform:none}'
+    + '.vl-act{display:flex;flex-direction:column;gap:5px;align-items:center}'
+    + '@media(max-width:1180px){.vl-row{grid-template-columns:24px 112px minmax(0,1.3fr) minmax(0,1fr) auto;grid-template-areas:"chk img id st act" "chk img loc com com";row-gap:10px}.vl-ph{width:112px;height:76px}.vl-act{flex-direction:column}}'
+    + '@media(max-width:640px){.vl-row{grid-template-columns:22px 92px minmax(0,1fr);grid-template-areas:"chk img id" "st st st" "loc loc loc" "com com com" "act act act";gap:10px;padding:12px}.vl-chk{padding-top:24px}.vl-ph{width:92px;height:64px}.vl-st,.vl-loc{display:flex;flex-wrap:wrap;align-items:center;gap:6px 12px}.vl-prix{margin-top:0}.vl-cb{margin-top:0}.vl-lbl{width:100%;margin-bottom:0}.vl-act{flex-direction:row;justify-content:flex-start}.vl-head .vl-tri{margin-left:0}.vl-pbar{flex-direction:column;align-items:stretch}.vl-pbar .vo-pager{justify-content:center}.vl-t{font-size:14px}}'
     + '.vo-pg{min-width:36px;height:36px;padding:0 10px;border:1.5px solid #e2eaf5;background:#fff;color:#2a5ea9;font:inherit;font-size:13px;font-weight:700;border-radius:10px;cursor:pointer;transition:all .15s}'
     + '.vo-pg:hover{border-color:#53bda7}.vo-pg.on{background:#2a5ea9;color:#fff;border-color:#2a5ea9}.vo-pg:disabled{opacity:.4;cursor:default}.vo-pg-dots{color:#9bb3d1;padding:0 4px}'
     // tableau
@@ -3572,6 +3686,96 @@ OD.define('vo-liste', {
       + '</div>';
   }
 
+  // ─────────────────────────────────────────────────────────── v27 : ligne de liste
+  var MOIS_C = ['janv.', 'févr.', 'mars', 'avr.', 'mai', 'juin', 'juil.', 'août', 'sept.', 'oct.', 'nov.', 'déc.'];
+  function moisAn(iso) { if (!notEmpty(iso)) return null; var p = String(iso).slice(0, 10).split('-'); return p.length === 3 ? MOIS_C[Number(p[1]) - 1] + ' ' + p[0] : null; }
+  function ligneHtml(r) {
+    var img = mainImage(r), sel = !!S.sel[r.VIN], cm = contremarque(r), n = nbPhotos(r);
+    var nb = nbjDays(r);
+    var ph = img
+      ? '<img src="' + esc(img) + '" alt="" data-vin="' + esc(r.VIN) + '" loading="lazy" onerror="__voImgErr(this)"><span class="vo-thumb-ph" style="display:none">' + IC.car + '</span>'
+      : IC.car;
+    var ident = [r.NO_IMMAT, notEmpty(r.NUMERO_POLICE) ? r.NUMERO_POLICE : r.NO_VO, r.VIN].filter(notEmpty).map(esc).join(' | ');
+    var meta2 = [moisAn(r.D_1MEC), (num(r.KMS) != null ? num(r.KMS).toLocaleString('fr-FR') + ' km' : null), r.COULEUR_DMS].filter(notEmpty).map(esc).join(' | ');
+    var badge = nb == null ? '' : '<span class="vl-badge' + (nb <= 60 ? ' ok' : nb <= 120 ? ' mid' : '') + '">En stock (' + nb + ' jour' + (nb > 1 ? 's' : '') + ')</span>';
+    // canal
+    var cb = '';
+    if (S.pvoActif) {
+      if (r.PVO_EN_STOCK !== true) cb = '<span class="vl-cbg hors" title="' + esc(libCanaux(r)) + '">Hors PVO²</span>';
+      else {
+        var cs = canauxDe(r);
+        cb = cs.length ? cs.map(function (k) { var d = CANAUX_PVO.find(function (x) { return x.k === k; }); return '<span class="vl-cbg ' + esc(k) + '">' + esc(d ? d.t : k) + '</span>'; }).join('') : '<span class="vl-cbg sans">Sans canal</span>';
+      }
+    }
+    // commentaire Planet VO²
+    var com = r.PVO_COMMENTAIRE, age = commentAge(r);
+    var neuf = com && age != null && age < 48 * 3600000;
+    var vendu = com && RX_VENDU.test(com);
+    var comHtml = S.pvoActif
+      ? '<div class="vl-com' + (com ? '' : ' vide') + (vendu ? ' vendu' : '') + (neuf && !vendu ? ' neuf' : '') + '"' + (com ? ' title="' + esc(com) + '"' : '') + '>'
+        + '<div class="vl-lbl">Commentaire PVO²' + (age != null && com ? ' · ' + esc(depuisTxt(age)) : '') + (neuf ? '<span class="vl-new">nouveau</span>' : '') + '</div>'
+        + '<div class="vl-ctxt">' + (com ? esc(com) : 'Aucun commentaire') + '</div></div>'
+      : '<div class="vl-com"></div>';
+    return '<div class="vl-row' + (sel ? ' sel' : '') + '">'
+      + '<div class="vl-chk"><input type="checkbox" class="vo-chk vo-rowchk" data-vin="' + esc(r.VIN) + '"' + (sel ? ' checked' : '') + '></div>'
+      + '<div class="vl-img"><div class="vl-ph"' + (hasPhoto(r) ? ' data-act="photos" data-vin="' + esc(r.VIN) + '" title="Diaporama"' : '') + '>' + ph
+      + (n ? '<span class="vl-nb">' + IC.camera + n + '</span>' : '') + '</div></div>'
+      + '<div class="vl-id">'
+      + '<div class="vl-t"><span class="vo-dot ' + (cm ? 'red' : 'green') + '" data-vin="' + esc(r.VIN) + '" data-cm="' + esc(r.ID_CM || '') + '"' + (cm ? '' : ' title="Disponible à la vente"') + '></span>' + esc(((r.MARQUE_DMS || '') + ' ' + (r.MODELE_DMS || '')).trim() || '-') + '</div>'
+      + '<div class="vl-v" title="' + esc(designation(r)) + '">' + esc(designation(r)) + '</div>'
+      + '<div class="vl-m">' + (ident || '-') + '</div>'
+      + (meta2 ? '<div class="vl-m">' + meta2 + '</div>' : '')
+      + '<div class="vl-site">' + esc(r.SITE || '-') + '</div>'
+      + '</div>'
+      + '<div class="vl-st">' + badge
+      + '<div class="vl-prix">' + esc(priceTxt(r)) + '</div>'
+      + (S.showPA ? '<div class="vl-pa">PA ' + esc(eur(r.PA_HT_TTC)) + '</div>' : '')
+      + (notEmpty(r.ORIGINEACHAT_Codifie) ? '<div class="vl-m">Origine : <b>' + esc(r.ORIGINEACHAT_Codifie) + '</b></div>' : '')
+      + (notEmpty(r.LABEL_Codifie) ? '<div class="vl-m">Label : <b>' + esc(r.LABEL_Codifie) + '</b></div>' : '')
+      + '</div>'
+      + '<div class="vl-loc"><div class="vl-lbl">Lieu / Emplacement</div>'
+      + '<div class="vl-lieu">' + esc(r.LIEU_STOCKAGE_Codifie || '-') + '</div>'
+      + (notEmpty(r.DETAIL_STOCKAGE_Codifie) ? '<div class="vl-m">' + esc(r.DETAIL_STOCKAGE_Codifie) + '</div>' : '')
+      + (cb ? '<div class="vl-cb">' + cb + '</div>' : '')
+      + '</div>'
+      + comHtml
+      + '<div class="vl-act">'
+      + '<span class="vo-iact eye" data-act="eye" data-vin="' + esc(r.VIN) + '" title="Fiche VO">' + IC.eye + '</span>'
+      + pictoHisto(r) + pictoWeb(r)
+      + '</div>'
+      + '</div>';
+  }
+  var TRIS = [
+    ['NBJ', 'Jours en stock'], ['PVENTE', 'Prix'], ['KMS', 'Kilométrage'], ['D_1MEC', 'Mise en circulation'],
+    ['NUMERO_POLICE', 'N° de police'], ['DESIGN', 'Modèle'], ['COMMENT', 'Commentaire PVO² modifié'], ['SITE', 'Site']
+  ];
+  function enteteListe() {
+    var opts = TRIS.map(function (t) { return '<option value="' + t[0] + '"' + (S.sortKey === t[0] ? ' selected' : '') + '>' + esc(t[1]) + '</option>'; }).join('');
+    return '<div class="vl-head"><label><input type="checkbox" class="vo-chk" id="vo-selall">Tout sélectionner</label>'
+      + '<div class="vl-tri">Trier par <select id="vl-tri">' + opts + '</select>'
+      + '<button type="button" class="vl-dir" id="vl-dir" title="' + (S.sortDir === 'asc' ? 'Croissant' : 'Décroissant') + '">' + (S.sortDir === 'asc' ? '↑' : '↓') + '</button></div></div>';
+  }
+  function barrePages(total, cls) {
+    var pp = defaultPerPage(), page = S.page;
+    var de = total ? (page - 1) * pp + 1 : 0, a = Math.min(total, page * pp);
+    var opts = [10, 20, 30, 50, 100, 200].map(function (v) { return '<option value="' + v + '"' + (v === pp ? ' selected' : '') + '>' + v + '</option>'; }).join('');
+    return '<div class="vl-pbar ' + (cls || '') + '"><div class="vl-pinfo"><span>' + de + '–' + a + ' sur ' + total + '</span>'
+      + '<span>Afficher <select class="vl-pp">' + opts + '</select> par page</span></div>'
+      + pagerHtml(total, page, pp, '') + '</div>';
+  }
+  function canauxHtml() {
+    if (!S.pvoActif) return '';
+    var sel = S.f.canaux || [];
+    // compte : tous les autres filtres appliqués, sauf le canal
+    var memo = S.f.canaux; S.f.canaux = null;
+    var base = S.raw.filter(passFilters);
+    S.f.canaux = memo;
+    return '<div class="vl-canaux"><span class="vl-can-lab">Canal PVO²</span>' + CANAUX_PVO.map(function (c) {
+      var n = base.filter(function (r) { return canalDe(r, c.k); }).length;
+      return '<button type="button" class="vl-can' + (sel.indexOf(c.k) !== -1 ? ' on' : '') + '" data-canal="' + c.k + '">' + esc(c.t) + ' <i>' + n + '</i></button>';
+    }).join('') + '</div>';
+  }
+
   // ─────────────────────────────────────────────────────────── pager / selbar
   function pagerHtml(total, page, perPage, cls) {
     var pages = Math.max(1, Math.ceil(total / perPage));
@@ -3610,17 +3814,11 @@ OD.define('vo-liste', {
     var cnt = root().querySelector('.vo-count');
     if (cnt) cnt.textContent = data.length + ' véhicule' + (data.length > 1 ? 's' : '') + " d'occasion";
 
-    var top = selbarHtml() + pagerHtml(data.length, S.page, perPage, 'top');
+    // v27 : liste façon Planet VO², pagination en haut ET en bas.
+    var top = canauxHtml() + selbarHtml() + barrePages(data.length, 'haut');
     if (!slice.length) { host.innerHTML = top + '<div class="vo-state">Aucun véhicule ne correspond aux filtres.</div>'; bindContent(host); return; }
-
-    if (S.view === 'photo') {
-      host.innerHTML = top + '<div class="vo-grid">' + slice.map(cardHtml).join('') + '</div>';
-    } else {
-      var cols = columns();
-      host.innerHTML = top + '<div class="vo-tablewrap"><table class="vo-table"><thead><tr>' + thHtml(cols) + '</tr></thead><tbody>'
-        + slice.map(function (r) { return rowHtml(r, cols); }).join('') + '</tbody></table></div>';
-      figerColonnes(host);
-    }
+    host.innerHTML = top + '<div class="vl-list">' + enteteListe() + slice.map(ligneHtml).join('') + '</div>'
+      + barrePages(data.length, 'bas');
     bindContent(host);
   }
 
@@ -3631,7 +3829,7 @@ OD.define('vo-liste', {
     add('reseau', 'Réseau', f.reseau); add('affaire', 'Affaire', f.affaire); add('site', 'Site', f.site);
     add('societe', 'Société', f.societe); add('pointVente', 'Point de vente', f.pointVente);
     add('marque', 'Marque', f.marque); add('modele', 'Modèle', f.modele); add('version', 'Version', f.version);
-    add('label', 'Label', f.label); add('stockage', 'Stockage', f.stockage);
+    add('label', 'Label', f.label); add('stockage', 'Lieu', f.stockage);
     add('carrosserie', 'Carrosserie', f.carrosserie); add('carburant', 'Carburant', f.carburant); add('boite', 'Boîte', f.boite);
     if (f.photos != null) add('photos', 'Photos', f.photos ? 'Oui' : 'Non');
     if (f.contremarque != null) add('contremarque', 'Contremarqué', f.contremarque ? 'Oui' : 'Non');
@@ -3663,7 +3861,7 @@ OD.define('vo-liste', {
     if (defs.length > 1) html += '<span class="vo-chip-clear" data-clear="1">Tout effacer</span>';
     box.innerHTML = html;
     box.querySelectorAll('[data-chip]').forEach(function (el) { el.addEventListener('click', function () { clearChip(el.getAttribute('data-chip')); S.page = 1; renderChips(); renderContent(); }); });
-    var clr = box.querySelector('[data-clear]'); if (clr) clr.addEventListener('click', function () { for (var k in S.f) S.f[k] = null; S.page = 1; renderChips(); renderContent(); });
+    var clr = box.querySelector('[data-clear]'); if (clr) clr.addEventListener('click', function () { var can = S.f.canaux; for (var k in S.f) S.f[k] = null; S.f.canaux = can; S.page = 1; renderChips(); renderContent(); });
     refreshFilterBadge();
   }
 
@@ -3705,7 +3903,7 @@ OD.define('vo-liste', {
         + '<div><div class="vo-lab">Site</div><select class="vo-sel" id="f_site">' + selHtml('SITE', f.site, siteBase(), 'Tous les sites') + '</select></div>'
         + '<div class="vo-fsec g">Localisation</div>'
         + '<div><div class="vo-lab">Label</div><select class="vo-sel" id="f_label">' + selHtml('LABEL_Codifie', f.label, S.raw, 'Tous les labels') + '</select></div>'
-        + '<div><div class="vo-lab">Lieu de stockage</div><select class="vo-sel" id="f_stockage">' + selHtml('LIEU_STOCKAGE_Codifie', f.stockage, S.raw, 'Tous les lieux') + '</select></div>'
+        + '<div><div class="vo-lab">Lieu</div><select class="vo-sel" id="f_stockage">' + selHtml('LIEU_STOCKAGE_Codifie', f.stockage, S.raw, 'Tous les lieux') + '</select></div>'
         + '<div class="vo-fsec o">Véhicule</div>'
         + '<div><div class="vo-lab">Marque</div><select class="vo-sel" id="f_marque">' + selHtml('MARQUE_DMS', f.marque, S.raw, 'Toutes les marques') + '</select></div>'
         + '<div><div class="vo-lab">Modèle</div><select class="vo-sel" id="f_modele">' + selHtml('MODELE_DMS', f.modele, modeleBase(), 'Tous les modèles') + '</select></div>'
@@ -3755,7 +3953,7 @@ OD.define('vo-liste', {
       onSel('f_carrosserie', 'carrosserie'); onSel('f_carburant', 'carburant'); onSel('f_boite', 'boite');
       bg.querySelectorAll('[data-tri]').forEach(function (el) { el.addEventListener('click', function () { var name = el.getAttribute('data-tri'), v = el.getAttribute('data-val'); f[name] = v === 'all' ? null : (v === 'yes'); readRanges(); rerender(); }); });
       bg.querySelectorAll('[data-dest]').forEach(function (el) { el.addEventListener('click', function () { var v = el.getAttribute('data-dest'); f.destination = v === 'all' ? null : v; readRanges(); rerender(); }); });
-      bg.querySelector('[data-reset]').addEventListener('click', function () { for (var k in f) f[k] = null; rerender(); });
+      bg.querySelector('[data-reset]').addEventListener('click', function () { var can = f.canaux; for (var k in f) f[k] = null; f.canaux = can; rerender(); });
       bg.querySelector('[data-apply]').addEventListener('click', function () { readRanges(); S.f = f; S.page = 1; bg.remove(); renderChips(); renderContent(); });
     }
     bg.addEventListener('mousedown', function (e) { if (e.target === bg) bg.remove(); });
@@ -3776,7 +3974,8 @@ OD.define('vo-liste', {
       ["Crit'Air", function (r) { return critair(r).label; }], ['CV', function (r) { return r.CV_DMS; }], ['CO2', function (r) { return r.TAUX_CO2; }],
       ['TVA', function (r) { return r.TVA; }], ['Destination', function (r) { return destination(r); }], ['Couleur', function (r) { return r.COULEUR_DMS; }],
       ['Site', function (r) { return r.SITE; }], ['Affaire', function (r) { return r.AFFAIRE; }], ['Réseau', function (r) { return r.RESEAU; }],
-      ['NBJ', function (r) { return nbjDays(r); }], ['Garantie', function (r) { return garantieTxt(r); }], ['Stockage', function (r) { return r.LIEU_STOCKAGE_Codifie; }]
+      ['NBJ', function (r) { return nbjDays(r); }], ['Garantie', function (r) { return garantieTxt(r); }], ['Lieu', function (r) { return r.LIEU_STOCKAGE_Codifie; }],
+      ['Emplacement', function (r) { return r.DETAIL_STOCKAGE_Codifie; }], ['Canal PVO²', function (r) { return libCanaux(r); }], ['Commentaire PVO²', function (r) { return r.PVO_COMMENTAIRE || ''; }]
     ]);
   }
   function stamp() { var d = new Date(); function p(n) { return ('0' + n).slice(-2); } return d.getFullYear() + p(d.getMonth() + 1) + p(d.getDate()); }
@@ -3901,9 +4100,22 @@ OD.define('vo-liste', {
     host.querySelectorAll('.vo-pg[data-pg]').forEach(function (el) {
       el.addEventListener('click', function () { var p = Number(el.getAttribute('data-pg')); if (p >= 1) { S.page = p; renderContent(); try { root().scrollIntoView({ behavior: 'smooth', block: 'start' }); } catch (e) { } } });
     });
+    // v27 : canal, tri, nombre par page
+    host.querySelectorAll('[data-canal]').forEach(function (el) {
+      el.addEventListener('click', function () {
+        var k = el.getAttribute('data-canal'), cur = (S.f.canaux || []).slice(), i = cur.indexOf(k);
+        if (i === -1) cur.push(k); else cur.splice(i, 1);
+        S.f.canaux = cur.length ? cur : null; S.page = 1; renderContent();
+      });
+    });
+    var tri = host.querySelector('#vl-tri'); if (tri) tri.addEventListener('change', function () { S.sortKey = tri.value; S.sortDir = (tri.value === 'PVENTE' || tri.value === 'KMS' || tri.value === 'NUMERO_POLICE' || tri.value === 'DESIGN' || tri.value === 'SITE') ? 'asc' : 'desc'; S.page = 1; renderContent(); });
+    var dir = host.querySelector('#vl-dir'); if (dir) dir.addEventListener('click', function () { S.sortDir = S.sortDir === 'asc' ? 'desc' : 'asc'; renderContent(); });
+    host.querySelectorAll('.vl-pp').forEach(function (el) {
+      el.addEventListener('change', function () { S.perPage = Number(el.value) || 20; try { localStorage.setItem('od_vo_parpage', String(S.perPage)); } catch (e) { } S.page = 1; renderContent(); });
+    });
     // sélection
     host.querySelectorAll('.vo-rowchk, .vo-cardchk').forEach(function (el) {
-      el.addEventListener('change', function () { toggleSel(el.getAttribute('data-vin'), el.checked); var card = el.closest('.vo-card'); if (card) card.classList.toggle('sel', el.checked); updateSelUI(host); });
+      el.addEventListener('change', function () { toggleSel(el.getAttribute('data-vin'), el.checked); var card = el.closest('.vo-card') || el.closest('.vl-row'); if (card) card.classList.toggle('sel', el.checked); updateSelUI(host); });
     });
     var selall = host.querySelector('#vo-selall');
     if (selall) { setSelAllState(host); selall.addEventListener('change', function () { var all = filtered(); if (selall.checked) all.forEach(function (r) { S.sel[r.VIN] = true; }); else all.forEach(function (r) { delete S.sel[r.VIN]; }); renderContent(); }); }
@@ -3938,7 +4150,6 @@ OD.define('vo-liste', {
       + '<div class="vo-field">' + IC.search + '<input id="vo-search" type="text" placeholder="Désignation / VIN / N° ordre"></div>'
       + '<div class="vo-field vo-immat">' + IC.search + '<input id="vo-immat" type="text" placeholder="Immatriculation"></div>'
       + '<button class="vo-btn" id="vo-filter">' + IC.filter + 'Tous les filtres<span class="vo-fbadge" id="vo-fbadge" style="display:none"></span></button>'
-      + '<div class="vo-toggle">Mode photo<div class="vo-switch" id="vo-switch"></div></div>'
       + '</div>'
       + '<div class="vo-chips"></div>'
       + '<div id="vo-content"></div>'
@@ -3948,9 +4159,7 @@ OD.define('vo-liste', {
     function onType() { clearTimeout(deb); deb = setTimeout(function () { S.search = sIn.value; S.immat = iIn.value; S.page = 1; renderContent(); }, 220); }
     sIn.addEventListener('input', onType); iIn.addEventListener('input', onType);
     r.querySelector('#vo-filter').addEventListener('click', openFilter);
-    var sw = r.querySelector('#vo-switch');
-    sw.addEventListener('click', function () { S.view = S.view === 'photo' ? 'table' : 'photo'; sw.classList.toggle('on', S.view === 'photo'); S.page = 1; renderContent(); });
-    try { if ((win.innerWidth || window.innerWidth) <= 760) { S.view = 'photo'; sw.classList.add('on'); } } catch (e) { }
+    S.view = 'liste';   // v27 : mode photo retiré
     refreshFilterBadge();
     r.setAttribute('data-vo-ver', String(VER));
   }
@@ -3960,12 +4169,42 @@ OD.define('vo-liste', {
     S.loading = true; S.error = null; renderContent();
     try { var role = num(connectedUser().ID_Role); S.showPA = role != null && PA_ROLES.indexOf(role) !== -1; } catch (e) { S.showPA = false; }
     S.raw = await loadAllOnce(force);
+    // v27 : filtre canal seulement si le tenant a des données Planet VO²
+    S.pvoActif = S.raw.some(function (x) { return x.PVO_EN_STOCK === true; });
+    suivrePvo();
     var d = await resolveDefaults();
     if (d) { if (S.f.reseau == null) S.f.reseau = d.reseau || null; if (S.f.affaire == null) S.f.affaire = d.affaire || null; if (S.f.site == null) S.f.site = d.site || null; }
     S.loading = false;
     renderChips(); renderContent();
   }
   function reloadForSite() { S.f.reseau = null; S.f.affaire = null; S.f.site = null; S.sel = {}; start(); }
+  // v27 : commentaires / canaux Planet VO² relus toutes les 2 minutes (le robot
+  // passe toutes les 15) et fusionnés dans la liste, sans recharger le stock.
+  function suivrePvo() {
+    if (!S.pvoActif) return;
+    clearInterval(window.__voPvoT);
+    window.__voPvoT = setInterval(async function () {
+      var r0 = root();
+      if (!r0 || !r0.isConnected) { clearInterval(window.__voPvoT); return; }
+      if (doc.visibilityState === 'hidden') return;
+      try {
+        var q = await sb().from('vo_pvo').select('vin,canaux,commentaire,commentaire_modifie_le,en_stock_pvo,vu_le');
+        if (q.error || !q.data) return;
+        var m = {}; q.data.forEach(function (x) { m[x.vin] = x; });
+        var change = false;
+        S.raw.forEach(function (row) {
+          var x = m[row.VIN];
+          var nv = x ? { c: x.canaux, k: x.commentaire, l: x.commentaire_modifie_le, e: x.en_stock_pvo } : { c: null, k: null, l: null, e: null };
+          if (JSON.stringify(nv.c) !== JSON.stringify(row.PVO_CANAUX) || nv.k !== row.PVO_COMMENTAIRE || nv.l !== row.PVO_COMMENTAIRE_LE || nv.e !== row.PVO_EN_STOCK) {
+            row.PVO_CANAUX = nv.c; row.PVO_COMMENTAIRE = nv.k; row.PVO_COMMENTAIRE_LE = nv.l; row.PVO_EN_STOCK = nv.e; change = true;
+          }
+          if (x) row.PVO_VU_LE = x.vu_le;
+        });
+        // pas de re-rendu si une fenêtre de filtre est ouverte ou si l'on tape
+        if (change && !doc.querySelector('.vo-modal-bg') && doc.activeElement && !/INPUT|SELECT/.test(doc.activeElement.tagName)) renderContent();
+      } catch (e) { }
+    }, 120000);
+  }
   window.__voReload = function () { start(true); };
   win.__voPosters = window.__voPosters = function () { generatePosters(doc.getElementById('vo-pdf')); };
   win.__voExcel = window.__voExcel = function () { exportExcel(doc.getElementById('vo-xls')); };
