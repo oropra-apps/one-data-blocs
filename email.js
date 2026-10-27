@@ -1,3 +1,5 @@
+// v9 (27/10/2026) : open({ mode: 'new', client, subject, body }) pré-remplit
+// l'objet et le corps (HTML) — modèles proposés par le lead management.
 // v8 (27/10/2026) : champs (destinataires, objet, corps) en 16 px sur mobile.
 // iPhone : un champ dont le texte fait moins de 16 px déclenche un ZOOM
 // automatique de Safari au toucher. La page entière devient alors plus grande que
@@ -606,6 +608,8 @@ OD.define('email', {
       state.client = opts.client || readVar(SELECTED_CLIENT_VAR_ID) || null;
       // reset compose
       state.toChips = []; state.ccChips = []; state.bccChips = []; state.rcptInput = { field: null, text: '' }; state.sugg = []; state.suggIdx = -1; state.showCc = false; state.subject = ''; state.bodyHtml = ''; state.attachments = []; state.replyToId = null; state.forwardOfId = null;
+      if (state.mode === 'new' && typeof opts.subject === 'string') state.subject = opts.subject;
+      if (state.mode === 'new' && typeof opts.body === 'string') state.bodyHtml = opts.body;
       ensureRoot(); render();
       await loadAccounts();
       if ((state.mode === 'reply' || state.mode === 'forward') && opts.emailId) { await prefillFrom(opts.emailId, state.mode); }
