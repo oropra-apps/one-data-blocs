@@ -1,3 +1,6 @@
+// v7 (27/10/2026) : sur mobile, toucher la zone de saisie ne fait plus sortir la
+// fenêtre de l'écran : le clavier réduit la page (interactive-widget) et la
+// fenêtre suit la partie visible, y compris si Chrome fait défiler la page.
 // v6 (27/10/2026) : sur mobile, la fenêtre SMS tient dans la partie visible de
 // l'écran (barres de Chrome et clavier compris) : saisie et micro accessibles.
 // SMS (canal) — module One Data (OD.define) v1 (Lot C) — overlay, ctx.tenant/ctx.supabase
@@ -23,6 +26,21 @@ OD.define('sms', {
   const GREEN = '#d9fdd3';    // fond bulle sortante (identique WhatsApp)
 
   const doc = (__anchor.ownerDocument || document);
+
+  // Clavier mobile (27/10/2026) : par défaut, Chrome Android ouvre le clavier
+  // PAR-DESSUS la page et la fait défiler pour montrer le champ : les fenêtres
+  // fixes (SMS, WhatsApp, e-mail, avis) partaient alors vers le haut, hors de
+  // l'écran. « interactive-widget=resizes-content » demande au navigateur de
+  // RÉDUIRE la page à la place du clavier : les fenêtres se rétrécissent et
+  // restent entières à l'écran. Posé une fois pour toute l'application.
+  (function clavierRedimensionne(d) {
+    try {
+      let m = d.querySelector('meta[name="viewport"]');
+      if (!m) { m = d.createElement('meta'); m.name = 'viewport'; m.content = 'width=device-width, initial-scale=1'; d.head.appendChild(m); }
+      const c = m.getAttribute('content') || '';
+      if (!/interactive-widget/.test(c)) m.setAttribute('content', (c ? c + ', ' : '') + 'interactive-widget=resizes-content');
+    } catch (e) { }
+  })(doc);
   const win = (wwLib.getFrontWindow && wwLib.getFrontWindow()) || window;
   function getRoot() { return doc.getElementById(ROOT_ID); }
   function ensureRoot() { let r = getRoot(); if (!r) { r = doc.createElement('div'); r.id = ROOT_ID; doc.body.appendChild(r); } return r; }
@@ -281,7 +299,7 @@ OD.define('sms', {
     '.sms-spin.dark{border-color:#e7d9c2;border-top-color:' + ORANGE + '}' +
     '@keyframes sms-spin{to{transform:rotate(360deg)}}' +
     '.sms-bar{position:fixed;left:24px;bottom:24px;width:min(300px,calc(100vw - 32px));background:' + ORANGE + ';color:#fff;border-radius:12px;box-shadow:0 12px 34px rgba(0,0,0,.24);z-index:9990;display:flex;align-items:center;gap:10px;padding:10px 12px;cursor:pointer}' +
-    '@media(max-width:640px){.sms-card{left:0!important;top:0!important;right:0!important;bottom:auto!important;width:100vw;height:100vh;height:100dvh;border-radius:0}.sms-foot{padding-bottom:calc(8px + env(safe-area-inset-bottom,0px))}.sms-bar{left:0;right:0;bottom:0;width:100vw;border-radius:0;padding-bottom:env(safe-area-inset-bottom,0px)}}' +
+    '@media(max-width:640px){.sms-head{position:relative;z-index:2}.sms-hbtn{padding:11px;min-width:44px;min-height:44px;justify-content:center;align-items:center}.sms-card{left:0!important;top:0;right:0!important;bottom:auto!important;width:100vw;height:100vh;height:100dvh;border-radius:0}.sms-foot{padding-bottom:calc(8px + env(safe-area-inset-bottom,0px))}.sms-bar{left:0;right:0;bottom:0;width:100vw;border-radius:0;padding-bottom:env(safe-area-inset-bottom,0px)}}' +
     '</style>';
 
   /* ---- rendu -------------------------------------------------------------- */
@@ -364,7 +382,7 @@ OD.define('sms', {
     const card = root.querySelector('.sms-card'); if (!card) return;
     if (!estMobile()) { card.style.height = ''; return; }
     const vv = win.visualViewport;
-    card.style.left = ''; card.style.top = vv ? vv.offsetTop + 'px' : ''; card.style.right = ''; card.style.bottom = '';
+    card.style.left = '0px'; card.style.top = (vv ? Math.round(vv.offsetTop) : 0) + 'px'; card.style.right = '0px'; card.style.bottom = 'auto';
     card.style.height = Math.round(vv ? vv.height : win.innerHeight) + 'px';
   }
   if (!win.__smsVV) {
