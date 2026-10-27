@@ -1,3 +1,5 @@
+// v6 (27/10/2026) : sur mobile, la fenêtre SMS tient dans la partie visible de
+// l'écran (barres de Chrome et clavier compris) : saisie et micro accessibles.
 // SMS (canal) — module One Data (OD.define) v1 (Lot C) — overlay, ctx.tenant/ctx.supabase
 OD.define('sms', {
   mount(__anchor, ctx) {
@@ -279,7 +281,7 @@ OD.define('sms', {
     '.sms-spin.dark{border-color:#e7d9c2;border-top-color:' + ORANGE + '}' +
     '@keyframes sms-spin{to{transform:rotate(360deg)}}' +
     '.sms-bar{position:fixed;left:24px;bottom:24px;width:min(300px,calc(100vw - 32px));background:' + ORANGE + ';color:#fff;border-radius:12px;box-shadow:0 12px 34px rgba(0,0,0,.24);z-index:9990;display:flex;align-items:center;gap:10px;padding:10px 12px;cursor:pointer}' +
-    '@media(max-width:640px){.sms-card{left:0;top:0;bottom:auto;width:100vw;height:100vh;border-radius:0}.sms-bar{left:0;right:0;bottom:0;width:100vw;border-radius:0}}' +
+    '@media(max-width:640px){.sms-card{left:0!important;top:0!important;right:0!important;bottom:auto!important;width:100vw;height:100vh;height:100dvh;border-radius:0}.sms-foot{padding-bottom:calc(8px + env(safe-area-inset-bottom,0px))}.sms-bar{left:0;right:0;bottom:0;width:100vw;border-radius:0;padding-bottom:env(safe-area-inset-bottom,0px)}}' +
     '</style>';
 
   /* ---- rendu -------------------------------------------------------------- */
@@ -353,7 +355,26 @@ OD.define('sms', {
   function autoGrow(el) { el.style.height = 'auto'; el.style.height = Math.min(el.scrollHeight, 96) + 'px'; }
 
   /* ---- déplaçable --------------------------------------------------------- */
+  // Mobile (v6) : la fenêtre occupe exactement la partie VISIBLE de l'écran.
+  // 100vh compte la zone cachée par la barre d'adresse et le bandeau du bas de
+  // Chrome : le champ de saisie et le micro tombaient dessous. On suit
+  // visualViewport, qui rétrécit aussi quand le clavier s'ouvre.
+  function estMobile() { return (win.innerWidth || 1024) <= 640; }
+  function ajusterMobile(root) {
+    const card = root.querySelector('.sms-card'); if (!card) return;
+    if (!estMobile()) { card.style.height = ''; return; }
+    const vv = win.visualViewport;
+    card.style.left = ''; card.style.top = vv ? vv.offsetTop + 'px' : ''; card.style.right = ''; card.style.bottom = '';
+    card.style.height = Math.round(vv ? vv.height : win.innerHeight) + 'px';
+  }
+  if (!win.__smsVV) {
+    win.__smsVV = true;
+    const relancer = () => { const r = doc.getElementById && doc.getElementById('oropra-sms-ui'); if (r) ajusterMobile(r); };
+    try { if (win.visualViewport) { win.visualViewport.addEventListener('resize', relancer); win.visualViewport.addEventListener('scroll', relancer); } } catch (e) { }
+    win.addEventListener('resize', relancer);
+  }
   function applyPos(root) {
+    if (estMobile()) { ajusterMobile(root); return; }
     const card = root.querySelector('.sms-card'); if (!card || !state.pos) return;
     const w = card.offsetWidth || 360, h = card.offsetHeight || 600, vw = win.innerWidth, vh = win.innerHeight;
     card.style.left = Math.max(6, Math.min(state.pos.left, vw - w - 6)) + 'px';
