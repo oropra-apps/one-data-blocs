@@ -1,6 +1,12 @@
 // ============================================================================
 //  LEAD MANAGEMENT — module One Data (OD.define 'lead-mgmt')
-//  VERSION TEAM COLIN (v64) — déploiement CIBLÉ (publish-targets :
+//  VERSION TEAM COLIN (v65) — déploiement CIBLÉ (publish-targets :
+//  v65 (27/10/2026) : nouveau dessin, plus aéré. « En souffrance » est
+//  groupé par VENDEUR (une carte par personne : avatar, nom, nombre de leads,
+//  ancienneté ; « Le prévenir » = poste_prevenir_vendeur, « Tout
+//  réattribuer… » vers un collègue ou le Pool). Pool : une carte par lead,
+//  âge en pastille, un seul bouton « Attribuer à Prénom » avec la raison
+//  dessous, ▾ pour choisir un autre vendeur. Onglets soulignés.
 //  v64 (27/10/2026) : le site choisi dans la barre du haut devient le
 //  périmètre de la page (et l'inverse) ; « Bloqués chez un vendeur » devient
 //  « En souffrance », et le vendeur qui garde le lead s'affiche en grand sur
@@ -1495,12 +1501,12 @@
         var pool = libres(sid), hd = pool.filter(function (x) { return niveau(x) === 'crit'; }).length;
         var bl = bloques(sid).length, ret = retardsEquipe(sid);
         lbl = (POSTE === 'chef' ? 'Chef des ventes' : 'Direction') + ' · ' + esc(nom);
-        p = '<b>' + plural(pool.length, 'lead', 'leads') + ' dans le Pool</b>' + (hd ? ' dont <b class="t-crit">' + hd + ' hors délai</b>' : '')
-          + (bl ? ' · <b class="t-crit">' + plural(bl, 'lead en souffrance', 'leads en souffrance') + '</b> chez un vendeur' : ' · aucun lead en souffrance')
-          + (ret ? ' · <b class="t-crit">' + plural(ret, 'lead en retard', 'leads en retard') + '</b> dans l\'équipe' : '') + '.';
+        var nbV = {}; bloques(sid).forEach(function (l) { nbV[l.id_user_attribue] = 1; });
+        p = (pool.length ? '<b>' + plural(pool.length, 'lead', 'leads') + '</b> ' + (pool.length > 1 ? 'attendent' : 'attend') + ' dans le Pool' + (hd ? ', dont <b class="t-crit">' + hd + ' hors délai</b>' : '') : 'Le Pool est vide')
+          + (bl ? ' · <b class="t-crit">' + bl + ' en souffrance</b> chez ' + plural(Object.keys(nbV).length, 'vendeur') : ' · aucun lead en souffrance') + '.';
         if (sid != null && !manager(sid)) p += ' <span class="t-mut">Vue de pilotage : le chef des ventes du site agit sur ses leads.</span>';
         var aAttr = pool.filter(function (l) { var g = suggestion(l); return manager(l.id_site) && g && g.id_user; });
-        if (aAttr.length) cta = '<button type="button" class="cta" data-a="tout-attribuer">Attribuer tout le Pool<small>' + plural(aAttr.length, 'lead', 'leads') + ' · au vendeur suggéré</small></button>';
+        if (aAttr.length) cta = '<button type="button" class="cta" data-a="tout-attribuer">Attribuer ' + (aAttr.length > 1 ? 'les ' + aAttr.length + ' leads du Pool' : 'le lead du Pool') + '<small>' + (aAttr.length > 1 ? 'chacun au vendeur suggéré' : 'au vendeur suggéré') + '</small></button>';
       }
       var analyses = '';
       return '<section class="hello"><div class="hello-t">' + (POSTE !== 'vendeur' ? perimetreHtml() : '')
@@ -1510,7 +1516,7 @@
     function bandeauBacsSite() {
       var b = S.bacs || {};
       if (b.joignable === undefined || b.par_moi) return '';
-      return '<div class="bd crit" role="alert"><b>BACS n\'est pas ouvert sur votre poste.</b><span>Rendez-vous, attributions, transferts et clôtures des leads BACS sont refusés tant que BACS n\'est pas ouvert dans un onglet de ce navigateur.</span></div>';
+      return '<div class="bacs-l" role="alert"><b>BACS fermé sur ce poste.</b><span>Les gestes sur les leads BACS (attribution, rendez-vous, clôture) sont refusés tant que BACS n\'est pas ouvert dans un onglet de ce navigateur.</span></div>';
     }
 
     // ── Filtres-pastilles ─────────────────────────────────────────────────
@@ -1652,26 +1658,114 @@
       return '<div class="regle"><span class="i" aria-hidden="true">i</span><div><b>Règle d\'attribution de ' + esc(siteNom((siteInfo(sid) || {}).site)) + '.</b> ' + texteRegle(r)
         + (r.peut_modifier ? ' <button type="button" class="lien" data-a="regle-modifier" data-id="' + sid + '">Modifier la règle</button>' : '') + '</div></div>';
     }
+    function ageLead(l) {
+      var m = mins(arrive(l)), r = slaDe(l) - m;
+      if (m >= 1440) return '<div class="age r"><b>' + duree(m) + '</b><small>en attente</small></div>';
+      if (r <= 0) return '<div class="age o"><b>' + duree(m) + '</b><small>hors délai</small></div>';
+      return '<div class="age v"><b>' + duree(r) + '</b><small>avant le délai</small></div>';
+    }
+    function carteLead(l) {
+      var g = suggestion(l), gere = manager(l.id_site), ch = S.choix && S.choix[l.id_lead];
+      var act;
+      if (!gere) act = '<button type="button" class="btn" data-a="open" data-id="' + l.id_lead + '">Ouvrir</button>';
+      else if (ch || !(g && g.id_user)) act = '<div class="choix"><select id="sel-' + l.id_lead + '" aria-label="Vendeur">' + optionsVendeurs(l.id_site, null, g && g.id_user) + '</select><button type="button" class="btn pri" data-a="attribuer" data-id="' + l.id_lead + '">Attribuer</button>'
+        + (g && g.id_user ? '<button type="button" class="btn ghost sm" data-a="choix" data-id="' + l.id_lead + '">Annuler</button>' : '') + '</div>';
+      else act = '<div class="go"><button type="button" class="main" data-a="attribuer-sugg" data-id="' + l.id_lead + '">Attribuer à ' + esc(prenom(g.nom)) + '<small>' + esc(g.raison) + '</small></button>'
+        + '<button type="button" class="alt" data-a="choix" data-id="' + l.id_lead + '" title="Choisir un autre vendeur" aria-label="Choisir un autre vendeur">▾</button></div>';
+      return '<div class="carte-l" data-a="open" data-id="' + l.id_lead + '" tabindex="0">' + ageLead(l)
+        + '<div class="qui"><b>' + esc(nomLead(l)) + (sitePoste() == null ? ' <span class="lr-v">' + esc(siteNom(l.site)) + '</span>' : '') + '</b><p>' + esc(demandeDe(l)) + '</p><span class="src">' + esc(l.source_libelle || l.source || 'Lead') + '</span></div>'
+        + act + '</div>';
+    }
     function vuePool() {
       var sid = sitePoste();
       var ls = libres(sid).slice().sort(function (a, b) { return reste(a) - reste(b); });
-      var h = regleHtml(sid) + '<div class="list">';
-      if (!ls.length) h += '<div class="empty">Le Pool est vide : chaque lead a son vendeur.</div>';
-      ls.slice(0, 150).forEach(function (l) { h += ligneAttrib(l, false); });
-      if (ls.length > 150) h += '<div class="empty">… et ' + (ls.length - 150) + ' autres.</div>';
+      var h = regleHtml(sid) + '<div class="cartes">';
+      if (!ls.length) h += '<div class="vide">Le Pool est vide : chaque lead a son vendeur.</div>';
+      ls.slice(0, 150).forEach(function (l) { h += carteLead(l); });
+      if (ls.length > 150) h += '<div class="vide">… et ' + (ls.length - 150) + ' autres.</div>';
       h += '</div>';
       var st = sid != null ? stockDu(sid) + (Number((siteInfo(sid) || {}).archives) || 0) : 0;
       if (st && manager(sid)) h += '<div class="stock-l"><span>' + plural(st, 'lead ouvert', 'leads ouverts') + ' depuis plus de 24 h faussent les délais du site.</span><button type="button" class="btn" data-a="solder" data-id="' + sid + '">Solder le stock</button></div>';
       return h + equipeHtml(sid);
     }
+    function groupesSouffrance(sid) {
+      var g = {};
+      bloques(sid).forEach(function (l) {
+        var k = l.id_user_attribue + '|' + l.id_site;
+        (g[k] = g[k] || { uid: l.id_user_attribue, site: l.id_site, nom: propre(l.vendeur_nom || 'Vendeur'), ls: [] }).ls.push(l);
+      });
+      return Object.keys(g).map(function (k) {
+        var x = g[k];
+        x.ls.sort(function (a, b) { return ts(a.attribue_le || a.arrive_le) - ts(b.attribue_le || b.arrive_le); });
+        x.vieux = Math.max.apply(null, x.ls.map(function (l) { return mins(l.attribue_le || arrive(l)); }));
+        x.appels = x.ls.reduce(function (a, l) { return a + (l.tentatives || 0); }, 0);
+        return x;
+      }).sort(function (a, b) { return (b.ls.length - a.ls.length) || (b.vieux - a.vieux); });
+    }
     function vueBloques() {
       var sid = sitePoste();
-      var ls = bloques(sid);
-      var h = '<div class="list">';
-      if (!ls.length) h += '<div class="empty">Aucun lead en souffrance : chaque vendeur traite les siens dans le délai.</div>';
-      ls.slice(0, 150).forEach(function (l) { h += ligneAttrib(l, true); });
-      h += '</div><p class="foot">Un lead est « en souffrance » quand son vendeur l\'a pris sans appeler depuis plus de 20 min, a dépassé le délai, l\'a depuis plus de 24 h, ou ne l\'a pas joint en trois essais. Ouvrez-le pour le rendre au Pool, le confier au plateau VROOM ou le clore.</p>';
-      return h + equipeHtml(sid);
+      var gs = groupesSouffrance(sid);
+      if (!gs.length) return '<div class="vide">Aucun lead en souffrance : chaque vendeur traite les siens dans le délai.</div>';
+      var h = '';
+      gs.forEach(function (x) {
+        var ini = x.nom.split(/\s+/).filter(Boolean).slice(0, 2).map(function (s) { return s[0]; }).join('').toUpperCase();
+        var gere = manager(x.site), ids = x.ls.map(function (l) { return l.id_lead; }).join(',');
+        h += '<section class="vend"><header class="vend-h"><span class="av' + (x.vieux >= 1440 ? '' : ' o') + '">' + esc(ini) + '</span>'
+          + '<div class="nm"><b>' + esc(x.nom) + (sitePoste() == null ? ' <span class="lr-v">' + esc(siteNom((siteInfo(x.site) || {}).site)) + '</span>' : '') + '</b>'
+          + '<span><em>' + plural(x.ls.length, 'lead en souffrance', 'leads en souffrance') + '</em> · le plus ancien depuis ' + duree(x.vieux) + ' · ' + (x.appels ? plural(x.appels, 'appel sans réponse', 'appels sans réponse') : 'aucun appel') + '</span></div>'
+          + (gere ? '<div class="acts"><button type="button" class="btn" data-a="prevenir" data-id="' + x.uid + '|' + ids + '">Prévenir</button><button type="button" class="btn pri" data-a="tout-reattr" data-id="' + x.uid + '|' + x.site + '|' + ids + '">Tout réattribuer…</button></div>' : '')
+          + '</header><div class="ls">';
+        x.ls.forEach(function (l) {
+          var m = mins(l.attribue_le || arrive(l));
+          var sous = l.tentatives ? plural(l.tentatives, 'essai') : niveau(l) === 'crit' && m < 1440 ? 'hors délai' : 'sans appel';
+          h += '<div class="l" data-a="open" data-id="' + l.id_lead + '" tabindex="0"><div class="d">' + duree(m) + '<small>' + sous + '</small></div>'
+            + '<div class="qui"><b>' + esc(nomLead(l)) + '</b><p>' + esc(demandeDe(l)) + ' · ' + esc(l.source_libelle || l.source || 'Lead') + '</p></div>'
+            + (gere ? '<button type="button" class="lien-r" data-a="open" data-id="' + l.id_lead + '">Réattribuer ›</button>' : '') + '</div>';
+        });
+        h += '</div></section>';
+      });
+      return h + '<p class="foot">En souffrance : pris sans appel depuis plus de 20 min, délai dépassé, gardé plus de 24 h, ou trois essais sans joindre le client.</p>';
+    }
+    function prevenir(v) {
+      var p = String(v).split('|'), uid = Number(p[0]), ids = (p[1] || '').split(',').map(Number).filter(Boolean);
+      return geste(async function () {
+        var r = await rpc('poste_prevenir_vendeur', { p_id_user: uid, p_ids: ids });
+        if (r && r.ok === false) { toast(r.motif || 'Impossible de prévenir ce vendeur.', true); return; }
+        toast(nomVendeur(uid) + ' est prévenu : ' + plural((r && r.leads) || ids.length, 'lead en souffrance', 'leads en souffrance') + '.');
+      });
+    }
+    function modalToutReattr(v) {
+      var p = String(v).split('|'), uid = p[0], site = p[1], ids = p[2];
+      var n = ids.split(',').filter(Boolean).length;
+      ouvrirModal('<div class="mb-h"><div><h2>Réattribuer les ' + plural(n, 'lead', 'leads') + ' de ' + esc(nomVendeur(uid)) + '</h2><p>Ils partent tous chez le même collègue, ou retournent dans le Pool.</p></div><button type="button" class="x" data-a="modal-close" aria-label="Fermer">' + X_SVG + '</button></div>'
+        + '<div class="mb-b"><label class="opt"><input type="radio" name="tr" value="pool" checked><span><b>Les rendre au Pool</b><small>Libres pour tous les vendeurs du site.</small></span></label>'
+        + '<label class="opt"><input type="radio" name="tr" value="vend"><span><b>Les confier à un collègue</b><small><select id="tr-vend">' + optionsVendeurs(site, uid) + '</select></small></span></label></div>'
+        + '<div class="mb-f"><button type="button" class="btn ghost" data-a="modal-close">Annuler</button><button type="button" class="btn pri" data-a="tout-reattr-ok" data-id="' + esc(ids) + '">Réattribuer</button></div>');
+    }
+    function toutReattrOk(ids) {
+      var mode = ($modal.querySelector('input[name="tr"]:checked') || {}).value, vend = ($modal.querySelector('#tr-vend') || {}).value;
+      var liste = String(ids).split(',').map(Number).filter(Boolean);
+      return geste(async function () {
+        var ok = 0;
+        for (var i = 0; i < liste.length; i++) {
+          try {
+            if (mode === 'vend' && vend) await rpc('poste_attribuer', { p_id_lead: liste[i], p_id_user: Number(vend) });
+            else await rpc('poste_rendre', { p_id_lead: liste[i], p_motif: 'en souffrance' });
+            ok++;
+          } catch (e) {}
+        }
+        fermerModal(); S.suggKey = null;
+        apres(plural(ok, 'lead réattribué', 'leads réattribués') + (mode === 'vend' && vend ? ' à ' + nomVendeur(vend) : ' au Pool') + '.', true);
+      });
+    }
+    function attribuerSugg(id) {
+      var l = leadDe(id), g = suggestion(l);
+      if (!g || !g.id_user) return;
+      return geste(async function () {
+        await rpc('poste_attribuer', { p_id_lead: Number(id), p_id_user: Number(g.id_user) });
+        S.suggKey = null;
+        apres(nomLead(l) + ' attribué à ' + propre(g.nom) + '.', true);
+      });
     }
     function equipeHtml(sid) {
       if (sid == null) {
@@ -2651,6 +2745,11 @@
         case 'appeler': await ouvrir(id); if (S.dr && Number(S.dr.id) === Number(id)) canal('appel'); return;
         case 'prendre': return prendre(id);
         case 'tout-attribuer': return toutAttribuer();
+        case 'attribuer-sugg': return attribuerSugg(id);
+        case 'choix': S.choix = S.choix || {}; S.choix[id] = !S.choix[id]; render(); return;
+        case 'prevenir': return prevenir(id);
+        case 'tout-reattr': return modalToutReattr(id);
+        case 'tout-reattr-ok': return toutReattrOk(id);
         case 'regle-modifier': return modalRegle(Number(id));
         case 'regle-ok': return enregistrerRegle(Number(id));
         case 'perim-ouvrir': S.perimOuvert = !S.perimOuvert; render(); return;
@@ -2726,7 +2825,7 @@
       var t = ev.target.closest('[data-a]');
       if (!t || t.disabled) return;
       var a = t.getAttribute('data-a');
-      if ((t.classList.contains('lr') || t.classList.contains('todo') || t.tagName === 'TR') && ev.target.closest('button,select,input,a')) return;
+      if ((t.classList.contains('lr') || t.classList.contains('todo') || t.classList.contains('carte-l') || t.classList.contains('l') || t.tagName === 'TR') && ev.target.closest('button,select,input,a')) return;
       ev.preventDefault(); ev.stopPropagation();
       action(a, t.getAttribute('data-id') || '');
     }
@@ -2738,7 +2837,7 @@
     $scrim.addEventListener('click', function () { if (S.modal) fermerModal(); else fermerTout(); });
     root.addEventListener('keydown', function (ev) {
       var t = ev.target;
-      if ((ev.key === 'Enter' || ev.key === ' ') && t.classList && (t.classList.contains('lr') || t.classList.contains('todo') || t.classList.contains('clic'))) { ev.preventDefault(); action(t.getAttribute('data-a'), t.getAttribute('data-id')); }
+      if ((ev.key === 'Enter' || ev.key === ' ') && t.classList && (t.classList.contains('lr') || t.classList.contains('todo') || t.classList.contains('clic') || t.classList.contains('carte-l') || t.classList.contains('l'))) { ev.preventDefault(); action(t.getAttribute('data-a'), t.getAttribute('data-id')); }
     });
     ov.addEventListener('keydown', function (ev) {
       var t = ev.target;
@@ -3280,6 +3379,61 @@
 .lmtc-ov .rg-t{font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:.05em;color:var(--lbl);margin-top:6px}
 .lmtc-ov .opt.chk{display:grid;grid-template-columns:auto minmax(0,1fr)}
 .lmtc-ov .opt select{padding:2px 6px;font-size:12px}
+/* ══ v65 : dessin aéré ══════════════════════════════════════════════════ */
+.lmtc .tabs{gap:4px;border-bottom:1px solid var(--line);margin:0 0 18px;flex-wrap:wrap}
+.lmtc .tabs button{border:0;border-bottom:3px solid transparent;border-radius:0;background:none;padding:10px 14px 12px;margin-bottom:-1px;font-size:14px;color:var(--ink-3)}
+.lmtc .tabs button:hover{color:var(--bleu);border-color:transparent;background:none}
+.lmtc .tabs button.on{background:none;color:var(--bleu-dk);border-bottom-color:var(--bleu);box-shadow:none}
+.lmtc .tabs .cnt{background:var(--sel);color:var(--bleu)}
+.lmtc .tabs .cnt.c,.lmtc .tabs button.on .cnt.c{background:var(--chaud-bg);color:var(--m-rouge)}
+.lmtc .tabs button.on .cnt{background:var(--sel);color:var(--bleu)}
+.lmtc .tabs .cnt.z{background:var(--calme-bg);color:var(--ink-3)}
+.lmtc .act:has(.cartes,.vend,.panel > .vide){background:none;border:0;box-shadow:none}
+.lmtc .act:has(.cartes,.vend,.panel > .vide) .panel{padding:0}
+.lmtc .bacs-l{display:flex;flex-wrap:wrap;gap:4px 10px;align-items:baseline;background:var(--card);border:1px solid var(--line);border-left:4px solid var(--m-rouge);border-radius:12px;padding:10px 14px;margin-bottom:18px;font-size:13px;color:var(--ink-2)}
+.lmtc .bacs-l b{color:var(--m-rouge);font-weight:800}
+.lmtc .regle{background:none;border:0;padding:0 2px;margin:0 0 16px}
+.lmtc .regle .i{background:var(--sel)}
+.lmtc .vide{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:26px;text-align:center;color:var(--mut);font-weight:700}
+/* Pool : une carte par lead */
+.lmtc .cartes{display:grid;gap:10px}
+.lmtc .carte-l{display:grid;grid-template-columns:76px minmax(0,1fr) auto;gap:18px;align-items:center;background:var(--card);border:1px solid var(--line);border-radius:16px;padding:16px 18px;cursor:pointer;transition:box-shadow .15s}
+.lmtc .carte-l:hover{box-shadow:0 6px 20px rgba(28,43,69,.07)}
+.lmtc .age{display:grid;place-items:center;align-content:center;height:58px;border-radius:14px;background:var(--ground);text-align:center;line-height:1.1}
+.lmtc .age b{font-size:16px;font-weight:800;color:var(--ink-2)}
+.lmtc .age small{font-size:10px;color:var(--ink-3);font-weight:700;margin-top:2px}
+.lmtc .age.r{background:var(--chaud-bg)} .lmtc .age.r b{color:var(--m-rouge)}
+.lmtc .age.o{background:var(--alerte-bg)} .lmtc .age.o b{color:var(--m-orange)}
+.lmtc .age.v{background:var(--ok-bg)} .lmtc .age.v b{color:var(--m-vert)}
+.lmtc .carte-l .qui,.lmtc .vend .qui{min-width:0}
+.lmtc .carte-l .qui b{font-size:15.5px;font-weight:800;color:var(--ink);display:block}
+.lmtc .carte-l .qui p,.lmtc .vend .qui p{margin:2px 0 0;color:var(--ink-2);font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.lmtc .carte-l .src{display:inline-block;margin-top:6px;font-size:11px;font-weight:700;color:var(--ink-3);background:var(--ground);border-radius:6px;padding:2px 8px}
+.lmtc .go{display:flex;align-items:stretch}
+.lmtc .go .main{border:0;background:var(--bleu);color:#fff;font:inherit;font-weight:800;font-size:13.5px;padding:9px 16px;border-radius:11px 0 0 11px;cursor:pointer;white-space:nowrap;text-align:left;line-height:1.25}
+.lmtc .go .main small{display:block;font-size:10.5px;font-weight:600;opacity:.85}
+.lmtc .go .alt{border:0;border-left:1px solid rgba(255,255,255,.28);background:var(--bleu);color:#fff;font:inherit;padding:0 12px;border-radius:0 11px 11px 0;cursor:pointer;font-size:12px}
+.lmtc .go .main:hover,.lmtc .go .alt:hover{background:#24528f}
+.lmtc .choix{display:flex;gap:6px;align-items:center;flex-wrap:wrap;justify-content:flex-end}
+.lmtc .choix select{max-width:240px}
+/* En souffrance : une carte par vendeur */
+.lmtc .vend{background:var(--card);border:1px solid var(--line);border-radius:18px;margin-bottom:14px;overflow:hidden}
+.lmtc .vend-h{display:flex;align-items:center;gap:14px;padding:16px 20px;border-bottom:1px solid var(--line)}
+.lmtc .vend .av{flex:none;width:44px;height:44px;border-radius:50%;display:grid;place-items:center;font-weight:800;font-size:15px;color:#fff;background:var(--m-rouge)}
+.lmtc .vend .av.o{background:var(--m-orange)}
+.lmtc .vend-h .nm{flex:1;min-width:0}
+.lmtc .vend-h .nm b{display:block;font-size:17px;font-weight:800;color:var(--ink)}
+.lmtc .vend-h .nm span{font-size:12.5px;color:var(--ink-2);font-weight:600}
+.lmtc .vend-h .nm em{font-style:normal;color:var(--m-rouge);font-weight:800}
+.lmtc .vend-h .acts{display:flex;gap:8px;flex-wrap:wrap}
+.lmtc .vend .l{display:grid;grid-template-columns:70px minmax(0,1fr) auto;gap:16px;align-items:center;padding:12px 20px;border-top:1px solid var(--line);cursor:pointer}
+.lmtc .vend .l:first-child{border-top:0}
+.lmtc .vend .l:hover{background:var(--hov)}
+.lmtc .vend .l .d{font-size:13.5px;font-weight:800;color:var(--m-rouge);text-align:center;line-height:1.15}
+.lmtc .vend .l .d small{display:block;font-size:10px;color:var(--ink-3);font-weight:700}
+.lmtc .vend .l .qui b{font-size:14.5px;font-weight:800;color:var(--ink)}
+.lmtc .lien-r{border:0;background:none;color:var(--bleu);font:inherit;font-weight:800;font-size:12.5px;cursor:pointer;padding:6px 4px;white-space:nowrap}
+@media (max-width:720px){.lmtc .carte-l{grid-template-columns:60px minmax(0,1fr)}.lmtc .carte-l > .go,.lmtc .carte-l > .choix,.lmtc .carte-l > .btn{grid-column:1/-1}.lmtc .go .main{flex:1}.lmtc .vend-h{flex-wrap:wrap}.lmtc .vend .l{grid-template-columns:56px minmax(0,1fr)}.lmtc .vend .l .lien-r{grid-column:2;justify-self:start}}
 @media (prefers-reduced-motion:reduce){.lmtc *{animation:none!important;transition:none!important}}
 `;
     (doc.head || doc.documentElement).appendChild(st);
