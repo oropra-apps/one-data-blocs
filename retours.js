@@ -1,3 +1,5 @@
+// v9 (27/10/2026) : le O se masque aussi d'après le marqueur posé par les
+// fenêtres de messagerie (od-plein-ecran), quel que soit le document qui les porte.
 // v8 (27/10/2026) : sur mobile, le O se masque quand une fenêtre SMS, WhatsApp
 // ou e-mail occupe l'écran ; il ne recouvre plus la croix de fermeture.
 // v7 (27/10/2026) : le clavier mobile réduit la page au lieu de la recouvrir :
@@ -24,7 +26,7 @@
 // ============================================================================
 OD.define('retours', {
   mount(__anchor, ctx) {
-    const VERSION = 8;   // v5 : écran courant fourni par pulse (plus grande surface visible, accessoires exclus)
+    const VERSION = 9;   // v5 : écran courant fourni par pulse (plus grande surface visible, accessoires exclus)
                          // v4 : « Montrer l'endroit » nomme la zone désignée (titre du bloc, colonne, champ, type)
     const W = window;
 
@@ -320,8 +322,11 @@ textarea:focus{border-color:#1F4A85;outline:none}
     // l'écran, le O se retire : il recouvrait la croix de fermeture.
     const masqueO = setInterval(() => {
       try {
-        const mobile = (window.innerWidth || 1024) <= 640;
-        const plein = mobile && !!document.querySelector('#oropra-sms-ui .sms-card, #oropra-wa-ui .wa-card, #oropra-email-ui .em-ov');
+        const docs = [document];
+        try { const fd = window.wwLib && window.wwLib.getFrontDocument && window.wwLib.getFrontDocument(); if (fd && fd !== document) docs.push(fd); } catch (e) { }
+        const mobile = (window.innerWidth || 1024) <= 640 || (window.visualViewport && window.visualViewport.width <= 640);
+        const plein = docs.some(d => d.documentElement.classList.contains('od-plein-ecran')
+          || (mobile && !!d.querySelector('#oropra-sms-ui .sms-card, #oropra-wa-ui .wa-card, #oropra-email-ui .em-ov')));
         lanceur.style.visibility = plein ? 'hidden' : '';
       } catch (e) { }
     }, 700);
