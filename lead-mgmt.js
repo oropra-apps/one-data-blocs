@@ -1,6 +1,9 @@
 // ============================================================================
 //  LEAD MANAGEMENT — module One Data (OD.define 'lead-mgmt')
-//  VERSION TEAM COLIN (v62) — déploiement CIBLÉ (publish-targets :
+//  VERSION TEAM COLIN (v63) — déploiement CIBLÉ (publish-targets :
+//  v63 (27/10/2026) : le lien « Tableaux détaillés » est retiré : il ouvrait
+//  l'ancienne version sans chemin de retour. Le mur et le relais restent sous
+//  « Analyses détaillées », la règle d'attribution sous « Modifier la règle ».
 //  v62 (27/10/2026) : LEAD MANAGEMENT ALLÉGÉ (« simplicité, rapidité,
 //  efficacité »). Plus de colonne de signaux ni de bandeau de compteurs :
 //  une phrase, un gros bouton « suivant », des filtres-pastilles au-dessus
@@ -1465,7 +1468,7 @@
       }
       var analyses = POSTE !== 'vendeur' ? ' · <button type="button" class="lien" data-a="tab" data-id="' + (sitePoste() == null ? 'mursites' : 'mur') + '">Analyses détaillées</button>' : '';
       return '<section class="hello"><div class="hello-t">' + (POSTE !== 'vendeur' ? perimetreHtml() : '')
-        + '<p class="hello-l">' + lbl + analyses + ' ·' + lienAncien() + '</p>'
+        + '<p class="hello-l">' + lbl + analyses + '</p>'
         + '<h1>' + (POSTE === 'vendeur' ? 'Bonjour ' + esc(pre || '') : esc(libPerim()) + ' · aujourd\'hui') + '</h1><p class="hello-p">' + p + '</p></div>' + cta + '</section>';
     }
     function bandeauBacsSite() {
