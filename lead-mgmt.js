@@ -1,6 +1,20 @@
 // ============================================================================
 //  LEAD MANAGEMENT — module One Data (OD.define 'lead-mgmt')
-//  VERSION TEAM COLIN (v61) — déploiement CIBLÉ (publish-targets :
+//  VERSION TEAM COLIN (v62) — déploiement CIBLÉ (publish-targets :
+//  v62 (27/10/2026) : LEAD MANAGEMENT ALLÉGÉ (« simplicité, rapidité,
+//  efficacité »). Plus de colonne de signaux ni de bandeau de compteurs :
+//  une phrase, un gros bouton « suivant », des filtres-pastilles au-dessus
+//  d'UNE liste triée par urgence, un compte à rebours et un seul bouton par
+//  ligne. La « piscine » devient le POOL. Vendeur : À rappeler · Relances ·
+//  Campagnes · Pool. Chef des ventes et direction : Pool (vendeur suggéré
+//  et sa raison, poste_suggestions) · Bloqués chez un vendeur · Campagnes,
+//  l'équipe en cartes, la règle d'attribution du site affichée et
+//  modifiable ; la direction a le sélecteur de périmètre marque › affaire ›
+//  site. Le mur et le relais restent accessibles (« Analyses détaillées »),
+//  en attendant leur place dans Performances. Fiche du lead : Appeler, SMS,
+//  WhatsApp, E-mail avec des MODÈLES adaptés au lead (pré-remplis dans les
+//  modules sms v12, whatsapp v17, email v9) ; rendez-vous avec l'objet BACS,
+//  des collègues invités et un commentaire (lead_rdv_creer à 6 paramètres).
 //  v61 (25/10/2026) : « Injoignable » — deux cases, comme dans BACS : envoyer
 //  l'e-mail au client, envoyer le SMS au client (décochées par défaut). Le
 //  geste rejoue le bouton BACS « Injoignable temporairement » : statut, date
@@ -310,7 +324,7 @@
       clearTimeout(toast._t); toast._t = setTimeout(function () { $toast.classList.remove('on'); }, err ? 5200 : 3200);
     }
 
-    root.innerHTML = '<section class="situ"><p class="situ-l"><span class="vr">Plateau VROOM</span></p><p class="situ-t">Chargement de la piscine BACS…</p></section>';
+    root.innerHTML = '<section class="situ"><p class="situ-l"><span class="vr">Plateau VROOM</span></p><p class="situ-t">Chargement de le Pool BACS…</p></section>';
 
     // ── Chargement ────────────────────────────────────────────────────────
     async function charger() {
@@ -365,7 +379,7 @@
       var hd = libres.filter(function (l) { return mins(l.recu_le) >= (l.sla_min || 120); })
         .sort(function (a, b) { return ts(a.recu_le) - ts(b.recu_le); });
       if (hd.length) out.push({ id: 'hd-' + hd.length + '-' + hd[0].sf_lead_id, niv: 'crit', k: 'Hors délai', t: hd[0].recu_le,
-        titre: plural(hd.length, 'lead hors délai', 'leads hors délai') + ' dans la piscine',
+        titre: plural(hd.length, 'lead hors délai', 'leads hors délai') + ' dans le Pool',
         d: 'Le plus ancien : ' + nomLead(hd[0]) + ', ' + duree(mins(hd[0].recu_le)) + ' (' + (hd[0].source_libelle || 'BACS') + ', SLA ' + slaTxt(hd[0].sla_min || 120) + ').',
         a: [['Prendre le plus ancien', 'prendre', hd[0].sf_lead_id]] });
       // 4. Rappels : ceux de l'heure, un par un ; le retard, en un seul signal.
@@ -410,7 +424,7 @@
       var atelierCache = (k.atelier_en_file || 0) > 0 && !(S.sources || []).some(function (c) { return c === 'bacs_atelier'; });
       if (atelierCache) out.push({ id: 'atelier-' + k.atelier_en_file, niv: 'info', k: 'Trafic atelier', t: null,
         titre: plural(k.atelier_en_file, 'lead atelier attend', 'leads atelier attendent') + ' dans BACS',
-        d: 'Le trafic atelier n\'est pas affiché dans la piscine par défaut.', a: [['Les afficher', 'source', 'bacs_atelier']] });
+        d: 'Le trafic atelier n\'est pas affiché dans le Pool par défaut.', a: [['Les afficher', 'source', 'bacs_atelier']] });
       return out.filter(function (s) { return !S.ack.has(s.id); });
     }
 
@@ -427,33 +441,35 @@
       return h;
     }
 
-    // ── Situation ─────────────────────────────────────────────────────────
+    // ── En-tête : une phrase et le bouton « suivant » (v62) ───────────────
+    function prochainVroom() {
+      var ls = S.piscine.filter(function (l) { return verrouLibre(l) && (l.statut_eff === 'A affecter' || l.statut_eff === 'Nouveau'); });
+      if (!ls.length) ls = S.piscine.filter(verrouLibre);
+      return ls.slice().sort(function (a, b) { return ts(a.recu_le) - ts(b.recu_le); })[0] || null;
+    }
     function renderSituation() {
       var k = S.kpis || {};
       var libres = S.piscine.filter(verrouLibre);
       var hd = libres.filter(function (l) { return (l.statut_eff === 'A affecter' || l.statut_eff === 'Nouveau') && mins(l.recu_le) >= (l.sla_min || 120); });
-      var old = libres.length ? libres.reduce(function (a, b) { return ts(a.recu_le) < ts(b.recu_le) ? a : b; }) : null;
       var nom = propre([user && user.prenom, user && user.nom].filter(Boolean).join(' ')) || (user && user.nomComplet) || '';
-      var l = '<span class="vr">Plateau VROOM</span>' + (nom ? ' · ' + esc(nom) : '')
-        + (opt.apercu ? ' · aperçu <button type="button" class="lien" data-a="quitter-apercu">revenir à la vue habituelle</button>' : '');
-      var t = libres.length
-        ? (hd.length ? '<b class="t-crit">' + plural(hd.length, 'lead hors délai', 'leads hors délai') + '</b> sur ' : '')
-          + '<b>' + plural(libres.length, 'lead libre', 'leads libres') + '</b> dans la piscine BACS. Le plus ancien attend depuis <b class="' + (hd.length ? 't-crit' : 't-acc') + '">' + duree(mins(old.recu_le)) + '</b>.'
-        : 'La piscine BACS est vide.';
-      if (k.n_rappels_dus) t += ' <b class="t-warn">' + plural(k.n_rappels_dus, 'rappel est dû', 'rappels sont dus') + '</b>.';
-      if (k.n_transferts_sans_contact) t += ' <b class="t-vr">' + plural(k.n_transferts_sans_contact, 'transfert n\'est pas pris', 'transferts ne sont pas pris') + '</b> par les sites.';
+      var p = '<b>' + plural(libres.length, 'lead libre', 'leads libres') + '</b> dans le Pool BACS'
+        + (hd.length ? ' dont <b class="t-crit">' + hd.length + ' hors délai</b>' : '')
+        + (k.n_rappels_dus ? ' · <b class="t-warn">' + plural(k.n_rappels_dus, 'rappel dû', 'rappels dus') + '</b>' : '')
+        + ' · Aujourd\'hui : <b>' + (k.pris || 0) + ' pris</b>, <b>' + (k.qualifies || 0) + ' transférés</b>, <b>' + (k.abandonnes || 0) + ' abandonnés</b>.';
       var syncAge = k.derniere_synchro ? mins(k.derniere_synchro) : null;
-      var kp = [['Pris aujourd\'hui', k.pris || 0], ['Qualifiés', k.qualifies || 0], ['Rappels programmés', k.rappels || 0],
-                ['Abandonnés', k.abandonnes || 0], ['Acceptés dans BACS', k.bacs_acceptes || 0],
-                ['Copie BACS', syncAge == null ? '—' : '<span class="txt ' + (syncAge > 1440 ? 't-crit' : syncAge > 120 ? 't-warn' : '') + '">' + (syncAge < 1 ? 'à l\'instant' : 'il y a ' + duree(syncAge)) + '</span>']];
+      if (syncAge != null && syncAge > 120) p += ' <span class="' + (syncAge > 1440 ? 't-crit' : 't-warn') + '">BACS relu il y a ' + duree(syncAge) + '.</span>';
+      var s = prochainVroom(), cta = '';
+      if (s) {
+        var m = mins(s.recu_le), sla = s.sla_min || 120;
+        cta = '<button type="button" class="cta" data-a="prendre" data-id="' + esc(s.sf_lead_id) + '"' + dis() + '>Prendre le suivant<small>'
+          + esc(nomLead(s)) + ' · ' + (m >= sla ? 'hors délai de ' + duree(m - sla) : 'attend depuis ' + duree(m)) + '</small></button>';
+      }
       var b = S.bacs || {};
-      kp.push(['Report dans BACS', !b.ecrire_bacs ? '<span class="txt t-mut">désactivé</span>'
-        : b.canal !== 'moi' ? '<span class="txt t-crit">bloqué</span>'
-        : b.echecs ? '<span class="txt t-crit">' + plural(b.echecs, 'échec') + '</span>'
-        : b.en_attente ? '<span class="txt t-warn">' + b.en_attente + ' en attente</span>'
-        : '<span class="txt t-ok">automatique</span>']);
-      return '<section class="situ"><p class="situ-l">' + l + '</p><p class="situ-t">' + t + '</p><div class="kpis">'
-        + kp.map(function (x) { return '<div class="k"><span>' + x[0] + '</span><b>' + x[1] + '</b></div>'; }).join('') + '</div></section>';
+      var voyant = !b.ecrire_bacs ? '' : '<span class="voyant ' + (b.canal !== 'moi' || b.echecs ? 'crit' : b.en_attente ? 'warn' : 'ok') + '">'
+        + (b.canal !== 'moi' ? 'BACS fermé' : b.echecs ? plural(b.echecs, 'échec BACS', 'échecs BACS') : b.en_attente ? b.en_attente + ' en attente BACS' : 'BACS connecté') + '</span>';
+      return '<section class="hello"><div class="hello-t"><p class="hello-l">Plateau VROOM' + (nom ? ' · ' + esc(nom) : '') + voyant
+        + (opt.apercu ? ' · aperçu <button type="button" class="lien" data-a="quitter-apercu">revenir à la vue habituelle</button>' : '') + '</p>'
+        + '<h1>' + (nom ? 'Bonjour ' + esc(nom.split(' ')[0]) : 'Plateau VROOM') + '</h1><p class="hello-p">' + p + '</p></div>' + cta + '</section>';
     }
 
     // ── Onglets ───────────────────────────────────────────────────────────
@@ -461,9 +477,9 @@
       var k = S.kpis || {};
       var libres = S.piscine.filter(verrouLibre);
       var hd = libres.some(function (l) { return (l.statut_eff === 'A affecter' || l.statut_eff === 'Nouveau') && mins(l.recu_le) >= (l.sla_min || 120); });
-      if (S.campagne) return [['piscine', 'La piscine BACS', fc(libres).length, false], ['rappels', 'Rappels', fc(S.rappels).length, false],
+      if (S.campagne) return [['piscine', 'Pool BACS', fc(libres).length, false], ['rappels', 'Rappels', fc(S.rappels).length, false],
                               ['transferts', 'Transferts', fc(S.transferts).length, false], ['campagnes', 'Campagnes', null]];
-      return [['piscine', 'La piscine BACS', libres.length, hd],
+      return [['piscine', 'Pool BACS', libres.length, hd],
               ['rappels', 'Rappels', S.rappels.length, (k.n_rappels_dus || 0) > 0],
               ['transferts', 'Transferts', S.transferts.length, (k.n_transferts_sans_contact || 0) > 0],
               ['campagnes', 'Campagnes', null]];
@@ -508,28 +524,23 @@
     }
     function vuePiscine() {
       var k = S.kpis || {};
-      var h = '<div class="ph"><div><h2>La piscine BACS</h2><p>' + (S.stock
-          ? 'Les leads acceptés par le plateau il y a plus de 14 jours, sans suite. Rappelez-les, qualifiez-les ou abandonnez-les.'
-          : 'Ce qui attend d\'être pris, du plus ancien au plus récent, et ce que le plateau a accepté ces 14 derniers jours. Prendre réserve le lead à votre nom ' + (k.verrou_minutes || 5) + ' min.') + '</p></div>'
-        + '</div>'
-        + '<div class="barre"><div class="seg"><button type="button" class="' + (!S.stock ? 'on' : '') + '" data-a="stock" data-id="">À traiter <span class="num">' + fc(S.piscine).length + '</span></button>'
+      var h = '<div class="barre"><div class="seg"><button type="button" class="' + (!S.stock ? 'on' : '') + '" data-a="stock" data-id="">À traiter <span class="num">' + fc(S.piscine).length + '</span></button>'
         + '<button type="button" class="' + (S.stock ? 'on' : '') + '" data-a="stock" data-id="1">Stock accepté <span class="num">' + (S.campagne && S.stockListe ? fc(S.stockListe).length : (k.stock_acceptes_anciens || 0)) + '</span></button></div>'
         + (!S.stock ? chipsSources() : '') + '</div><div class="list">';
       var ls = fc(S.stock ? (S.stockListe || []) : S.piscine);
       if (S.stock && !S.stockListe) h += '<div class="empty">Chargement du stock…</div>';
-      else if (!ls.length) h += '<div class="empty">' + (S.campagne ? 'Aucun lead de cette campagne à traiter.' : S.stock ? 'Aucun lead en stock.' : 'Rien à prendre : la piscine BACS est vide pour les sources sélectionnées.') + '</div>';
+      else if (!ls.length) h += '<div class="empty">' + (S.campagne ? 'Aucun lead de cette campagne à traiter.' : S.stock ? 'Aucun lead en stock.' : 'Rien à prendre : le Pool BACS est vide pour les sources sélectionnées.') + '</div>';
       ls.forEach(function (l) {
         var gauche = S.stock
           ? '<span class="tm crit"><b>' + duree(mins(l.recu_le)) + '</b><small>reçu le ' + jour(l.recu_le) + '</small></span>'
           : tm(l.recu_le, l.sla_min || 120);
         h += ligneLead(l, gauche, S.stock || l.statut_eff === 'Accepté' ? 'Rappeler' : 'Prendre');
       });
-      return h + '</div>';
+      return h + '</div><p class="foot">Prendre réserve le lead à votre nom ' + (k.verrou_minutes || 5) + ' min.' + (S.stock ? ' Stock : leads acceptés il y a plus de 14 jours, sans suite.' : '') + '</p>';
     }
     function vueRappels() {
       var ls = fc(S.rappels).filter(function (l) { return !S.miens || Number(l.derniere_action_par) === Number(MOI); });
-      var h = '<div class="ph"><div><h2>Rappels</h2><p>Les clients injoignables et les projets à long terme, du rappel le plus en retard au plus lointain (30 jours en arrière, 7 jours en avant).</p></div>'
-        + '<div class="ph-r"><div class="seg"><button type="button" class="' + (!S.miens ? 'on' : '') + '" data-a="miens" data-id="">Tout le plateau</button><button type="button" class="' + (S.miens ? 'on' : '') + '" data-a="miens" data-id="1">Les miens</button></div></div></div><div class="list">';
+      var h = '<div class="barre"><div class="ph-r"><div class="seg"><button type="button" class="' + (!S.miens ? 'on' : '') + '" data-a="miens" data-id="">Tout le plateau</button><button type="button" class="' + (S.miens ? 'on' : '') + '" data-a="miens" data-id="1">Les miens</button></div></div></div><div class="list">';
       if (!ls.length) h += '<div class="empty">' + (S.campagne ? 'Aucun rappel pour cette campagne.' : 'Aucun rappel programmé.') + '</div>';
       ls.forEach(function (l) {
         var due = ts(l.rappel_le) - Date.now();
@@ -552,8 +563,7 @@
     }
     function vueTransferts() {
       var ls = fc(S.transferts).filter(function (l) { return !S.miens || Number(l.derniere_action_par) === Number(MOI); });
-      var h = '<div class="ph"><div><h2>Transferts</h2><p>Ce que deviennent les leads qualifiés par le plateau ces 30 derniers jours. Le site a 2 h pour les prendre ; au-delà, relancez le chef des ventes.</p></div>'
-        + '<div class="ph-r"><div class="seg"><button type="button" class="' + (!S.miens ? 'on' : '') + '" data-a="miens" data-id="">Tout le plateau</button><button type="button" class="' + (S.miens ? 'on' : '') + '" data-a="miens" data-id="1">Les miens</button></div></div></div><div class="list">';
+      var h = '<div class="barre"><span class="lbl-s">Le site a 2 h pour prendre un transfert.</span><div class="ph-r"><div class="seg"><button type="button" class="' + (!S.miens ? 'on' : '') + '" data-a="miens" data-id="">Tout le plateau</button><button type="button" class="' + (S.miens ? 'on' : '') + '" data-a="miens" data-id="1">Les miens</button></div></div></div><div class="list">';
       if (!ls.length) h += '<div class="empty">' + (S.campagne ? 'Aucun transfert pour cette campagne sur la période.' : 'Aucun transfert sur la période.') + '</div>';
       ls.forEach(function (l) {
         var depuis = l.transfere_le || l.derniere_action_le;
@@ -568,7 +578,7 @@
       return h + '</div>';
     }
     function vueCampagnes() {
-      var h = '<div class="ph"><div><h2>Campagnes BACS</h2><p>Les leads des 90 derniers jours par campagne, hors trafic atelier. Filtrez les files sur une campagne pour la solder.</p></div></div>';
+      var h = '';
       if (!S.campagnes) return h + '<div class="empty">Chargement des campagnes…</div>';
       if (!S.campagnes.length) return h + '<div class="empty">Aucune campagne sur la période.</div>';
       h += '<div class="scroll"><table class="camp-t"><thead><tr><th>Campagne</th><th>Reçus</th><th>À prendre</th><th>Acceptés</th><th>En rappel</th><th>Qualifiés</th><th>Aban&shy;donnés</th><th>Taux de qualif.</th><th></th></tr></thead><tbody>';
@@ -585,7 +595,7 @@
           + '<td class="act-c">' + (actif ? '<button type="button" class="btn sm" data-a="campagne" data-id="">Retirer</button>'
               : ouverts && !sans ? '<button type="button" class="btn sm" data-a="campagne" data-id="' + esc(c.campagne) + '">Filtrer</button>' : '') + '</td></tr>';
       });
-      return h + '</tbody></table></div><p class="foot">Un lead est compté dans la colonne de son statut actuel : statut BACS, ou celui du dernier geste One Data s\'il est plus récent que la copie BACS. « Filtrer » restreint la piscine, les rappels et les transferts à la campagne ; les signaux restent ceux de tout le plateau.</p>';
+      return h + '</tbody></table></div><p class="foot">Un lead est compté dans la colonne de son statut actuel : statut BACS, ou celui du dernier geste One Data s\'il est plus récent que la copie BACS. « Filtrer » restreint le Pool, les rappels et les transferts à la campagne ; les signaux restent ceux de tout le plateau.</p>';
     }
     function renderPanel() {
       if (S.tab === 'rappels') return vueRappels();
@@ -601,14 +611,11 @@
           + (S.erreur ? '<div><button type="button" class="btn pri" data-a="reessayer">Réessayer</button></div>' : '') + '</section>';
         return;
       }
-      var list = signaux();
-      list.forEach(function (s) { if (!S.vus.has(s.id)) { S.vus.add(s.id); if (!S.premier) S.frais.add(s.id); } });
-      S.premier = false;
       var y = (FW.scrollY || 0);
       root.innerHTML = renderSituation() + bandeauBacs()
         + (S.erreur ? '<p class="alerte">' + esc(S.erreur) + ' Les données affichées datent du dernier chargement réussi.</p>' : '')
-        + '<div class="poste"><aside class="sig" aria-label="Signaux">' + renderSignaux(list) + '</aside>'
-        + '<section class="act" aria-label="Actions">' + renderTabs() + bandeauFiltre() + '<div class="panel">' + renderPanel() + '</div></section></div>';
+        + renderTabs() + bandeauFiltre()
+        + '<section class="act" aria-label="Leads"><div class="panel">' + renderPanel() + '</div></section>';
       try { if (FW.scrollY !== y) FW.scrollTo(0, y); } catch (e) {}
       setTimeout(function () { S.frais.clear(); }, 7000);
     }
@@ -1120,7 +1127,8 @@
     var COLS = [['ok', 'Dans les temps'], ['warn', 'À risque'], ['crit', 'Hors délai'], ['stock', 'Ouverts + 24 h']];
 
     var S = {
-      tab: POSTE === 'vendeur' ? 'afaire' : 'mur',
+      tab: POSTE === 'vendeur' ? 'arappeler' : 'pool',
+      sugg: {}, suggKey: null, regle: {}, perimOuvert: false, invitables: null,
       leads: [], stats: null, bacs: null, charge: false, erreur: null,
       site: null,              // site affiché (chef, direction après « Ouvrir »)
       vueSite: null,           // direction : site ouvert
@@ -1172,7 +1180,7 @@
       if (l.campagne) h += '<span class="tag camp" title="' + esc(l.campagne) + '">' + esc(l.campagne.length > 40 ? l.campagne.slice(0, 38) + '…' : l.campagne) + '</span>';
       if (l.tentatives > 0) h += '<span class="tag warn">' + plural(l.tentatives, 'tentative') + '</span>';
       if (horsMarque(l)) h += '<span class="tag warn">Demande ' + esc(propre(l.marque_lead)) + '</span>';
-      if (aussiPlateau(l)) h += '<span class="tag">Aussi en piscine BACS</span>';
+      if (aussiPlateau(l)) h += '<span class="tag">Aussi dans le Pool BACS</span>';
       if (l.statut_bacs === 'Abandonned') h += '<span class="tag crit">Abandonné dans BACS</span>';
       return h;
     }
@@ -1227,6 +1235,7 @@
       try { await charger(); }
       catch (e) { S.erreur = messageErreur(e); if (!silencieux) toast(S.erreur, true); }
       render();
+      if (POSTE !== 'vendeur') chargerAide();
       if (S.dr && S.dr.id && !S.dr.demo) { var l = S.leads.find(function (x) { return Number(x.id_lead) === Number(S.dr.id); }); if (l) { S.dr.l = l; renderDrawerPreserve(); } }
       else if (S.cell && !$drawer.hidden) renderVolet();
     }
@@ -1250,6 +1259,33 @@
       } catch (e) { S.campagnes = S.campagnes || []; toast(messageErreur(e), true); }
     }
 
+    // ── v62 : suggestion d'attribution et règle du site ───────────────────
+    // poste_suggestions : pour chaque lead du Pool, le vendeur que la règle
+    // désignerait et POURQUOI (lecture seule). poste_regle_site : la règle,
+    // affichée au chef pour qu'il la connaisse.
+    async function chargerAide() {
+      var sid = sitePoste();
+      var ids = libres(sid).map(function (l) { return Number(l.id_lead); }).sort(function (a, b) { return a - b; });
+      var key = ids.join(',');
+      var fait = false;
+      if (key !== S.suggKey) {
+        S.suggKey = key;
+        if (ids.length) {
+          try {
+            var r = await rpc('poste_suggestions', { p_ids: ids });
+            var m = {}; ((r && r.leads) || []).forEach(function (x) { m[x.id_lead] = x; });
+            S.sugg = m; fait = true;
+          } catch (e) { S.sugg = {}; }
+        } else { S.sugg = {}; }
+      }
+      if (sid != null && !S.regle[sid]) {
+        try { S.regle[sid] = await rpc('poste_regle_site', { p_id_site: Number(sid) }) || { vide: true }; fait = true; }
+        catch (e) { S.regle[sid] = { vide: true }; }
+      }
+      if (fait) render();
+    }
+    function suggestion(l) { return S.sugg[l.id_lead] || null; }
+
     // ── Signaux ───────────────────────────────────────────────────────────
     function signaux() {
       var out = [];
@@ -1262,7 +1298,7 @@
             d: (l.qualification || 'Transmis par le plateau VROOM') + (l.transfere_par_nom ? ' (' + propre(l.transfere_par_nom) + ')' : ''), a: [['Prendre', 'prendre', l.id_lead]] });
         });
         piscine(null).filter(function (l) { return !l.par_plateau && !verrouAutre(l) && mins(l.arrive_le) < 20; }).slice(0, 4).forEach(function (l) {
-          out.push({ id: 'np-' + l.id_lead, niv: 'new', k: 'Nouveau dans la piscine', t: l.arrive_le, titre: nomLead(l) + ' · ' + (l.source_libelle || ''), d: demandeDe(l), a: [['Prendre', 'prendre', l.id_lead]] });
+          out.push({ id: 'np-' + l.id_lead, niv: 'new', k: 'Nouveau dans le Pool', t: l.arrive_le, titre: nomLead(l) + ' · ' + (l.source_libelle || ''), d: demandeDe(l), a: [['Prendre', 'prendre', l.id_lead]] });
         });
         mesLeads().filter(function (l) { return l.attribue_par_nom && l.attribue_le && mins(l.attribue_le) < 1440; }).slice(0, 4).forEach(function (l) {
           out.push({ id: 'att-' + l.id_lead + '-' + l.attribue_le, niv: 'warn', k: 'Attribué par votre chef', t: l.attribue_le, titre: propre(l.attribue_par_nom) + ' vous confie ' + nomLead(l),
@@ -1284,11 +1320,11 @@
         var gere = manager(sid);
         p.filter(function (l) { return mins(l.arrive_le) < 15; }).slice(0, 3).forEach(function (l) {
           out.push({ id: 'cnew-' + l.id_lead, niv: l.par_plateau ? 'vr' : 'new', k: l.par_plateau ? 'Transféré par VROOM' : 'Nouveau lead', t: l.arrive_le, titre: nomLead(l) + ' · ' + (l.source_libelle || ''),
-            d: demandeDe(l) + '. Dans la piscine, personne ne l\'a encore pris.', a: gere ? [['Attribuer', 'open', l.id_lead]] : [['Ouvrir', 'open', l.id_lead]] });
+            d: demandeDe(l) + '. Dans le Pool, personne ne l\'a encore pris.', a: gere ? [['Attribuer', 'open', l.id_lead]] : [['Ouvrir', 'open', l.id_lead]] });
         });
         var hd2 = p.filter(function (l) { return niveau(l) === 'crit'; }).sort(function (a, b2) { return ts(a.arrive_le) - ts(b2.arrive_le); });
         if (hd2.length) out.push({ id: 'chd-' + hd2.length + '-' + hd2[0].id_lead, niv: 'crit', k: 'Hors délai', t: hd2[0].arrive_le,
-          titre: plural(hd2.length, 'lead hors délai', 'leads hors délai') + ' dans la piscine', d: hd2.slice(0, 4).map(function (l) { return nomLead(l) + ' (' + duree(mins(l.arrive_le)) + ')'; }).join(', ') + '. Personne ne les a pris.',
+          titre: plural(hd2.length, 'lead hors délai', 'leads hors délai') + ' dans le Pool', d: hd2.slice(0, 4).map(function (l) { return nomLead(l) + ' (' + duree(mins(l.arrive_le)) + ')'; }).join(', ') + '. Personne ne les a pris.',
           a: [['Attribuer', 'tab', 'relayer']] });
         var vrp = p.filter(function (l) { return l.par_plateau && mins(l.arrive_le) >= 120; });
         if (vrp.length) out.push({ id: 'cvr-' + vrp.length, niv: 'vr', k: 'Transferts VROOM non pris', t: vrp[0].arrive_le, titre: plural(vrp.length, 'lead qualifié', 'leads qualifiés') + ' par le plateau attend' + (vrp.length > 1 ? 'ent' : '') + ' depuis plus de 2 h',
@@ -1333,7 +1369,7 @@
       S.leads.filter(function (l) { return l.zone === 'piscine' && niveau(l) === 'crit'; }).forEach(function (l) { parSite[l.id_site] = (parSite[l.id_site] || 0) + 1; });
       Object.keys(parSite).sort(function (a, b) { return parSite[b] - parSite[a]; }).slice(0, 2).forEach(function (sid) {
         var s = siteInfo(sid) || {};
-        out.push({ id: 'd-hd-' + sid + '-' + parSite[sid], niv: 'crit', k: 'Hors délai', t: null, titre: siteNom(s.site) + ' : ' + plural(parSite[sid], 'lead hors délai', 'leads hors délai') + ' dans la piscine',
+        out.push({ id: 'd-hd-' + sid + '-' + parSite[sid], niv: 'crit', k: 'Hors délai', t: null, titre: siteNom(s.site) + ' : ' + plural(parSite[sid], 'lead hors délai', 'leads hors délai') + ' dans le Pool',
           d: 'Personne ne les a pris.' + (s.chefs ? ' Chef des ventes : ' + propre(s.chefs) + '.' : ''), a: [['Ouvrir', 'voir-site', sid]] });
       });
       return out.filter(function (s) { return !S.ack.has(s.id); });
@@ -1351,74 +1387,277 @@
       return h;
     }
 
-    // ── Situation ─────────────────────────────────────────────────────────
+    // ── En-tête : une phrase et le bouton « suivant » (v62) ───────────────
     function lienAncien() { return ' <button type="button" class="lien" data-a="ancien">Tableaux détaillés</button>'; }
+    function aRappeler() { return mesLeads().filter(function (l) { return !l.tentatives; }); }
+    function aRelancer() { return mesLeads().filter(function (l) { return l.tentatives > 0; }); }
+    function poolNom(sid) {
+      if (sid != null) return 'Pool ' + siteNom((siteInfo(sid) || {}).site);
+      var ss = sitesStats();
+      return ss.length === 1 ? 'Pool ' + siteNom(ss[0].site) : 'Pool de vos sites';
+    }
+    function reste(l) { return slaDe(l) - mins(arrive(l)); }
+    function retardsEquipe(sid) { return S.leads.filter(function (l) { return l.zone === 'vendeur' && (sid == null || Number(l.id_site) === Number(sid)) && niveau(l) === 'crit'; }).length; }
+    function libPerim() {
+      var sid = sitePoste();
+      return sid == null ? 'Tous mes sites' : siteNom((siteInfo(sid) || {}).site);
+    }
+    function sitesSelecteur() { return POSTE === 'chef' ? sitesStats().filter(function (s) { return s.manager; }) : sitesStats(); }
+    // Le sélecteur de périmètre : le même arbre que le Suivi activité
+    // (marque › affaire › site). Direction : « Tous mes sites » en tête.
+    function perimetreHtml() {
+      var ss = sitesSelecteur();
+      if (POSTE === 'chef' && ss.length < 2) return '';
+      var sid = sitePoste();
+      var h = '<div class="perim"><button type="button" class="perim-btn" data-a="perim-ouvrir" aria-expanded="' + !!S.perimOuvert + '">Périmètre : ' + esc(libPerim()) + ' <span aria-hidden="true">▾</span></button>';
+      if (S.perimOuvert) {
+        var arbre = {};
+        ss.forEach(function (s) {
+          var m = propre(s.reseau || 'Autres'), a = propre(s.affaire || '');
+          ((arbre[m] = arbre[m] || {})[a] = arbre[m][a] || []).push(s);
+        });
+        h += '<div class="perim-pop" role="menu"><p class="perim-cap">Marque › affaire › site</p>';
+        if (POSTE === 'direction') h += '<button type="button" class="l0' + (sid == null ? ' on' : '') + '" data-a="perim" data-id="">Tous mes sites</button>';
+        Object.keys(arbre).sort().forEach(function (m) {
+          h += '<p class="perim-m">' + esc(m) + '</p>';
+          Object.keys(arbre[m]).sort().forEach(function (a) {
+            if (a && Object.keys(arbre[m]).length > 1) h += '<p class="perim-a">' + esc(a) + '</p>';
+            arbre[m][a].forEach(function (s) {
+              h += '<button type="button" class="l2' + (Number(s.id_site) === Number(sid) ? ' on' : '') + '" data-a="perim" data-id="' + s.id_site + '">' + esc(siteNom(s.site)) + '</button>';
+            });
+          });
+        });
+        h += '</div>';
+      }
+      return h + '</div>';
+    }
     function renderSituation() {
       var nom = propre((S.stats && S.stats.nom) || [user && user.prenom, user && user.nom].filter(Boolean).join(' '));
-      var l = '', t = '', k = [];
+      var pre = prenom(nom);
+      var cta = '', p = '', lbl = '';
       if (POSTE === 'vendeur') {
-        var ss = sitesStats();
-        var lib = ss.length === 1 ? siteNom(ss[0].site) : plural(ss.length, 'site');
-        var af = mesLeads().length, li = libres(null).length;
-        var ms = monStat();
-        l = esc(lib) + ' · ' + esc(nom) + ' ·' + lienAncien();
-        t = esc(prenom(nom)) + ', vous avez <b class="' + (mesLeads().some(function (x) { return niveau(x) === 'crit'; }) ? 't-crit' : 't-acc') + '">' + plural(af, 'personne à appeler', 'personnes à appeler') + '</b> et <b>' + plural(li, 'lead libre', 'leads libres') + '</b> dans la piscine' + (ss.length === 1 ? ' de ' + esc(lib) : '') + '.';
-        k = [['Premiers contacts aujourd\'hui', ms.reduce(function (a, v) { return a + (v.contacts_jour || 0); }, 0)], ['Pris aujourd\'hui', ms.reduce(function (a, v) { return a + (v.pris_jour || 0); }, 0)],
-             ['À faire', af], ['En piscine', li], ['Relances campagne', S.mesSollis ? S.mesSollis.length : '—']];
-      } else if (POSTE === 'chef' || S.vueSite != null) {
-        var sid = sitePoste(), si = siteInfo(sid) || {};
-        var p = libres(sid), hd = p.filter(function (x) { return niveau(x) === 'crit'; }).length;
-        var rs = leadsDu(sid).filter(prisSansAppel).length;
-        var tot = vendeursDu(sid).reduce(function (a, v) { return a + (v.contacts_jour || 0); }, 0);
-        l = (S.vueSite != null ? '<button type="button" class="lien" data-a="retour-sites">← Tous les sites</button> · ' : '') + esc(siteNom(si.site)) + ' · ' + esc(POSTE === 'chef' ? nom + ', chef des ventes' : (si.chefs ? propre(si.chefs) + ', chef des ventes' : 'aucun chef des ventes rattaché')) + ' ·' + lienAncien();
-        t = 'À ' + esc(siteNom(si.site)) + ', ' + (hd ? '<b class="t-crit">' + plural(hd, 'lead hors délai', 'leads hors délai') + '</b> ' + (hd > 1 ? 'attendent' : 'attend') + ' dans la piscine' : 'aucun lead n\'est hors délai dans la piscine')
-          + (rs ? ' et <b class="t-warn">' + plural(rs, 'lead est pris', 'leads sont pris') + ' sans appel</b>' : '') + '. L\'équipe en est à <b>' + plural(tot, 'premier contact', 'premiers contacts') + '</b> aujourd\'hui.';
-        if (!manager(sid)) t += ' <span class="t-mut">Vue de pilotage : seul le chef des ventes du site agit sur ses leads.</span>';
-        k = [['Leads libres', p.length], ['Chez les vendeurs', leadsDu(sid).filter(function (x) { return x.zone === 'vendeur'; }).length],
-             ['Au plateau VROOM', leadsDu(sid).filter(function (x) { return x.zone === 'plateau'; }).length],
-             ['Ouverts + 24 h', stockDu(sid) + (si.archives ? '<span class="mes">+ ' + si.archives + ' archives</span>' : '')], ['Leads 7 j', si.n7 || 0],
-             ['1er contact médian, 30 j', si.d30_min != null ? dureeMes(si.d30_min) : '—']];
-        if (POSTE === 'chef' && sitesStats().filter(function (s) { return s.manager; }).length > 1) {
-          l += '<span class="site-chips">' + sitesStats().filter(function (s) { return s.manager; }).map(function (s) {
-            return '<button type="button" class="fchip' + (Number(s.id_site) === Number(sid) ? ' on' : '') + '" data-a="site" data-id="' + s.id_site + '">' + esc(siteNom(s.site)) + '</button>';
-          }).join('') + '</span>';
+        var ml = mesLeads(), crit = ml.filter(function (x) { return niveau(x) === 'crit'; }).length;
+        var li = libres(null).length, s = ml[0];
+        lbl = esc(sitesStats().length === 1 ? siteNom(sitesStats()[0].site) : plural(sitesStats().length, 'site')) + ' · ' + esc(nom);
+        p = '<b>' + plural(ml.length, 'lead à rappeler', 'leads à rappeler') + '</b>'
+          + (crit ? ' · <b class="t-crit">' + crit + ' en retard</b>' : '')
+          + (s && reste(s) > 0 ? ' · le prochain expire dans <b>' + duree(reste(s)) + '</b>' : '')
+          + ' · <b>' + plural(li, 'lead libre', 'leads libres') + '</b> dans le ' + esc(poolNom()) + '.';
+        if (s) {
+          var rs = reste(s);
+          cta = '<button type="button" class="cta" data-a="appeler" data-id="' + s.id_lead + '">' + (__lmPeutAppeler() ? 'Appeler le suivant' : 'Traiter le suivant')
+            + '<small>' + esc(nomLead(s)) + ' · ' + (rs < 0 ? 'en retard de ' + duree(-rs) : 'expire dans ' + duree(rs)) + '</small></button>';
+        } else if (li) {
+          var o = libres(null).slice().sort(function (a, b) { return reste(a) - reste(b); })[0];
+          cta = '<button type="button" class="cta" data-a="prendre" data-id="' + o.id_lead + '">Prendre dans le Pool<small>' + esc(nomLead(o)) + ' · ' + esc(demandeDe(o)) + '</small></button>';
         }
       } else {
-        var ss2 = sitesStats();
-        var pires = ss2.filter(function (s) { return s.d30_min != null && s.nc30 >= 2; }).sort(function (a, b) { return b.d30_min - a.d30_min; }).slice(0, 3);
-        var st = S.leads.filter(function (x) { return x.zone !== 'plateau' && mins(x.arrive_le) >= 1440; }).length;
-        l = 'Direction · ' + plural(ss2.length, 'site') + ' · ' + esc(nom) + ' ·' + lienAncien();
-        t = pires.length ? 'Le premier contact arrive en ' + pires.map(function (s, i) { return '<b class="' + (i === 0 ? (s.d30_min > 240 ? 't-crit' : 't-warn') : '') + '">' + dureeMes(s.d30_min) + '</b> à ' + esc(siteNom(s.site)); }).join(', ') + ' en délai médian sur 30 jours.'
-          : 'Pas encore assez de premiers contacts mesurés sur 30 jours.';
-        if (st) t += ' <b>' + plural(st, 'lead est ouvert', 'leads sont ouverts') + '</b> depuis plus de 24 h.';
-        k = [['Leads 7 j', ss2.reduce(function (a, s) { return a + (s.n7 || 0); }, 0)], ['En piscine', S.leads.filter(function (x) { return x.zone === 'piscine'; }).length],
-             ['Hors délai', S.leads.filter(function (x) { return x.zone !== 'plateau' && niveau(x) === 'crit'; }).length], ['Ouverts + 24 h', st],
-             ['Au plateau VROOM', S.leads.filter(function (x) { return x.zone === 'plateau'; }).length]];
+        var sid = sitePoste();
+        var pool = libres(sid), hd = pool.filter(function (x) { return niveau(x) === 'crit'; }).length;
+        var bl = bloques(sid).length, ret = retardsEquipe(sid);
+        lbl = (POSTE === 'chef' ? 'Chef des ventes' : 'Direction') + ' · ' + esc(nom);
+        p = '<b>' + plural(pool.length, 'lead', 'leads') + ' dans le Pool</b>' + (hd ? ' dont <b class="t-crit">' + hd + ' hors délai</b>' : '')
+          + ' · ' + plural(bl, 'lead bloqué', 'leads bloqués') + ' chez un vendeur'
+          + (ret ? ' · <b class="t-crit">' + plural(ret, 'lead en retard', 'leads en retard') + '</b> dans l\'équipe' : '') + '.';
+        if (sid != null && !manager(sid)) p += ' <span class="t-mut">Vue de pilotage : le chef des ventes du site agit sur ses leads.</span>';
+        var aAttr = pool.filter(function (l) { var g = suggestion(l); return manager(l.id_site) && g && g.id_user; });
+        if (aAttr.length) cta = '<button type="button" class="cta" data-a="tout-attribuer">Attribuer tout le Pool<small>' + plural(aAttr.length, 'lead', 'leads') + ' · au vendeur suggéré</small></button>';
       }
-      return '<section class="situ"><p class="situ-l">' + l + '</p><p class="situ-t">' + t + '</p><div class="kpis">'
-        + k.map(function (x) { return '<div class="k"><span>' + x[0] + '</span><b>' + x[1] + '</b></div>'; }).join('') + '</div></section>';
+      var analyses = POSTE !== 'vendeur' ? ' · <button type="button" class="lien" data-a="tab" data-id="' + (sitePoste() == null ? 'mursites' : 'mur') + '">Analyses détaillées</button>' : '';
+      return '<section class="hello"><div class="hello-t">' + (POSTE !== 'vendeur' ? perimetreHtml() : '')
+        + '<p class="hello-l">' + lbl + analyses + ' ·' + lienAncien() + '</p>'
+        + '<h1>' + (POSTE === 'vendeur' ? 'Bonjour ' + esc(pre || '') : esc(libPerim()) + ' · aujourd\'hui') + '</h1><p class="hello-p">' + p + '</p></div>' + cta + '</section>';
+    }
+    function bandeauBacsSite() {
+      var b = S.bacs || {};
+      if (b.joignable === undefined || b.par_moi) return '';
+      return '<div class="bd crit" role="alert"><b>BACS n\'est pas ouvert sur votre poste.</b><span>Rendez-vous, attributions, transferts et clôtures des leads BACS sont refusés tant que BACS n\'est pas ouvert dans un onglet de ce navigateur.</span></div>';
     }
 
-    // ── Onglets ───────────────────────────────────────────────────────────
+    // ── Filtres-pastilles ─────────────────────────────────────────────────
     function onglets() {
       if (POSTE === 'vendeur') {
-        var ss = sitesStats();
-        return [['afaire', 'À faire', mesLeads().length + (S.mesSollis ? S.mesSollis.length : 0), mesLeads().some(function (l) { return niveau(l) === 'crit'; })],
-                ['piscine', ss.length === 1 ? 'Piscine de ' + siteNom(ss[0].site) : 'Piscine', libres(null).length],
-                ['campagnes', 'Mes campagnes', S.mesSollis ? S.mesSollis.length : null]];
+        return [['arappeler', 'À rappeler', aRappeler().length, aRappeler().some(function (l) { return niveau(l) === 'crit'; })],
+                ['relances', 'Relances', aRelancer().length, false],
+                ['campagnes', 'Campagnes', S.mesSollis ? S.mesSollis.length : null, false],
+                ['pool', poolNom(), libres(null).length, false]];
       }
-      if (POSTE === 'chef' || S.vueSite != null) {
-        var n = groupesRelais().reduce(function (a, g) { return a + g.items.length; }, 0);
-        return [['mur', 'Le mur', null], ['relayer', 'À relayer', n, groupesRelais()[0].items.length > 0], ['campagnes', 'Campagnes', null]];
-      }
-      return [['mur', 'Le mur des sites', null], ['relais', 'Le relais', null], ['campagnes', 'Campagnes', null]];
+      var sid = sitePoste(), pool = libres(sid);
+      return [['pool', sid == null ? 'Pool' : poolNom(sid), pool.length, pool.some(function (l) { return niveau(l) === 'crit'; })],
+              ['bloques', 'Bloqués chez un vendeur', bloques(sid).length, bloques(sid).length > 0],
+              ['campagnes', 'Campagnes', null, false]];
     }
     function renderTabs() {
-      return '<div class="tabs" role="tablist">' + onglets().map(function (o) {
+      var analyse = ['mur', 'mursites', 'relais'].indexOf(S.tab) !== -1;
+      return '<div class="tabs" role="tablist">' + (analyse ? '<button type="button" data-a="tab" data-id="pool">← Retour au Pool</button>' : '') + onglets().map(function (o) {
         var on = o[0] === S.tab;
         return '<button type="button" role="tab" aria-selected="' + on + '" class="' + (on ? 'on' : '') + '" data-a="tab" data-id="' + o[0] + '">' + esc(o[1])
           + (o[2] != null ? ' <span class="cnt ' + (o[2] === 0 ? 'z' : (o[3] ? 'c' : '')) + '">' + o[2] + '</span>' : '') + '</button>';
       }).join('') + '</div>';
+    }
+
+    // ── Lignes v62 : compte à rebours, qui, source, UN bouton ─────────────
+    function rebours(l) {
+      var m = mins(arrive(l));
+      if (m >= 1440) return '<span class="tm crit"><b>' + duree(m) + '</b><small>arrivé le ' + jour(arrive(l)) + '</small></span>';
+      var r = slaDe(l) - m;
+      if (r <= 0) return '<span class="tm crit"><b>+' + duree(-r) + '</b><small>hors délai</small></span>';
+      return '<span class="tm ' + (r <= slaDe(l) * 0.4 ? 'warn' : 'ok') + '"><b>' + duree(r) + '</b><small>avant le délai</small></span>';
+    }
+    function etatCourt(l) {
+      if (l.tentatives) return 'pas joint ×' + l.tentatives + (l.dernier_essai ? ', ' + quand(l.dernier_essai) : '');
+      if (l.par_plateau) return 'qualifié par VROOM';
+      if (l.zone === 'piscine') return 'libre';
+      return 'nouveau';
+    }
+    function ligneAction(l, act) {
+      var a;
+      if (act === 'prendre') a = verrouAutre(l) ? '<span class="resa-l">Réservé par ' + esc(propre(l.verrou_nom || 'un collègue')) + '</span>' : '<button type="button" class="btn vr" data-a="prendre" data-id="' + l.id_lead + '">Prendre</button>';
+      else a = '<button type="button" class="btn pri" data-a="appeler" data-id="' + l.id_lead + '">' + (__lmPeutAppeler() ? (l.tentatives ? 'Rappeler' : 'Appeler') : 'Traiter') + '</button>';
+      return '<div class="lr v2" data-a="open" data-id="' + l.id_lead + '" tabindex="0"><div>' + rebours(l) + '</div>'
+        + '<div class="who"><span class="lr-n">' + esc(nomLead(l)) + '</span><p class="lr-d">' + esc(demandeDe(l)) + ' · ' + esc(etatCourt(l)) + '</p></div>'
+        + '<div class="src"><span class="tag">' + esc(l.source_libelle || l.source || 'Lead') + '</span></div>'
+        + '<div class="lr-a">' + a + '</div></div>';
+    }
+    function ligneAttrib(l, bloque) {
+      var g = suggestion(l), gere = manager(l.id_site);
+      var why = bloque ? (l.vendeur_nom ? 'Chez ' + propre(l.vendeur_nom) + (l.attribue_le ? ' depuis ' + duree(mins(l.attribue_le)) : '') + (l.tentatives ? ' · ' + plural(l.tentatives, 'tentative') : ' · pas encore appelé') : '')
+        : g ? (g.id_user ? 'Suggéré : ' + propre(g.nom) + ' — ' + g.raison : 'Aucun vendeur disponible') : '';
+      var a;
+      if (!gere) a = '<button type="button" class="btn" data-a="open" data-id="' + l.id_lead + '">Ouvrir</button>';
+      else a = '<select id="sel-' + l.id_lead + '" aria-label="Vendeur">' + optionsVendeurs(l.id_site, bloque ? l.id_user_attribue : null, g && g.id_user) + '</select>'
+        + '<button type="button" class="btn pri" data-a="attribuer" data-id="' + l.id_lead + '">' + (bloque ? 'Réattribuer' : 'Attribuer') + '</button>';
+      return '<div class="lr v2 attr" data-a="open" data-id="' + l.id_lead + '" tabindex="0"><div>' + rebours(l) + '</div>'
+        + '<div class="who"><span class="lr-n">' + esc(nomLead(l)) + '</span>' + (sitePoste() == null ? ' <span class="lr-v">' + esc(siteNom(l.site)) + '</span>' : '')
+        + '<p class="lr-d">' + esc(demandeDe(l)) + '</p>' + (why ? '<p class="why">' + esc(why) + '</p>' : '') + '</div>'
+        + '<div class="src"><span class="tag">' + esc(l.source_libelle || l.source || 'Lead') + '</span></div>'
+        + '<div class="lr-a">' + a + '</div></div>';
+    }
+
+    // ── Vues : vendeur ────────────────────────────────────────────────────
+    function vueListeVendeur() {
+      var rel = S.tab === 'relances';
+      var ls = rel ? aRelancer() : aRappeler();
+      var h = '<div class="list">';
+      if (!ls.length) h += '<div class="empty">' + (rel ? 'Aucune relance en attente.' : 'Rien à rappeler.' + (libres(null).length ? ' Des leads attendent dans le ' + esc(poolNom()) + '.' : '')) + '</div>';
+      ls.forEach(function (l) { h += ligneAction(l, 'appeler'); });
+      h += '</div>';
+      var arch = Number((S.stats || {}).mes_archives) || 0;
+      if (arch && !rel) h += '<p class="foot">' + (arch > 1 ? arch + ' autres leads vous sont encore attribués' : 'Un autre lead vous est encore attribué') + ', reçu' + (arch > 1 ? 's' : '') + ' il y a plus de ' + ((S.stats && S.stats.arriere_jours) || 30) + ' jours : votre chef des ventes les solde.</p>';
+      return h;
+    }
+    function vuePiscineVendeur() {
+      var ls = piscine(null).sort(function (a, b) { return reste(a) - reste(b); });
+      var h = '<div class="list">';
+      if (!ls.length) h += '<div class="empty">Le Pool est vide.</div>';
+      ls.forEach(function (l) { h += ligneAction(l, 'prendre'); });
+      return h + '</div><p class="foot">Libre-service : premier arrivé, premier servi. Un lead pris passe dans « À rappeler » ; s\'il ne vous concerne pas, rendez-le au Pool.</p>';
+    }
+    function vueCampagnesVendeur() {
+      var h = '';
+      if (!S.campagnes) return '<div class="empty">Chargement des campagnes…</div>';
+      if (!S.campagnes.length) return '<div class="empty">Aucune campagne ne vous a été confiée ces 90 derniers jours.</div>';
+      S.campagnes.forEach(function (c) {
+        var cibles = (S.mesSollis || []).filter(function (t2) { return t2.campagne === c.campagne; });
+        var n = Number(c.nb_sollicitations) || 0, tr = Number(c.nb_traitees) || 0, pct = n ? Math.round(100 * tr / n) : 0;
+        h += '<div class="sub"><div class="sub-h"><h3>' + esc(c.campagne) + '</h3><span class="prog"><span class="num">' + tr + ' / ' + n + ' traités</span><span class="bar' + (pct < 40 ? ' low' : '') + '"><i style="width:' + pct + '%"></i></span></span></div><div class="list">';
+        if (!cibles.length) h += '<div class="empty">Tous les clients de cette campagne sont traités.</div>';
+        cibles.slice(0, 80).forEach(function (t2) {
+          h += '<div class="lr v2" data-a="fiche" data-id="' + esc(t2.id_client) + '" tabindex="0"><div><span class="tm ' + (t2.anciennete_j >= 3 ? 'warn' : 'ok') + '"><b>' + (t2.anciennete_j ? plural(t2.anciennete_j, 'jour') : 'aujourd\'hui') + '</b><small>depuis le lancement</small></span></div>'
+            + '<div class="who"><span class="lr-n">' + esc(propre(t2.client_nom)) + '</span><p class="lr-d">' + esc(siteNom(t2.nom_site)) + '</p></div><div class="src"><span class="tag camp">Campagne</span></div>'
+            + '<div class="lr-a"><button type="button" class="btn pri" data-a="fiche" data-id="' + esc(t2.id_client) + '">Ouvrir la fiche</button></div></div>';
+        });
+        h += '</div></div>';
+      });
+      return h + '<p class="foot">Une relance est comptée comme traitée quand vous faites votre compte rendu sur la fiche du client.</p>';
+    }
+
+    // ── Vues : chef des ventes et direction ───────────────────────────────
+    function bloques(sid) {
+      return S.leads.filter(function (l) {
+        if (l.zone !== 'vendeur' || (sid != null && Number(l.id_site) !== Number(sid))) return false;
+        return prisSansAppel(l) || niveau(l) === 'crit' || niveau(l) === 'stock' || l.tentatives >= 3;
+      }).sort(function (a, b) { return reste(a) - reste(b); });
+    }
+    function texteRegle(r) {
+      if (!r || r.vide) return '';
+      var crit = [];
+      if (r.priorite_cycle) crit.push('le vendeur qui suit déjà le client');
+      if (r.vendeur_habituel) crit.push('son vendeur habituel (' + (r.vendeur_habituel_mois || 12) + ' derniers mois)');
+      crit.push(r.repartition === 'sequentiel' ? 'le suivant du tour de rôle'
+        : r.repartition === 'conversion' ? 'le vendeur le moins chargé, et à charge égale celui qui convertit le mieux'
+        : 'le vendeur le moins chargé');
+      var c = crit.join(', sinon ');
+      var h = r.mode === 'libre' ? '<b>Libre-service</b> : les vendeurs prennent eux-mêmes leurs leads dans le Pool. Quand vous attribuez, One Data suggère ' + c + '.'
+        : r.mode === 'manuel' ? '<b>Attribution par le chef des ventes</b> : vous attribuez chaque lead. One Data suggère ' + c + '.'
+        : '<b>Attribution automatique</b> : chaque lead part aussitôt chez ' + c + '. Le Pool ne garde que ceux qu\'aucun vendeur ne peut prendre.';
+      if (r.filtre_vn_vo) h += ' Un lead VO ne va qu\'aux vendeurs VO.';
+      var ex = (r.exclus || []).filter(function (e) { return !/recette|administration/i.test(e.motif || ''); });
+      if (ex.length) h += ' Écartés du tour de rôle : ' + ex.map(function (e) { return esc(propre(e.nom)) + (e.au ? ' (jusqu\'au ' + jour(e.au) + ')' : ''); }).join(', ') + '.';
+      return h;
+    }
+    function regleHtml(sid) {
+      if (sid == null) return '<div class="regle"><span class="i" aria-hidden="true">i</span><div>Chaque site applique sa propre règle d\'attribution. Choisissez un site dans le périmètre pour la voir.</div></div>';
+      var r = S.regle[sid];
+      if (!r || r.vide) return '';
+      return '<div class="regle"><span class="i" aria-hidden="true">i</span><div><b>Règle d\'attribution de ' + esc(siteNom((siteInfo(sid) || {}).site)) + '.</b> ' + texteRegle(r)
+        + (r.peut_modifier ? ' <button type="button" class="lien" data-a="regle-modifier" data-id="' + sid + '">Modifier la règle</button>' : '') + '</div></div>';
+    }
+    function vuePool() {
+      var sid = sitePoste();
+      var ls = libres(sid).slice().sort(function (a, b) { return reste(a) - reste(b); });
+      var h = regleHtml(sid) + '<div class="list">';
+      if (!ls.length) h += '<div class="empty">Le Pool est vide : chaque lead a son vendeur.</div>';
+      ls.slice(0, 150).forEach(function (l) { h += ligneAttrib(l, false); });
+      if (ls.length > 150) h += '<div class="empty">… et ' + (ls.length - 150) + ' autres.</div>';
+      h += '</div>';
+      var st = sid != null ? stockDu(sid) + (Number((siteInfo(sid) || {}).archives) || 0) : 0;
+      if (st && manager(sid)) h += '<div class="stock-l"><span>' + plural(st, 'lead ouvert', 'leads ouverts') + ' depuis plus de 24 h faussent les délais du site.</span><button type="button" class="btn" data-a="solder" data-id="' + sid + '">Solder le stock</button></div>';
+      return h + equipeHtml(sid);
+    }
+    function vueBloques() {
+      var sid = sitePoste();
+      var ls = bloques(sid);
+      var h = '<div class="list">';
+      if (!ls.length) h += '<div class="empty">Aucun lead bloqué : chaque vendeur traite les siens dans le délai.</div>';
+      ls.slice(0, 150).forEach(function (l) { h += ligneAttrib(l, true); });
+      h += '</div><p class="foot">Un lead est « bloqué » quand son vendeur l\'a pris sans appeler depuis plus de 20 min, a dépassé le délai, l\'a depuis plus de 24 h, ou ne l\'a pas joint en trois essais. Ouvrez-le pour le rendre au Pool, le confier au plateau VROOM ou le clore.</p>';
+      return h + equipeHtml(sid);
+    }
+    function equipeHtml(sid) {
+      if (sid == null) {
+        var cartes = sitesStats().map(function (s) {
+          var pool = libres(s.id_site), hd = pool.filter(function (l) { return niveau(l) === 'crit'; }).length;
+          return { s: s, pool: pool.length, hd: hd, ret: retardsEquipe(s.id_site), vend: S.leads.filter(function (l) { return l.zone === 'vendeur' && Number(l.id_site) === Number(s.id_site); }).length };
+        }).filter(function (c) { return c.pool || c.vend || c.s.n7; })
+          .sort(function (a, b) { return (b.hd + b.ret) - (a.hd + a.ret) || b.pool - a.pool; });
+        if (!cartes.length) return '';
+        return '<h3 class="sec-t">Les sites</h3><div class="team">' + cartes.map(function (c) {
+          return '<button type="button" class="mate" data-a="perim" data-id="' + c.s.id_site + '"><span class="nm">' + esc(siteNom(c.s.site))
+            + (c.hd + c.ret ? '<span class="pill crit">' + (c.hd + c.ret) + ' en retard</span>' : '<span class="pill ok">à jour</span>') + '</span>'
+            + '<span class="st"><span><b>' + c.pool + '</b>dans le Pool</span><span><b>' + c.vend + '</b>chez les vendeurs</span></span>'
+            + '<span class="mate-lg">1er contact médian, 30 j : ' + (c.s.d30_min != null ? dureeMes(c.s.d30_min) : '—') + '</span></button>';
+        }).join('') + '</div>';
+      }
+      var vs = vendeursDu(sid).map(function (v) {
+        var ls = S.leads.filter(function (l) { return l.zone === 'vendeur' && Number(l.id_site) === Number(sid) && Number(l.id_user_attribue) === Number(v.id_user); });
+        var vieux = ls.reduce(function (a, l) { return Math.max(a, mins(arrive(l))); }, 0);
+        return { v: v, n: ls.length, ret: ls.filter(function (l) { return niveau(l) === 'crit' || niveau(l) === 'stock'; }).length, vieux: vieux, critV: ls.some(function (l) { return niveau(l) === 'crit' || niveau(l) === 'stock'; }) };
+      });
+      var actifs = vs.filter(function (x) { return x.n || x.v.contacts_jour || x.v.pris_jour; })
+        .sort(function (a, b) { return (b.ret - a.ret) || (b.n - a.n); });
+      var autres = vs.filter(function (x) { return actifs.indexOf(x) === -1; });
+      var carte = function (x) {
+        return '<button type="button" class="mate" data-a="cell" data-id="' + x.v.id_user + '|tous"><span class="nm">' + esc(propre(x.v.nom))
+          + (x.ret ? '<span class="pill crit">' + x.ret + ' en retard</span>' : '<span class="pill ok">à jour</span>') + '</span>'
+          + '<span class="st"><span><b>' + x.n + '</b>en cours</span><span><b class="' + (x.critV ? 't-crit' : '') + '">' + (x.n ? duree(x.vieux) : '—') + '</b>plus ancien</span></span>'
+          + '<span class="mate-lg">' + plural(x.v.contacts_jour || 0, 'premier contact', 'premiers contacts') + ' · ' + (x.v.pris_jour || 0) + ' pris aujourd\'hui' + (x.v.exclu ? ' · écarté du tour de rôle' : '') + '</span></button>';
+      };
+      var h = '<h3 class="sec-t">L\'équipe</h3>';
+      if (!actifs.length && !autres.length) return h + '<div class="empty">Aucun vendeur rattaché à ce site.</div>';
+      h += '<div class="team">' + actifs.map(carte).join('') + (S.autresVendeurs ? autres.map(carte).join('') : '') + '</div>';
+      if (autres.length) h += '<button type="button" class="btn ghost sm" data-a="autres-vendeurs">' + (S.autresVendeurs ? 'Masquer' : 'Afficher') + ' les ' + plural(autres.length, 'autre vendeur', 'autres vendeurs') + ', sans lead en cours</button>';
+      return h;
     }
 
     // ── Lignes ────────────────────────────────────────────────────────────
@@ -1445,7 +1684,7 @@
     function vueAFaire() {
       var ls = mesLeads();
       var h = '<div class="ph"><div><h2>À faire maintenant</h2><p>Dans l\'ordre où il faut le faire : vos leads d\'abord, le plus pressé en tête, puis les relances de campagne.</p></div></div><div class="list">';
-      if (!ls.length && !(S.mesSollis || []).length) h += '<div class="empty">Rien en attente. Prenez un lead dans la piscine du site.</div>';
+      if (!ls.length && !(S.mesSollis || []).length) h += '<div class="empty">Rien en attente. Prenez un lead dans le Pool du site.</div>';
       ls.forEach(function (l) {
         var verbe = __lmPeutAppeler() ? (l.tentatives ? 'Rappeler' : 'Appeler') : (l.tentatives ? 'Relancer' : 'Traiter');
         var sous = l.tentatives ? 'tentative ' + (l.tentatives + 1) + ' sur 3' : 'premier contact';
@@ -1469,8 +1708,8 @@
     }
     function vuePiscineVendeur() {
       var ls = piscine(null).sort(function (a, b) { return (slaDe(a) - mins(arrive(a))) - (slaDe(b) - mins(arrive(b))); });
-      var h = '<div class="ph"><div><h2>' + esc(sitesStats().length === 1 ? 'Piscine de ' + siteNom(sitesStats()[0].site) : 'Piscine de vos sites') + '</h2><p>Libre-service : premier arrivé, premier servi. Prendre met le lead à votre nom ; s\'il ne vous concerne pas, rendez-le à la piscine.</p></div></div><div class="list">';
-      if (!ls.length) h += '<div class="empty">La piscine est vide.</div>';
+      var h = '<div class="ph"><div><h2>' + esc(sitesStats().length === 1 ? 'Pool ' + siteNom(sitesStats()[0].site) : 'Pool de vos sites') + '</h2><p>Libre-service : premier arrivé, premier servi. Prendre met le lead à votre nom ; s\'il ne vous concerne pas, rendez-le au Pool.</p></div></div><div class="list">';
+      if (!ls.length) h += '<div class="empty">Le Pool est vide.</div>';
       ls.forEach(function (l) { h += ligneLead(l); });
       return h + '</div>';
     }
@@ -1501,7 +1740,7 @@
       var sid = sitePoste(), si = siteInfo(sid) || {};
       var gere = manager(sid);
       var pisc = compter(piscine(sid));
-      var h = '<div class="ph"><div><h2>Le mur · ' + esc(siteNom(si.site)) + '</h2><p>Qui a la main sur quoi, et depuis combien de temps. La piscine en tête : personne n\'y a la main. Cliquez un chiffre : la liste des leads s\'ouvre dans le volet de droite.</p></div>'
+      var h = '<div class="ph"><div><h2>Le mur · ' + esc(siteNom(si.site)) + '</h2><p>Qui a la main sur quoi, et depuis combien de temps. Le Pool en tête : personne n\'y a la main. Cliquez un chiffre : la liste des leads s\'ouvre dans le volet de droite.</p></div>'
         + '<div class="ph-r"><span class="lbl-s">Compter depuis</span><div class="seg"><button type="button" class="' + (S.depuis === 'site' ? 'on' : '') + '" data-a="depuis" data-id="site">L\'arrivée sur le site</button><button type="button" class="' + (S.depuis === 'bacs' ? 'on' : '') + '" data-a="depuis" data-id="bacs">La réception</button></div></div></div>';
       h += '<div class="scroll"><table class="mur"><thead><tr><th>Qui a la main</th>' + COLS.map(function (c) { return '<th>' + c[1] + '</th>'; }).join('') + '<th>Premiers contacts aujourd\'hui</th></tr></thead><tbody>';
       var cell = function (r, c, n) {
@@ -1509,7 +1748,7 @@
         if (!n) return '<td><span class="cell zero" aria-label="aucun">·</span></td>';
         return '<td><button type="button" class="cell ' + c + (sel ? ' sel' : '') + '" data-a="cell" data-id="' + esc(r) + '|' + c + '">' + n + '</button></td>';
       };
-      h += '<tr class="pisc"><td class="who"><b>Piscine · personne</b><small>libre-service, premier arrivé</small></td>'
+      h += '<tr class="pisc"><td class="who"><b>Pool · personne</b><small>libre-service, premier arrivé</small></td>'
         + cell('piscine', 'ok', pisc.ok.length) + cell('piscine', 'warn', pisc.warn.length) + cell('piscine', 'crit', pisc.crit.length) + cell('piscine', 'stock', pisc.stock.length) + '<td><span class="na">—</span></td></tr>';
       var vs = vendeursDu(sid).map(function (v) { return Object.assign({ c: compter(S.leads.filter(function (l) { return l.zone === 'vendeur' && Number(l.id_site) === Number(sid) && Number(l.id_user_attribue) === Number(v.id_user); })) }, v); });
       // Leads attribués à quelqu'un qui n'est pas vendeur du site (chef, ancien vendeur) : une ligne chacun.
@@ -1544,18 +1783,20 @@
       var sid = sitePoste(), r = S.cell.r, c = S.cell.c, ls;
       if (r === 'piscine') ls = compter(piscine(sid))[c] || [];
       else if (r === 'plateau') ls = leadsDu(sid).filter(function (l) { return l.zone === 'plateau'; });
+      else if (c === 'tous') ls = S.leads.filter(function (l) { return l.zone === 'vendeur' && (sid == null || Number(l.id_site) === Number(sid)) && String(l.id_user_attribue) === String(r); });
       else ls = compter(S.leads.filter(function (l) { return l.zone === 'vendeur' && Number(l.id_site) === Number(sid) && String(l.id_user_attribue) === String(r); }))[c] || [];
-      var lib = r === 'plateau' ? 'Pas encore transmis au site' : (COLS.find(function (x) { return x[0] === c; }) || ['', ''])[1];
+      var lib = r === 'plateau' ? 'Pas encore transmis au site' : c === 'tous' ? 'Ses leads en cours' : (COLS.find(function (x) { return x[0] === c; }) || ['', ''])[1];
       var nom = '';
       if (r !== 'piscine' && r !== 'plateau') {
         var v = vendeursDu(sid).find(function (x) { return String(x.id_user) === String(r); });
         var lv = S.leads.find(function (x) { return String(x.id_user_attribue) === String(r) && x.vendeur_nom; });
         nom = propre((v && v.nom) || (lv && lv.vendeur_nom) || 'Vendeur');
       }
-      var qui = r === 'piscine' ? 'Piscine · personne' : r === 'plateau' ? 'Au plateau VROOM' : nom;
+      var qui = r === 'piscine' ? 'Pool · personne' : r === 'plateau' ? 'Au plateau VROOM' : nom;
       return { sid: sid, r: r, c: c, gere: manager(sid), qui: qui, lib: lib, leads: ls.slice().sort(function (a, b) { return ts(arrive(a)) - ts(arrive(b)); }) };
     }
     function renderVolet() {
+      $drawer.classList.remove('composing');
       var z = listeCellule();
       if (!z) return fermerTout();
       var si = siteInfo(z.sid) || {};
@@ -1576,17 +1817,18 @@
       var sid = sitePoste();
       var mine = leadsDu(sid).filter(function (l) { return l.zone !== 'plateau'; });
       return [
-        { k: 'hd', titre: 'Hors délai dans la piscine', why: 'Personne ne les a pris dans le temps prévu. Confiez-les à quelqu\'un.', items: mine.filter(function (l) { return l.zone === 'piscine' && !verrouAutre(l) && niveau(l) === 'crit'; }), act: 'attribuer' },
-        { k: 'rs', titre: 'Pris sans appel depuis plus de 20 min', why: 'Un vendeur les a pris puis n\'a pas appelé. Rendez-les à la piscine ou confiez-les à un autre.', items: mine.filter(prisSansAppel), act: 'liberer' },
+        { k: 'hd', titre: 'Hors délai dans le Pool', why: 'Personne ne les a pris dans le temps prévu. Confiez-les à quelqu\'un.', items: mine.filter(function (l) { return l.zone === 'piscine' && !verrouAutre(l) && niveau(l) === 'crit'; }), act: 'attribuer' },
+        { k: 'rs', titre: 'Pris sans appel depuis plus de 20 min', why: 'Un vendeur les a pris puis n\'a pas appelé. Rendez-les au Pool ou confiez-les à un autre.', items: mine.filter(prisSansAppel), act: 'liberer' },
         { k: 'hs', titre: 'Autre marque demandée', why: 'La demande vise une marque que le site ne vend pas. Renvoyez-les avant qu\'ils ne vieillissent ici.', items: mine.filter(horsMarque), act: 'renvoyer' },
         { k: 'inj', titre: 'Injoignables après 3 tentatives', why: 'Le plateau VROOM peut reprendre la relance (leads BACS), ou le lead peut être clos.', items: mine.filter(function (l) { return l.zone === 'vendeur' && l.tentatives >= 3; }), act: 'injoignable' }
       ];
     }
-    function optionsVendeurs(sid, exclu) {
+    function optionsVendeurs(sid, exclu, choisi) {
       var vs = vendeursDu(sid).filter(function (v) { return String(v.id_user) !== String(exclu); })
         .map(function (v) { return [v, charge(v.id_user, sid)]; })
         .sort(function (a, b) { return (a[0].exclu - b[0].exclu) || (a[1] - b[1]) || String(a[0].nom).localeCompare(String(b[0].nom), 'fr'); });
-      return vs.map(function (x, i) { return '<option value="' + x[0].id_user + '">' + esc(propre(x[0].nom)) + ' · ' + x[1] + ' en cours' + (x[0].exclu ? ' · écarté' : i === 0 ? ' · conseillé' : '') + '</option>'; }).join('');
+      if (choisi == null && vs.length) choisi = vs[0][0].id_user;
+      return vs.map(function (x) { return '<option value="' + x[0].id_user + '"' + (String(x[0].id_user) === String(choisi) ? ' selected' : '') + '>' + esc(propre(x[0].nom)) + ' · ' + x[1] + ' en cours' + (x[0].exclu ? ' · écarté' : String(x[0].id_user) === String(choisi) ? ' · suggéré' : '') + '</option>'; }).join('');
     }
     function sitesRenvoi(l) {
       var m = marqueNorm(l.marque_lead);
@@ -1605,7 +1847,7 @@
           var a = '';
           if (!gere) a = '<button type="button" class="btn sm" data-a="open" data-id="' + l.id_lead + '">Ouvrir</button>';
           else if (g.act === 'attribuer') a = '<select id="sel-' + l.id_lead + '" aria-label="Vendeur">' + optionsVendeurs(l.id_site) + '</select><button type="button" class="btn sm pri" data-a="attribuer" data-id="' + l.id_lead + '">Attribuer</button>';
-          else if (g.act === 'liberer') a = '<button type="button" class="btn sm" data-a="rendre" data-id="' + l.id_lead + '">Rendre à la piscine</button><select id="sel-' + l.id_lead + '" aria-label="Vendeur">' + optionsVendeurs(l.id_site, l.id_user_attribue) + '</select><button type="button" class="btn sm pri" data-a="attribuer" data-id="' + l.id_lead + '">Attribuer</button>';
+          else if (g.act === 'liberer') a = '<button type="button" class="btn sm" data-a="rendre" data-id="' + l.id_lead + '">Rendre au Pool</button><select id="sel-' + l.id_lead + '" aria-label="Vendeur">' + optionsVendeurs(l.id_site, l.id_user_attribue) + '</select><button type="button" class="btn sm pri" data-a="attribuer" data-id="' + l.id_lead + '">Attribuer</button>';
           else if (g.act === 'renvoyer') a = '<select id="sit-' + l.id_lead + '" aria-label="Site">' + sitesRenvoi(l).map(function (s) { return '<option value="' + s.id_site + '">' + esc(siteNom(s.site)) + ' · ' + esc(propre(s.reseau || '')) + '</option>'; }).join('') + '</select><button type="button" class="btn sm pri" data-a="renvoyer" data-id="' + l.id_lead + '">Renvoyer</button>';
           else if (g.act === 'injoignable') a = (l.sf_lead_id ? '<button type="button" class="btn sm vr" data-a="confier" data-id="' + l.id_lead + '">Confier au plateau VROOM</button>' : '') + '<button type="button" class="btn sm dang" data-a="clore-inj" data-id="' + l.id_lead + '">Clore</button>';
           var tsv = g.act === 'liberer' ? tm(l.attribue_le, 20, 'pris par ' + prenom(l.vendeur_nom)) : tm(arrive(l), slaDe(l));
@@ -1657,7 +1899,7 @@
       if (!S.relais) return h + '<div class="empty">Chargement du relais…</div>';
       var rows = S.relais.filter(function (r) { return r.att_bacs_min != null || r.att_site_min != null || r.vendeur_min != null; })
         .map(function (r) {
-          var seg = [['u', 'Attente en piscine BACS', r.att_bacs_min], ['v', 'Traitement VROOM', r.vroom_min], ['u', 'Attente sur le site', r.att_site_min], ['s', 'Vendeur, avant l\'appel', r.vendeur_min]]
+          var seg = [['u', 'Attente dans le Pool BACS', r.att_bacs_min], ['v', 'Traitement VROOM', r.vroom_min], ['u', 'Attente sur le site', r.att_site_min], ['s', 'Vendeur, avant l\'appel', r.vendeur_min]]
             .filter(function (x) { return x[2] != null; }).map(function (x) { return [x[0], x[1], Math.max(0, Number(x[2]))]; });
           return { r: r, seg: seg, tot: seg.reduce(function (a, s) { return a + s[2]; }, 0) };
         }).sort(function (a, b) { return b.tot - a.tot; });
@@ -1669,7 +1911,7 @@
           + x.seg.map(function (s) { return '<i class="' + s[0] + '" style="width:' + Math.max(1.5, 100 * s[2] / tot).toFixed(2) + '%" title="' + esc(s[1]) + ' : ' + dureeMes(s[2]) + '"></i>'; }).join('') + '</div><div class="rl-d">'
           + x.seg.map(function (s) { return '<span>' + esc(s[1]) + ' <b>' + dureeMes(s[2]) + '</b></span>'; }).join('') + '</div></div>';
       });
-      return h + '</div><p class="foot">Médianes calculées séparément pour chaque segment : leur somme donne un ordre de grandeur, pas un parcours réel. Piscine BACS et traitement VROOM : historique BACS des comptes VROOM et gestes du plateau dans One Data. Site : de l\'arrivée sur le site à la prise par un vendeur, puis de la prise au premier contact.</p>';
+      return h + '</div><p class="foot">Médianes calculées séparément pour chaque segment : leur somme donne un ordre de grandeur, pas un parcours réel. Pool BACS et traitement VROOM : historique BACS des comptes VROOM et gestes du plateau dans One Data. Site : de l\'arrivée sur le site à la prise par un vendeur, puis de la prise au premier contact.</p>';
     }
 
     // ── Campagnes : chef et direction ─────────────────────────────────────
@@ -1702,9 +1944,13 @@
     }
 
     function renderPanel() {
-      if (POSTE === 'vendeur') return S.tab === 'piscine' ? vuePiscineVendeur() : S.tab === 'campagnes' ? vueCampagnesVendeur() : vueAFaire();
-      if (POSTE === 'chef' || S.vueSite != null) return S.tab === 'relayer' ? vueRelayer() : S.tab === 'campagnes' ? vueCampagnesManager() : vueMur();
-      return S.tab === 'relais' ? vueRelais() : S.tab === 'campagnes' ? vueCampagnesManager() : vueMurSites();
+      if (POSTE === 'vendeur') return S.tab === 'pool' ? vuePiscineVendeur() : S.tab === 'campagnes' ? vueCampagnesVendeur() : vueListeVendeur();
+      if (S.tab === 'bloques') return vueBloques();
+      if (S.tab === 'campagnes') return vueCampagnesManager();
+      if (S.tab === 'mur') return sitePoste() == null ? vueMurSites() : vueMur();
+      if (S.tab === 'mursites') return '<div class="seg-a"><button type="button" class="on" data-a="tab" data-id="mursites">Le mur des sites</button><button type="button" data-a="tab" data-id="relais">Le relais</button></div>' + vueMurSites();
+      if (S.tab === 'relais') return '<div class="seg-a"><button type="button" data-a="tab" data-id="mursites">Le mur des sites</button><button type="button" class="on" data-a="tab" data-id="relais">Le relais</button></div>' + vueRelais();
+      return vuePool();
     }
     function render() {
       if (!el.isConnected) return;
@@ -1713,14 +1959,11 @@
           + (S.erreur ? '<div><button type="button" class="btn pri" data-a="reessayer">Réessayer</button></div>' : '') + '</section>';
         return;
       }
-      var list = signaux();
-      list.forEach(function (s) { if (!S.vus.has(s.id)) { S.vus.add(s.id); if (!S.premier) S.frais.add(s.id); } });
-      S.premier = false;
       var y = (FW.scrollY || 0);
-      root.innerHTML = renderSituation()
+      root.innerHTML = renderSituation() + bandeauBacsSite()
         + (S.erreur ? '<p class="alerte">' + esc(S.erreur) + ' Les données affichées datent du dernier chargement réussi.</p>' : '')
-        + '<div class="poste"><aside class="sig" aria-label="Signaux">' + renderSignaux(list) + '</aside>'
-        + '<section class="act" aria-label="Actions">' + renderTabs() + '<div class="panel">' + renderPanel() + '</div></section></div>';
+        + renderTabs()
+        + '<section class="act" aria-label="Leads"><div class="panel">' + renderPanel() + '</div></section>';
       try { if (FW.scrollY !== y) FW.scrollTo(0, y); } catch (e) {}
       setTimeout(function () { S.frais.clear(); }, 7000);
     }
@@ -1734,7 +1977,15 @@
       var gere = manager(l.id_site);
       var mien = estMien(l);
       var retour = S.cell ? '<button type="button" class="retour" data-a="retour-liste"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 6l-6 6 6 6"/></svg>Retour à la liste</button>' : '';
-      var h = '<header class="dr-h"><div>' + retour + '<div class="tags" style="margin:0 0 6px">' + tagsLead(l) + '</div><h2>' + esc(nomLead(l)) + '</h2><p class="dr-s">' + esc(siteNom(l.site)) + (l.vendeur_nom ? ' · chez ' + esc(propre(l.vendeur_nom)) : l.zone === 'piscine' ? ' · dans la piscine' : l.zone === 'plateau' ? ' · au plateau VROOM' : '') + '</p></div>' + x + '</header><div class="dr-b">';
+      var canaux = [['Appeler', 'appel', 'call', IC.phone], ['SMS', 'sms', 'sms', IC.sms], ['WhatsApp', 'wa', 'wa', IC.wa], ['E-mail', 'mail', 'mail', IC.mail]]
+        .filter(function (c) { return c[1] !== 'appel' || __lmPeutAppeler(); }).map(function (c) {
+          return '<button type="button" class="fs-btn ' + c[2] + (D.canal === c[1] ? ' on' : '') + '" data-a="canal" data-id="' + c[1] + '"' + ((c[1] === 'mail' ? !l.email : !l.telephone) ? ' disabled' : '') + '>' + svgIc(c[3]) + c[0] + '</button>'; }).join('');
+      var h = '<header class="dr-h"><div class="dr-ht">' + retour + '<h2>' + esc(nomLead(l)) + '</h2><p class="dr-s">' + esc([demandeDe(l), l.source_libelle, siteNom(l.site)].filter(Boolean).join(' · '))
+        + (l.vendeur_nom ? ' · chez ' + esc(propre(l.vendeur_nom)) : l.zone === 'piscine' ? ' · dans le Pool' : l.zone === 'plateau' ? ' · au plateau VROOM' : '') + '</p>'
+        + '<p class="dr-tel">' + (l.telephone ? '<b>' + esc(telAff(l.telephone)) + '</b>' : 'Aucun numéro') + (l.email ? ' · ' + esc(l.email) : '') + '</p>'
+        + '<div class="canaux">' + canaux + '</div>'
+        + (l.id_client ? '<button type="button" class="lien fiche-l" data-a="fiche" data-id="' + l.id_client + '">Ouvrir la fiche client ›</button>' : '')
+        + '</div>' + x + '</header><div class="dr-b">' + composeHtml(l);
       // Délais
       h += '<section><h3>Délai</h3><div class="delais">';
       if (l.zone === 'plateau') h += '<div><span>Au plateau VROOM</span><span class="tm neutre"><b>' + duree(mins(l.recu_le)) + '</b><small>reçu le ' + esc(quand(l.recu_le)) + '</small></span></div>';
@@ -1744,12 +1995,6 @@
         if (l.zone === 'vendeur' && l.attribue_le) h += '<div><span>Chez ' + esc(prenom(l.vendeur_nom)) + ' depuis</span>' + tm(l.attribue_le, 30, l.tentatives ? plural(l.tentatives, 'tentative') : 'sans appel') + '</div>';
       }
       h += '</div></section>';
-      // Contact
-      h += '<section><h3>Contact</h3>' + (l.telephone ? '<div class="tel"><b>' + esc(telAff(l.telephone)) + '</b><button type="button" class="btn sm" data-a="copier" data-id="' + esc(telAff(l.telephone)) + '">Copier</button></div>' : '<p class="hint">Aucun numéro.</p>')
-        + (l.email ? '<p class="mail">' + esc(l.email) + '</p>' : '')
-        + '<div class="canaux">' + [['Appeler', 'appel', 'call', IC.phone], ['WhatsApp', 'wa', 'wa', IC.wa], ['Email', 'mail', 'mail', IC.mail], ['SMS', 'sms', 'sms', IC.sms]].filter(function (c) { return c[1] !== 'appel' || __lmPeutAppeler(); }).map(function (c) {
-            return '<button type="button" class="fs-btn ' + c[2] + '" data-a="canal" data-id="' + c[1] + '"' + ((c[1] === 'mail' ? !l.email : !l.telephone) ? ' disabled' : '') + '>' + svgIc(c[3]) + c[0] + '</button>'; }).join('')
-        + (l.id_client ? '<button type="button" class="fs-btn fiche" data-a="fiche" data-id="' + l.id_client + '">' + svgIc(IC.fiche) + 'Fiche client</button>' : '') + '</div></section>';
       // Demande
       h += '<section><h3>Demande</h3><dl class="dl">' + [['Source', l.source_libelle], ['Véhicule', l.vehicule], ['Campagne', l.campagne], ['Reçu le', quand(l.recu_le)], ['Statut BACS', l.statut_bacs]]
           .filter(function (y) { return y[1]; }).map(function (y) { return '<dt>' + y[0] + '</dt><dd>' + esc(y[1]) + '</dd>'; }).join('') + '</dl>'
@@ -1760,6 +2005,7 @@
       if (D.demo) h = h.replace('<div class="dr-b">', '<p class="demo">Fiche d\'exemple de la visite guidée : rien n\'est enregistré.</p><div class="dr-b">');
       var sc = $drawer.querySelector('.dr-b'); var top = sc ? sc.scrollTop : 0;
       $drawer.innerHTML = h;
+      $drawer.classList.toggle('composing', !!(D.canal && D.canal !== 'appel'));
       var sc2 = $drawer.querySelector('.dr-b'); if (sc2) sc2.scrollTop = top;
     }
     function piedDrawer(l, gere, mien) {
@@ -1782,12 +2028,12 @@
       if (mode === 'attribuer') {
         h += '<div class="row"><select id="dr-vendeur" aria-label="Vendeur">' + optionsVendeurs(l.id_site, l.id_user_attribue) + '</select><button type="button" class="btn pri" data-a="attribuer" data-id="' + l.id_lead + '|dr">' + (l.id_user_attribue ? 'Réattribuer' : 'Attribuer') + '</button></div>'
           + '<div class="row">' + (l.sf_lead_id ? '<button type="button" class="btn vr" data-a="confier" data-id="' + l.id_lead + '">Confier au plateau VROOM</button>' : '')
-          + (l.id_user_attribue ? '<button type="button" class="btn" data-a="rendre" data-id="' + l.id_lead + '">Rendre à la piscine</button>' : '') + '</div>';
+          + (l.id_user_attribue ? '<button type="button" class="btn" data-a="rendre" data-id="' + l.id_lead + '">Rendre au Pool</button>' : '') + '</div>';
       } else if (mode === 'resultat') {
         h += piedResultat(l, true);
       } else if (mode === 'renvoyer') {
         h += '<div class="row"><select id="dr-site" aria-label="Site">' + sitesRenvoi(l).map(function (s) { return '<option value="' + s.id_site + '">' + esc(siteNom(s.site)) + ' · ' + esc(propre(s.reseau || '')) + '</option>'; }).join('') + '</select><button type="button" class="btn pri" data-a="renvoyer" data-id="' + l.id_lead + '|dr">Renvoyer</button></div>'
-          + '<p class="hint">Le lead part dans la piscine du site choisi (ou chez le vendeur du tour de rôle), avec son délai remis à zéro.' + (l.sf_lead_id ? ' BACS reçoit le nouveau site.' : '') + '</p>';
+          + '<p class="hint">Le lead part dans le Pool du site choisi (ou chez le vendeur du tour de rôle), avec son délai remis à zéro.' + (l.sf_lead_id ? ' BACS reçoit le nouveau site.' : '') + '</p>';
       } else {
         h += piedClore(l);
       }
@@ -1803,8 +2049,7 @@
       h += '<div class="row">';
       if (r === 'rdv') {
         if (!l.id_client) h += '<span class="hint">Pas de fiche client rattachée : le rendez-vous ne peut pas être posé ici.</span>';
-        else h += '<input type="datetime-local" id="rdv-date" value="' + dateLocale(demainA(10, 1)) + '" aria-label="Date du rendez-vous"><select id="rdv-duree" aria-label="Durée"><option value="30">30 min</option><option value="60" selected>1 h</option><option value="90">1 h 30</option></select>'
-          + '<input type="text" id="rdv-sujet" placeholder="Objet (essai, offre…)" aria-label="Objet"><button type="button" class="btn vr" data-a="rdv" data-id="' + l.id_lead + '">Enregistrer le RDV</button>';
+        else return h + '</div>' + formRdv(l);
       } else if (r === 'joint') {
         h += '<input type="text" id="res-note" placeholder="Ce qui a été dit (facultatif)" aria-label="Note"><button type="button" class="btn pri" data-a="joint" data-id="' + l.id_lead + '">Enregistrer le contact</button>';
       } else if (r === 'pasjoint') {
@@ -1813,9 +2058,100 @@
         return h + '</div>' + piedClore(l);
       }
       h += '</div>';
-      if (!dansChef) h += '<div class="row pied"><span class="hint">' + (l.sf_lead_id ? 'Lead BACS : le RDV et la clôture partent aussi dans BACS.' : 'Lead hors BACS : tout est enregistré dans One Data.') + '</span><button type="button" class="btn sm ghost" data-a="rendre" data-id="' + l.id_lead + '">Rendre à la piscine</button></div>';
+      if (!dansChef) h += '<div class="row pied"><span class="hint">' + (l.sf_lead_id ? 'Lead BACS : le RDV et la clôture partent aussi dans BACS.' : 'Lead hors BACS : tout est enregistré dans One Data.') + '</span><button type="button" class="btn sm ghost" data-a="rendre" data-id="' + l.id_lead + '">Rendre au Pool</button></div>';
       return h;
     }
+    // ── v62 : modèles de messages adaptés au lead ─────────────────────────
+    function estVO(l) { return /\bVO\b|occasion/i.test(l.vehicule || '') || /centrale|leboncoin|lbc|autoscout|paru|spoticar|vo/i.test((l.source || '') + ' ' + (l.source_libelle || '')); }
+    function vehCourt(l) { var v = String(l.vehicule || '').replace(/\s+/g, ' ').trim(); return v ? (v.length > 60 ? v.slice(0, 58) + '…' : v) : ''; }
+    function salut(l) {
+      var s = String(l.nom || '').trim(), m = /^([A-ZÀ-ÖØ-Ý'’ -]{2,}?)\s+(.*[a-zà-ÿ].*)$/.exec(s);
+      return m ? propre(m[2]) + ' ' + propre(m[1]) : nomLead(l);
+    }
+    function modeles(canalId, l) {
+      var cli = salut(l), moi = prenom((S.stats && S.stats.nom) || '') || 'votre conseiller', site = siteNom(l.site) || 'notre concession';
+      var v = vehCourt(l), vo = estVO(l), relance = (l.tentatives || 0) > 0;
+      var leVeh = v ? 'le ' + v : 'votre projet', duVeh = v ? 'du ' + v : 'de votre projet', auVeh = v ? 'au sujet du ' + v : 'au sujet de votre demande';
+      var M;
+      if (canalId === 'sms') M = [
+        { k: 'Premier contact', t: 'Bonjour ' + cli + ', ' + moi + ' de ' + site + '. J\'ai bien reçu votre demande ' + (v ? 'pour ' + leVeh : '') + '. À quel moment puis-je vous appeler ?' },
+        vo ? { k: 'Véhicule disponible', t: 'Bonjour ' + cli + ', ' + leVeh + ' est toujours disponible à ' + site + '. Je peux vous le réserver pour un essai : quel jour vous arrange ? ' + moi }
+           : { k: 'Proposer un essai', t: 'Bonjour ' + cli + ', je vous propose un essai ' + duVeh + ' cette semaine à ' + site + '. Plutôt en semaine ou le samedi ? ' + moi },
+        { k: 'Après un appel manqué', t: 'Bonjour ' + cli + ', j\'ai essayé de vous joindre ' + auVeh + '. Répondez simplement à ce SMS avec un créneau qui vous convient. ' + moi + ', ' + site }];
+      else if (canalId === 'wa') M = [
+        { k: 'Premier contact', m: 'Modèle WhatsApp validé par Meta : votre phrase s\'insère après la présentation.', t: 'Vous nous avez écrit ' + auVeh + ' : je peux répondre à vos questions ici.' },
+        vo ? { k: 'Véhicule disponible', m: 'Modèle WhatsApp validé par Meta.', t: (v ? 'Le ' + v : 'Le véhicule') + ' est toujours disponible, je peux vous envoyer ses photos et son historique.' }
+           : { k: 'Proposer un essai', m: 'Modèle WhatsApp validé par Meta.', t: 'Je peux vous proposer un essai ' + duVeh + ' cette semaine.' },
+        { k: 'Après un appel manqué', m: 'Modèle WhatsApp validé par Meta.', t: 'J\'ai essayé de vous joindre ' + auVeh + '.' }];
+      else M = [
+        vo ? { k: 'Réponse à votre annonce', s: 'Votre demande pour ' + (v ? leVeh : 'notre véhicule'), t: 'Bonjour ' + cli + ',\n\nMerci pour votre intérêt pour ' + (v ? leVeh : 'notre véhicule') + '. Il est disponible à ' + site + '.\n\nJe vous propose de venir l\'essayer : quel jour vous conviendrait ?\n\n' + moi + '\n' + site }
+           : { k: 'Réponse à votre demande', s: 'Votre projet' + (v ? ' ' + v : ''), t: 'Bonjour ' + cli + ',\n\nMerci pour votre demande ' + (v ? 'concernant ' + leVeh : '') + '. Je reste à votre disposition pour vous présenter les offres du moment.\n\nJe vous propose un essai à ' + site + ' : quel jour vous conviendrait ?\n\n' + moi + '\n' + site },
+        { k: 'Estimation de votre reprise', s: 'Estimation de votre véhicule actuel', t: 'Bonjour ' + cli + ',\n\nPour préparer votre projet, je peux estimer votre véhicule actuel. Envoyez-moi sa carte grise et son kilométrage, ou passez 20 minutes à ' + site + '.\n\n' + moi },
+        { k: 'Après un appel manqué', s: 'Votre demande · ' + site, t: 'Bonjour ' + cli + ',\n\nJ\'ai essayé de vous joindre ' + auVeh + '. Indiquez-moi un créneau de rappel en répondant à ce message.\n\n' + moi + '\n' + site }];
+      // Conseillé : après un appel manqué, le message qui le dit ; sinon le premier.
+      var reco = relance ? M.length - 1 : 0;
+      M.forEach(function (x, i) { x.reco = i === reco; });
+      return M;
+    }
+    function composeHtml(l) {
+      var D = S.dr;
+      if (!D || !D.canal || D.canal === 'appel') return '';
+      var M = modeles(D.canal, l), i = D.tpl == null ? M.findIndex(function (x) { return x.reco; }) : D.tpl;
+      if (i < 0) i = 0;
+      var m = M[i], lib = { sms: 'SMS', wa: 'WhatsApp', mail: 'E-mail' }[D.canal];
+      var txt = D.txt != null ? D.txt : m.t, subj = D.subj != null ? D.subj : (m.s || '');
+      return '<section class="compose ' + D.canal + '"><h3>' + lib + ' · modèles adaptés à ce lead</h3><div class="tpls">' + M.map(function (x, j) {
+          return '<button type="button" class="tpl' + (j === i ? ' on' : '') + '" data-a="tpl" data-id="' + j + '">' + esc(x.k) + (x.reco ? '<span class="reco">conseillé</span>' : '') + '</button>'; }).join('') + '</div>'
+        + (m.m ? '<p class="hint">' + esc(m.m) + '</p>' : '')
+        + (D.canal === 'mail' ? '<input type="text" id="cp-subj" value="' + esc(subj) + '" aria-label="Objet">' : '')
+        + '<textarea id="cp-txt" rows="' + (D.canal === 'mail' ? 7 : 3) + '" aria-label="Message">' + esc(txt) + '</textarea>'
+        + '<div class="row"><span class="hint">' + (D.canal === 'wa' ? 'La fenêtre WhatsApp s\'ouvre avec ce motif : vous relisez puis envoyez.' : 'La fenêtre ' + lib + ' s\'ouvre avec ce texte : vous relisez puis envoyez.') + '</span>'
+        + '<button type="button" class="btn pri" data-a="canal-ouvrir">Ouvrir dans ' + lib + '</button><button type="button" class="btn ghost sm" data-a="canal-fermer">Annuler</button></div></section>';
+    }
+    var OBJETS_RDV = ['RDV Vente', 'Essai', 'Estimation de reprise', 'Livraison VN', 'Livraison VO'];
+    function creneau(j, hr) { var d = new Date(); d.setDate(d.getDate() + j); d.setHours(hr, 0, 0, 0); return d; }
+    function samediProchain() { var d = new Date(); var k = (6 - d.getDay() + 7) % 7 || 7; return creneau(k, 10); }
+    function formRdv(l) {
+      var D = S.dr, f = D.rdvF || (D.rdvF = { objet: estVO(l) ? 'Essai' : 'RDV Vente', date: dateLocale(creneau(1, 10)), duree: '60', inv: [], com: '', sms: true });
+      var rapides = [['Demain 10:00', creneau(1, 10)], ['Demain 14:00', creneau(1, 14)], ['Samedi 10:00', samediProchain()]];
+      if (!S.invitables) chargerInvitables();
+      var inv = (S.invitables || []).filter(function (u) { return Number(u.id_user) !== Number(l.id_user_attribue || MOI); });
+      // Les collègues du site d'abord : vendeurs, chef des ventes.
+      var duSite = {}; vendeursDu(l.id_site).forEach(function (v) { duSite[v.id_user] = 1; });
+      inv.sort(function (a, b) { return ((duSite[b.id_user] ? 1 : 0) - (duSite[a.id_user] ? 1 : 0)) || String(a.nom).localeCompare(String(b.nom), 'fr'); });
+      var prop = inv.slice(0, 8), autres = inv.slice(8);
+      var h = '<div class="rdvf">'
+        + '<div class="q"><span>Objet <em class="bacs-tag">libellés BACS</em></span><div class="chips">' + OBJETS_RDV.map(function (o) {
+            return '<button type="button" class="qk' + (f.objet === o ? ' on' : '') + '" data-a="rdv-objet" data-id="' + esc(o) + '">' + esc(o) + '</button>'; }).join('') + '</div></div>'
+        + '<div class="q"><span>Quand</span><div class="chips">' + rapides.map(function (x) {
+            var v = dateLocale(x[1]); return '<button type="button" class="qk' + (f.date === v ? ' on' : '') + '" data-a="rdv-quand" data-id="' + v + '">' + x[0] + '</button>'; }).join('') + '</div>'
+        + '<div class="row"><input type="datetime-local" id="rdv-date" value="' + esc(f.date) + '" aria-label="Date et heure"><select id="rdv-duree" aria-label="Durée">'
+        + [['30', '30 min'], ['60', '1h00'], ['90', '1h30'], ['120', '2h00']].map(function (d) { return '<option value="' + d[0] + '"' + (f.duree === d[0] ? ' selected' : '') + '>' + d[1] + '</option>'; }).join('') + '</select></div></div>'
+        + '<div class="q"><span>Inviter un collègue</span><div class="chips">' + prop.concat(inv.filter(function (u) { return f.inv.indexOf(Number(u.id_user)) !== -1 && prop.indexOf(u) === -1; })).map(function (u) {
+            return '<button type="button" class="qk' + (f.inv.indexOf(Number(u.id_user)) !== -1 ? ' on' : '') + '" data-a="rdv-inv" data-id="' + u.id_user + '">' + esc(propre(u.nom)) + '</button>'; }).join('')
+        + (autres.length ? '<select id="rdv-inv-plus" aria-label="Autre collègue"><option value="">Autre collègue…</option>' + autres.map(function (u) { return '<option value="' + u.id_user + '">' + esc(propre(u.nom)) + '</option>'; }).join('') + '</select>' : '')
+        + (S.invitables == null ? '<span class="hint">Chargement des collègues…</span>' : '') + '</div></div>'
+        + '<div class="q"><span>Commentaire</span><textarea id="rdv-com" rows="2" placeholder="Ex. vient avec sa Clio pour la reprise, préparer le véhicule">' + esc(f.com) + '</textarea></div>'
+        + '<label class="hint chk"><input type="checkbox" id="rdv-sms"' + (f.sms ? ' checked' : '') + (l.telephone ? '' : ' disabled') + '> Envoyer la confirmation au client par SMS</label>'
+        + '<div class="row"><button type="button" class="btn vr big" data-a="rdv" data-id="' + l.id_lead + '">Valider le rendez-vous</button></div>'
+        + '<p class="hint">' + (l.sf_lead_id ? 'Le rendez-vous part dans l\'agenda One Data et dans BACS, avec son objet et ses invités.' : 'Le rendez-vous part dans l\'agenda One Data.') + '</p></div>';
+      return h;
+    }
+    async function chargerInvitables() {
+      if (S.invitables || S._invEnCours) return; S._invEnCours = true;
+      try { S.invitables = await rpc('agenda_invitables') || []; } catch (e) { S.invitables = []; }
+      S._invEnCours = false;
+      if (S.dr) renderDrawerPreserve();
+    }
+    function lireRdvF() {
+      var D = S.dr; if (!D || !D.rdvF) return;
+      var g = function (s) { return $drawer.querySelector(s); };
+      if (g('#rdv-date')) D.rdvF.date = g('#rdv-date').value;
+      if (g('#rdv-duree')) D.rdvF.duree = g('#rdv-duree').value;
+      if (g('#rdv-com')) D.rdvF.com = g('#rdv-com').value;
+      if (g('#rdv-sms')) D.rdvF.sms = g('#rdv-sms').checked;
+    }
+
     // ── v56 : rattacher le lead à une fiche client ─────────────────────────
     function sansFiche(l) { return !l.id_client && !!(l.telephone || l.email); }
     function blocRattacher(l) {
@@ -1888,14 +2224,20 @@
     function demainA(hr, j) { var d = new Date(); d.setDate(d.getDate() + (j || 1)); d.setHours(hr, 0, 0, 0); return d; }
     function lireForm() {
       var g = function (s) { var x2 = $drawer.querySelector(s); return x2 ? x2.value : null; };
-      return { vendeur: g('#dr-vendeur'), site: g('#dr-site'), rdv: g('#rdv-date'), duree: g('#rdv-duree'), sujet: g('#rdv-sujet'), note: g('#res-note'), motif: g('#clore-motif'), cnote: g('#clore-note') };
+      return { vendeur: g('#dr-vendeur'), site: g('#dr-site'), note: g('#res-note'), motif: g('#clore-motif'), cnote: g('#clore-note') };
+    }
+    function lireCompose() {
+      var D = S.dr; if (!D || !D.canal) return;
+      var a = $drawer.querySelector('#cp-txt'), b = $drawer.querySelector('#cp-subj');
+      if (a) D.txt = a.value; if (b) D.subj = b.value;
     }
     function renderDrawerPreserve() {
       var v = lireForm();
+      lireRdvF(); lireCompose();
       renderDrawer();
       Object.keys(v).forEach(function (k) {
         if (v[k] == null) return;
-        var sel = { vendeur: '#dr-vendeur', site: '#dr-site', rdv: '#rdv-date', duree: '#rdv-duree', sujet: '#rdv-sujet', note: '#res-note', motif: '#clore-motif', cnote: '#clore-note' }[k];
+        var sel = { vendeur: '#dr-vendeur', site: '#dr-site', note: '#res-note', motif: '#clore-motif', cnote: '#clore-note' }[k];
         var x2 = $drawer.querySelector(sel); if (x2) x2.value = v[k];
       });
     }
@@ -2052,7 +2394,7 @@
     function prendre(id) {
       return geste(async function () {
         var r = await rpc('poste_prendre', { p_id_lead: Number(id) });
-        if (r && r.action === 'reserve') { await rafraichir(true); S.tab = POSTE === 'vendeur' ? S.tab : S.tab; toast('Lead pris : il est dans votre liste « À faire ».'); return ouvrir(id); }
+        if (r && r.action === 'reserve') { await rafraichir(true); S.tab = POSTE === 'vendeur' ? S.tab : S.tab; toast('Lead pris : il est dans « À rappeler ».'); return ouvrir(id); }
         if (r && r.action === 'occupe') toast('Déjà pris par ' + propre(r.par_nom || 'un collègue') + '.', true);
         else if (r && r.action === 'clos') toast('Ce lead est déjà traité.', true);
         rafraichir(true);
@@ -2060,7 +2402,7 @@
     }
     function attribuer(v) {
       var p = String(v).split('|'), id = p[0], dr = p[1] === 'dr';
-      var sel = dr ? $drawer.querySelector('#dr-vendeur') : root.querySelector('#sel-' + id);
+      var sel = dr ? $drawer.querySelector('#dr-vendeur') : (root.querySelector('#sel-' + id) || $drawer.querySelector('#sel-' + id));
       if (!sel || !sel.value) { toast('Aucun vendeur rattaché à ce site.', true); return; }
       var l = leadDe(id);
       return geste(async function () {
@@ -2069,15 +2411,24 @@
       });
     }
     function rdv(id) {
-      var f = lireForm(), l = leadDe(id);
-      var d = f.rdv ? new Date(f.rdv) : null;
+      lireRdvF();
+      var D = S.dr, f = (D && D.rdvF) || {}, l = leadDe(id);
+      var d = f.date ? new Date(f.date) : null;
       if (!d || isNaN(d.getTime()) || d.getTime() < Date.now() - 3600000) { toast('Choisissez la date du rendez-vous.', true); return; }
       var fin = new Date(d.getTime() + (Number(f.duree) || 60) * 60000);
       var loc = function (x) { var q = function (n) { return String(n).padStart(2, '0'); }; return x.getFullYear() + '-' + q(x.getMonth() + 1) + '-' + q(x.getDate()) + ' ' + q(x.getHours()) + ':' + q(x.getMinutes()) + ':00'; };
+      var objet = f.objet || 'RDV Vente', com = String(f.com || '').trim();
+      var sms = !!f.sms && !!l.telephone;
       return geste(async function () {
-        var r = await rpc('lead_rdv_creer', { p_id_lead: Number(id), p_start: loc(d), p_end: loc(fin), p_sujet: (f.sujet || '').trim() || 'Rendez-vous' });
-        await rpc('poste_resultat', { p_id_lead: Number(id), p_resultat: 'joint_rdv', p_note: (f.sujet || '').trim() || null });
-        apres('RDV inscrit dans l\'agenda le ' + quand(d) + (r && r.vers_bacs ? ', et envoyé à BACS' : '') + '. ' + nomLead(l) + ' est contacté.');
+        var r = await rpc('lead_rdv_creer', { p_id_lead: Number(id), p_start: loc(d), p_end: loc(fin), p_sujet: objet, p_commentaire: com || null, p_invites: (f.inv || []).length ? f.inv.map(Number) : null });
+        await rpc('poste_resultat', { p_id_lead: Number(id), p_resultat: 'joint_rdv', p_note: objet + (com ? ' · ' + com : '') });
+        var jourTxt = d.toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long' }) + ' à ' + hh(d);
+        if (sms) {
+          var moi = prenom((S.stats && S.stats.nom) || '') || 'votre conseiller';
+          var txt = 'Bonjour ' + salut(l) + ', je vous confirme notre rendez-vous (' + objet.replace(/^RDV /, '').toLowerCase() + ') le ' + jourTxt + ' à ' + (siteNom(l.site) || 'la concession') + '. À bientôt, ' + moi + '.';
+          canal('sms', { text: txt });
+        }
+        apres(objet + ' le ' + jourTxt + ' : dans l\'agenda' + (r && r.vers_bacs ? ' et envoyé à BACS' : '') + ((f.inv || []).length ? ', ' + plural(f.inv.length, 'collègue invité', 'collègues invités') : '') + '.' + (sms ? ' Relisez puis envoyez le SMS de confirmation.' : ''));
       });
     }
     function resultat(id, res) {
@@ -2099,7 +2450,7 @@
       var l = leadDe(id);
       return geste(async function () {
         await rpc('poste_rendre', { p_id_lead: Number(id), p_motif: null });
-        apres(nomLead(l) + ' est de nouveau dans la piscine' + (POSTE !== 'vendeur' && l.vendeur_nom ? ' (repris à ' + prenom(l.vendeur_nom) + ')' : '') + '.');
+        apres(nomLead(l) + ' est de nouveau dans le Pool' + (POSTE !== 'vendeur' && l.vendeur_nom ? ' (repris à ' + prenom(l.vendeur_nom) + ')' : '') + '.');
       });
     }
     function confier(id) {
@@ -2142,9 +2493,10 @@
       for (var i = 0; i < c.length; i++) { try { if (c[i] && c[i].OD3CX && typeof c[i].OD3CX.appeler === 'function') return c[i].OD3CX; } catch (e) {} }
       return null;
     }
-    function canal(act) {
+    function canal(act, pre) {
       var D = S.dr; if (!D || !D.l) return;
       if (D.demo) { toast('Visite guidée : les boutons de contact ne font rien sur la fiche d\'exemple.'); return; }
+      pre = pre || {};
       var l = D.l, nom = nomLead(l);
       var client = { IDVu: l.id_client, TEl_MOB: l.telephone, EMAIL: l.email, nom: nom, prenom: '' };
       try {
@@ -2155,10 +2507,76 @@
           var w = (window.parent && window.parent.__VOIP_UI__) || window.__VOIP_UI__ || FW.__VOIP_UI__;
           if (w && w.call) { w.call(l.telephone, client); return; }
           FW.open('tel:' + String(l.telephone || '').replace(/[^0-9+]/g, ''), '_self');
-        } else if (act === 'sms') { var s = FW.__SMS_UI__ || window.__SMS_UI__; if (s && s.open) s.open({ client: client }); else toast('Module SMS indisponible.', true); }
-        else if (act === 'wa') { var wa = FW.__WA_UI__ || window.__WA_UI__; if (wa && wa.open) wa.open({ client: client }); else toast('Module WhatsApp indisponible.', true); }
-        else if (act === 'mail') { var m = FW.__EMAIL_UI__ || window.__EMAIL_UI__; if (m && m.open) m.open({ mode: 'new', client: client }); else FW.open('mailto:' + l.email, '_blank'); }
+        } else if (act === 'sms') { var s = FW.__SMS_UI__ || window.__SMS_UI__; if (s && s.open) s.open({ client: client, text: pre.text }); else toast('Module SMS indisponible.', true); }
+        else if (act === 'wa') { var wa = FW.__WA_UI__ || window.__WA_UI__; if (wa && wa.open) wa.open({ client: client, motif: pre.text }); else toast('Module WhatsApp indisponible.', true); }
+        else if (act === 'mail') {
+          var m = FW.__EMAIL_UI__ || window.__EMAIL_UI__;
+          var corps = pre.text != null ? esc(pre.text).replace(/\n/g, '<br>') : undefined;
+          if (m && m.open) m.open({ mode: 'new', client: client, subject: pre.subject, body: corps });
+          else FW.open('mailto:' + l.email + (pre.subject ? '?subject=' + encodeURIComponent(pre.subject) + '&body=' + encodeURIComponent(pre.text || '') : ''), '_blank');
+        }
       } catch (e) { toast('Canal indisponible : ' + messageErreur(e), true); }
+    }
+    // v62 : SMS, WhatsApp, e-mail passent d'abord par les modèles du lead.
+    function choisirCanal(act) {
+      var D = S.dr; if (!D || !D.l) return;
+      if (act === 'appel') return canal('appel');
+      if (D.canal === act) { D.canal = null; renderDrawerPreserve(); return; }
+      lireRdvF();
+      D.canal = act; D.tpl = null; D.txt = null; D.subj = null;
+      renderDrawer();
+      var b = $drawer.querySelector('.dr-b'); if (b) b.scrollTop = 0;
+    }
+    function ouvrirCanalModele() {
+      var D = S.dr; if (!D || !D.canal) return;
+      lireCompose();
+      var M = modeles(D.canal, D.l), i = D.tpl == null ? Math.max(0, M.findIndex(function (x) { return x.reco; })) : D.tpl;
+      var txt = D.txt != null ? D.txt : M[i].t, subj = D.subj != null ? D.subj : M[i].s;
+      canal(D.canal, { text: txt, subject: subj });
+    }
+    // v62 : tout le Pool au vendeur suggéré (sites que l'on encadre).
+    function toutAttribuer() {
+      var ls = libres(sitePoste()).filter(function (l) { var g = suggestion(l); return manager(l.id_site) && g && g.id_user; });
+      if (!ls.length) return;
+      return geste(async function () {
+        var ok = 0, ko = 0;
+        for (var i = 0; i < ls.length; i++) {
+          try { await rpc('poste_attribuer', { p_id_lead: Number(ls[i].id_lead), p_id_user: Number(suggestion(ls[i]).id_user) }); ok++; } catch (e) { ko++; }
+        }
+        S.suggKey = null;
+        apres(plural(ok, 'lead attribué', 'leads attribués') + ' au vendeur suggéré' + (ko ? ' ; ' + ko + ' refusé' + (ko > 1 ? 's' : '') : '') + '.', true);
+      });
+    }
+    // v62 : la règle d'attribution du site, modifiable par qui l'encadre.
+    function modalRegle(sid) {
+      var r = S.regle[sid] || {};
+      var radio = function (n, v, lib, sous) { return '<label class="opt"><input type="radio" name="' + n + '" value="' + v + '"' + (r[n === 'rg-mode' ? 'mode' : 'repartition'] === v ? ' checked' : '') + '><span><b>' + lib + '</b><small>' + sous + '</small></span></label>'; };
+      ouvrirModal('<div class="mb-h"><div><h2>Règle d\'attribution · ' + esc(siteNom((siteInfo(sid) || {}).site)) + '</h2><p>Elle s\'applique aux nouveaux leads du site et aux suggestions du Pool.</p></div><button type="button" class="x" data-a="modal-close" aria-label="Fermer">' + X_SVG + '</button></div><div class="mb-b">'
+        + '<p class="rg-t">Qui attribue ?</p>'
+        + radio('rg-mode', 'libre', 'Libre-service', 'Les vendeurs prennent eux-mêmes leurs leads dans le Pool ; vous pouvez attribuer.')
+        + radio('rg-mode', 'manuel', 'Le chef des ventes', 'Chaque lead attend dans le Pool que vous l\'attribuiez.')
+        + radio('rg-mode', 'auto', 'Automatique', 'Chaque lead part aussitôt chez le vendeur désigné par la règle.')
+        + '<p class="rg-t">À qui en priorité ?</p>'
+        + '<label class="opt chk"><input type="checkbox" id="rg-cycle"' + (r.priorite_cycle ? ' checked' : '') + '><span><b>Au vendeur qui suit déjà le client</b><small>Son cycle commercial est ouvert sur le site.</small></span></label>'
+        + '<label class="opt chk"><input type="checkbox" id="rg-hab"' + (r.vendeur_habituel ? ' checked' : '') + '><span><b>À son vendeur habituel</b><small>Le dernier vendeur à l\'avoir contacté sur les <select id="rg-mois">' + [6, 12, 24].map(function (m) { return '<option value="' + m + '"' + (Number(r.vendeur_habituel_mois || 12) === m ? ' selected' : '') + '>' + m + '</option>'; }).join('') + '</select> derniers mois.</small></span></label>'
+        + '<p class="rg-t">Sinon ?</p>'
+        + radio('rg-rep', 'charge', 'Le moins chargé', 'Le vendeur qui a le moins de leads en cours.')
+        + radio('rg-rep', 'conversion', 'Le moins chargé, puis le meilleur', 'À charge égale, celui qui convertit le mieux : la conversion départage, elle ne classe pas.')
+        + radio('rg-rep', 'sequentiel', 'Tour de rôle', 'Chacun son tour, le dernier servi passe en queue.')
+        + '<label class="opt chk"><input type="checkbox" id="rg-vnvo"' + (r.filtre_vn_vo ? ' checked' : '') + '><span><b>Un lead VO ne va qu\'aux vendeurs VO</b><small>Selon le profil VN / VO de chaque vendeur.</small></span></label>'
+        + '</div><div class="mb-f"><button type="button" class="btn ghost" data-a="modal-close">Annuler</button><button type="button" class="btn pri" data-a="regle-ok" data-id="' + sid + '">Enregistrer la règle</button></div>');
+    }
+    function enregistrerRegle(sid) {
+      var q = function (s) { return $modal.querySelector(s); };
+      var mode = (q('input[name="rg-mode"]:checked') || {}).value, rep = (q('input[name="rg-rep"]:checked') || {}).value;
+      var p = { id_site: Number(sid), mode: mode || null, repartition: rep || null, priorite_cycle: !!(q('#rg-cycle') || {}).checked,
+                vendeur_habituel: !!(q('#rg-hab') || {}).checked, vendeur_habituel_mois: Number((q('#rg-mois') || {}).value) || 12, filtre_vn_vo: !!(q('#rg-vnvo') || {}).checked };
+      return geste(async function () {
+        await rpc('lead_regles_enregistrer', { p_regles: p });
+        fermerModal(); S.regle[sid] = null; S.suggKey = null;
+        toast('Règle d\'attribution enregistrée.');
+        await rafraichir(true);
+      });
     }
     function ficheClient(idClient) {
       if (!idClient) { toast('Pas de fiche client rattachée.', true); return; }
@@ -2181,10 +2599,20 @@
           return;
         case 'ack': S.ack.add(id); memoAck(); render(); return;
         case 'open': return ouvrir(id);
+        case 'appeler': await ouvrir(id); if (S.dr && Number(S.dr.id) === Number(id)) canal('appel'); return;
         case 'prendre': return prendre(id);
+        case 'tout-attribuer': return toutAttribuer();
+        case 'regle-modifier': return modalRegle(Number(id));
+        case 'regle-ok': return enregistrerRegle(Number(id));
+        case 'perim-ouvrir': S.perimOuvert = !S.perimOuvert; render(); return;
+        case 'perim':
+          S.perimOuvert = false; S.cell = null; S.campagnes = null; S.suggKey = null;
+          if (POSTE === 'direction') S.vueSite = id === '' ? null : Number(id); else S.site = Number(id);
+          if (['mur', 'mursites'].indexOf(S.tab) !== -1) S.tab = sitePoste() == null ? 'mursites' : 'mur';
+          render(); chargerAide(); if (S.tab === 'campagnes') { await chargerCampagnes(); render(); } return;
         case 'site': S.site = Number(id); S.cell = null; S.campagnes = null; render(); if (S.tab === 'campagnes') { await chargerCampagnes(); render(); } return;
-        case 'voir-site': S.vueSite = Number(id); S.tab = 'mur'; S.cell = null; S.campagnes = null; render(); try { FW.scrollTo(0, 0); } catch (e) {} return;
-        case 'retour-sites': S.vueSite = null; S.tab = 'mur'; S.cell = null; S.campagnes = null; render(); return;
+        case 'voir-site': S.vueSite = Number(id); S.tab = 'pool'; S.cell = null; S.campagnes = null; S.suggKey = null; render(); chargerAide(); try { FW.scrollTo(0, 0); } catch (e) {} return;
+        case 'retour-sites': S.vueSite = null; S.tab = 'pool'; S.cell = null; S.campagnes = null; S.suggKey = null; render(); chargerAide(); return;
         case 'depuis': S.depuis = id; S.cell = null; render(); return;
         case 'cell': { var p = id.split('|'); S.cell = { r: p[0], c: p[1] }; S.dr = null; render(); renderVolet(); return; }
         case 'cell-close': return fermerTout();
@@ -2221,7 +2649,13 @@
         // Panneau
         case 'close': return fermerTout();
         case 'copier': try { await (FW.navigator || navigator).clipboard.writeText(id); toast('Numéro copié'); } catch (e) { toast(id); } return;
-        case 'canal': return canal(id);
+        case 'canal': return choisirCanal(id);
+        case 'tpl': if (S.dr) { S.dr.tpl = Number(id); S.dr.txt = null; S.dr.subj = null; lireRdvF(); renderDrawer(); } return;
+        case 'canal-ouvrir': return ouvrirCanalModele();
+        case 'canal-fermer': if (S.dr) { S.dr.canal = null; renderDrawerPreserve(); } return;
+        case 'rdv-objet': if (S.dr && S.dr.rdvF) { lireRdvF(); S.dr.rdvF.objet = id; renderDrawerPreserve(); } return;
+        case 'rdv-quand': if (S.dr && S.dr.rdvF) { lireRdvF(); S.dr.rdvF.date = id; renderDrawerPreserve(); } return;
+        case 'rdv-inv': if (S.dr && S.dr.rdvF) { lireRdvF(); var iv = S.dr.rdvF.inv, n2 = Number(id); S.dr.rdvF.inv = iv.indexOf(n2) !== -1 ? iv.filter(function (z) { return z !== n2; }) : iv.concat([n2]); renderDrawerPreserve(); } return;
         case 'mode': if (S.dr) { S.dr.mode = id; renderDrawerPreserve(); } return;
         case 'res': if (S.dr) { S.dr.res = id; renderDrawerPreserve(); } return;
         case 'rdv': return rdv(id);
@@ -2246,7 +2680,10 @@
       ev.preventDefault(); ev.stopPropagation();
       action(a, t.getAttribute('data-id') || '');
     }
-    root.addEventListener('click', surClic);
+    root.addEventListener('click', function (ev) {
+      if (S.perimOuvert && !ev.target.closest('.perim')) { S.perimOuvert = false; render(); }
+      surClic(ev);
+    });
     ov.addEventListener('click', surClic);
     $scrim.addEventListener('click', function () { if (S.modal) fermerModal(); else fermerTout(); });
     root.addEventListener('keydown', function (ev) {
@@ -2258,6 +2695,7 @@
       if ((ev.key === 'Enter' || ev.key === ' ') && t.classList && t.classList.contains('lr')) { ev.preventDefault(); action(t.getAttribute('data-a'), t.getAttribute('data-id')); }
     });
     ov.addEventListener('change', function (ev) {
+      if (ev.target.id === 'rdv-inv-plus' && S.dr && S.dr.rdvF && ev.target.value) { lireRdvF(); var n3 = Number(ev.target.value); if (S.dr.rdvF.inv.indexOf(n3) === -1) S.dr.rdvF.inv.push(n3); renderDrawerPreserve(); return; }
       if (ev.target.id === 'c-aff' || ev.target.id === 'c-site') majVendeursCamp();
       if (ev.target.closest && ev.target.closest('.mb')) { var go = $modal.querySelector('#c-go'); if (go && ev.target.id !== 'c-nom') { go.disabled = true; go.removeAttribute('data-confirme'); go.textContent = 'Lancer la campagne'; } }
     });
@@ -2672,6 +3110,111 @@
 .lmtc-ov .dr-b.vol .lr{grid-template-columns:112px minmax(0,1fr) auto;gap:10px;padding:10px 8px}
 .lmtc-ov .dr-b.vol .lr:first-child{border-top:0}
 .lmtc-ov .demo{margin:0;padding:8px 18px;background:#eaf1fb;color:var(--bleu-dk);font-size:12.5px;font-weight:800;border-bottom:1.5px solid #eef2f8}
+/* ══ v62 : lead management allégé ══════════════════════════════════════ */
+.lmtc .hello{display:flex;flex-wrap:wrap;align-items:center;gap:14px 24px;margin:4px 0 18px}
+.lmtc .hello-t{flex:1 1 420px;min-width:0;display:grid;gap:4px}
+.lmtc .hello-l{font-size:11px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--ink-3)}
+.lmtc .hello-l .lien{font-size:11px}
+.lmtc .hello h1{margin:0;font-size:clamp(20px,2.4vw,25px);font-weight:800;color:var(--bleu-dk);letter-spacing:-.01em}
+.lmtc .hello-p{font-size:15px;color:var(--ink-2);line-height:1.5;max-width:90ch}
+.lmtc .hello-p b{color:var(--ink);font-weight:800}
+.lmtc .hello-p b.t-crit{color:var(--m-rouge)} .lmtc .hello-p b.t-warn{color:var(--m-orange)}
+.lmtc .cta{border:0;background:var(--vert);color:#fff;font:inherit;font-weight:800;font-size:15.5px;padding:13px 22px;border-radius:12px;cursor:pointer;box-shadow:0 4px 14px rgba(83,189,167,.35);text-align:center;line-height:1.25;transition:background .15s}
+.lmtc .cta:hover{background:var(--vert-dk)}
+.lmtc .cta small{display:block;font-weight:600;font-size:11.5px;opacity:.92;margin-top:2px}
+.lmtc .cta[disabled]{opacity:.55;cursor:not-allowed}
+@media (max-width:640px){.lmtc .cta{width:100%}}
+.lmtc .voyant{display:inline-flex;align-items:center;gap:6px;margin-left:10px;text-transform:none;letter-spacing:0;font-size:12px;font-weight:700;color:var(--ink-2)}
+.lmtc .voyant::before{content:"";width:8px;height:8px;border-radius:50%;background:var(--vert)}
+.lmtc .voyant.warn::before{background:var(--m-orange)} .lmtc .voyant.crit::before{background:var(--m-rouge)} .lmtc .voyant.crit{color:var(--m-rouge)}
+/* Filtres-pastilles (remplacent les onglets) */
+.lmtc .tabs{background:none;padding:0;margin:0 0 12px;gap:8px}
+.lmtc .tabs button{border:1.5px solid var(--line);background:var(--card);border-radius:999px;padding:7px 14px;color:var(--ink-2)}
+.lmtc .tabs button:hover{border-color:var(--bleu-clair);color:var(--bleu)}
+.lmtc .tabs button.on{border-color:var(--bleu);background:var(--sel);color:var(--bleu);box-shadow:none}
+.lmtc .tabs .cnt{background:var(--calme-bg)}
+.lmtc .act{background:var(--card);border:1px solid var(--line);border-radius:14px;box-shadow:var(--ombre);min-width:0}
+.lmtc .act .panel{padding:6px 14px 16px}
+/* Lignes v62 */
+.lmtc .lr.v2{grid-template-columns:118px minmax(0,1fr) minmax(0,150px) auto;padding:13px 8px}
+.lmtc .list > .lr.v2:first-child,.lmtc .list > .empty:first-child{border-top:0}
+.lmtc .lr.v2 .who .lr-d{margin-top:2px}
+.lmtc .lr.v2 .src{min-width:0}
+.lmtc .lr.v2 .src .tag{max-width:150px}
+.lmtc .lr.v2 .why{font-size:12px;color:var(--ink-3);font-weight:600;margin-top:3px}
+.lmtc .lr.attr .lr-a select{max-width:250px}
+.lmtc .lr.v2 .btn{padding:9px 15px;font-size:13px}
+@media (max-width:760px){.lmtc .lr.v2{grid-template-columns:100px minmax(0,1fr)}.lmtc .lr.v2 .src{display:none}.lmtc .lr.v2 .lr-a{grid-column:1/-1;justify-content:flex-start}}
+/* Règle d'attribution */
+.lmtc .regle{display:flex;gap:10px;align-items:flex-start;background:var(--sel);border:1px solid var(--bleu-clair);border-radius:12px;padding:11px 14px;margin:10px 0 6px;font-size:13px;color:var(--ink-2);line-height:1.5}
+.lmtc .regle b{color:var(--bleu-dk);font-weight:800}
+.lmtc .regle .i{flex:none;width:21px;height:21px;border-radius:50%;background:var(--card);color:var(--bleu);display:grid;place-items:center;font-weight:800;font-size:12px;margin-top:1px}
+.lmtc .regle .lien{font-size:13px}
+.lmtc .stock-l{display:flex;flex-wrap:wrap;gap:8px 14px;align-items:center;justify-content:space-between;margin-top:10px;padding:10px 12px;border-radius:10px;background:var(--alerte-bg);font-size:12.5px;font-weight:700;color:#8a6d1f}
+/* L'équipe, les sites */
+.lmtc .sec-t{margin:22px 0 10px;font-size:11px;font-weight:800;letter-spacing:.06em;text-transform:uppercase;color:var(--ink-3)}
+.lmtc .team{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:10px}
+.lmtc .mate{display:grid;gap:8px;text-align:left;background:var(--card);border:1.5px solid var(--line);border-radius:14px;padding:14px;font:inherit;color:var(--ink);cursor:pointer;transition:border-color .15s}
+.lmtc .mate:hover{border-color:var(--bleu-clair)}
+.lmtc .mate .nm{display:flex;justify-content:space-between;align-items:center;gap:8px;font-weight:800}
+.lmtc .mate .st{display:flex;gap:18px}
+.lmtc .mate .st span{display:grid;font-size:11.5px;color:var(--ink-3);font-weight:600}
+.lmtc .mate .st b{font-size:19px;font-weight:800;color:var(--ink);font-variant-numeric:tabular-nums}
+.lmtc .mate .st b.t-crit{color:var(--m-rouge)}
+.lmtc .mate-lg{font-size:11.5px;color:var(--ink-2);font-weight:600}
+.lmtc .pill{font-size:11px;font-weight:800;border-radius:999px;padding:2px 9px;white-space:nowrap}
+.lmtc .pill.crit{background:var(--chaud-bg);color:var(--m-rouge)} .lmtc .pill.ok{background:var(--ok-bg);color:var(--m-vert)}
+/* Périmètre (direction, chef de plusieurs sites) */
+.lmtc .perim{position:relative;margin-bottom:6px}
+.lmtc .perim-btn{border:1.5px solid var(--bleu);background:var(--card);color:var(--bleu);border-radius:10px;padding:7px 13px;font:inherit;font-weight:800;font-size:13px;cursor:pointer}
+.lmtc .perim-pop{position:absolute;top:42px;left:0;z-index:50;background:var(--card);border:1px solid var(--line);border-radius:12px;box-shadow:0 12px 34px rgba(28,43,69,.16);padding:8px;min-width:270px;max-height:70vh;overflow:auto;display:grid;gap:1px}
+.lmtc .perim-pop button{text-align:left;border:0;background:none;padding:7px 10px;border-radius:8px;font:inherit;font-size:13.5px;color:var(--ink);cursor:pointer}
+.lmtc .perim-pop button:hover,.lmtc .perim-pop button.on{background:var(--sel);color:var(--bleu)}
+.lmtc .perim-pop .l0{font-weight:800}
+.lmtc .perim-pop .l2{padding-left:30px}
+.lmtc .perim-cap{font-size:10.5px;color:var(--ink-3);font-weight:700;padding:4px 10px 6px;text-transform:uppercase;letter-spacing:.05em}
+.lmtc .perim-m{font-size:12px;font-weight:800;color:var(--bleu-dk);padding:8px 10px 2px}
+.lmtc .perim-a{font-size:12px;font-weight:700;color:var(--ink-2);padding:4px 10px 2px 18px}
+.lmtc .seg-a{display:inline-flex;gap:4px;background:var(--calme-bg);border-radius:10px;padding:3px;margin:8px 0 12px}
+.lmtc .seg-a button{border:0;background:none;padding:6px 12px;border-radius:8px;font:inherit;font-size:12.5px;font-weight:700;color:var(--ink-2);cursor:pointer}
+.lmtc .seg-a button.on{background:var(--card);color:var(--ink)}
+.lmtc .sub-h{display:flex;flex-wrap:wrap;gap:6px 14px;align-items:center;justify-content:space-between}
+/* Fiche du lead */
+.lmtc-ov .dr-ht{display:grid;gap:6px;min-width:0;flex:1}
+.lmtc-ov .dr-tel{font-size:13px;color:var(--ink-2);font-weight:600;word-break:break-word}
+.lmtc-ov .dr-tel b{font-size:16px;color:var(--bleu-dk);font-weight:800;font-variant-numeric:tabular-nums;user-select:all}
+.lmtc-ov .dr-h .canaux{margin-top:4px}
+.lmtc-ov .dr-h .canaux{flex-wrap:nowrap}
+.lmtc-ov .dr-h .fs-btn{flex:1 1 0;min-width:0;justify-content:center;padding:9px 6px;font-size:13px;gap:6px;white-space:nowrap}
+@media (max-width:420px){.lmtc-ov .dr-h .fs-btn svg{display:none}}
+.lmtc-ov .fs-btn.on{box-shadow:inset 0 0 0 1.5px currentColor}
+.lmtc-ov .fs-btn.call.on{background:var(--sel)} .lmtc-ov .fs-btn.wa.on{background:#eafaf1} .lmtc-ov .fs-btn.mail.on{background:#f2f5f9} .lmtc-ov .fs-btn.sms.on{background:#fdf7e8}
+.lmtc-ov .lien{border:0;background:none;padding:0;color:var(--bleu);font:inherit;font-weight:800;font-size:12.5px;cursor:pointer;text-decoration:underline;justify-self:start}
+.lmtc-ov .compose{margin-top:12px;padding:12px!important;border:1.5px solid var(--line-in)!important;border-radius:12px;background:#fbfcfe}
+.lmtc-ov .compose.sms{border-color:#f0dca6!important} .lmtc-ov .compose.wa{border-color:#bfe6cf!important} .lmtc-ov .compose.mail{border-color:#d7dfe9!important}
+.lmtc-ov .tpls{display:grid;gap:6px}
+.lmtc-ov .tpl{display:flex;justify-content:space-between;align-items:center;gap:8px;text-align:left;border:1.5px solid var(--line-in);background:#fff;border-radius:9px;padding:8px 10px;font:inherit;font-size:13px;font-weight:700;color:var(--ink);cursor:pointer}
+.lmtc-ov .tpl.on{border-color:var(--bleu);background:var(--sel);color:var(--bleu-dk)}
+.lmtc-ov .reco{font-size:10.5px;font-weight:800;color:var(--m-vert);background:var(--ok-bg);border-radius:999px;padding:1px 8px;white-space:nowrap}
+.lmtc-ov .compose textarea,.lmtc-ov .compose input[type=text]{width:100%}
+.lmtc-ov .compose .row{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.lmtc-ov .compose .row .hint{flex:1 1 200px}
+.lmtc-ov .dr-f{max-height:62vh;overflow:auto;grid-auto-rows:max-content;align-content:start}
+.lmtc-ov .drawer.composing .dr-f{max-height:30vh}
+.lmtc-ov .rdvf{display:grid;gap:12px;margin-top:4px}
+.lmtc-ov .rdvf .q{display:grid;gap:6px}
+.lmtc-ov .rdvf .q > span{font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:.05em;color:var(--lbl)}
+.lmtc-ov .rdvf .row{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.lmtc-ov .qk{border:1.5px solid var(--line-in);background:#fff;color:var(--ink-2);border-radius:999px;padding:6px 12px;font:inherit;font-size:12.5px;font-weight:700;cursor:pointer}
+.lmtc-ov .qk.on{border-color:var(--vert);background:var(--ok-bg);color:var(--m-vert)}
+.lmtc-ov .bacs-tag{font-style:normal;text-transform:none;letter-spacing:0;font-size:10.5px;font-weight:800;color:var(--bleu);background:var(--sel);border-radius:999px;padding:1px 7px;margin-left:6px}
+.lmtc-ov .rdvf textarea{min-height:52px}
+.lmtc-ov label.chk{display:inline-flex;align-items:center;gap:8px;cursor:pointer;color:var(--ink-2);font-size:12.5px}
+.lmtc-ov label.chk input{accent-color:var(--vert)}
+.lmtc-ov .btn.big{width:100%;padding:12px;font-size:14px}
+.lmtc-ov .rg-t{font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:.05em;color:var(--lbl);margin-top:6px}
+.lmtc-ov .opt.chk{display:grid;grid-template-columns:auto minmax(0,1fr)}
+.lmtc-ov .opt select{padding:2px 6px;font-size:12px}
 @media (prefers-reduced-motion:reduce){.lmtc *{animation:none!important;transition:none!important}}
 `;
     (doc.head || doc.documentElement).appendChild(st);
