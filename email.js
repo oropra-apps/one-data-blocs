@@ -1,3 +1,4 @@
+// v7 (27/10/2026) : verrou de la page renforcé pour iPhone (body figé).
 // v6 (27/10/2026) : sur mobile, la page ne défile plus derrière la fenêtre e-mail.
 // v5 (27/10/2026) : le clavier mobile réduit la page au lieu de la recouvrir :
 // la fenêtre e-mail reste entière à l'écran pendant la saisie.
@@ -423,11 +424,22 @@ OD.define('email', {
       const h = doc.documentElement, b = doc.body;
       const tenu = Object.keys(L.cles).length > 0;
       if (tenu && !L.avant) {
-        L.avant = { h: h.style.overflow, b: b.style.overflow, hb: h.style.overscrollBehavior };
+        // iPhone : overflow:hidden ne suffit pas (Safari fait quand même
+        // défiler la page sous le doigt et sous le clavier). On FIGE le body
+        // à sa position courante, puis on la restitue à la fermeture.
+        const x = win.scrollX || win.pageXOffset || 0, y = win.scrollY || win.pageYOffset || 0;
+        L.avant = { x: x, y: y, h: h.style.overflow, b: b.style.overflow, hb: h.style.overscrollBehavior,
+                    pos: b.style.position, top: b.style.top, left: b.style.left, w: b.style.width };
         h.style.overflow = 'hidden'; b.style.overflow = 'hidden'; h.style.overscrollBehavior = 'none';
+        b.style.position = 'fixed'; b.style.top = (-y) + 'px'; b.style.left = (-x) + 'px'; b.style.width = '100%';
+        h.classList.add('od-plein-ecran');
       } else if (!tenu && L.avant) {
-        h.style.overflow = L.avant.h; b.style.overflow = L.avant.b; h.style.overscrollBehavior = L.avant.hb;
+        const a = L.avant;
+        h.style.overflow = a.h; b.style.overflow = a.b; h.style.overscrollBehavior = a.hb;
+        b.style.position = a.pos; b.style.top = a.top; b.style.left = a.left; b.style.width = a.w;
+        h.classList.remove('od-plein-ecran');
         L.avant = null;
+        try { win.scrollTo(a.x, a.y); } catch (e) { }
       }
     } catch (e) { }
   }
