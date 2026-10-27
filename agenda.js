@@ -1,4 +1,5 @@
 // ============================================================================
+//  v33 (27/10/2026) : durées au format 1h30, 2h30 (au lieu de 1,5 h, 2,5 h).
 //  v32 (27/10/2026) : BACS FERMÉ NE BLOQUE PLUS L'AGENDA.
 //  Le RDV, le créneau ou la bilatérale s'enregistre toujours ; son envoi vers
 //  BACS attend en file et part dès que BACS est rouvert sur le poste du
@@ -9,7 +10,7 @@
 //  recharge alors pour retirer les pastilles.
 // ============================================================================
 //  v31 (27/10/2026) : DURÉE EN HEURES ET DÉPLACEMENT EXPLIQUÉ.
-//  - La durée se choisit en heures (¼ h, ½ h, ¾ h, 1 h, 1,5 h … 10 h) ; par
+//  - La durée se choisit en heures (¼ h, ½ h, ¾ h, 1 h, 1h30 … 10 h) ; par
 //    défaut 1 h. Une durée hors liste (sélection de 3 h 15 à la souris, RDV
 //    BACS de 15 h) est ajoutée à la liste : avant, le menu retombait en
 //    silence sur la première valeur et le RDV était enregistré à 15 min.
@@ -1421,14 +1422,14 @@ OD.define('agenda', {
   const ORIGINES = ['Initiative personnelle', 'Indication', 'Marketing Groupe', 'Campagnes Constructeur', 'Fin de financement', 'Salon - Expo'];
   const DURATIONS = [15, 30, 45, 60, 90, 120, 150, 180, 240, 300, 360, 420, 480, 540, 600];
   const DUREE_DEFAUT = 60;
-  // 30 -> « ½ h », 90 -> « 1,5 h », 75 -> « 1 h 15 »
+  // 30 -> « ½ h », 90 -> « 1h30 », 75 -> « 1h15 »
   function libDuree(min) {
     min = Number(min) || 0;
     if (min === 15) return '\u00bc h'; if (min === 30) return '\u00bd h'; if (min === 45) return '\u00be h';
     if (min % 60 === 0) return (min / 60) + ' h';
-    if (min % 30 === 0) return String(min / 60).replace('.', ',') + ' h';
+    // v33 : 90 -> « 1h30 », 150 -> « 2h30 » (demande d'Antoine, 27/10/2026)
     const h = Math.floor(min / 60), m = min % 60;
-    return h ? (h + ' h ' + String(m).padStart(2, '0')) : (m + ' min');
+    return h ? (h + 'h' + String(m).padStart(2, '0')) : (m + ' min');
   }
   function optionsDuree(cur) {
     const l = DURATIONS.slice(); cur = Number(cur) || DUREE_DEFAUT;
