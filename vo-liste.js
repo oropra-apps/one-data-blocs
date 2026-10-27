@@ -1,4 +1,9 @@
 // ============================================================================
+//  v28 (27/10/2026) : onglet « Historique Autoviza » dans la fiche VO. Le rapport
+//  Autoviza public (celui que La Centrale publie avec l'annonce) s'affiche dans
+//  la fiche. Un vendeur colle UNE FOIS le lien du rapport (ou de l'annonce La
+//  Centrale) ; il est ensuite visible de tous (table vo_autoviza). La Centrale
+//  bloquant toute lecture automatique, le lien ne peut pas être retrouvé seul.
 //  v27 (27/10/2026) : LISTE VO FAÇON PLANET VO² + COMMENTAIRE PVO² EN CONTINU.
 //  * La liste reprend la présentation de la liste de stock Planet VO² : une
 //    ligne par VO (photo, identité, statut / prix, lieu / emplacement, canal,
@@ -347,7 +352,7 @@ OD.define('vo-liste', {
   function openWeb(url) { if (notEmpty(url)) { try { win.open(url, '_blank', 'noopener'); } catch (e) { window.open(url, '_blank'); } } }
 
   // ─────────────────────────────────────────────────────────── popup fiche VO
-  var ficheState = { vin: null, row: null, tab: 'fiche', photos: null, photosLoading: false, apv: null, apvLoading: false };
+  var ficheState = { vin: null, row: null, tab: 'fiche', photos: null, photosLoading: false, apv: null, apvLoading: false, av: undefined, avLoading: false, avMsg: null, avEdit: false };
 
   function fmtEurTTC(v) { var n = num(v); return n ? n.toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + ' € TTC' : '-'; }
 
@@ -367,9 +372,96 @@ OD.define('vo-liste', {
     ficheState.photos = S.photoCache[vin] || null;
     ficheState.apv = null;
     ficheState.photosLoading = !ficheState.photos; ficheState.apvLoading = false;
+    ficheState.av = undefined; ficheState.avLoading = false; ficheState.avMsg = null; ficheState.avEdit = false;
+    if (ficheState.tab === 'autoviza') loadAutoviza(vin);
     renderFichePopup();
     // Charge les photos seulement si pas en cache
     if (!ficheState.photos) loadPhotos(vin);
+  }
+
+  // ─────────────────────────────────────────── onglet Historique Autoviza (v28)
+  var AV_CSS = '<style>'
+    + '.av-wrap{display:flex;flex-direction:column;gap:12px}'
+    + '.av-bar{display:flex;align-items:center;gap:10px;flex-wrap:wrap;font-size:12.5px;color:#7a8aa3}'
+    + '.av-bar b{color:#1F4A85}'
+    + '.av-btn{display:inline-flex;align-items:center;gap:6px;border:1.5px solid #d7e2f0;background:#fff;color:#2a5ea9;border-radius:8px;padding:7px 13px;font:inherit;font-size:12.5px;font-weight:700;cursor:pointer;text-decoration:none}'
+    + '.av-btn:hover{border-color:#2a5ea9}'
+    + '.av-btn.pri{background:#2a5ea9;border-color:#2a5ea9;color:#fff}'
+    + '.av-btn.pri:hover{background:#1F4A85}'
+    + '.av-frame{width:100%;height:68vh;min-height:420px;border:1px solid #e3ecf7;border-radius:10px;background:#f7faff}'
+    + '.av-vide{border:1px dashed #cfe0f2;border-radius:12px;padding:20px;background:#f7faff;color:#1c2b45;font-size:13px;line-height:1.55}'
+    + '.av-vide ol{margin:8px 0 14px 18px;padding:0}'
+    + '.av-form{display:flex;gap:8px;flex-wrap:wrap}'
+    + '.av-in{flex:1;min-width:260px;border:1.5px solid #d7e2f0;border-radius:8px;padding:8px 11px;font:inherit;font-size:13px;color:#1c2b45}'
+    + '.av-in:focus{outline:none;border-color:#2a5ea9}'
+    + '.av-msg{font-size:12.5px;color:#b23433}'
+    + '.av-msg.ok{color:#2c7a68}'
+    + '</style>';
+
+  async function loadAutoviza(vin) {
+    var c = sb(); if (!c || !vin) return;
+    ficheState.avLoading = true;
+    try {
+      var r = await c.rpc('vo_autoviza_lire', { p_vin: vin });
+      if (ficheState.vin !== vin) return;
+      ficheState.av = (r && !r.error) ? (r.data || null) : null;
+    } catch (e) { ficheState.av = null; }
+    ficheState.avLoading = false;
+    if (ficheState.tab === 'autoviza' && doc.getElementById('vo-fiche-overlay')) renderFichePopup();
+  }
+
+  function renderAutovizaTab() {
+    if (ficheState.av === undefined || ficheState.avLoading) return AV_CSS + '<div class="av-vide">Chargement…</div>';
+    var av = ficheState.av || {};
+    var msg = ficheState.avMsg ? '<div class="av-msg' + (ficheState.avMsg.ok ? ' ok' : '') + '">' + esc(ficheState.avMsg.txt) + '</div>' : '';
+    var form = '<div class="av-form"><input type="url" class="av-in" id="av-lien" placeholder="Lien du rapport Autoviza ou de l\'annonce La Centrale" value="">'
+      + '<button type="button" class="av-btn pri" id="av-save">Enregistrer</button>'
+      + (av.url_rapport || av.url_annonce ? '<button type="button" class="av-btn" id="av-cancel">Annuler</button>' : '') + '</div>';
+    if (av.url_rapport && !ficheState.avEdit) {
+      var qui = [av.saisi_par, av.saisi_le ? new Date(av.saisi_le).toLocaleDateString('fr-FR') : null].filter(Boolean).join(', le ');
+      return AV_CSS + '<div class="av-wrap"><div class="av-bar"><span>Rapport public Autoviza' + (qui ? ' · lien ajouté par <b>' + esc(qui) + '</b>' : '') + '</span><span style="flex:1"></span>'
+        + (av.url_annonce ? '<a class="av-btn" href="' + esc(av.url_annonce) + '" target="_blank" rel="noopener">Annonce La Centrale</a>' : '')
+        + '<a class="av-btn" href="' + esc(av.url_rapport) + '" target="_blank" rel="noopener">Ouvrir dans un onglet</a>'
+        + '<button type="button" class="av-btn" id="av-edit">Changer le lien</button></div>'
+        + msg + '<iframe class="av-frame" src="' + esc(av.url_rapport) + '" loading="lazy" referrerpolicy="no-referrer" title="Rapport Autoviza"></iframe></div>';
+    }
+    var aide = av.url_annonce && !av.url_rapport
+      ? '<p style="margin:0 0 10px">L\'annonce La Centrale est enregistrée, mais pas encore le rapport : <a class="av-btn" style="padding:4px 10px" href="' + esc(av.url_annonce) + '" target="_blank" rel="noopener">ouvrir l\'annonce</a></p>'
+      : '';
+    return AV_CSS + '<div class="av-wrap"><div class="av-vide">' + aide
+      + '<b>Aucun rapport Autoviza enregistré pour ce véhicule.</b>'
+      + '<ol><li>Ouvrez l\'annonce du véhicule sur La Centrale.</li>'
+      + '<li>Cliquez sur le lien de l\'historique Autoviza du véhicule.</li>'
+      + '<li>Copiez l\'adresse de la page du rapport et collez-la ci-dessous.</li></ol>'
+      + 'Le rapport sera ensuite visible ici par tous les vendeurs.'
+      + '<div style="margin-top:12px">' + form + '</div>' + msg + '</div></div>';
+  }
+
+  function bindAutoviza() {
+    var ed = doc.getElementById('av-edit');
+    if (ed) ed.addEventListener('click', function (e) { e.stopPropagation(); ficheState.avEdit = true; ficheState.avMsg = null; renderFichePopup(); });
+    var ca = doc.getElementById('av-cancel');
+    if (ca) ca.addEventListener('click', function (e) { e.stopPropagation(); ficheState.avEdit = false; ficheState.avMsg = null; renderFichePopup(); });
+    var sv = doc.getElementById('av-save');
+    if (sv) sv.addEventListener('click', async function (e) {
+      e.stopPropagation();
+      var inp = doc.getElementById('av-lien'); var lien = inp ? inp.value.trim() : '';
+      if (!lien) { ficheState.avMsg = { ok: false, txt: 'Collez d\'abord un lien.' }; renderFichePopup(); return; }
+      sv.disabled = true;
+      try {
+        var r = await sb().rpc('vo_autoviza_enregistrer', { p_vin: ficheState.vin, p_lien: lien });
+        if (r.error) throw r.error;
+        var d = r.data || {};
+        if (!d.ok) { ficheState.avMsg = { ok: false, txt: d.erreur || 'Lien non reconnu.' }; }
+        else {
+          ficheState.av = d; ficheState.avEdit = false;
+          ficheState.avMsg = d.url_rapport ? null : { ok: true, txt: 'Annonce enregistrée. Ajoutez maintenant le lien du rapport Autoviza.' };
+        }
+      } catch (err) { ficheState.avMsg = { ok: false, txt: 'Enregistrement impossible : ' + ((err && err.message) || err) }; }
+      renderFichePopup();
+    });
+    var inp2 = doc.getElementById('av-lien');
+    if (inp2) inp2.addEventListener('keydown', function (e) { if (e.key === 'Enter') { e.preventDefault(); var b = doc.getElementById('av-save'); if (b) b.click(); } });
   }
 
   function closeFichePopup() {
@@ -515,12 +607,14 @@ OD.define('vo-liste', {
       + vfTab('fiche', 'Fiche VO', tab)
       + vfTab('photos', 'Photos', tab)
       + vfTab('apv', 'Historique véhicule', tab)
+      + vfTab('autoviza', 'Historique Autoviza', tab)
       + '</div>';
 
     // ── body selon onglet ──
     var bodyHtml = '<div class="vf-body">' + renderFicheTab(row, vin, ca) + '</div>';
     if (tab === 'photos') bodyHtml = '<div class="vf-body">' + renderPhotosTab() + '</div>';
     if (tab === 'apv') bodyHtml = '<div class="vf-body">' + renderApvTab() + '</div>';
+    if (tab === 'autoviza') bodyHtml = '<div class="vf-body">' + renderAutovizaTab() + '</div>';
 
     // ── assemblage ──
     var overlay = doc.createElement('div');
@@ -542,9 +636,11 @@ OD.define('vo-liste', {
         ficheState.tab = el.getAttribute('data-tab');
         if (ficheState.tab === 'photos' && !ficheState.photos && !ficheState.photosLoading) loadPhotos(ficheState.vin);
         if (ficheState.tab === 'apv' && !ficheState.apv && !ficheState.apvLoading) loadApv(ficheState.vin);
+        if (ficheState.tab === 'autoviza' && ficheState.av === undefined && !ficheState.avLoading) loadAutoviza(ficheState.vin);
         renderFichePopup();
       });
     });
+    bindAutoviza();
     // miniatures onglet Fiche : change image principale ET ouvre diaporama au clic
     doc.querySelectorAll('.vf-thumb[data-src]').forEach(function (el) {
       el.addEventListener('click', function () {
