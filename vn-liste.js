@@ -14,6 +14,11 @@
 //    le détail (vn_bacs_fiche), avec un lien direct vers le véhicule dans BACS.
 //  * Le stock reste celui du DMS (v_liste_vn) : c'est lui qui dit ce qui est
 //    en stock, à quel prix et depuis quand ; BACS décrit la voiture.
+//  v9 (28/10/2026) : photos de secours. Environ une photo Toyota mémorisée sur
+//    quatre n'existe plus chez Toyota (404 : configuration retirée). La base
+//    rend jusqu'à 8 photos contrôlées (même modèle, même teinte) ; la vignette
+//    passe à la suivante quand une image ne se charge pas, et retient les
+//    images mortes pour la session. Statut BACS « On the road » = en circulation.
 //  v8 (28/10/2026) : toutes les fiches BACS sont lues (l'appel était plafonné à
 //    1 000 lignes par l'API : 2 900 fiches, une sur trois seulement affichée,
 //    d'où « Pas encore lu » à tort) ; un véhicule sans photo propre prend celle
@@ -101,15 +106,34 @@ OD.define('vn-liste', {
     var m = {};
     S.raw.forEach(function (r) {
       var b = bacsDe(r), k = cleTeinte(r);
-      if (b && b.photo_url && k && !m[k]) m[k] = b.photo_url;
+      var l = listePhotos(b);
+      if (l.length && k && !m[k]) m[k] = l;
     });
     S.photosDms = m;
   }
-  function photoDe(r, b) {
-    if (b && b.photo_url) return b.photo_url;
-    var k = cleTeinte(r);
-    return k && S.photosDms ? S.photosDms[k] || null : null;
+  function listePhotos(b) {
+    if (!b) return [];
+    var l = Array.isArray(b.photos) && b.photos.length ? b.photos : (b.photo_url ? [b.photo_url] : []);
+    return l.filter(function (u) { return u && !PHOTOS_MORTES[u]; });
   }
+  function photosDe(r, b) {
+    var l = listePhotos(b);
+    if (l.length) return l;
+    var k = cleTeinte(r);
+    var d = k && S.photosDms ? S.photosDms[k] || [] : [];
+    return d.filter(function (u) { return !PHOTOS_MORTES[u]; });
+  }
+  // Images mortes (404 chez Toyota), retenues pour la session ; une image qui
+  // ne charge pas cède la place à la suivante de sa liste.
+  var PHOTOS_MORTES = window.__vnPhotosMortes || (window.__vnPhotosMortes = {});
+  win.__vnImg = window.__vnImg = function (img) {
+    try {
+      PHOTOS_MORTES[img.getAttribute('src')] = 1;
+      var l = (img.getAttribute('data-alt') || '').split('|').filter(function (u) { return u && !PHOTOS_MORTES[u]; });
+      if (l.length) { img.setAttribute('data-alt', l.slice(1).join('|')); img.setAttribute('src', l[0]); return; }
+      var p = img.parentNode; if (p) p.classList.remove('photo'); img.remove();
+    } catch (e) { }
+  };
 
   // Les statuts arrivent en majuscules techniques : on les rend lisibles.
   var LIB_STATUT = {
@@ -125,7 +149,7 @@ OD.define('vn-liste', {
     BEV: 'Électrique', EV: 'Électrique', FCEV: 'Hydrogène', GO: 'Diesel', DI: 'Diesel', ES: 'Essence', EH: 'Hybride' };
   // Statut du parc BACS (libellés anglais de BACS).
   var LIB_PARC = { 'Stock': 'En stock', 'Delivered': 'Livré', 'Delivery to plan': 'Livraison planifiée',
-    'On the road': 'En route', 'In transit': 'En transit', 'Sold': 'Vendu' };
+    'On the road': 'En circulation', 'In transit': 'En transit', 'Sold': 'Vendu' };
   function libParc(s) { return s ? (LIB_PARC[s] || s) : ''; }
   // Véhicule livré dans BACS mais toujours en stock au DMS : à vérifier.
   function ecartParc(r, statut) { return !r.en_commande && /^deliver/i.test(String(statut || '')) && !/^delivery to plan/i.test(String(statut || '')); }
@@ -421,10 +445,10 @@ OD.define('vn-liste', {
     var en = libEnergie((b && b.energie) || r.energie);
     var fam = propre(r.modele) || marqueDe(r) || 'VN';
     // Photo Toyota du véhicule : à l'échec du chargement, la vignette texte reprend.
-    var ph = photoDe(r, b);
+    var phs = photosDe(r, b), ph = phs[0];
     if (ph) {
       return '<div class="vn-vig photo' + (r.en_commande ? ' cmd' : '') + '">'
-        + '<img src="' + esc(ph) + '" alt="" loading="lazy" onerror="this.parentNode.classList.remove(\'photo\');this.remove()">'
+        + '<img src="' + esc(ph) + '" data-alt="' + esc(phs.slice(1).join('|')) + '" alt="" loading="lazy" onerror="__vnImg(this)">'
         + '<span class="vn-vig-m">' + esc(marqueDe(r)) + '</span>'
         + '<span class="vn-vig-f">' + esc(fam) + '</span>'
         + '<span class="vn-vig-b">' + pastille(coul) + (en ? '<span>' + esc(en) + '</span>' : '') + '</span>'
