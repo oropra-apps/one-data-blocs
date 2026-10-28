@@ -1,4 +1,8 @@
 // ============================================================================
+//  v25 (29/10/2026) : sélecteur de dates identique à celui de la gestion des
+//  ventes (bouton « 📅 du → au », calendrier d'un mois, deux clics). Les
+//  raccourcis Cette semaine / Ce mois / 3 mois / Année restent, à côté du
+//  bouton (ils étaient cachés dans l'ancien calendrier).
 //  v24 (26/10/2026) : le « + » de planification est centré dans son bouton
 //  (padding par défaut du navigateur annulé, centrage flex).
 //  BILATÉRALES — v23 (14/10/2026, Team Colin) — v23 : vue vendeur refaite (prochaine, chiffres regardés, engagements, historique)
@@ -107,6 +111,96 @@ function readWwDate(id) {
 }
 
 const doc = __anchor.ownerDocument || document;
+  // ==========================================================================
+  //  SÉLECTEUR DE PÉRIODE — même dessin que la gestion des ventes (kanban) :
+  //  un bouton « 📅 01 oct. → 28 oct. ▾ », un calendrier d'un mois, deux clics
+  //  (début puis fin). Copie conforme dans chaque module (aucun chargement
+  //  externe) : odPeriodeKit(doc, FW) rend { bouton, ouvrir, fermer, moisEnCours }.
+  // ==========================================================================
+  function odPeriodeKit(doc, FW) {
+    var dehors = null;
+    var e = function (s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); };
+    var ymd = function (y, m, d) { return y + '-' + String(m + 1).padStart(2, '0') + '-' + String(d).padStart(2, '0'); };
+    function style() {
+      if (doc.getElementById('od-dp-style')) return;
+      var st = doc.createElement('style'); st.id = 'od-dp-style';
+      st.textContent = '.od-range{background:#fff;border:1px solid #ece9e1;border-radius:10px;padding:7px 12px;font-family:inherit;font-size:12px;font-weight:700;color:#2a5ea9;cursor:pointer;display:inline-flex;align-items:center;gap:6px;white-space:nowrap;line-height:1.2}'
+        + '.od-range:hover{border-color:#2a5ea9}.od-range:disabled{opacity:.6;cursor:default}'
+        + '.od-range .od-caret{font-size:10px;color:#888780}'
+        + '#od-dp .kan-dp-box{background:#fff;border:1.5px solid #e8eef7;border-radius:12px;box-shadow:0 8px 30px rgba(42,94,169,.18);padding:13px;width:262px;font-family:"Nunito Sans",system-ui,sans-serif}'
+        + '#od-dp .kan-dp-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:8px}'
+        + '#od-dp .kan-dp-head span{font-size:12px;font-weight:700;color:#2a5ea9;text-transform:capitalize}'
+        + '#od-dp .kan-dp-head button{width:26px;height:26px;border:1.5px solid #e8eef7;background:#fff;border-radius:8px;cursor:pointer;color:#2a5ea9;font-size:13px;line-height:1;padding:0}'
+        + '#od-dp .kan-dp-head button:hover{background:#f5f8fc}'
+        + '#od-dp .kan-dp-grid{display:grid;grid-template-columns:repeat(7,33px);gap:2px}'
+        + '#od-dp .kan-dp-dow{font-size:9px;color:#acc5e4;text-align:center;font-weight:800;padding-bottom:3px}'
+        + '#od-dp .kan-dp-day{height:29px;line-height:29px;text-align:center;font-size:11px;color:#2c2c2a;border-radius:7px;cursor:pointer}'
+        + '#od-dp .kan-dp-day:hover{background:#eef4fc}'
+        + '#od-dp .kan-dp-day.today{box-shadow:inset 0 0 0 1.5px #acc5e4}'
+        + '#od-dp .kan-dp-day.sel{background:#2a5ea9;color:#fff;font-weight:800}'
+        + '#od-dp .kan-dp-day.inr{background:#eef4fc}'
+        + '#od-dp .kan-dp-foot{margin-top:8px;text-align:center;font-size:10px;color:#9bb3d1;font-style:italic}';
+      doc.head.appendChild(st);
+    }
+    function fmt(du, au) {
+      var f = function (s) { if (!s) return '?'; var d = new Date(String(s).slice(0, 10) + 'T12:00:00'); return d.toLocaleDateString('fr-FR', { day: '2-digit', month: 'short' }); };
+      return f(du) + ' → ' + f(au);
+    }
+    function bouton(du, au, attrs, titre) {
+      style();
+      return '<button type="button" class="od-range" ' + (attrs || '') + (titre ? ' title="' + e(titre) + '"' : '') + '>📅 <span class="od-range-t">' + e(fmt(du, au)) + '</span> <span class="od-caret">▾</span></button>';
+    }
+    function fermer() {
+      var p = doc.getElementById('od-dp'); if (p) p.remove();
+      if (dehors) { doc.removeEventListener('mousedown', dehors, true); dehors = null; }
+    }
+    function ouvrir(anchor, debut, surChoix) {
+      if (doc.getElementById('od-dp')) { fermer(); return; }
+      style();
+      var pk = { mois: null, deb: null, fin: null, survol: null };
+      var m0 = new Date(String(debut || '').slice(0, 10) + 'T12:00:00'); if (isNaN(m0)) m0 = new Date();
+      pk.mois = new Date(m0.getFullYear(), m0.getMonth(), 1);
+      var pop = doc.createElement('div'); pop.id = 'od-dp';
+      var r = anchor.getBoundingClientRect();
+      var largeur = ((FW && FW.innerWidth) || (doc.defaultView && doc.defaultView.innerWidth) || 1200);
+      pop.style.cssText = 'position:fixed;z-index:99999;top:' + (r.bottom + 6) + 'px;left:' + Math.max(8, Math.min(r.left, largeur - 280)) + 'px';
+      doc.body.appendChild(pop);
+      function cal() {
+        var y = pk.mois.getFullYear(), m = pk.mois.getMonth(), p1 = new Date(y, m, 1), dec = (p1.getDay() + 6) % 7, nb = new Date(y, m + 1, 0).getDate();
+        var auj = new Date(), today = ymd(auj.getFullYear(), auj.getMonth(), auj.getDate()), a = pk.deb, b = pk.fin || pk.survol;
+        var lo = a && b ? (a < b ? a : b) : null, hi = a && b ? (a < b ? b : a) : null;
+        var h = '<div class="kan-dp-box"><div class="kan-dp-head"><button type="button" data-nav="-1">‹</button><span>' + e(p1.toLocaleDateString('fr-FR', { month: 'long', year: 'numeric' })) + '</span><button type="button" data-nav="1">›</button></div><div class="kan-dp-grid">';
+        ['L', 'M', 'M', 'J', 'V', 'S', 'D'].forEach(function (x) { h += '<span class="kan-dp-dow">' + x + '</span>'; });
+        for (var i = 0; i < dec; i++) h += '<span></span>';
+        for (var d = 1; d <= nb; d++) {
+          var ds = ymd(y, m, d), c = 'kan-dp-day';
+          if (ds === today) c += ' today';
+          if (pk.deb === ds || pk.fin === ds) c += ' sel'; else if (lo && hi && ds > lo && ds < hi) c += ' inr';
+          h += '<span class="' + c + '" data-d="' + ds + '">' + d + '</span>';
+        }
+        return h + '</div><div class="kan-dp-foot">' + (pk.deb ? 'Cliquez la date de fin' : 'Cliquez la date de début') + '</div></div>';
+      }
+      function brancher() {
+        pop.querySelectorAll('[data-nav]').forEach(function (b) { b.addEventListener('click', function (ev) { ev.stopPropagation(); pk.mois = new Date(pk.mois.getFullYear(), pk.mois.getMonth() + Number(b.getAttribute('data-nav')), 1); peindre(); }); });
+        pop.querySelectorAll('.kan-dp-day').forEach(function (c) {
+          c.addEventListener('click', function () {
+            var ds = c.getAttribute('data-d');
+            if (!pk.deb || pk.fin) { pk.deb = ds; pk.fin = null; pk.survol = null; peindre(); return; }
+            pk.fin = ds; var a = pk.deb, b = pk.fin; if (b < a) { var t = a; a = b; b = t; }
+            fermer(); surChoix(a, b);
+          });
+          c.addEventListener('mouseenter', function () { if (pk.deb && !pk.fin && pk.survol !== c.getAttribute('data-d')) { pk.survol = c.getAttribute('data-d'); peindre(); } });
+        });
+      }
+      function peindre() { pop.innerHTML = cal(); brancher(); }
+      peindre();
+      dehors = function (ev) { if (!pop.contains(ev.target) && ev.target !== anchor && !anchor.contains(ev.target)) fermer(); };
+      setTimeout(function () { doc.addEventListener('mousedown', dehors, true); }, 0);
+    }
+    function moisEnCours() { var a = new Date(); return { du: ymd(a.getFullYear(), a.getMonth(), 1), au: ymd(a.getFullYear(), a.getMonth(), a.getDate()) }; }
+    return { bouton: bouton, ouvrir: ouvrir, fermer: fermer, fmt: fmt, moisEnCours: moisEnCours };
+  }
+const DPB = odPeriodeKit(doc, (wwLib.getFrontWindow && wwLib.getFrontWindow()) || window);
 function getRoot() { return __anchor; }
 
 // --- Viewer connecté (MÊME méthode que le dashboard : COLLECTION, pas variable) ---
@@ -780,29 +874,17 @@ function scopeLabel() {
   // Sélecteur de dates AUTONOME : un seul calendrier, sélection de la plage en 2 clics.
   // 1er clic = début (en attente), 2e clic = fin -> applique la période et recharge.
   function renderDatePicker() {
-    const trig = '<button class="bp-trigger" data-dp-toggle="1">' +
-        '<span class="bp-cal-ico">' + BP_CAL_SVG + '</span>' +
-        '<span class="bp-range-txt">' + esc(fmtDate(state.period.from)) + '<span class="bp-arrow">→</span>' + esc(fmtDate(state.period.to)) + '</span>' +
-        '<span class="bp-chev">' + (state.dpOpen ? '▲' : '▼') + '</span>' +
-      '</button>';
-    let pop = '';
-    if (state.dpOpen) {
-      pop = '<div class="bp-backdrop" data-dp-close="1"></div>' +
-        '<div class="bp-pop">' + renderCalendar() +
-          '<div class="bp-pop-foot">' +
-            '<span class="bp-hint">' + (state.dpStart ? 'Cliquez la date de <b>fin</b>' : 'Cliquez la date de <b>début</b>') + '</span>' +
-            '<span class="bp-presets">' +
-              '<button class="bp-preset" data-period-preset="semaine">Cette semaine</button>' +
-              '<button class="bp-preset" data-period-preset="mois">Ce mois</button>' +
-              '<button class="bp-preset" data-period-preset="3mois">3 mois</button>' +
-              '<button class="bp-preset" data-period-preset="annee">Année</button>' +
-            '</span>' +
-          '</div>' +
-        '</div>';
-    }
+    // Raccourci actif : celui dont les bornes sont exactement la période.
+    const now = new Date(), fin = ymd(now);
+    const debs = { semaine: ymd(new Date(now.getFullYear(), now.getMonth(), now.getDate() - ((now.getDay() + 6) % 7))),
+                   mois: ymd(new Date(now.getFullYear(), now.getMonth(), 1)),
+                   '3mois': ymd(new Date(now.getFullYear(), now.getMonth() - 2, 1)),
+                   annee: ymd(new Date(now.getFullYear(), 0, 1)) };
+    const raccourci = (k, l) => '<button class="bp-preset' + (state.period.to === fin && state.period.from === debs[k] ? ' on' : '') + '" data-period-preset="' + k + '">' + l + '</button>';
     return '<div class="bil-period">' +
       '<span class="bp-lbl">Période analysée</span>' +
-      '<div class="bp-wrap">' + trig + pop + '</div>' +
+      '<span class="bp-presets">' + raccourci('semaine', 'Cette semaine') + raccourci('mois', 'Ce mois') + raccourci('3mois', '3 mois') + raccourci('annee', 'Année') + '</span>' +
+      '<span style="margin-left:auto">' + DPB.bouton(state.period.from, state.period.to, 'data-odp="1"', 'Choisir les dates') + '</span>' +
     '</div>';
   }
 
@@ -1936,6 +2018,12 @@ window.__bilRoute = function (e) {
   const card = e.target.closest('[data-bil]');
   if (card) { openBil(Number(card.getAttribute('data-bil'))); return; }
 
+  // v25 : sélecteur de dates de la gestion des ventes
+  const odp = e.target.closest('[data-odp]');
+  if (odp) {
+    DPB.ouvrir(odp, state.period.from, (a, b) => { state.period = { from: a, to: b }; state.dpStart = null; state.dpOpen = false; reloadPeriodBil(); });
+    return;
+  }
   // Sélecteur de dates : ouverture/fermeture du calendrier
   const dpTog = e.target.closest('[data-dp-toggle]');
   if (dpTog) {
@@ -2378,6 +2466,7 @@ const STYLE = '<style>' +
 '#bil-root .bp-presets{display:flex;gap:6px;flex-wrap:wrap}' +
 '#bil-root .bp-preset{font-size:12px;font-weight:700;color:#2a5ea9;background:#fff;border:1px solid #e3e9f3;border-radius:16px;padding:5px 12px;cursor:pointer;font-family:inherit}' +
 '#bil-root .bp-preset:hover{background:rgba(172,197,228,.16)}' +
+'#bil-root .bp-preset.on{background:#2a5ea9;border-color:#2a5ea9;color:#fff}' +
 '#bil-root .bil-perim{background:#fff;border:1px solid #e3e9f3;border-radius:12px;margin-bottom:14px;padding:10px 12px 12px}' +
 '#bil-root .perim-title{font-size:11px;font-weight:800;color:#8b99b0;text-transform:uppercase;letter-spacing:.04em;margin:2px 4px 6px}' +
 '#bil-root .tree-row.lv-root{font-weight:800;color:#1c2b45}' +
