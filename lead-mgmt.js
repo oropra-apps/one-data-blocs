@@ -1,6 +1,11 @@
 // ============================================================================
 //  LEAD MANAGEMENT — module One Data (OD.define 'lead-mgmt')
-//  VERSION TEAM COLIN (v67) — déploiement CIBLÉ (publish-targets :
+//  VERSION TEAM COLIN (v68) — déploiement CIBLÉ (publish-targets :
+//  v68 (28/10/2026) : la « Vue vendeur » du chef utilise le même menu de
+//  vendeurs que la gestion des ventes (bouton VENDEUR / nom, recherche,
+//  groupes VN / VO / VN-VO, le chef en tête = sa propre vue). Les vendeurs
+//  grands comptes sont retirés du lead management (en base : équipe, règle
+//  d'attribution, Pool).
 //  v67 (28/10/2026) : leads segmentés VN / VO (pastille sur chaque lead,
 //  filtre Tous / VN / VO ; un vendeur VN ou VO ne voit que son univers dans
 //  le Pool, un VNVO voit les deux — filtrage fait en base, poste_site_leads).
@@ -1197,15 +1202,38 @@
       return '<div class="seg-u" role="group" aria-label="Univers">' + [['tous', 'VN + VO'], ['VN', 'VN'], ['VO', 'VO']].map(function (o) {
         return '<button type="button" class="' + (S.univ === o[0] ? 'on' : '') + '" data-a="univ" data-id="' + o[0] + '" aria-pressed="' + (S.univ === o[0]) + '">' + o[1] + '</button>'; }).join('') + '</div>';
     }
+    // Même sélecteur que la gestion des ventes : bouton « VENDEUR / nom ▾ »,
+    // recherche, groupes VN / VO / VN-VO, le chef en tête (= sa propre vue).
+    function vnvoLbl(t) { var n = String(t || '').toUpperCase().replace(/[^A-Z]/g, ''); return n === 'VN' ? 'VN' : n === 'VO' ? 'VO' : n === 'VNVO' ? 'VN/VO' : 'Autres'; }
+    function vnvoRang(t) { var n = String(t || '').toUpperCase().replace(/[^A-Z]/g, ''); return n === 'VN' ? 0 : n === 'VO' ? 1 : n === 'VNVO' ? 2 : 3; }
+    function vendeursComme() {
+      var sid = S.comme ? S.comme.site : sitePoste();
+      var vus = {};
+      return vendeursDu(sid).filter(function (v) { if (vus[v.id_user] || Number(v.id_user) === Number(S.stats && S.stats.moi)) return false; vus[v.id_user] = 1; return true; })
+        .sort(function (a, b) { return (vnvoRang(a.vn_vo) - vnvoRang(b.vn_vo)) || String(propre(a.nom)).localeCompare(String(propre(b.nom)), 'fr', { sensitivity: 'base' }); });
+    }
+    function listeComme() {
+      var q = String(S.commeQ || '').toLowerCase().trim();
+      var moiNom = propre((S.stats && S.stats.nom) || '') || 'Moi';
+      var h = '', last = null;
+      var p0 = S.comme ? S.poste0 : POSTE;
+      if (!q || moiNom.toLowerCase().indexOf(q) !== -1) h += '<div class="k-vgroup">' + (p0 === 'chef' ? 'Chef des ventes' : 'Direction') + '</div><button type="button" class="k-vitem' + (!S.comme ? ' on' : '') + '" data-a="comme-off">' + esc(moiNom) + '</button>';
+      var ls = vendeursComme().filter(function (v) { return !q || String(propre(v.nom)).toLowerCase().indexOf(q) !== -1; });
+      ls.forEach(function (v) {
+        var t = vnvoLbl(v.vn_vo);
+        if (t !== last) { h += '<div class="k-vgroup">' + esc(t) + '</div>'; last = t; }
+        h += '<button type="button" class="k-vitem' + (S.comme && Number(S.comme.id) === Number(v.id_user) ? ' on' : '') + '" data-a="comme" data-id="' + v.id_user + '">' + esc(propre(v.nom)) + '</button>';
+      });
+      return h || '<div class="k-vempty">Aucun vendeur sur ce site.</div>';
+    }
     function selComme() {
       var p0 = S.comme ? S.poste0 : POSTE;
       if (p0 === 'vendeur') return '';
       var sid = S.comme ? S.comme.site : sitePoste();
-      if (sid == null) return '';
-      var vus = {}, vs = vendeursDu(sid).filter(function (v) { if (vus[v.id_user]) return false; vus[v.id_user] = 1; return true; });
-      if (!vs.length) return '';
-      return '<select class="comme-s" data-x="comme" aria-label="Voir l\'écran d\'un vendeur"><option value="">Vue vendeur…</option>' + vs.map(function (v) {
-        return '<option value="' + v.id_user + '"' + (S.comme && Number(S.comme.id) === Number(v.id_user) ? ' selected' : '') + '>' + esc(propre(v.nom)) + (v.vn_vo ? ' · ' + esc(v.vn_vo === 'VNVO' ? 'VN/VO' : v.vn_vo) : '') + '</option>'; }).join('') + '</select>';
+      if (sid == null || !vendeursComme().length) return '';
+      var nom = S.comme ? propre(S.comme.nom) : (propre((S.stats && S.stats.nom) || '') || 'Moi');
+      return '<div class="k-vend-sel"><button type="button" class="k-vend k-vend-btn" data-a="comme-menu" aria-expanded="' + !!S.commeMenu + '"><span class="k-vend-l">Vendeur</span><span class="k-vend-n">' + esc(nom) + ' <span class="k-caret">\u25be</span></span></button>'
+        + (S.commeMenu ? '<div class="k-vpanel"><input type="text" class="k-vsearch" data-x="comme-q" placeholder="Rechercher un vendeur…" value="' + esc(S.commeQ || '') + '"><div class="k-vlist">' + listeComme() + '</div></div>' : '') + '</div>';
     }
     function fmtPer() { var f = function (x) { return new Date(x + 'T12:00:00').toLocaleDateString('fr-FR', { day: '2-digit', month: 'short' }); }; return f(S.per.du) + ' \u2192 ' + f(S.per.au); }
     function outils() {
@@ -1235,7 +1263,7 @@
       POSTE = S.poste0 || POSTE; S.comme = null; S.poste0 = null; MOI = S.stats ? S.stats.moi : MOI;
       S.tab = 'pool'; S.cell = null; S.leads = filtrerUniv(S.tous); render(); chargerAide();
     }
-    var ACTIONS_APERCU = ['tab', 'comme-off', 'univ', 'dates', 'open', 'close', 'retour-liste', 'ack', 'reessayer', 'cell', 'fermer'];
+    var ACTIONS_APERCU = ['tab', 'comme-off', 'comme', 'comme-menu', 'univ', 'dates', 'open', 'close', 'retour-liste', 'ack', 'reessayer', 'cell', 'fermer'];
     function fermerDates() {
       var e = doc.getElementById('lm-dp'); if (e) e.remove();
       if (S._dpDehors) { doc.removeEventListener('mousedown', S._dpDehors, true); S._dpDehors = null; }
@@ -2869,7 +2897,9 @@
         case 'prendre': return prendre(id);
         case 'tout-attribuer': return toutAttribuer();
         case 'univ': S.univ = id || 'tous'; S.leads = filtrerUniv(S.tous); S.suggKey = null; render(); if (POSTE !== 'vendeur') chargerAide(); return;
-        case 'comme-off': return sortirComme();
+        case 'comme-off': S.commeMenu = false; S.commeQ = ''; if (S.comme) return sortirComme(); render(); return;
+        case 'comme-menu': S.commeMenu = !S.commeMenu; S.commeQ = ''; render(); if (S.commeMenu) { var qi = root.querySelector('.k-vsearch'); if (qi) try { qi.focus(); } catch (e) {} } return;
+        case 'comme': S.commeMenu = false; S.commeQ = ''; return entrerComme(Number(id));
         case 'attribuer-sugg': return attribuerSugg(id);
         case 'choix': S.choix = S.choix || {}; S.choix[id] = !S.choix[id]; render(); return;
         case 'prevenir': return prevenir(id);
@@ -2961,11 +2991,12 @@
     }
     root.addEventListener('click', function (ev) {
       if (S.perimOuvert && !ev.target.closest('.perim')) { S.perimOuvert = false; render(); }
+      if (S.commeMenu && !ev.target.closest('.k-vend-sel')) { S.commeMenu = false; render(); }
       surClic(ev);
     });
     ov.addEventListener('click', surClic);
-    root.addEventListener('change', function (ev) {
-      if (ev.target.getAttribute && ev.target.getAttribute('data-x') === 'comme') { if (ev.target.value) entrerComme(Number(ev.target.value)); else sortirComme(); }
+    root.addEventListener('input', function (ev) {
+      if (ev.target.getAttribute && ev.target.getAttribute('data-x') === 'comme-q') { S.commeQ = ev.target.value; var li = root.querySelector('.k-vlist'); if (li) li.innerHTML = listeComme(); }
     });
     $scrim.addEventListener('click', function () { if (S.modal) fermerModal(); else fermerTout(); });
     root.addEventListener('keydown', function (ev) {
@@ -3555,7 +3586,20 @@
 .lmtc .seg-u button{border:0;background:none;padding:7px 11px;font:inherit;font-size:12px;font-weight:700;color:var(--ink-2);cursor:pointer}
 .lmtc .seg-u button+button{border-left:1px solid #ece9e1}
 .lmtc .seg-u button.on{background:#2a5ea9;color:#fff}
-.lmtc .comme-s{border:1px solid #ece9e1;border-radius:10px;padding:7px 10px;font:inherit;font-size:12px;font-weight:700;color:#2a5ea9;background:#fff;cursor:pointer;max-width:220px}
+.lmtc .k-vend{display:flex;flex-direction:column;line-height:1.1}
+.lmtc .k-vend-l{font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:.04em;color:#888780}
+.lmtc .k-vend-n{font-size:15px;font-weight:800;color:#2a5ea9}
+.lmtc .k-vend-sel{position:relative}
+.lmtc .k-vend-btn{background:#fff;border:1px solid #ece9e1;border-radius:10px;padding:5px 12px;cursor:pointer;text-align:left;font-family:inherit}
+.lmtc .k-vend-btn:hover{border-color:#2a5ea9}
+.lmtc .k-vpanel{position:absolute;top:calc(100% + 6px);right:0;z-index:30;width:300px;max-height:380px;overflow-y:auto;background:#fff;border:1px solid #ece9e1;border-radius:12px;box-shadow:0 12px 32px rgba(42,94,169,.16);padding:8px;text-align:left}
+.lmtc .k-vsearch{width:100%;border:1px solid #ece9e1;border-radius:8px;padding:8px 11px;font-family:inherit;font-size:13px;color:#1c2b45;box-sizing:border-box;margin-bottom:6px}
+.lmtc .k-vsearch:focus{outline:none;border-color:#2a5ea9}
+.lmtc .k-vgroup{font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:.04em;color:#888780;padding:8px 8px 4px}
+.lmtc .k-vitem{display:flex;align-items:center;gap:6px;width:100%;text-align:left;background:none;border:none;border-radius:8px;padding:8px 10px;font-family:inherit;font-size:13px;font-weight:700;color:#1c2b45;cursor:pointer}
+.lmtc .k-vitem:hover{background:rgba(172,197,228,.18)}
+.lmtc .k-vitem.on{background:#2a5ea9;color:#fff}
+.lmtc .k-vempty{font-size:12px;color:#888780;padding:10px}
 .lmtc .k-range{background:#fff;border:1px solid #ece9e1;border-radius:10px;padding:7px 12px;font-family:inherit;font-size:12px;font-weight:700;color:#2a5ea9;cursor:pointer;display:inline-flex;align-items:center;gap:6px}
 .lmtc .k-range:hover{border-color:#2a5ea9}
 .lmtc .k-caret{font-size:10px;color:#888780}
