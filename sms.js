@@ -1,3 +1,9 @@
+// v13 (28/10/2026) : bouton « Modèles » dans la fenêtre SMS — modèles gérés
+// dans Administration › Modèles de messages (module `modeles`, chargé à la
+// demande). open({ client, text, idLead }) : idLead adapte les variables au
+// lead (véhicule, site). Sans le module `modeles`, le bouton n'apparaît pas.
+// v12 (27/10/2026) : open({ client, text }) pré-remplit le message (modèles
+// proposés par le lead management). Sans « text », comportement inchangé.
 // v11 (27/10/2026) : champ de saisie en 16 px sur mobile ; la fermeture libère
 // bien la page (en v9-v10, fermer la fenêtre laissait la fiche figée).
 // iPhone : un champ dont le texte fait moins de 16 px déclenche un ZOOM
@@ -170,6 +176,8 @@ OD.define('sms', {
     stopDictation();
     const text = (state.input || '').trim();
     if (!text || state.sending) return;
+    const trous = trousRestants(text);
+    if (trous.length) { state.error = 'Complétez avant l’envoi : ' + trous.join(', ') + '.'; render(); return; }
     const c = state.client || {};
     const toNumber = toE164(c.TEl_MOB);
     if (!toNumber) { state.error = 'Pas de numéro mobile pour ce client.'; render(); return; }
@@ -262,6 +270,7 @@ OD.define('sms', {
   }
 
   /* ---- icônes ------------------------------------------------------------- */
+  const IC_TPL = '<svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/><path d="M14 3v6h6M8 13h8M8 17h5"/></svg>';
   const IC_SEND = '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>';
   const IC_DICT = '<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M6 11a6 6 0 0 0 12 0M12 17v3M9 20h6"/></svg>';
   const IC_CLOSE = '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg>';
@@ -406,6 +415,7 @@ OD.define('sms', {
       '<div class="sms-body" data-act="scroll">' + renderMessages() + '</div>' +
       (state.error ? '<div class="sms-err">' + esc(state.error) + '</div>' : '') +
       '<div class="sms-foot">' +
+        (modelesDispo() ? '<button class="sms-fbtn" data-act="modeles" title="Insérer un modèle">' + IC_TPL + '</button>' : '') +
         (dictSupported() ? '<button class="sms-fbtn ' + (state.dictating ? 'sms-dict-on' : '') + '" data-act="dict" title="Dictée vocale">' + IC_DICT + '</button>' : '') +
         '<textarea class="sms-inp" data-act="input" rows="1" placeholder="' + (state.dictating ? 'Parlez…' : 'Saisir le texte') + '">' + esc(state.input || '') + '</textarea>' +
         '<button class="sms-fbtn sms-send' + (canSend ? ' on' : '') + '" data-act="send" title="Envoyer">' + (state.sending ? '<span class="sms-spin"></span>' : IC_SEND) + '</button>' +
@@ -479,6 +489,7 @@ OD.define('sms', {
     root.querySelectorAll('[data-act="restore"]').forEach(el => el.addEventListener('click', (e) => { e.stopPropagation(); setMinimized(false); }));
     root.querySelectorAll('[data-act="send"]').forEach(el => el.addEventListener('click', () => sendSms()));
     root.querySelectorAll('[data-act="dict"]').forEach(el => el.addEventListener('click', () => toggleDictation()));
+    root.querySelectorAll('[data-act="modeles"]').forEach(el => el.addEventListener('click', (e) => { e.stopPropagation(); choisirModele(); }));
     root.querySelectorAll('[data-act="sel"]').forEach(el => el.addEventListener('click', () => { const key = el.getAttribute('data-key'); state.selectedKey = state.selectedKey === key ? null : key; render(); }));
     root.querySelectorAll('[data-act="del"]').forEach(el => el.addEventListener('click', (e) => { e.stopPropagation(); deleteMsg(el.getAttribute('data-key')); }));
     const input = root.querySelector('[data-act="input"]');
@@ -490,12 +501,45 @@ OD.define('sms', {
     }
   }
 
+  /* ---- Modèles de messages (v13) ------------------------------------------ */
+  function odGlobal() { return win.OD || window.OD || null; }
+  function modelesDispo() { const o = odGlobal(); return !!(win.__OD_MODELES__ || window.__OD_MODELES__ || (o && o.manifest && o.manifest.modeles && o.manifest.modeles.cdn_url)); }
+  function chargerModeles() {
+    const api = win.__OD_MODELES__ || window.__OD_MODELES__;
+    if (api) return Promise.resolve(api);
+    const o = odGlobal(), e = o && o.manifest && o.manifest.modeles;
+    if (!e || !e.cdn_url) return Promise.resolve(null);
+    if (!window.__odModelesP) window.__odModelesP = new Promise((res) => {
+      const s = document.createElement('script'); s.src = e.cdn_url; s.async = true;
+      s.onload = () => res(window.__OD_MODELES__ || win.__OD_MODELES__ || null);
+      s.onerror = () => { window.__odModelesP = null; res(null); };
+      document.head.appendChild(s);
+    });
+    return window.__odModelesP;
+  }
+  // Les [libellés] laissés par un modèle pour une donnée manquante.
+  function trousRestants(t) { return (state.trous || []).filter((l) => String(t || '').indexOf('[' + l + ']') !== -1); }
+  async function choisirModele() {
+    stopDictation();
+    const api = await chargerModeles();
+    if (!api) { state.error = 'Les modèles de messages ne sont pas disponibles.'; render(); return; }
+    const c = state.client || {};
+    const m = await api.choisir({ canal: 'sms', idClient: c.IDVu, idLead: state.idLead, idSite: state.site, contexte: state.idLead ? 'lead' : 'client', doc: doc });
+    if (!m) return;
+    state.input = m.corps; state.error = null; state.trous = m.manquantes || [];
+    render();
+    const inp = getRoot() && getRoot().querySelector('[data-act="input"]');
+    if (inp) { inp.focus(); const i = inp.value.indexOf('['); try { if (m.manquantes && m.manquantes.length && i >= 0) inp.setSelectionRange(i, inp.value.indexOf(']', i) + 1); else inp.setSelectionRange(inp.value.length, inp.value.length); } catch (e) {} }
+  }
+
   /* ---- API ---------------------------------------------------------------- */
   function setMinimized(v) { state.minimized = !!v; render(true); }
   function open(opts) {
     ensureRoot();
     const c = (opts && opts.client) || readVar(SELECTED_CLIENT_VAR_ID) || {};
-    state.open = true; state.minimized = false; state.client = c; state.error = null; state.input = ''; state.selectedKey = null; state._scrolled = false;
+    state.open = true; state.minimized = false; state.client = c; state.error = null; state.input = (opts && typeof opts.text === 'string') ? opts.text : ''; state.selectedKey = null; state._scrolled = false;
+    state.idLead = (opts && (opts.idLead || opts.lead)) || null;
+    state.trous = (opts && opts.trous) || [];
     state.site = siteCourant();
     render();
     if (c.IDVu != null) { loadThread(c.IDVu, state.site).then(() => subscribeRealtime(c.IDVu, state.site)); }
