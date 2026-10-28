@@ -14,6 +14,8 @@
 //    le détail (vn_bacs_fiche), avec un lien direct vers le véhicule dans BACS.
 //  * Le stock reste celui du DMS (v_liste_vn) : c'est lui qui dit ce qui est
 //    en stock, à quel prix et depuis quand ; BACS décrit la voiture.
+//  v6 (28/10/2026) : statut du parc BACS traduit (Stock, Livré, Livraison planifiée,
+//    En route) ; un véhicule encore au stock DMS mais livré dans BACS est signalé.
 //  v4 (28/10/2026) : colonne « N° commande » (commande fournisseur DBS).
 //
 //  Rendu dans __anchor, sur la page /vn-liste.
@@ -93,6 +95,12 @@ OD.define('vn-liste', {
   // Codes énergie BACS.
   var LIB_ENERGIE = { HSD: 'Hybride', HEV: 'Hybride', PHEV: 'Hybride rechargeable', PHV: 'Hybride rechargeable',
     BEV: 'Électrique', EV: 'Électrique', FCEV: 'Hydrogène', GO: 'Diesel', DI: 'Diesel', ES: 'Essence', EH: 'Hybride' };
+  // Statut du parc BACS (libellés anglais de BACS).
+  var LIB_PARC = { 'Stock': 'En stock', 'Delivered': 'Livré', 'Delivery to plan': 'Livraison planifiée',
+    'On the road': 'En route', 'In transit': 'En transit', 'Sold': 'Vendu' };
+  function libParc(s) { return s ? (LIB_PARC[s] || s) : ''; }
+  // Véhicule livré dans BACS mais toujours en stock au DMS : à vérifier.
+  function ecartParc(r, statut) { return !r.en_commande && /^deliver/i.test(String(statut || '')) && !/^delivery to plan/i.test(String(statut || '')); }
   function libEnergie(e) { if (!notEmpty(e)) return ''; var k = String(e).trim().toUpperCase(); return LIB_ENERGIE[k] || propre(e); }
 
   // Pastille de teinte à partir du libellé (BACS sinon DMS).
@@ -389,7 +397,8 @@ OD.define('vn-liste', {
     var meta2 = [coul ? pastille(coul) + esc(coul) : null, (b && b.interieur) ? 'Intérieur ' + esc(b.interieur) : null].filter(Boolean).join(' | ');
     var bacsBloc = b
       ? '<div class="vl-lbl">Véhicule BACS</div>'
-        + '<div class="vl-lieu"><i class="vn-bdot"></i>' + esc(b.statut_parc || 'Parc') + '</div>'
+        + '<div class="vl-lieu"><i class="vn-bdot' + (ecartParc(r, b.statut_parc) ? ' warn' : '') + '"></i>' + esc(libParc(b.statut_parc) || 'Parc') + '</div>'
+        + (ecartParc(r, b.statut_parc) ? '<div class="vl-m vl-warn">Livré dans BACS, encore au stock DMS</div>' : '')
         + (b.point_de_vente ? '<div class="vl-m">' + esc(propre(b.point_de_vente.replace(/^\d+\s+/, ''))) + '</div>' : '')
         + (b.facture_le ? '<div class="vl-m">Facturé le ' + esc(dateFR(b.facture_le)) + '</div>' : '')
       : '<div class="vl-lbl">Véhicule BACS</div><div class="vl-m vl-muet">' + (cmd ? 'Pas encore lu' : 'Sans n° de commande') + '</div>';
@@ -505,7 +514,7 @@ OD.define('vn-liste', {
       + ligneF('Katashiki', bv(c, 'Katashiki__c') ? '<span class="vn-mono">' + esc(bv(c, 'Katashiki__c')) + '</span>' : null)
       + ligneF('Famille', e(bv(c, 'Family__c'))));
     var suivi = section('Suivi BACS',
-        ligneF('Statut du parc', e(parc && parc.statut))
+        ligneF('Statut du parc', parc && parc.statut ? esc(libParc(parc.statut)) + (ecartParc(r, parc.statut) ? ' <span class="vn-warn">encore au stock DMS</span>' : '') : null)
       + ligneF('Point de vente', e(parc && parc.site ? propre(String(parc.site).replace(/^\d+\s+/, '')) : null))
       + ligneF('Type de parc', e(parc && parc.type))
       + ligneF('Client', e(parc && parc.client))
@@ -685,7 +694,8 @@ OD.define('vn-liste', {
     + '.vn-tt{display:inline-block;width:12px;height:12px;border-radius:50%;border:1.5px solid rgba(31,74,133,.18);flex:none;vertical-align:-2px;margin-right:4px}'
     + '.vn-vig-b .vn-tt{margin-right:0}'
     + '.vn-dot{width:9px;height:9px;border-radius:50%;flex:none}.vn-dot.green{background:#53bda7}.vn-dot.red{background:#e05a4f}'
-    + '.vn-bdot{display:inline-block;width:8px;height:8px;border-radius:50%;background:#53bda7;flex:none}'
+    + '.vn-bdot{display:inline-block;width:8px;height:8px;border-radius:50%;background:#53bda7;flex:none}.vn-bdot.warn{background:#fac055}'
+    + '.vl-warn{color:#9a6b00}.vn-warn{font-size:11.5px;font-weight:800;color:#9a6b00;background:#fff4dd;border-radius:6px;padding:1px 7px;margin-left:4px}'
     + '.vn-cmd{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:12px;font-weight:700;color:#1F4A85;background:#eef3fa;border-radius:6px;padding:1px 7px;margin-right:4px}'
     + '.vn-mono{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:12.5px}'
     + '.vn-code{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:11px;color:#7a98c5;background:#f2f6fc;border-radius:5px;padding:1px 5px;margin-left:4px}'
