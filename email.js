@@ -1,3 +1,9 @@
+// v12 (28/10/2026) : bouton « Modèles » dans la barre d'outils — modèles
+// gérés dans Administration › Modèles de messages (module `modeles`, chargé à
+// la demande). Le modèle remplit l'objet (nouveau message) et le corps, la
+// signature et un éventuel message cité restent en place. Les [données
+// manquantes] laissées par le modèle bloquent l'envoi tant qu'elles restent.
+// open({ mode, client, subject, body, idLead, trous }).
 // v11 (28/10/2026) : sans boîte mail reliée, le panneau Signature l'explique
 // (titre « Signature — » vide, boutons sans effet en v10). Le modèle de
 // signature ne porte plus de mobile (consigne Team Colin) : le champ Mobile
@@ -498,6 +504,11 @@ OD.define('email', {
     if (!state.toChips.length) { state.error = 'Ajoutez au moins un destinataire.'; render(); return; }
     if (!state.subject.trim()) { state.error = "L'objet est obligatoire."; render(); return; }
     if (state.attachments.some(a => a._uploading)) { state.error = 'Pièces jointes en cours d\'envoi…'; render(); return; }
+    {
+      const edc = getRoot() && getRoot().querySelector('.em-body');
+      const tr = trousRestants(state.subject + ' ' + (edc ? edc.innerText : ''));
+      if (tr.length) { state.error = 'Complétez avant l’envoi : ' + tr.join(', ') + '.'; render(); return; }
+    }
     // corps depuis l'éditeur
     const ed = getRoot() && getRoot().querySelector('.em-body'); if (ed) state.bodyHtml = ed.innerHTML;
     state.error = null; state.sending = true; render();
@@ -566,6 +577,8 @@ OD.define('email', {
     '.em-tools{display:flex;flex-wrap:wrap;gap:2px;align-items:center;padding:8px 14px;border-bottom:1px solid #eef2f8;background:#fafcff}' +
     '.em-tb{width:32px;height:30px;border:none;background:none;border-radius:7px;color:#5a7196;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;font-size:15px}' +
     '.em-tb:hover{background:#e6eef8;color:#1F4A85}' +
+    '.em-tpl{height:30px;border:1px solid #acc5e4;background:#fff;border-radius:7px;color:#2a5ea9;cursor:pointer;font-size:12.5px;font-weight:600;padding:0 10px;font-family:inherit}' +
+    '.em-tpl:hover{background:#eaf0f9}' +
     '.em-tb b,.em-tb i,.em-tb u,.em-tb s{pointer-events:none}' +
     '.em-sep{width:1px;height:20px;background:#dbe6f5;margin:0 4px}' +
     '.em-color{width:22px;height:22px;border:1px solid #dbe6f5;border-radius:6px;padding:0;cursor:pointer;background:#1F4A85}' +
@@ -635,6 +648,7 @@ OD.define('email', {
       '<input type="color" class="em-color" title="Couleur du texte" value="#1F4A85">' +
       '<span class="em-sep"></span>' +
       tb('undo', '↶', 'Annuler') + tb('redo', '↷', 'Rétablir') +
+      (modelesDispo() ? '<span class="em-sep"></span><button class="em-tpl" data-act="modeles" title="Insérer un modèle">Modèles</button>' : '') +
       '</div>';
   }
 
@@ -891,8 +905,44 @@ OD.define('email', {
       cmd(c);
     });
     on('.em-color', 'input', (e) => cmd('foreColor', e.target.value));
+    on('[data-act="modeles"]', 'click', (e) => { e.preventDefault(); choisirModele(); });
     // sauvegarde du corps à la frappe
     const ed = root.querySelector('.em-body'); if (ed) ed.addEventListener('input', () => { state.bodyHtml = ed.innerHTML; });
+  }
+
+  /* ---- Modèles de messages (v12) ---- */
+  function odGlobal() { return win.OD || window.OD || null; }
+  function modelesDispo() { const o = odGlobal(); return !!(win.__OD_MODELES__ || window.__OD_MODELES__ || (o && o.manifest && o.manifest.modeles && o.manifest.modeles.cdn_url)); }
+  function chargerModeles() {
+    const api = win.__OD_MODELES__ || window.__OD_MODELES__;
+    if (api) return Promise.resolve(api);
+    const o = odGlobal(), e = o && o.manifest && o.manifest.modeles;
+    if (!e || !e.cdn_url) return Promise.resolve(null);
+    if (!window.__odModelesP) window.__odModelesP = new Promise((res) => {
+      const sc = document.createElement('script'); sc.src = e.cdn_url; sc.async = true;
+      sc.onload = () => res(window.__OD_MODELES__ || win.__OD_MODELES__ || null);
+      sc.onerror = () => { window.__odModelesP = null; res(null); };
+      document.head.appendChild(sc);
+    });
+    return window.__odModelesP;
+  }
+  function trousRestants(t) { return (state.trous || []).filter((l) => String(t || '').indexOf('[' + l + ']') !== -1); }
+  async function choisirModele() {
+    const api = await chargerModeles();
+    if (!api) { state.error = 'Les modèles de messages ne sont pas disponibles.'; render(); return; }
+    const ed0 = getRoot() && getRoot().querySelector('.em-body'); if (ed0) state.bodyHtml = ed0.innerHTML;
+    const c = state.client || {};
+    const m = await api.choisir({ canal: 'email', idClient: c.IDVu, idLead: state.idLead, idSite: readVar(SELECTED_SITE_VAR_ID), contexte: state.idLead ? 'lead' : 'client', doc: doc });
+    if (!m) return;
+    // Le corps du modèle remplace la saisie ; un message cité (réponse,
+    // transfert) reste en dessous, la signature est reposée par applySignature.
+    let html = sansSignature(state.bodyHtml || '');
+    const q = html.indexOf('<blockquote'), cite = q >= 0 ? html.slice(html.lastIndexOf('<br><br>', q) >= 0 ? html.lastIndexOf('<br><br>', q) : q) : '';
+    state.bodyHtml = api.texteHtml(m.corps) + cite;
+    if (m.objet && (state.mode === 'new' || !state.subject.trim())) state.subject = m.objet;
+    state.trous = m.manquantes || []; state.error = null;
+    render();
+    applySignature();
   }
 
   /* ---- API ---- */
@@ -906,6 +956,8 @@ OD.define('email', {
       state.toChips = []; state.ccChips = []; state.bccChips = []; state.rcptInput = { field: null, text: '' }; state.sugg = []; state.suggIdx = -1; state.showCc = false; state.subject = ''; state.bodyHtml = ''; state.attachments = []; state.replyToId = null; state.forwardOfId = null;
       if (state.mode === 'new' && typeof opts.subject === 'string') state.subject = opts.subject;
       if (state.mode === 'new' && typeof opts.body === 'string') state.bodyHtml = opts.body;
+      state.idLead = opts.idLead || opts.lead || null;
+      state.trous = opts.trous || [];
       ensureRoot(); render();
       await loadAccounts();
       if ((state.mode === 'reply' || state.mode === 'forward') && opts.emailId) { await prefillFrom(opts.emailId, state.mode); }
