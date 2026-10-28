@@ -1,4 +1,6 @@
 // ============================================================================
+//  v21 (28/10/2026) : « Plus de critères » supprimé (ville, code postal, dates
+//  de naissance, CSP). Restent les six critères en accès direct.
 //  v20 (28/10/2026) : critères en accès direct — Nom, Prénom, Téléphone,
 //  Email, Véhicule, ID Client (Société : SIRET, Raison sociale, Téléphone,
 //  Email, Véhicule, ID Client). Le champ « Véhicule » prend une
@@ -852,13 +854,6 @@ OD.define('client-search', {
       h += fieldHtml('Email', 'EMAIL');
       h += fieldHtml('Véhicule', 'vehicule', 'text', 'Véhicule : immat. ou VIN');
       h += fieldHtml('ID Client', 'IDVu');
-      if (state.showMore) {
-        h += fieldHtml('Ville', 'ville');
-        h += fieldHtml('Code postal', 'cp');
-        h += fieldHtml('Né(e) après le', 'birthMin', 'date');
-        h += fieldHtml('Né(e) avant le', 'birthMax', 'date');
-        h += fieldHtml('CSP', 'CSP');
-      }
     } else {
       h += fieldHtml('SIRET', 'SIRET');
       h += fieldHtml('Raison sociale', 'NOM');
@@ -875,9 +870,6 @@ OD.define('client-search', {
     const total = Math.max(1, Math.ceil(state.totalCount / PAGE_SIZE));
     let h = '<div class="crs-toolbar">';
     h += '<div class="crs-toolbar-section">';
-    if (state.activeTab === 'particulier') {
-      h += `<button class="crs-more-toggle" data-crs-action="toggle-more">${state.showMore ? ICON_MINUS : ICON_PLUS}<span>${state.showMore ? 'Moins de critères' : 'Plus de critères'}</span></button>`;
-    }
     h += '</div><div class="crs-toolbar-section center">';
     if (state.searched && state.totalCount > 0) {
       h += '<div class="crs-pager">';
