@@ -1,5 +1,8 @@
 // ============================================================================
-//  TOP NAV — module One Data (OD.define)  v35 — SÉLECTEUR DE PÉRIMÈTRE
+//  TOP NAV — module One Data (OD.define)  v36 — SÉLECTEUR DE PÉRIMÈTRE
+//  v36 (28/10/2026) : plus d'« Import VN » dans le menu Véhicules (Team Colin),
+//  et jamais de Delco pour les opérateurs VROOM (rôle 10), quel que soit le
+//  socle chargé.
 //  v35 (27/10/2026) : entrée « Leads » à part entière dans la barre, avec
 //  deux pages : Leads management (le travail à faire) et Leads performances
 //  (l'onglet Leads de la page Performances). Compteur sur l'entrée pour les
@@ -134,7 +137,7 @@ OD.define('topnav', {
   const wwLib = window.wwLib;
   const doc = __anchor.ownerDocument || wwLib.getFrontDocument();
   const ROOT_ID = 'nav-root';
-  const NAV_VER = 38; // <- numéro de version (témoin de chargement)
+  const NAV_VER = 39; // <- numéro de version (témoin de chargement)
 
   // ------------------------------------------------------------- favicon
   // Posée une fois par chargement de l'app ; les balises existantes (icônes
@@ -397,8 +400,7 @@ OD.define('topnav', {
     ] },
     { label: 'Véhicules', items: [
       { t: 'Stock VN', p: P.vnListe },
-      { t: 'Stock VO', p: P.voListe },
-      { t: 'Import VN', p: P.vnConfig }
+      { t: 'Stock VO', p: P.voListe }
     ] }
   ];
   const USER_MENU = [
@@ -589,7 +591,7 @@ OD.define('topnav', {
     var __u = user();
     var __role = Number(__u.ID_Role != null ? __u.ID_Role : __u.id_role);
     // v32 : Delco suit la licence (Intelligence, Full) ; repli : ancienne règle par rôle.
-    var __delcoOk = (typeof OD !== 'undefined' && typeof OD.peut === 'function') ? OD.peut('delco') : (__role !== 4 && __role !== 9);
+    var __delcoOk = (__role !== 10) && ((typeof OD !== 'undefined' && typeof OD.peut === 'function') ? OD.peut('delco') : (__role !== 4 && __role !== 9));
     // Arbitrage des doublons : administrateur, vendeur, secretaire (07/10/2026).
     var __arbOk = (__role === 1 || __role === 4 || __role === 9);
     var __userMenu = USER_MENU.filter(function (it) { return __arbOk || it.act !== 'doublons'; });
