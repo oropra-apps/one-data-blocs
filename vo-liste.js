@@ -1,4 +1,9 @@
 // ============================================================================
+//  v30 (28/10/2026) : FILTRE VO / VD (le tag vo-liste-v29 existait deja, identique a la v28). Depuis le 28/10 le stock VO vient de
+//  Planet VO², démos (VD) comprises (TYPE_VEH = VO ou VD dans v_liste_vo).
+//  * boutons « VO » / « VD (démos) » à côté du canal PVO², avec compteurs ;
+//    aucun sélectionné = tous. N'apparaissent que si le stock contient des VD.
+//  * pastille « Démo » sur la ligne d'un VD ; colonne « Type » dans l'export.
 //  v28 (27/10/2026) : onglet « Historique Autoviza » dans la fiche VO. Le rapport
 //  Autoviza public (celui que La Centrale publie avec l'annonce) s'affiche dans
 //  la fiche. Un vendeur colle UNE FOIS le lien du rapport (ou de l'annonce La
@@ -198,7 +203,7 @@ OD.define('vo-liste', {
     'RESEAU', 'SOCIETE', 'POINT_VENTE', 'IDSITE', 'IDSITE_Codifie', 'NBPORTE_EUROTAX', 'PHOTO_1', 'NB_PHOTOS', 'cover_url', 'URL360', 'radarLink', 'ID_CM', 'PRET_A_LA_VENTE', 'LIEN_ANNONCE',
     'TVA', 'CODETVA', 'CV_DMS', 'TAUX_CO2', 'GARANTIE', 'CODE_GARANTIE', 'LIBELLE_GARANTIE', 'COULEUR_DMS',
     'CARROSSERIE_EUROTAX', 'LABEL_Codifie', 'LIEU_STOCKAGE_Codifie', 'DETAIL_STOCKAGE_Codifie',
-    'ORIGINEACHAT_Codifie', 'MIL', 'NATCODE_SELECTED', 'INFOMEDIAIRE_Codifie'
+    'ORIGINEACHAT_Codifie', 'MIL', 'NATCODE_SELECTED', 'INFOMEDIAIRE_Codifie', 'TYPE_VEH'
   ].join(',');
   // v21 : colonne absente des bases non migrees -> repli sur COLS_BASE.
   var COLS_BASE = COLS;
@@ -235,7 +240,8 @@ OD.define('vo-liste', {
       prixMin: null, prixMax: null, milMin: null, milMax: null,
       kmsMin: null, kmsMax: null, nbjMin: null, nbjMax: null, co2Min: null, co2Max: null,
       carrosserie: null, carburant: null, boite: null,
-      canaux: ['particulier']          // v27 : canal Planet VO², particuliers par défaut
+      canaux: ['particulier'],         // v27 : canal Planet VO², particuliers par défaut
+      types: null                      // v30 : VO / VD (null = tous)
     }
   };
   function defaultPerPage() { return S.perPage || 20; }
@@ -3277,6 +3283,13 @@ OD.define('vo-liste', {
     var page = function (from) { return c.from('v_liste_vo').select(cols).order('VIN').range(from, from + size - 1); };
     var duo = await Promise.all([page(0), page(size)]);
     // v21 : base sans NUMERO_POLICE (migration pas encore passee) -> on recharge sans.
+    // v30 : vue sans TYPE_VEH -> sans elle (le filtre VO / VD n'apparait pas).
+    if (duo[0].error && /TYPE_VEH/i.test(duo[0].error.message || '')) {
+      console.warn('[vo] TYPE_VEH absent de v_liste_vo, chargement sans');
+      COLS_BASE = COLS_BASE.replace(',TYPE_VEH', '');
+      S.cols = cols = cols.replace(',TYPE_VEH', '');
+      duo = await Promise.all([page(0), page(size)]);
+    }
     // v27 : vue sans les colonnes Planet VO² (tenant non migré) -> sans elles.
     if (duo[0].error && /PVO_/i.test(duo[0].error.message || '')) {
       console.warn('[vo] colonnes Planet VO² absentes de v_liste_vo, chargement sans');
@@ -3338,6 +3351,7 @@ OD.define('vo-liste', {
     if (f.carburant && r.CARBURANT_DMS !== f.carburant) return false;
     if (f.boite && r.BOITEV_EUROTAX !== f.boite) return false;
     if (!canalOk(r, f.canaux)) return false;
+    if (f.types && f.types.length && f.types.indexOf(typeDe(r)) === -1) return false;
 
     if (f.photos != null && hasPhoto(r) !== f.photos) return false;
     if (f.contremarque != null && contremarque(r) !== f.contremarque) return false;
@@ -3357,6 +3371,9 @@ OD.define('vo-liste', {
     if (notEmpty(S.immat)) { var qi = S.immat.toLowerCase().replace(/[\s-]/g, ''); var im = String(r.NO_IMMAT || '').toLowerCase().replace(/[\s-]/g, ''); if (im.indexOf(qi) === -1) return false; }
     return true;
   }
+  // ── v29 : VO / VD ─────────────────────────────────────────────────────────
+  var TYPES_VO = [{ k: 'VO', t: 'VO' }, { k: 'VD', t: 'VD (démos)' }];
+  function typeDe(r) { return String(r.TYPE_VEH || '').toUpperCase() === 'VD' ? 'VD' : 'VO'; }
   // ── v27 : canal de vente Planet VO² ──────────────────────────────────────
   var CANAUX_PVO = [
     { k: 'particulier', t: 'Particuliers' }, { k: 'marchand', t: 'Marchands' },
@@ -3420,7 +3437,7 @@ OD.define('vo-liste', {
     return arr;
   }
   function distinct(field, base) { var set = {}; (base || S.raw).forEach(function (r) { if (notEmpty(r[field])) set[r[field]] = 1; }); return Object.keys(set).sort(function (a, b) { return a.localeCompare(b, 'fr'); }); }
-  function activeFilterCount() { var f = S.f, n = 0; for (var k in f) if (f[k] != null && k !== 'canaux') n++; return n; }
+  function activeFilterCount() { var f = S.f, n = 0; for (var k in f) if (f[k] != null && k !== 'canaux' && k !== 'types') n++; return n; }
 
   // ─────────────────────────────────────────────────────────── sélection
   function selVins() { return Object.keys(S.sel).filter(function (v) { return S.sel[v]; }); }
@@ -3503,6 +3520,8 @@ OD.define('vo-liste', {
     + '.vl-can:hover{border-color:#53bda7}.vl-can.on{background:#2a5ea9;border-color:#2a5ea9;color:#fff}'
     + '.vl-can i{font-style:normal;font-size:11px;font-weight:800;opacity:.75}'
     + '.vl-can-lab{font-size:11px;font-weight:800;letter-spacing:.05em;text-transform:uppercase;color:#7a98c5;align-self:center;margin-right:2px}'
+    + '.vl-typ-lab{margin-left:14px}'
+    + '.vl-vd{font-size:10.5px;font-weight:800;padding:2px 7px;border-radius:7px;background:#e6f6f2;color:#1f8a73;letter-spacing:.02em}'
     + '.vl-head{display:flex;align-items:center;gap:12px;padding:10px 16px;background:#f7faff;border-bottom:1px solid #e8eef7;font-size:12.5px;font-weight:700;color:#7a98c5;flex-wrap:wrap}'
     + '.vl-head label{display:inline-flex;align-items:center;gap:8px;cursor:pointer}'
     + '.vl-head .vl-tri{margin-left:auto;display:flex;align-items:center;gap:7px}'
@@ -3817,7 +3836,7 @@ OD.define('vo-liste', {
       + '<div class="vl-img"><div class="vl-ph"' + (hasPhoto(r) ? ' data-act="photos" data-vin="' + esc(r.VIN) + '" title="Diaporama"' : '') + '>' + ph
       + (n ? '<span class="vl-nb">' + IC.camera + n + '</span>' : '') + '</div></div>'
       + '<div class="vl-id">'
-      + '<div class="vl-t"><span class="vo-dot ' + (cm ? 'red' : 'green') + '" data-vin="' + esc(r.VIN) + '" data-cm="' + esc(r.ID_CM || '') + '"' + (cm ? '' : ' title="Disponible à la vente"') + '></span>' + esc(((r.MARQUE_DMS || '') + ' ' + (r.MODELE_DMS || '')).trim() || '-') + '</div>'
+      + '<div class="vl-t"><span class="vo-dot ' + (cm ? 'red' : 'green') + '" data-vin="' + esc(r.VIN) + '" data-cm="' + esc(r.ID_CM || '') + '"' + (cm ? '' : ' title="Disponible à la vente"') + '></span>' + esc(((r.MARQUE_DMS || '') + ' ' + (r.MODELE_DMS || '')).trim() || '-') + (typeDe(r) === 'VD' ? '<span class="vl-vd" title="Véhicule de démonstration">Démo</span>' : '') + '</div>'
       + '<div class="vl-v" title="' + esc(designation(r)) + '">' + esc(designation(r)) + '</div>'
       + '<div class="vl-m">' + (ident || '-') + '</div>'
       + (meta2 ? '<div class="vl-m">' + meta2 + '</div>' : '')
@@ -3859,8 +3878,20 @@ OD.define('vo-liste', {
       + '<span>Afficher <select class="vl-pp">' + opts + '</select> par page</span></div>'
       + pagerHtml(total, page, pp, '') + '</div>';
   }
+  // v30 : boutons VO / VD (compte : tous les autres filtres, sauf le type)
+  function typesHtml() {
+    if (!S.raw.some(function (r) { return typeDe(r) === 'VD'; })) return '';
+    var sel = S.f.types || [];
+    var memo = S.f.types; S.f.types = null;
+    var base = S.raw.filter(passFilters);
+    S.f.types = memo;
+    return '<span class="vl-can-lab vl-typ-lab">Type</span>' + TYPES_VO.map(function (c) {
+      var n = base.filter(function (r) { return typeDe(r) === c.k; }).length;
+      return '<button type="button" class="vl-can' + (sel.indexOf(c.k) !== -1 ? ' on' : '') + '" data-type="' + c.k + '">' + esc(c.t) + ' <i>' + n + '</i></button>';
+    }).join('');
+  }
   function canauxHtml() {
-    if (!S.pvoActif) return '';
+    if (!S.pvoActif) { var t0 = typesHtml(); return t0 ? '<div class="vl-canaux">' + t0 + '</div>' : ''; }
     var sel = S.f.canaux || [];
     // compte : tous les autres filtres appliqués, sauf le canal
     var memo = S.f.canaux; S.f.canaux = null;
@@ -3869,7 +3900,7 @@ OD.define('vo-liste', {
     return '<div class="vl-canaux"><span class="vl-can-lab">Canal PVO²</span>' + CANAUX_PVO.map(function (c) {
       var n = base.filter(function (r) { return canalDe(r, c.k); }).length;
       return '<button type="button" class="vl-can' + (sel.indexOf(c.k) !== -1 ? ' on' : '') + '" data-canal="' + c.k + '">' + esc(c.t) + ' <i>' + n + '</i></button>';
-    }).join('') + '</div>';
+    }).join('') + typesHtml() + '</div>';
   }
 
   // ─────────────────────────────────────────────────────────── pager / selbar
@@ -3957,7 +3988,7 @@ OD.define('vo-liste', {
     if (defs.length > 1) html += '<span class="vo-chip-clear" data-clear="1">Tout effacer</span>';
     box.innerHTML = html;
     box.querySelectorAll('[data-chip]').forEach(function (el) { el.addEventListener('click', function () { clearChip(el.getAttribute('data-chip')); S.page = 1; renderChips(); renderContent(); }); });
-    var clr = box.querySelector('[data-clear]'); if (clr) clr.addEventListener('click', function () { var can = S.f.canaux; for (var k in S.f) S.f[k] = null; S.f.canaux = can; S.page = 1; renderChips(); renderContent(); });
+    var clr = box.querySelector('[data-clear]'); if (clr) clr.addEventListener('click', function () { var can = S.f.canaux, typ = S.f.types; for (var k in S.f) S.f[k] = null; S.f.canaux = can; S.f.types = typ; S.page = 1; renderChips(); renderContent(); });
     refreshFilterBadge();
   }
 
@@ -4071,7 +4102,7 @@ OD.define('vo-liste', {
       ['TVA', function (r) { return r.TVA; }], ['Destination', function (r) { return destination(r); }], ['Couleur', function (r) { return r.COULEUR_DMS; }],
       ['Site', function (r) { return r.SITE; }], ['Affaire', function (r) { return r.AFFAIRE; }], ['Réseau', function (r) { return r.RESEAU; }],
       ['NBJ', function (r) { return nbjDays(r); }], ['Garantie', function (r) { return garantieTxt(r); }], ['Lieu', function (r) { return r.LIEU_STOCKAGE_Codifie; }],
-      ['Emplacement', function (r) { return r.DETAIL_STOCKAGE_Codifie; }], ['Canal PVO²', function (r) { return libCanaux(r); }], ['Commentaire PVO²', function (r) { return r.PVO_COMMENTAIRE || ''; }]
+      ['Emplacement', function (r) { return r.DETAIL_STOCKAGE_Codifie; }], ['Type', function (r) { return typeDe(r); }], ['Canal PVO²', function (r) { return libCanaux(r); }], ['Commentaire PVO²', function (r) { return r.PVO_COMMENTAIRE || ''; }]
     ]);
   }
   function stamp() { var d = new Date(); function p(n) { return ('0' + n).slice(-2); } return d.getFullYear() + p(d.getMonth() + 1) + p(d.getDate()); }
@@ -4195,6 +4226,14 @@ OD.define('vo-liste', {
     });
     host.querySelectorAll('.vo-pg[data-pg]').forEach(function (el) {
       el.addEventListener('click', function () { var p = Number(el.getAttribute('data-pg')); if (p >= 1) { S.page = p; renderContent(); try { root().scrollIntoView({ behavior: 'smooth', block: 'start' }); } catch (e) { } } });
+    });
+    // v30 : VO / VD
+    host.querySelectorAll('[data-type]').forEach(function (el) {
+      el.addEventListener('click', function () {
+        var k = el.getAttribute('data-type'), cur = (S.f.types || []).slice(), i = cur.indexOf(k);
+        if (i === -1) cur.push(k); else cur.splice(i, 1);
+        S.f.types = cur.length ? cur : null; S.page = 1; renderContent();
+      });
     });
     // v27 : canal, tri, nombre par page
     host.querySelectorAll('[data-canal]').forEach(function (el) {
