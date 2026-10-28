@@ -1,13 +1,31 @@
 // ============================================================================
 //  LEAD MANAGEMENT — module One Data (OD.define 'lead-mgmt')
-//  VERSION TEAM COLIN (v72) — déploiement CIBLÉ (publish-targets :
+//  VERSION TEAM COLIN (v76) — déploiement CIBLÉ (publish-targets :
+//  v76 (28/10/2026) : les modèles SMS / WhatsApp / e-mail de la fiche d'un
+//  lead viennent de Administration › Modèles de messages (module `modeles`,
+//  fonction modele_rendus : variables du lead remplacées en base, modèles VN
+//  ou VO selon le lead, version du site si le site en a une). Les textes
+//  écrits en dur restent le repli d'un locataire sans ce module. La fenêtre
+//  SMS / WhatsApp / e-mail reçoit l'identifiant du lead (son bouton
+//  « Modèles » propose alors les mêmes modèles) et les [données manquantes].
+//  v75 (28/10/2026) : règle affichée (Pool du vendeur, règle du site côté
+//  chef) : un lead pris et non traité dans les 15 minutes revient dans le
+//  Pool (lead_retour_pool, en base, toutes les minutes). Sur la ligne d'un
+//  lead pris : « à traiter : retour au Pool dans N min ».
+//  v74 (28/10/2026) : plateau VROOM, MODE DÉMONSTRATION (bouton dans le
+//  bandeau « BACS fermé ») : Prendre / ouvrir un lead montre la fiche comme
+//  après la prise, avec qualification, transfert, rappel et abandon, sans
+//  rien réserver ni écrire (One Data comme BACS). Pour présenter l'outil.
+//  v73 (28/10/2026) : plateau VROOM, bandeau BACS corrigé — ce qui bloque
+//  est l'absence de BACS ouvert sur le poste, pas l'identifiant BACS du compte
+//  (facultatif : il sert seulement à nommer l'opérateur propriétaire du lead).
 //  v72 (28/10/2026) : PLATEAU VROOM revu.
 //  * « Prendre le suivant » : le lead FRAIS (moins de 24 h) le plus en
 //    retard sur son délai ; plus jamais un lead de trois semaines quand des
 //    leads du jour attendent. Pool BACS en trois files : Moins de 24 h (par
 //    défaut), Plus de 24 h, Stock accepté. Hors délai = leads frais.
-//  * Bandeau BACS réduit à une ligne ; boutons grisés avec la raison exacte
-//    (compte non relié à BACS ou BACS fermé).
+//  * Bandeau BACS réduit à une ligne (« BACS fermé sur ce poste ») ; boutons
+//    grisés avec la raison en infobulle.
 //  * Onglet « Rappels dus » (compteur = rappels dus, comme l'en-tête), liste
 //    triée par échéance. Trafic atelier retiré (pastille et signal).
 //  * Une étiquette par lead (campagne, sinon source) ; le site BACS passe
@@ -352,7 +370,7 @@
 
     // ── État ──────────────────────────────────────────────────────────────
     var S = {
-      tab: 'piscine', stock: false, age: 'frais', univ: 'tous', per: periodeDefaut(), sources: null, campagne: null, miens: false,
+      tab: 'piscine', stock: false, age: 'frais', demoMode: false, univ: 'tous', per: periodeDefaut(), sources: null, campagne: null, miens: false,
       kpis: null, piscine: [], rappels: [], transferts: [], campagnes: null, stockListe: null,
       ack: new Set(), vus: new Set(), frais: new Set(), premier: true,
       bacs: null,
@@ -410,8 +428,8 @@
     function ecritBacs() { return !!(S.bacs && S.bacs.ecrire_bacs); }
     // v60 : BACS doit être ouvert sur CE poste (session de l'opérateur). On
     // bloque AVANT le geste ; la base le refuserait de toute façon.
-    function bloque() { return ecritBacs() && S.bacs.canal !== 'moi'; }
-    function dis() { return bloque() ? ' disabled title="' + (S.bacs && S.bacs.moi_bacs === false ? 'Compte non relié à BACS' : 'Ouvrez BACS dans un onglet de ce navigateur pour agir') + '"' : ''; }
+    function bloque() { return !S.demoMode && ecritBacs() && S.bacs.canal !== 'moi'; }
+    function dis() { return bloque() ? ' disabled title="Ouvrez BACS dans un onglet de ce navigateur pour agir"' : ''; }
     var GESTES_BACS = ['prendre', 'qualifier', 'injoignable', 'long-terme', 'abandonner'];
     // Réveille l'extension pour qu'elle vide la file tout de suite (sans
     // effet si elle ne connaît pas encore ce signal : elle la videra au
@@ -426,9 +444,13 @@
     function bandeauBacs() {
       var b = S.bacs; if (!b || !b.ecrire_bacs) return '';
       // v71 : une ligne discrète (les boutons sont grisés, avec la raison en infobulle).
-      if (b.canal !== 'moi') return '<div class="bacs-l" role="status">' + (b.moi_bacs === false
-          ? '<b>Compte non relié à BACS.</b><span>Vos gestes sont reportés dans BACS à votre nom : l\'administrateur doit renseigner votre identifiant BACS.</span>'
-          : '<b>BACS fermé sur ce poste.</b><span>Ouvrez BACS dans un onglet de ce navigateur : les gestes se débloquent dès qu\'il répond.</span>') + '</div>';
+      // Ce qui bloque, c'est l'absence de session BACS sur CE poste (règle du
+      // 22/10 : un geste qui touche BACS exige BACS ouvert chez l'utilisateur).
+      // L'identifiant BACS du compte n'est pas requis : il sert seulement à
+      // mettre l'opérateur propriétaire du lead dans BACS.
+      if (S.demoMode) return '<div class="demo-l" role="status"><b>Mode démonstration.</b><span>Tout est consultable et chaque geste se joue sur la fiche, mais rien n\'est enregistré, ni dans One Data ni dans BACS.</span><button type="button" class="btn sm" data-a="demo-off">Quitter la démonstration</button></div>';
+      if (b.canal !== 'moi') return '<div class="bacs-l" role="status"><b>BACS fermé sur ce poste.</b><span>Prendre, transférer ou abandonner un lead s\'écrit dans BACS : ouvrez BACS dans un onglet de ce navigateur, avec l\'extension One Data. Les gestes se débloquent dès qu\'il répond.</span>'
+        + '<button type="button" class="btn sm" data-a="demo-on">Mode démonstration</button></div>';
       var h = '';
       if (b.en_attente_vieux > 0) h += '<div class="bd warn"><b>' + plural(b.en_attente_vieux, 'geste attend', 'gestes attendent') + ' d\'être appliqué' + (b.en_attente_vieux > 1 ? 's' : '') + ' dans BACS.</b>'
         + '<span>Ils partent au prochain passage de l\'extension. Si cela dure, rechargez l\'onglet BACS.</span></div>';
@@ -924,7 +946,7 @@
       }
       h += '</footer>';
       var top = $drawer.scrollTop;
-      if (D.demo) h = h.replace('<div class="dr-b">', '<p class="demo">Fiche d\'exemple de la visite guidée : rien n\'est enregistré, rien ne part dans BACS.</p><div class="dr-b">');
+      if (D.demo) h = h.replace('<div class="dr-b">', '<p class="demo">' + (S.demoMode ? 'Démonstration : la fiche est montrée comme après la prise du lead. Rien n\'est enregistré, rien ne part dans BACS.' : 'Fiche d\'exemple de la visite guidée : rien n\'est enregistré, rien ne part dans BACS.') + '</p><div class="dr-b">');
       $drawer.innerHTML = h;
       $drawer.scrollTop = top;
     }
@@ -969,8 +991,9 @@
     // l'opérateur pour montrer la qualification, l'orientation et les issues.
     // Aucun geste n'est enregistré (geste() et canal() refusent), rien n'est
     // réservé ni libéré dans BACS.
-    async function ouvrirExemple() {
-      var cand = [].concat(S.piscine || [], S.stockListe || [], S.rappels || [], S.transferts || []).filter(function (x) { return x && x.sf_lead_id; })[0];
+    async function ouvrirExemple(sfVoulu) {
+      var tous = [].concat(S.piscine || [], S.stockListe || [], S.rappels || [], S.transferts || []).filter(function (x) { return x && x.sf_lead_id; });
+      var cand = (sfVoulu && tous.find(function (x) { return x.sf_lead_id === sfVoulu; })) || tous[0];
       var fiche = null;
       if (cand) { try { fiche = await rpc('plateau_fiche', { p_sf_lead_id: cand.sf_lead_id }); } catch (e) { fiche = null; } }
       if (!fiche) fiche = { sf_lead_id: 'exemple', prenom: 'Client', nom: 'Exemple', recu_le: new Date(Date.now() - 1200000).toISOString(), fiche_bacs: { type_demande: 'Demande d\'essai', modele: 'Yaris Cross' } };
@@ -1041,7 +1064,7 @@
     // ── Gestes ────────────────────────────────────────────────────────────
     var occupe = false;
     async function geste(fn) {
-      if (S.dr && S.dr.demo) { toast('Visite guidée : rien n\'est enregistré sur la fiche d\'exemple.'); return; }
+      if (S.dr && S.dr.demo) { toast(S.demoMode ? 'Démonstration : en situation réelle, ce geste serait enregistré dans One Data et reporté dans BACS.' : 'Visite guidée : rien n\'est enregistré sur la fiche d\'exemple.'); return; }
       if (occupe) return; occupe = true;
       ov.classList.add('busy'); root.classList.add('busy');
       try { await fn(); }
@@ -1144,9 +1167,19 @@
     function memoAck() { try { FW.localStorage.setItem('lmtc-ack', JSON.stringify(Array.from(S.ack).slice(-200))); } catch (e) {} }
     async function action(a, id, ev) {
       if (GESTES_BACS.indexOf(a) !== -1 && bloque()) {
-        toast(S.bacs && S.bacs.moi_bacs === false ? 'Votre compte n\'est pas relié à BACS : l\'administrateur doit renseigner votre identifiant BACS.' : 'BACS n\'est pas ouvert sur votre poste : ouvrez-le dans un onglet de ce navigateur et connectez-vous.', true); return;
+        toast('BACS n\'est pas ouvert sur votre poste : ouvrez-le dans un onglet de ce navigateur et connectez-vous.', true); return;
+      }
+      // v74 : mode démonstration — « Prendre » et l'ouverture d'un lead
+      // montrent la fiche telle qu'après la prise (qualification, transfert,
+      // rappel, abandon), sans rien réserver ni écrire ; les gestes qui
+      // écriraient sont refusés.
+      if (S.demoMode) {
+        if (a === 'prendre' || a === 'open') return ouvrirExemple(id);
+        if (a === 'relancer' || a === 'bacs-relancer') { toast('Démonstration : en situation réelle, le chef des ventes du site serait relancé.'); return; }
       }
       switch (a) {
+        case 'demo-on': S.demoMode = true; render(); toast('Mode démonstration : rien n\'est enregistré.'); return;
+        case 'demo-off': S.demoMode = false; if (S.dr && S.dr.demo) fermerDrawer(true); render(); return;
         case 'age': S.tab = 'piscine'; S.stock = false; S.age = id === 'vieux' ? 'vieux' : 'frais'; render(); return;
         case 'univ': S.univ = id || 'tous'; render(); return;
         case 'dem-plus': if (S.dr) { S.dr.demOuverte = !S.dr.demOuverte; renderDrawerPreserve(); } return;
@@ -1792,8 +1825,19 @@
       if (r <= 0) return '<span class="tm crit"><b>+' + duree(-r) + '</b><small>hors délai</small></span>';
       return '<span class="tm ' + (r <= slaDe(l) * 0.4 ? 'warn' : 'ok') + '"><b>' + duree(r) + '</b><small>avant le délai</small></span>';
     }
+    // v75 : un lead pris dans le Pool et non traité revient au Pool au bout
+    // de N minutes (lead_retour_pool, en base). N = stats.pool_retour_minutes.
+    function minRetour() { return Number((S.stats && S.stats.pool_retour_minutes) || 15); }
+    function texteRetour() { return 'Un lead pris et non traité (ni appel, ni geste) dans les ' + minRetour() + ' minutes revient automatiquement dans le Pool.'; }
+    function retourDans(l) {
+      if (l.zone !== 'vendeur' || l.tentatives || l.attribue_par_nom || !l.attribue_le) return null;
+      if (['libre', 'prise_directe', 'rendu', 'retour_pool', null, undefined, ''].indexOf(l.attribution_regle) === -1) return null;
+      var r = minRetour() - mins(l.attribue_le);
+      return r > 0 && r <= minRetour() ? r : null;
+    }
     function etatCourt(l) {
       if (l.tentatives) return 'pas joint ×' + l.tentatives + (l.dernier_essai ? ', ' + quand(l.dernier_essai) : '');
+      var rt = retourDans(l); if (rt != null) return 'à traiter : retour au Pool dans ' + Math.ceil(rt) + ' min';
       if (l.par_plateau) return 'qualifié par VROOM';
       if (l.zone === 'piscine') return 'libre';
       return 'nouveau';
@@ -1849,7 +1893,7 @@
       var h = '<div class="list">';
       if (!ls.length) h += '<div class="empty">Le Pool est vide.</div>';
       ls.forEach(function (l) { h += ligneAction(l, 'prendre'); });
-      return h + '</div><p class="foot">Libre-service : premier arrivé, premier servi. Un lead pris passe dans « À rappeler » ; s\'il ne vous concerne pas, rendez-le au Pool.</p>';
+      return h + '</div><p class="foot">Libre-service : premier arrivé, premier servi. Un lead pris passe dans « À rappeler » ; s\'il ne vous concerne pas, rendez-le au Pool. ' + texteRetour() + '</p>';
     }
     function vueCampagnesVendeur() {
       var h = '';
@@ -1886,10 +1930,10 @@
         : r.repartition === 'conversion' ? 'le vendeur le moins chargé, et à charge égale celui qui convertit le mieux'
         : 'le vendeur le moins chargé');
       var c = crit.join(', sinon ');
-      var h = r.mode === 'libre' ? '<b>Libre-service</b> : les vendeurs prennent eux-mêmes leurs leads dans le Pool. Quand vous attribuez, One Data suggère ' + c + '.'
+      var h = r.mode === 'libre' ? '<b>Libre-service</b> : les vendeurs prennent eux-mêmes leurs leads dans le Pool. ' + texteRetour() + ' Quand vous attribuez, One Data suggère ' + c + '.'
         : r.mode === 'manuel' ? '<b>Attribution par le chef des ventes</b> : vous attribuez chaque lead. One Data suggère ' + c + '.'
         : '<b>Attribution automatique</b> : chaque lead part aussitôt chez ' + c + '. Le Pool ne garde que ceux qu\'aucun vendeur ne peut prendre.';
-      if (r.filtre_vn_vo) h += ' Un lead VO ne va qu\'aux vendeurs VO.';
+      if (r.filtre_vn_vo) h += ' Un lead VN va aux vendeurs VN, un lead VO aux vendeurs VO ; les vendeurs VN/VO reçoivent les deux.';
       var ex = (r.exclus || []).filter(function (e) { return !/recette|administration/i.test(e.motif || ''); });
       if (ex.length) h += ' Écartés du tour de rôle : ' + ex.map(function (e) { return esc(propre(e.nom)) + (e.au ? ' (jusqu\'au ' + jour(e.au) + ')' : ''); }).join(', ') + '.';
       return h;
@@ -2094,7 +2138,7 @@
     }
     function vuePiscineVendeur() {
       var ls = piscine(null).sort(function (a, b) { return (slaDe(a) - mins(arrive(a))) - (slaDe(b) - mins(arrive(b))); });
-      var h = '<div class="ph"><div><h2>' + esc(poolNom()) + '</h2><p>Libre-service : premier arrivé, premier servi. Prendre met le lead à votre nom ; s\'il ne vous concerne pas, rendez-le au Pool.</p></div></div><div class="list">';
+      var h = '<div class="ph"><div><h2>' + esc(poolNom()) + '</h2><p>Libre-service : premier arrivé, premier servi. Prendre met le lead à votre nom ; s\'il ne vous concerne pas, rendez-le au Pool.<br><b>' + esc(texteRetour()) + '</b></p></div></div><div class="list">';
       if (!ls.length) h += '<div class="empty">Le Pool est vide.</div>';
       ls.forEach(function (l) { h += ligneLead(l); });
       return h + '</div>';
@@ -2468,7 +2512,54 @@
       var s = String(l.nom || '').trim(), m = /^([A-ZÀ-ÖØ-Ý'’ -]{2,}?)\s+(.*[a-zà-ÿ].*)$/.exec(s);
       return m ? propre(m[2]) + ' ' + propre(m[1]) : nomLead(l);
     }
+    // v76 : modèles de la base (Administration › Modèles de messages)
+    var CANAL_MOD = { sms: 'sms', wa: 'whatsapp', mail: 'email' };
+    function odGlobalLm() { try { return FW.OD || window.OD || null; } catch (e) { return window.OD || null; } }
+    function modelesApi() {
+      var api = (FW && FW.__OD_MODELES__) || window.__OD_MODELES__;
+      if (api) return Promise.resolve(api);
+      var o = odGlobalLm(), e = o && o.manifest && o.manifest.modeles;
+      if (!e || !e.cdn_url) return Promise.resolve(null);
+      if (!window.__odModelesP) window.__odModelesP = new Promise(function (res) {
+        var sc = document.createElement('script'); sc.src = e.cdn_url; sc.async = true;
+        sc.onload = function () { res(window.__OD_MODELES__ || (FW && FW.__OD_MODELES__) || null); };
+        sc.onerror = function () { window.__odModelesP = null; res(null); };
+        document.head.appendChild(sc);
+      });
+      return window.__odModelesP;
+    }
+    function chargerModelesLead(D, act) {
+      D.modDb = null; D.modEtat = 'charge';
+      modelesApi().then(function (api) {
+        if (!api) return null;
+        return api.lister({ canal: CANAL_MOD[act], idLead: D.l.id_lead, idClient: D.l.id_client, idSite: D.l.id_site, contexte: 'lead' });
+      }).then(function (liste) {
+        if (S.dr !== D || D.canal !== act) return;
+        var vo = estVO(D.l);
+        D.modDb = (liste || []).filter(function (m) { return m.univers === 'tous' || m.univers === (vo ? 'VO' : 'VN'); });
+        D.modEtat = D.modDb.length ? 'ok' : 'vide';
+        if (D.tpl != null) D.tpl = null;
+        renderDrawerPreserve();
+      }, function () {
+        if (S.dr !== D || D.canal !== act) return;
+        D.modEtat = 'ko'; renderDrawerPreserve();
+      });
+    }
     function modeles(canalId, l) {
+      var D = S.dr;
+      if (D && D.modEtat === 'ok' && D.modDb && D.modDb.length && D.canal === canalId) {
+        var relanceDb = (l.tentatives || 0) > 0, cible = relanceDb ? 'appel_manque' : (estVO(l) ? 'vehicule_dispo' : 'premier_contact');
+        var MD = D.modDb.map(function (m) { return { k: m.titre, t: m.corps, s: m.objet || '', id: m.id, manq: m.manquantes || [], cat: m.categorie,
+          m: canalId === 'wa' ? 'Modèle WhatsApp validé par Meta : votre phrase s\'insère après la présentation.' : null }; });
+        var ir = MD.findIndex(function (x) { return x.cat === cible; });
+        if (ir < 0) ir = MD.findIndex(function (x) { return x.cat === 'premier_contact'; });
+        if (ir < 0) ir = 0;
+        MD.forEach(function (x, i) { x.reco = i === ir; });
+        return MD;
+      }
+      return modelesEnDur(canalId, l);
+    }
+    function modelesEnDur(canalId, l) {
       var cli = salut(l), moi = prenom((S.stats && S.stats.nom) || '') || 'votre conseiller', site = siteNom(l.site) || 'notre concession';
       var v = vehCourt(l), vo = estVO(l), relance = (l.tentatives || 0) > 0;
       var leVeh = v ? 'le ' + v : 'votre projet', duVeh = v ? 'du ' + v : 'de votre projet', auVeh = v ? 'au sujet du ' + v : 'au sujet de votre demande';
@@ -2496,13 +2587,16 @@
     function composeHtml(l) {
       var D = S.dr;
       if (!D || !D.canal || D.canal === 'appel') return '';
+      var lib0 = { sms: 'SMS', wa: 'WhatsApp', mail: 'E-mail' }[D.canal];
+      if (D.modEtat === 'charge') return '<section class="compose ' + D.canal + '"><h3>' + lib0 + ' · modèles adaptés à ce lead</h3><p class="hint">Préparation des modèles…</p></section>';
       var M = modeles(D.canal, l), i = D.tpl == null ? M.findIndex(function (x) { return x.reco; }) : D.tpl;
-      if (i < 0) i = 0;
-      var m = M[i], lib = { sms: 'SMS', wa: 'WhatsApp', mail: 'E-mail' }[D.canal];
+      if (i < 0 || i >= M.length) i = 0;
+      var m = M[i], lib = lib0;
       var txt = D.txt != null ? D.txt : m.t, subj = D.subj != null ? D.subj : (m.s || '');
       return '<section class="compose ' + D.canal + '"><h3>' + lib + ' · modèles adaptés à ce lead</h3><div class="tpls">' + M.map(function (x, j) {
           return '<button type="button" class="tpl' + (j === i ? ' on' : '') + '" data-a="tpl" data-id="' + j + '">' + esc(x.k) + (x.reco ? '<span class="reco">conseillé</span>' : '') + '</button>'; }).join('') + '</div>'
         + (m.m ? '<p class="hint">' + esc(m.m) + '</p>' : '')
+        + (m.manq && m.manq.length ? '<p class="hint err">À compléter dans le texte : ' + esc(m.manq.join(', ')) + '.</p>' : '')
         + (D.canal === 'mail' ? '<input type="text" id="cp-subj" value="' + esc(subj) + '" aria-label="Objet">' : '')
         + '<textarea id="cp-txt" rows="' + (D.canal === 'mail' ? 7 : 3) + '" aria-label="Message">' + esc(txt) + '</textarea>'
         + '<div class="row"><span class="hint">' + (D.canal === 'wa' ? 'La fenêtre WhatsApp s\'ouvre avec ce motif : vous relisez puis envoyez.' : 'La fenêtre ' + lib + ' s\'ouvre avec ce texte : vous relisez puis envoyez.') + '</span>'
@@ -2794,7 +2888,7 @@
     // ── Gestes ────────────────────────────────────────────────────────────
     var occupe = false;
     async function geste(fn) {
-      if (S.dr && S.dr.demo) { toast('Visite guidée : rien n\'est enregistré sur la fiche d\'exemple.'); return; }
+      if (S.dr && S.dr.demo) { toast(S.demoMode ? 'Démonstration : en situation réelle, ce geste serait enregistré dans One Data et reporté dans BACS.' : 'Visite guidée : rien n\'est enregistré sur la fiche d\'exemple.'); return; }
       if (occupe) return; occupe = true;
       ov.classList.add('busy'); root.classList.add('busy');
       try { await fn(); }
@@ -2915,12 +3009,12 @@
           var w = (window.parent && window.parent.__VOIP_UI__) || window.__VOIP_UI__ || FW.__VOIP_UI__;
           if (w && w.call) { w.call(l.telephone, client); return; }
           FW.open('tel:' + String(l.telephone || '').replace(/[^0-9+]/g, ''), '_self');
-        } else if (act === 'sms') { var s = FW.__SMS_UI__ || window.__SMS_UI__; if (s && s.open) s.open({ client: client, text: pre.text }); else toast('Module SMS indisponible.', true); }
-        else if (act === 'wa') { var wa = FW.__WA_UI__ || window.__WA_UI__; if (wa && wa.open) wa.open({ client: client, motif: pre.text }); else toast('Module WhatsApp indisponible.', true); }
+        } else if (act === 'sms') { var s = FW.__SMS_UI__ || window.__SMS_UI__; if (s && s.open) s.open({ client: client, text: pre.text, idLead: l.id_lead, trous: pre.trous }); else toast('Module SMS indisponible.', true); }
+        else if (act === 'wa') { var wa = FW.__WA_UI__ || window.__WA_UI__; if (wa && wa.open) wa.open({ client: client, motif: pre.text, idLead: l.id_lead, trous: pre.trous }); else toast('Module WhatsApp indisponible.', true); }
         else if (act === 'mail') {
           var m = FW.__EMAIL_UI__ || window.__EMAIL_UI__;
-          var corps = pre.text != null ? esc(pre.text).replace(/\n/g, '<br>') : undefined;
-          if (m && m.open) m.open({ mode: 'new', client: client, subject: pre.subject, body: corps });
+          var corps = pre.text != null ? esc(pre.text).split(/\n{2,}/).map(function (p) { return '<p style="margin:0 0 12px">' + p.replace(/\n/g, '<br>') + '</p>'; }).join('') : undefined;
+          if (m && m.open) m.open({ mode: 'new', client: client, subject: pre.subject, body: corps, idLead: l.id_lead, trous: pre.trous });
           else FW.open('mailto:' + l.email + (pre.subject ? '?subject=' + encodeURIComponent(pre.subject) + '&body=' + encodeURIComponent(pre.text || '') : ''), '_blank');
         }
       } catch (e) { toast('Canal indisponible : ' + messageErreur(e), true); }
@@ -2932,6 +3026,7 @@
       if (D.canal === act) { D.canal = null; renderDrawerPreserve(); return; }
       lireRdvF();
       D.canal = act; D.tpl = null; D.txt = null; D.subj = null;
+      if (odGlobalLm() && odGlobalLm().manifest && odGlobalLm().manifest.modeles) chargerModelesLead(D, act); else { D.modEtat = null; D.modDb = null; }
       renderDrawer();
       $drawer.scrollTop = 0;
     }
@@ -2939,8 +3034,10 @@
       var D = S.dr; if (!D || !D.canal) return;
       lireCompose();
       var M = modeles(D.canal, D.l), i = D.tpl == null ? Math.max(0, M.findIndex(function (x) { return x.reco; })) : D.tpl;
+      if (i >= M.length) i = 0;
       var txt = D.txt != null ? D.txt : M[i].t, subj = D.subj != null ? D.subj : M[i].s;
-      canal(D.canal, { text: txt, subject: subj });
+      if (M[i].id != null) modelesApi().then(function (api) { if (api) api.utilise(M[i].id); });
+      canal(D.canal, { text: txt, subject: subj, trous: M[i].manq || [] });
     }
     // v62 : tout le Pool au vendeur suggéré (sites que l'on encadre).
     function toutAttribuer() {
@@ -3654,6 +3751,7 @@
 .lmtc-ov .compose textarea,.lmtc-ov .compose input[type=text]{width:100%}
 .lmtc-ov .compose .row{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
 .lmtc-ov .compose .row .hint{flex:1 1 200px}
+.lmtc-ov .compose .hint.err{color:#c4554a;font-weight:600}
 .lmtc-ov .dr-f{max-height:62vh;overflow:auto;grid-auto-rows:max-content;align-content:start}
 .lmtc-ov .drawer.composing .dr-f{max-height:30vh}
 /* v70 : UN SEUL défilement, celui du volet entier (plus de petites zones
@@ -3688,6 +3786,9 @@
 .lmtc .act:has(.cartes,.vend,.panel > .vide){background:none;border:0;box-shadow:none}
 .lmtc .act:has(.cartes,.vend,.panel > .vide) .panel{padding:0}
 .lmtc .bacs-l{display:flex;flex-wrap:wrap;gap:4px 10px;align-items:baseline;background:var(--card);border:1px solid var(--line);border-left:4px solid var(--m-rouge);border-radius:12px;padding:10px 14px;margin-bottom:18px;font-size:13px;color:var(--ink-2)}
+.lmtc .demo-l{display:flex;flex-wrap:wrap;gap:4px 10px;align-items:center;background:var(--sel);border:1px solid var(--bleu-clair);border-left:4px solid var(--bleu);border-radius:12px;padding:10px 14px;margin-bottom:18px;font-size:13px;color:var(--bleu-dk)}
+.lmtc .demo-l b{font-weight:800}
+.lmtc .demo-l .btn,.lmtc .bacs-l .btn{margin-left:auto}
 .lmtc .bacs-l b{color:var(--m-rouge);font-weight:800}
 .lmtc .regle{background:none;border:0;padding:0 2px;margin:0 0 16px}
 .lmtc .regle .i{background:var(--sel)}
