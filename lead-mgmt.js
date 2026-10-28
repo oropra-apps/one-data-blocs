@@ -1,13 +1,16 @@
 // ============================================================================
 //  LEAD MANAGEMENT — module One Data (OD.define 'lead-mgmt')
-//  VERSION TEAM COLIN (v72) — déploiement CIBLÉ (publish-targets :
+//  VERSION TEAM COLIN (v73) — déploiement CIBLÉ (publish-targets :
+//  v73 (28/10/2026) : plateau VROOM, bandeau BACS corrigé — ce qui bloque
+//  est l'absence de BACS ouvert sur le poste, pas l'identifiant BACS du compte
+//  (facultatif : il sert seulement à nommer l'opérateur propriétaire du lead).
 //  v72 (28/10/2026) : PLATEAU VROOM revu.
 //  * « Prendre le suivant » : le lead FRAIS (moins de 24 h) le plus en
 //    retard sur son délai ; plus jamais un lead de trois semaines quand des
 //    leads du jour attendent. Pool BACS en trois files : Moins de 24 h (par
 //    défaut), Plus de 24 h, Stock accepté. Hors délai = leads frais.
-//  * Bandeau BACS réduit à une ligne ; boutons grisés avec la raison exacte
-//    (compte non relié à BACS ou BACS fermé).
+//  * Bandeau BACS réduit à une ligne (« BACS fermé sur ce poste ») ; boutons
+//    grisés avec la raison en infobulle.
 //  * Onglet « Rappels dus » (compteur = rappels dus, comme l'en-tête), liste
 //    triée par échéance. Trafic atelier retiré (pastille et signal).
 //  * Une étiquette par lead (campagne, sinon source) ; le site BACS passe
@@ -411,7 +414,7 @@
     // v60 : BACS doit être ouvert sur CE poste (session de l'opérateur). On
     // bloque AVANT le geste ; la base le refuserait de toute façon.
     function bloque() { return ecritBacs() && S.bacs.canal !== 'moi'; }
-    function dis() { return bloque() ? ' disabled title="' + (S.bacs && S.bacs.moi_bacs === false ? 'Compte non relié à BACS' : 'Ouvrez BACS dans un onglet de ce navigateur pour agir') + '"' : ''; }
+    function dis() { return bloque() ? ' disabled title="Ouvrez BACS dans un onglet de ce navigateur pour agir"' : ''; }
     var GESTES_BACS = ['prendre', 'qualifier', 'injoignable', 'long-terme', 'abandonner'];
     // Réveille l'extension pour qu'elle vide la file tout de suite (sans
     // effet si elle ne connaît pas encore ce signal : elle la videra au
@@ -426,9 +429,11 @@
     function bandeauBacs() {
       var b = S.bacs; if (!b || !b.ecrire_bacs) return '';
       // v71 : une ligne discrète (les boutons sont grisés, avec la raison en infobulle).
-      if (b.canal !== 'moi') return '<div class="bacs-l" role="status">' + (b.moi_bacs === false
-          ? '<b>Compte non relié à BACS.</b><span>Vos gestes sont reportés dans BACS à votre nom : l\'administrateur doit renseigner votre identifiant BACS.</span>'
-          : '<b>BACS fermé sur ce poste.</b><span>Ouvrez BACS dans un onglet de ce navigateur : les gestes se débloquent dès qu\'il répond.</span>') + '</div>';
+      // Ce qui bloque, c'est l'absence de session BACS sur CE poste (règle du
+      // 22/10 : un geste qui touche BACS exige BACS ouvert chez l'utilisateur).
+      // L'identifiant BACS du compte n'est pas requis : il sert seulement à
+      // mettre l'opérateur propriétaire du lead dans BACS.
+      if (b.canal !== 'moi') return '<div class="bacs-l" role="status"><b>BACS fermé sur ce poste.</b><span>Prendre, transférer ou abandonner un lead s\'écrit dans BACS : ouvrez BACS dans un onglet de ce navigateur, avec l\'extension One Data. Les gestes se débloquent dès qu\'il répond.</span></div>';
       var h = '';
       if (b.en_attente_vieux > 0) h += '<div class="bd warn"><b>' + plural(b.en_attente_vieux, 'geste attend', 'gestes attendent') + ' d\'être appliqué' + (b.en_attente_vieux > 1 ? 's' : '') + ' dans BACS.</b>'
         + '<span>Ils partent au prochain passage de l\'extension. Si cela dure, rechargez l\'onglet BACS.</span></div>';
@@ -1144,7 +1149,7 @@
     function memoAck() { try { FW.localStorage.setItem('lmtc-ack', JSON.stringify(Array.from(S.ack).slice(-200))); } catch (e) {} }
     async function action(a, id, ev) {
       if (GESTES_BACS.indexOf(a) !== -1 && bloque()) {
-        toast(S.bacs && S.bacs.moi_bacs === false ? 'Votre compte n\'est pas relié à BACS : l\'administrateur doit renseigner votre identifiant BACS.' : 'BACS n\'est pas ouvert sur votre poste : ouvrez-le dans un onglet de ce navigateur et connectez-vous.', true); return;
+        toast('BACS n\'est pas ouvert sur votre poste : ouvrez-le dans un onglet de ce navigateur et connectez-vous.', true); return;
       }
       switch (a) {
         case 'age': S.tab = 'piscine'; S.stock = false; S.age = id === 'vieux' ? 'vieux' : 'frais'; render(); return;
