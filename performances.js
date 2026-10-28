@@ -1,5 +1,9 @@
 // ============================================================================
 //  PERFORMANCES ÉQUIPE — module One Data (OD.define)  v1
+//  v29 (29/10/2026) : sélecteur de dates identique à celui de la gestion des
+//  ventes. Vue Leads : les raccourcis restent (7 jours… 90 jours) et, à droite,
+//  le bouton « 📅 du → au » ouvre le calendrier (deux clics) à la place du
+//  libellé « du … au … ». Vue Ventes : même dessin exact (bouton et calendrier).
 //  v28 (27/10/2026) : la barre du haut (topnav v35, menu « Leads ») ouvre la
 //  page directement sur la vue Leads ou Ventes (window.__odPerfVue).
 //  v27 (27/10/2026) : onglet « Leads » (Team Colin). Les indicateurs du lead
@@ -780,10 +784,10 @@ OD.define('performances', {
 #perf-root .pf-btn2.on { background:var(--orange); border-color:var(--orange); color:#633806; }
 #perf-root .pf-btn2:disabled { opacity:.6; cursor:wait; }
 #perf-root .pf-sep { width:1px; height:20px; background:var(--border); }
-#perf-root .pf-range { border:1px solid var(--blue-lt); border-radius:6px; padding:6px 12px; font-size:11px; color:var(--blue-dk); background:#fff; cursor:pointer; font-family:inherit; font-weight:600; display:inline-flex; align-items:center; gap:6px; }
-#perf-root .pf-range:hover { background:#f5f8fc; border-color:var(--blue-dk); }
+#perf-root .pf-range { background:#fff; border:1px solid #ece9e1; border-radius:10px; padding:7px 12px; font-family:inherit; font-size:12px; font-weight:700; color:#2a5ea9; cursor:pointer; display:inline-flex; align-items:center; gap:6px; white-space:nowrap; }
+#perf-root .pf-range:hover { border-color:#2a5ea9; }
 #perf-root .pf-range:disabled { opacity:.6; cursor:default; }
-#perf-root .pf-range-car { font-size:9px; color:var(--text-mut); }
+#perf-root .pf-range-car { font-size:10px; color:#888780; }
 #perf-root .pf-toggle { display:flex; border:1px solid var(--blue-lt); border-radius:6px; overflow:hidden; }
 #perf-root .pf-toggle button { padding:5px 12px; font-size:11px; border:none; cursor:pointer; background:#fff; color:var(--blue-dk); font-family:inherit; }
 #perf-root .pf-toggle button.active { background:var(--blue-dk); color:#fff; }
@@ -1533,19 +1537,19 @@ OD.define('performances', {
     if (doc.getElementById('pf-dp-style')) return;
     const st = doc.createElement('style'); st.id = 'pf-dp-style';
     st.textContent = `
-#pf-dp .pf-dp-box { background:#fff; border:1px solid #eaf0f9; border-radius:10px; box-shadow:0 8px 30px rgba(42,94,169,.18); padding:12px; width:262px; font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; }
+#pf-dp .pf-dp-box { background:#fff; border:1.5px solid #e8eef7; border-radius:12px; box-shadow:0 8px 30px rgba(42,94,169,.18); padding:13px; width:262px; font-family:"Nunito Sans",system-ui,sans-serif; }
 #pf-dp .pf-dp-head { display:flex; align-items:center; justify-content:space-between; margin-bottom:8px; }
-#pf-dp .pf-dp-head span { font-size:12px; font-weight:600; color:#2a5ea9; text-transform:capitalize; }
-#pf-dp .pf-dp-head button { width:24px; height:24px; border:1px solid #eaf0f9; background:#fff; border-radius:6px; cursor:pointer; color:#2a5ea9; font-size:13px; line-height:1; padding:0; }
+#pf-dp .pf-dp-head span { font-size:12px; font-weight:700; color:#2a5ea9; text-transform:capitalize; }
+#pf-dp .pf-dp-head button { width:26px; height:26px; border:1.5px solid #e8eef7; background:#fff; border-radius:8px; cursor:pointer; color:#2a5ea9; font-size:13px; line-height:1; padding:0; }
 #pf-dp .pf-dp-head button:hover { background:#f5f8fc; }
 #pf-dp .pf-dp-grid { display:grid; grid-template-columns:repeat(7,33px); gap:2px; }
-#pf-dp .pf-dp-dow { font-size:9px; color:#acc5e4; text-align:center; font-weight:700; padding-bottom:3px; }
-#pf-dp .pf-dp-day { height:29px; line-height:29px; text-align:center; font-size:11px; color:#2c2c2a; border-radius:6px; cursor:pointer; }
-#pf-dp .pf-dp-day:hover { background:#eaf0f9; }
-#pf-dp .pf-dp-day.today { box-shadow:inset 0 0 0 1px #acc5e4; }
-#pf-dp .pf-dp-day.sel { background:#2a5ea9; color:#fff; font-weight:700; }
-#pf-dp .pf-dp-day.inr { background:#e6f1fb; }
-#pf-dp .pf-dp-foot { margin-top:8px; text-align:center; font-size:10px; color:#7a9cc4; font-style:italic; }
+#pf-dp .pf-dp-dow { font-size:9px; color:#acc5e4; text-align:center; font-weight:800; padding-bottom:3px; }
+#pf-dp .pf-dp-day { height:29px; line-height:29px; text-align:center; font-size:11px; color:#2c2c2a; border-radius:7px; cursor:pointer; }
+#pf-dp .pf-dp-day:hover { background:#eef4fc; }
+#pf-dp .pf-dp-day.today { box-shadow:inset 0 0 0 1.5px #acc5e4; }
+#pf-dp .pf-dp-day.sel { background:#2a5ea9; color:#fff; font-weight:800; }
+#pf-dp .pf-dp-day.inr { background:#eef4fc; }
+#pf-dp .pf-dp-foot { margin-top:8px; text-align:center; font-size:10px; color:#9bb3d1; font-style:italic; }
 `;
     doc.head.appendChild(st);
   }
@@ -2398,6 +2402,96 @@ OD.define('performances', {
   function montageLeads(host) {
     const C = { bleu: '#2a5ea9', bleuDk: '#1F4A85', bleuCl: '#acc5e4', bleuPale: '#eef4fc', vert: '#53bda7', vertDk: '#00997f',
                 orange: '#fac055', orangeDk: '#d2941f', rouge: '#d97070', rougeDk: '#c0524f', ink: '#1c2b45', ink2: '#5a6b86', ink3: '#8b99b0', ligne: '#e3e9f3' };
+    // ==========================================================================
+    //  SÉLECTEUR DE PÉRIODE — même dessin que la gestion des ventes (kanban) :
+    //  un bouton « 📅 01 oct. → 28 oct. ▾ », un calendrier d'un mois, deux clics
+    //  (début puis fin). Copie conforme dans chaque module (aucun chargement
+    //  externe) : odPeriodeKit(doc, FW) rend { bouton, ouvrir, fermer, moisEnCours }.
+    // ==========================================================================
+    function odPeriodeKit(doc, FW) {
+      var dehors = null;
+      var e = function (s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); };
+      var ymd = function (y, m, d) { return y + '-' + String(m + 1).padStart(2, '0') + '-' + String(d).padStart(2, '0'); };
+      function style() {
+        if (doc.getElementById('od-dp-style')) return;
+        var st = doc.createElement('style'); st.id = 'od-dp-style';
+        st.textContent = '.od-range{background:#fff;border:1px solid #ece9e1;border-radius:10px;padding:7px 12px;font-family:inherit;font-size:12px;font-weight:700;color:#2a5ea9;cursor:pointer;display:inline-flex;align-items:center;gap:6px;white-space:nowrap;line-height:1.2}'
+          + '.od-range:hover{border-color:#2a5ea9}.od-range:disabled{opacity:.6;cursor:default}'
+          + '.od-range .od-caret{font-size:10px;color:#888780}'
+          + '#od-dp .kan-dp-box{background:#fff;border:1.5px solid #e8eef7;border-radius:12px;box-shadow:0 8px 30px rgba(42,94,169,.18);padding:13px;width:262px;font-family:"Nunito Sans",system-ui,sans-serif}'
+          + '#od-dp .kan-dp-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:8px}'
+          + '#od-dp .kan-dp-head span{font-size:12px;font-weight:700;color:#2a5ea9;text-transform:capitalize}'
+          + '#od-dp .kan-dp-head button{width:26px;height:26px;border:1.5px solid #e8eef7;background:#fff;border-radius:8px;cursor:pointer;color:#2a5ea9;font-size:13px;line-height:1;padding:0}'
+          + '#od-dp .kan-dp-head button:hover{background:#f5f8fc}'
+          + '#od-dp .kan-dp-grid{display:grid;grid-template-columns:repeat(7,33px);gap:2px}'
+          + '#od-dp .kan-dp-dow{font-size:9px;color:#acc5e4;text-align:center;font-weight:800;padding-bottom:3px}'
+          + '#od-dp .kan-dp-day{height:29px;line-height:29px;text-align:center;font-size:11px;color:#2c2c2a;border-radius:7px;cursor:pointer}'
+          + '#od-dp .kan-dp-day:hover{background:#eef4fc}'
+          + '#od-dp .kan-dp-day.today{box-shadow:inset 0 0 0 1.5px #acc5e4}'
+          + '#od-dp .kan-dp-day.sel{background:#2a5ea9;color:#fff;font-weight:800}'
+          + '#od-dp .kan-dp-day.inr{background:#eef4fc}'
+          + '#od-dp .kan-dp-foot{margin-top:8px;text-align:center;font-size:10px;color:#9bb3d1;font-style:italic}';
+        doc.head.appendChild(st);
+      }
+      function fmt(du, au) {
+        var f = function (s) { if (!s) return '?'; var d = new Date(String(s).slice(0, 10) + 'T12:00:00'); return d.toLocaleDateString('fr-FR', { day: '2-digit', month: 'short' }); };
+        return f(du) + ' → ' + f(au);
+      }
+      function bouton(du, au, attrs, titre) {
+        style();
+        return '<button type="button" class="od-range" ' + (attrs || '') + (titre ? ' title="' + e(titre) + '"' : '') + '>📅 <span class="od-range-t">' + e(fmt(du, au)) + '</span> <span class="od-caret">▾</span></button>';
+      }
+      function fermer() {
+        var p = doc.getElementById('od-dp'); if (p) p.remove();
+        if (dehors) { doc.removeEventListener('mousedown', dehors, true); dehors = null; }
+      }
+      function ouvrir(anchor, debut, surChoix) {
+        if (doc.getElementById('od-dp')) { fermer(); return; }
+        style();
+        var pk = { mois: null, deb: null, fin: null, survol: null };
+        var m0 = new Date(String(debut || '').slice(0, 10) + 'T12:00:00'); if (isNaN(m0)) m0 = new Date();
+        pk.mois = new Date(m0.getFullYear(), m0.getMonth(), 1);
+        var pop = doc.createElement('div'); pop.id = 'od-dp';
+        var r = anchor.getBoundingClientRect();
+        var largeur = ((FW && FW.innerWidth) || (doc.defaultView && doc.defaultView.innerWidth) || 1200);
+        pop.style.cssText = 'position:fixed;z-index:99999;top:' + (r.bottom + 6) + 'px;left:' + Math.max(8, Math.min(r.left, largeur - 280)) + 'px';
+        doc.body.appendChild(pop);
+        function cal() {
+          var y = pk.mois.getFullYear(), m = pk.mois.getMonth(), p1 = new Date(y, m, 1), dec = (p1.getDay() + 6) % 7, nb = new Date(y, m + 1, 0).getDate();
+          var auj = new Date(), today = ymd(auj.getFullYear(), auj.getMonth(), auj.getDate()), a = pk.deb, b = pk.fin || pk.survol;
+          var lo = a && b ? (a < b ? a : b) : null, hi = a && b ? (a < b ? b : a) : null;
+          var h = '<div class="kan-dp-box"><div class="kan-dp-head"><button type="button" data-nav="-1">‹</button><span>' + e(p1.toLocaleDateString('fr-FR', { month: 'long', year: 'numeric' })) + '</span><button type="button" data-nav="1">›</button></div><div class="kan-dp-grid">';
+          ['L', 'M', 'M', 'J', 'V', 'S', 'D'].forEach(function (x) { h += '<span class="kan-dp-dow">' + x + '</span>'; });
+          for (var i = 0; i < dec; i++) h += '<span></span>';
+          for (var d = 1; d <= nb; d++) {
+            var ds = ymd(y, m, d), c = 'kan-dp-day';
+            if (ds === today) c += ' today';
+            if (pk.deb === ds || pk.fin === ds) c += ' sel'; else if (lo && hi && ds > lo && ds < hi) c += ' inr';
+            h += '<span class="' + c + '" data-d="' + ds + '">' + d + '</span>';
+          }
+          return h + '</div><div class="kan-dp-foot">' + (pk.deb ? 'Cliquez la date de fin' : 'Cliquez la date de début') + '</div></div>';
+        }
+        function brancher() {
+          pop.querySelectorAll('[data-nav]').forEach(function (b) { b.addEventListener('click', function (ev) { ev.stopPropagation(); pk.mois = new Date(pk.mois.getFullYear(), pk.mois.getMonth() + Number(b.getAttribute('data-nav')), 1); peindre(); }); });
+          pop.querySelectorAll('.kan-dp-day').forEach(function (c) {
+            c.addEventListener('click', function () {
+              var ds = c.getAttribute('data-d');
+              if (!pk.deb || pk.fin) { pk.deb = ds; pk.fin = null; pk.survol = null; peindre(); return; }
+              pk.fin = ds; var a = pk.deb, b = pk.fin; if (b < a) { var t = a; a = b; b = t; }
+              fermer(); surChoix(a, b);
+            });
+            c.addEventListener('mouseenter', function () { if (pk.deb && !pk.fin && pk.survol !== c.getAttribute('data-d')) { pk.survol = c.getAttribute('data-d'); peindre(); } });
+          });
+        }
+        function peindre() { pop.innerHTML = cal(); brancher(); }
+        peindre();
+        dehors = function (ev) { if (!pop.contains(ev.target) && ev.target !== anchor && !anchor.contains(ev.target)) fermer(); };
+        setTimeout(function () { doc.addEventListener('mousedown', dehors, true); }, 0);
+      }
+      function moisEnCours() { var a = new Date(); return { du: ymd(a.getFullYear(), a.getMonth(), 1), au: ymd(a.getFullYear(), a.getMonth(), a.getDate()) }; }
+      return { bouton: bouton, ouvrir: ouvrir, fermer: fermer, fmt: fmt, moisEnCours: moisEnCours };
+    }
+    const DPL = odPeriodeKit(doc, doc.defaultView || window);
     const L = window.__OD_PERF_LEADS__ = window.__OD_PERF_LEADS__ || { preset: 'mois', site: null };
     let data = null, charge = false, erreur = null, jeton = 0;
     injecterCssLeads();
@@ -2425,11 +2519,13 @@ OD.define('performances', {
       return [ymdL(new Date(n.getFullYear(), n.getMonth(), 1, 12)), ymdL(n)];
     }
     const PRESETS = [['7j', '7 jours'], ['30j', '30 jours'], ['mois', 'Ce mois-ci'], ['moisprec', 'Mois dernier'], ['90j', '90 jours']];
+    // v29 : dates choisies au calendrier (L.du / L.au), sinon le raccourci.
+    function periodeL() { return (L.du && L.au) ? [L.du, L.au] : bornes(L.preset); }
     function niveauDelai(p) { return p == null ? 'n' : p >= 80 ? 'ok' : p >= 50 ? 'warn' : 'crit'; }
 
     async function charger() {
       const t = ++jeton; charge = false; erreur = null; rendre();
-      const [d, f] = bornes(L.preset);
+      const [d, f] = periodeL();
       try {
         const r = await sb.rpc('perf_leads', { p_deb: d, p_fin: f, p_sites: L.site ? [Number(L.site)] : null });
         if (t !== jeton) return;
@@ -2538,13 +2634,13 @@ OD.define('performances', {
       injecterCssLeads();
       const sites = (data && data.sites) || [];
       let h = '<div class="pl-bar"><span class="pl-lbl">Période</span><div class="pl-seg">'
-        + PRESETS.map(p => '<button type="button" class="' + (L.preset === p[0] ? 'on' : '') + '" data-pl-preset="' + p[0] + '">' + p[1] + '</button>').join('') + '</div>';
+        + PRESETS.map(p => '<button type="button" class="' + (!L.du && L.preset === p[0] ? 'on' : '') + '" data-pl-preset="' + p[0] + '">' + p[1] + '</button>').join('') + '</div>';
       if (sites.length > 1) {
         h += '<span class="pl-lbl">Périmètre</span><select class="pl-sel" data-pl-site><option value="">Tous mes sites</option>'
           + sites.map(s => '<option value="' + s.id_site + '"' + (String(L.site) === String(s.id_site) ? ' selected' : '') + '>' + e(propre(s.site)) + '</option>').join('') + '</select>';
       }
-      const [d, f] = bornes(L.preset);
-      h += '<span class="pl-per">du ' + new Date(d + 'T12:00:00').toLocaleDateString('fr-FR') + ' au ' + new Date(f + 'T12:00:00').toLocaleDateString('fr-FR') + '</span></div>';
+      const [d, f] = periodeL();
+      h += '<span class="pl-per">' + DPL.bouton(d, f, 'data-pl-dp="1"', 'Choisir les dates') + '</span></div>';
       if (!charge) { host.innerHTML = h + '<div class="pl-vide">Chargement des indicateurs…</div>'; lier(); return; }
       if (erreur) { host.innerHTML = h + '<div class="pl-vide err">Les indicateurs n\'ont pas pu être chargés : ' + e(erreur) + '</div>'; lier(); return; }
       const k = data.kpi || {}, p = data.prec || {};
@@ -2581,7 +2677,9 @@ OD.define('performances', {
       lier();
     }
     function lier() {
-      host.querySelectorAll('[data-pl-preset]').forEach(b => b.addEventListener('click', () => { L.preset = b.getAttribute('data-pl-preset'); charger(); }));
+      host.querySelectorAll('[data-pl-preset]').forEach(b => b.addEventListener('click', () => { L.preset = b.getAttribute('data-pl-preset'); L.du = L.au = null; charger(); }));
+      const bdp = host.querySelector('[data-pl-dp]');
+      if (bdp) bdp.addEventListener('click', () => { const [d0] = periodeL(); DPL.ouvrir(bdp, d0, (a, z) => { L.du = a; L.au = z; charger(); }); });
       const s = host.querySelector('[data-pl-site]');
       if (s) s.addEventListener('change', () => { L.site = s.value || null; charger(); });
     }
