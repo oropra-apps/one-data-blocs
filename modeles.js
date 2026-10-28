@@ -1,5 +1,10 @@
 // ============================================================================
-//  MODÈLES DE MESSAGES — module One Data (OD.define 'modeles')  v1
+//  MODÈLES DE MESSAGES — module One Data (OD.define 'modeles')  v2
+//  v2 (28/10/2026) : relecture des textes. Variables « le_vehicule » et
+//  « du_vehicule » (article accordé : « la Toyota Yaris », « le Toyota C-HR »,
+//  « la Lexus ES d'occasion »), nom du véhicule nettoyé en base. Partie
+//  facultative avec repli : [[ votre {{vehicule}} || votre véhicule ]].
+//  L'aperçu de l'administration applique la même règle que la base.
 //  v1 (28/10/2026) — Team Colin.
 //  * API partagée window.__OD_MODELES__, posée dès le chargement du fichier :
 //      lister({ canal, idClient, idLead, idSite, contexte })  -> modele_rendus
@@ -70,8 +75,9 @@
   function appliquer(txt, vars) {
     var t = String(txt || '');
     t = t.replace(/\[\[([\s\S]*?)\]\]/g, function (m, frag) {
-      var ok = true; frag.replace(/\{\{\s*([a-z_]+)\s*\}\}/g, function (x, k) { if (!vars[k]) ok = false; return x; });
-      return ok ? frag : '';
+      var i = frag.indexOf('||'), a = i >= 0 ? frag.slice(0, i) : frag, b = i >= 0 ? frag.slice(i + 2) : '';
+      var ok = true; a.replace(/\{\{\s*([a-z_]+)\s*\}\}/g, function (x, k) { if (!vars[k]) ok = false; return x; });
+      return ok ? a : b;
     });
     t = t.replace(/\{\{\s*([a-z_]+)\s*\}\}/g, function (m, k) { return vars[k] != null && vars[k] !== '' ? vars[k] : '[' + k + ']'; });
     return t.replace(/ {2,}/g, ' ').replace(/ ([,.])/g, '$1');
@@ -464,10 +470,12 @@
         + '<div class="odm-vars">' + groupes.map(function (g) {
             return '<div class="grp"><b>' + esc(g) + '</b>' + vars.filter(function (v) { return v.groupe === g; }).map(function (v) {
               return '<button class="odm-var" data-a="var" data-v="' + v.cle + '" title="' + esc(v.libelle) + ' — ex. ' + esc(v.exemple) + '">' + esc(v.libelle.replace(/\s*\(.*\)$/, '')) + '</button>'; }).join('') + '</div>'; }).join('')
-        + '<div class="grp"><b>Mise en forme</b><button class="odm-var opt" data-a="facultatif" title="Sélectionnez une partie du texte : elle disparaîtra si une variable qu\'elle contient est vide.">[[ partie facultative ]]</button></div></div>'
+        + '<div class="grp"><b>Mise en forme</b><button class="odm-var opt" data-a="facultatif" title="Sélectionnez une partie du texte : elle disparaîtra si une variable qu\'elle contient est vide.">[[ partie facultative ]]</button>'
+        + '<button class="odm-var opt" data-a="repli" title="Texte de remplacement quand la variable est vide.">[[ … || repli ]]</button></div></div>'
         + '<textarea class="odm-ta" data-f="corps" rows="' + (canal === 'email' ? 12 : 5) + '">' + esc(m.corps || '') + '</textarea>'
         + '<div class="odm-cnt" data-x="cnt"></div>'
-        + '<p class="odm-hint">Cliquez une variable pour l\'insérer à l\'endroit du curseur. Une variable sans valeur pour un client devient [à compléter] dans le message du vendeur, sauf si elle est dans une <b>partie facultative</b> [[ … ]] : la partie disparaît alors entièrement.</p></div>'
+        + '<p class="odm-hint">Cliquez une variable pour l\'insérer à l\'endroit du curseur. Pour le véhicule, préférez <b>« Véhicule avec article »</b> (« le Toyota C-HR », « la Toyota Yaris ») à « le {{vehicule}} » : l\'article est accordé tout seul. '
+        + 'Une variable sans valeur pour un client devient [à compléter] dans le message du vendeur, sauf dans une <b>partie facultative</b> : [[ concernant {{le_vehicule}} ]] disparaît entièrement, et [[ votre {{vehicule}} || votre véhicule ]] prend le texte après « || ».</p></div>'
         + '<div class="odm-row"><div class="odm-f" style="flex:0 0 120px"><label class="odm-lbl">Ordre</label><input class="odm-in" type="number" data-f="ordre" value="' + esc(m.ordre != null ? m.ordre : 100) + '"></div>'
         + '<div class="odm-f"><label class="odm-lbl">État</label><div class="odm-chips"><button class="odm-chip' + (m.actif ? ' on' : '') + '" data-a="etat" data-v="1">Actif</button><button class="odm-chip' + (!m.actif ? ' on' : '') + '" data-a="etat" data-v="0">' + (parent ? 'Retiré pour ce site' : 'Désactivé') + '</button></div></div></div>'
         + '</div><div><label class="odm-lbl">Aperçu avec un client fictif</label><div class="odm-prev" data-x="prev"></div>'
@@ -511,6 +519,12 @@
           var c = last || ta, s = c.selectionStart, en = c.selectionEnd;
           if (s != null && en > s) { var sel = c.value.slice(s, en); c.value = c.value.slice(0, s) + '[[' + sel + ']]' + c.value.slice(en); c.focus(); try { c.setSelectionRange(s, en + 4); } catch (x) { } apercu(); }
           else inserer(c, '[[ ]]');
+          return;
+        }
+        if (a === 'repli') {
+          var c2 = last || ta, s2 = c2.selectionStart, e2 = c2.selectionEnd;
+          var sel2 = (s2 != null && e2 > s2) ? c2.value.slice(s2, e2) : '';
+          inserer(c2, '[[' + (sel2 || ' ') + '|| ]]');
           return;
         }
         if (a === 'ctx') { b.classList.toggle('on'); return; }
