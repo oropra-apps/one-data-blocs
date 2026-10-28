@@ -1,4 +1,6 @@
 // ============================================================================
+//  v31 (28/10/2026) : bouton « Hors PVO² » masqué quand il ne compte aucun VO (stock VO
+//    construit depuis Planet VO² : il est toujours vide chez Team Colin).
 //  v30 (28/10/2026) : FILTRE VO / VD (le tag vo-liste-v29 existait deja, identique a la v28). Depuis le 28/10 le stock VO vient de
 //  Planet VO², démos (VD) comprises (TYPE_VEH = VO ou VD dans v_liste_vo).
 //  * boutons « VO » / « VD (démos) » à côté du canal PVO², avec compteurs ;
@@ -3899,6 +3901,8 @@ OD.define('vo-liste', {
     S.f.canaux = memo;
     return '<div class="vl-canaux"><span class="vl-can-lab">Canal PVO²</span>' + CANAUX_PVO.map(function (c) {
       var n = base.filter(function (r) { return canalDe(r, c.k); }).length;
+      // v31 : « Hors PVO² » n'a plus de sens quand le stock VO vient de Planet VO² : masqué s'il est vide.
+      if (c.k === 'hors' && !n) return '';
       return '<button type="button" class="vl-can' + (sel.indexOf(c.k) !== -1 ? ' on' : '') + '" data-canal="' + c.k + '">' + esc(c.t) + ' <i>' + n + '</i></button>';
     }).join('') + typesHtml() + '</div>';
   }
