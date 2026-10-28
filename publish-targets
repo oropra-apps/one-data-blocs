@@ -69,3 +69,17 @@ onboarding   = oropra
 # réalisable : tant que le SQL n'est pas sur les autres tenants, on cible.
 bilaterales   = teamcolin
 agenda        = teamcolin
+
+# Suivi d'activité v7 (28/10/2026) : refonte par rôle (vendeur, chef des
+# ventes, directeur de site, direction). Il appelle act_contexte, act_vendeur,
+# act_chef, act_site, act_entonnoir et act_groupe, livrées par la migration
+# 20261028080000_suivi_activite_roles.sql sur la seule base de Team Colin.
+# Le reste de la flotte reste sur la v6 (tag activite-v6).
+activite      = teamcolin
+
+# Recherche client v19 (28/10/2026) : ouverte depuis la carte « inconnu » des
+# Notifications (numéro ou adresse pré-saisis, fenêtre de création
+# pré-remplie) ; la recherche par téléphone interroge aussi tel_mob_e164 /
+# tel_fixe_e164, vérifiées sur la seule base de Team Colin. Le reste de la
+# flotte reste sur la v18 (tag client-search-v18).
+client-search = teamcolin
