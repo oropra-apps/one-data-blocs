@@ -1,3 +1,12 @@
+// v13 (29/10/2026) : dictée vocale du corps du message (bouton micro à côté
+// du trombone, comme les fenêtres SMS et WhatsApp). Le texte s'insère à
+// l'endroit du curseur (sinon avant la signature), le texte provisoire
+// s'affiche en grisé pendant que l'on parle. Commandes vocales : « virgule »,
+// « point final », « point à la ligne », « point d'interrogation », « point
+// d'exclamation », « deux points », « à la ligne », « nouveau paragraphe »
+// (« point » seul n'est pas interprété : « faire le point » resterait intact). Majuscule automatique en
+// début de phrase. La dictée s'arrête à l'envoi, à la fermeture et dès que
+// l'on tape au clavier dans le message.
 // v12 (28/10/2026) : bouton « Modèles » dans la barre d'outils — modèles
 // gérés dans Administration › Modèles de messages (module `modeles`, chargé à
 // la demande). Le modèle remplit l'objet (nouveau message) et le corps, la
@@ -498,6 +507,7 @@ OD.define('email', {
   /* ---- envoi ---- */
   async function send() {
     if (state.sending) return;
+    stopDictation();
     // committe une saisie en cours éventuelle
     if (state.rcptInput.field && state.rcptInput.text.trim()) commitInput(state.rcptInput.field);
     if (!state.fromId) { state.error = 'Sélectionnez un compte expéditeur.'; render(); return; }
@@ -595,6 +605,9 @@ OD.define('email', {
     '.em-ft-l,.em-ft-r{display:flex;align-items:center;gap:8px}' +
     '.em-send{background:#1F4A85;color:#fff;border:none;border-radius:10px;padding:10px 20px;font:inherit;font-size:14px;font-weight:700;cursor:pointer;display:inline-flex;align-items:center;gap:8px}' +
     '.em-send:hover{background:#163a6b}.em-send:disabled{opacity:.6;cursor:default}' +
+    '.em-dict.on{background:#e24b4a;border-color:#e24b4a;color:#fff;animation:em-pulse 1.1s ease-in-out infinite}' +
+    '@keyframes em-pulse{0%,100%{box-shadow:0 0 0 0 rgba(226,75,74,.45)}50%{box-shadow:0 0 0 6px rgba(226,75,74,0)}}' +
+    '.em-body .em-dict-tmp{color:#7a9cc4;font-style:italic}' +
     '.em-clip{width:38px;height:38px;border:1px solid #dbe6f5;background:#fff;border-radius:10px;color:#5a7196;cursor:pointer;display:inline-flex;align-items:center;justify-content:center}.em-clip:hover{background:#f2f6fc}' +
     '.em-err{color:#e24b4a;font-size:12.5px;flex:1;min-width:120px}' +
     '.em-cancel{border:none;background:none;color:#7a98c5;font:inherit;font-size:13px;font-weight:600;cursor:pointer}' +
@@ -725,6 +738,7 @@ OD.define('email', {
       '<div class="em-body" contenteditable="true" data-ph="Rédigez votre message…">' + state.bodyHtml + '</div>' +
       attHtml +
       '<div class="em-ft"><div class="em-ft-l"><button class="em-clip" data-act="attach" title="Joindre un fichier"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg></button>' +
+      (dictSupported() ? '<button class="em-clip em-dict' + (dict.on ? ' on' : '') + '" data-act="dict" title="' + (dict.on ? 'Arrêter la dictée' : 'Dictée vocale') + '">' + IC_MIC + '</button>' : '') +
       '<button class="em-sig-toggle' + (state.sigOn ? ' on' : '') + '" data-act="sigtoggle" title="Signature automatique"><span class="sw"><span class="kn"></span></span>Signature</button>' +
       '<button class="em-sig-cfg" data-act="sigcfg" title="Paramétrer la signature">&#9998;</button>' +
       '</div>' +
@@ -840,6 +854,8 @@ OD.define('email', {
     on('[data-act="close"]', 'click', () => api.close());
     on('[data-act="send"]', 'click', send);
     on('[data-act="attach"]', 'click', pickFiles);
+    on('[data-act="dict"]', 'mousedown', (e) => { e.preventDefault(); memoCurseur(); });
+    on('[data-act="dict"]', 'click', (e) => { e.preventDefault(); toggleDictation(); });
     on('[data-act="sigtoggle"]', 'click', () => { state.sigOn = !state.sigOn; applySignature(); render(); });
     on('[data-act="sigcfg"]', 'click', ouvrirPanneauSignature);
     on('[data-act="sigclose"]', 'click', () => { state.sigPanel = false; state.sigAvis = { t: '', g: '' }; render(); });
@@ -907,7 +923,116 @@ OD.define('email', {
     on('.em-color', 'input', (e) => cmd('foreColor', e.target.value));
     on('[data-act="modeles"]', 'click', (e) => { e.preventDefault(); choisirModele(); });
     // sauvegarde du corps à la frappe
-    const ed = root.querySelector('.em-body'); if (ed) ed.addEventListener('input', () => { state.bodyHtml = ed.innerHTML; });
+    const ed = root.querySelector('.em-body'); if (ed) {
+      ed.addEventListener('input', () => { state.bodyHtml = ed.innerHTML; });
+      ed.addEventListener('keydown', () => { if (dict.on) stopDictation(); });
+      ed.addEventListener('mouseup', memoCurseur); ed.addEventListener('keyup', memoCurseur);
+    }
+  }
+
+  /* ---- Dictée vocale (v13) ---- */
+  const IC_MIC = '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M6 11a6 6 0 0 0 12 0M12 17v3M9 20h6"/></svg>';
+  const dict = { on: false, recog: null, range: null };
+  function dictSupported() { return !!(win.SpeechRecognition || win.webkitSpeechRecognition); }
+  function editeur() { return getRoot() && getRoot().querySelector('.em-body'); }
+  // Position du curseur dans le message, gardée au moment où l'on clique le micro.
+  function memoCurseur() {
+    try {
+      const ed = editeur(), sel = (doc.getSelection && doc.getSelection()) || win.getSelection();
+      if (ed && sel && sel.rangeCount && ed.contains(sel.getRangeAt(0).startContainer)) dict.range = sel.getRangeAt(0).cloneRange();
+    } catch (e) { }
+  }
+  // Marqueur d'insertion : le texte définitif se place devant, le texte
+  // provisoire s'affiche dedans.
+  function poserMarqueur(ed) {
+    const m = doc.createElement('span'); m.className = 'em-dict-tmp'; m.setAttribute('data-dict', '1');
+    let r = dict.range && ed.contains(dict.range.startContainer) ? dict.range : null;
+    if (!r) {
+      r = doc.createRange();
+      const sig = ed.querySelector('[data-oropra-sig]'), cite = ed.querySelector('blockquote');
+      const avant = sig || cite;
+      if (avant) r.setStartBefore(avant); else { r.selectNodeContents(ed); r.collapse(false); }
+    }
+    r.collapse(false);
+    r.insertNode(m);
+    return m;
+  }
+  // Texte qui précède le marqueur ; un saut de ligne (<br>, début de bloc)
+  // compte comme « \n » pour la majuscule et l'espace.
+  function texteAvant(m) {
+    let p = m.previousSibling;
+    while (p && p.nodeType === 3 && !p.nodeValue.length) p = p.previousSibling;
+    if (!p || (p.nodeType === 1 && /^(BR|DIV|P|UL|OL|LI|BLOCKQUOTE)$/.test(p.nodeName))) {
+      const r0 = doc.createRange(); r0.selectNodeContents(editeur()); r0.setEndBefore(m);
+      return r0.toString() ? r0.toString() + '\n' : '';
+    }
+    const r = doc.createRange(); r.selectNodeContents(editeur()); r.setEndBefore(m);
+    return r.toString();
+  }
+  function ponctuer(t) {
+    return (' ' + t + ' ')
+      .replace(/\s+point d'interrogation\b/gi, ' ?').replace(/\s+point d'exclamation\b/gi, ' !')
+      .replace(/\s+point à la ligne\b/gi, '.\n').replace(/\s+(à la ligne|nouvelle ligne)\b/gi, '\n')
+      .replace(/\s+nouveau paragraphe\b/gi, '\n\n')
+      .replace(/\s+deux[ -]points\b/gi, ' :').replace(/\s+virgule\b/gi, ',')
+      .replace(/\s+point final\b/gi, '.')
+      .replace(/[ \t]+\n/g, '\n').replace(/\n[ \t]+/g, '\n')
+      .replace(/^ +/, '').replace(/ +$/, '');
+  }
+  function insererFinal(m, brut) {
+    let t = ponctuer(brut);
+    if (!t) return;
+    const avant = texteAvant(m);
+    const debutPhrase = !avant.trim() || /[.!?]\s*$/.test(avant) || /\n\s*$/.test(avant);
+    if (debutPhrase) t = t.replace(/^([^\S\n]*)(\p{Ll})/u, (x, a, b) => a + b.toUpperCase());
+    t = t.replace(/([.!?]\s+|\n)(\p{Ll})/gu, (x, a, b) => a + b.toUpperCase());
+    if (avant && !/[\s\u00a0]$/.test(avant) && !/^[,.:!?\n]/.test(t)) t = ' ' + t;
+    if (/^ ?[:!?]/.test(t)) t = '\u00a0' + t.replace(/^ /, '');
+    const frag = doc.createDocumentFragment();
+    t.split('\n').forEach((ligne, i) => { if (i) frag.appendChild(doc.createElement('br')); if (ligne) frag.appendChild(doc.createTextNode(ligne)); });
+    m.parentNode.insertBefore(frag, m);
+  }
+  function majBoutonDict() {
+    const b = getRoot() && getRoot().querySelector('[data-act="dict"]');
+    if (b) { b.classList.toggle('on', dict.on); b.title = dict.on ? 'Arrêter la dictée' : 'Dictée vocale'; }
+  }
+  function nettoyerMarqueur() {
+    const ed = editeur(); if (!ed) return;
+    ed.querySelectorAll('[data-dict]').forEach(n => n.remove());
+    state.bodyHtml = ed.innerHTML;
+  }
+  function stopDictation() {
+    const r = dict.recog; dict.recog = null; dict.on = false;
+    if (r) { try { r.onend = null; r.onresult = null; r.onerror = null; r.stop(); } catch (e) { } }
+    nettoyerMarqueur(); majBoutonDict();
+  }
+  function toggleDictation() {
+    if (dict.on) { stopDictation(); return; }
+    const SR = win.SpeechRecognition || win.webkitSpeechRecognition;
+    if (!SR) { state.error = "La dictée vocale n'est pas disponible sur ce navigateur (utilisez Chrome ou Edge)."; render(); return; }
+    const ed = editeur(); if (!ed) return;
+    ed.querySelectorAll('[data-dict]').forEach(n => n.remove());
+    const r = new SR(); r.lang = 'fr-FR'; r.interimResults = true; r.continuous = true;
+    r.onresult = (e) => {
+      const ed2 = editeur(); if (!ed2) return;
+      let m = ed2.querySelector('[data-dict]'); if (!m) m = poserMarqueur(ed2);
+      let interim = '';
+      for (let i = e.resultIndex; i < e.results.length; i++) {
+        const tx = e.results[i][0].transcript;
+        if (e.results[i].isFinal) insererFinal(m, tx); else interim += tx;
+      }
+      m.textContent = interim ? (/\S$/.test(texteAvant(m)) ? ' ' : '') + interim : '';
+      state.bodyHtml = ed2.innerHTML;
+    };
+    r.onerror = (ev) => {
+      if (ev && (ev.error === 'not-allowed' || ev.error === 'service-not-allowed')) state.error = 'Le micro est bloqué : autorisez-le pour ce site dans le navigateur.';
+      stopDictation(); if (state.error) render();
+    };
+    r.onend = () => { if (dict.recog === r) stopDictation(); };
+    poserMarqueur(ed);
+    dict.recog = r; dict.on = true; state.error = null;
+    try { r.start(); } catch (e) { stopDictation(); return; }
+    majBoutonDict();
   }
 
   /* ---- Modèles de messages (v12) ---- */
@@ -967,7 +1092,7 @@ OD.define('email', {
       const ed = getRoot() && getRoot().querySelector('.em-body'); if (ed && state.mode === 'reply') { ed.focus(); }
       else { const toi = getRoot() && getRoot().querySelector('[data-act="to"]'); if (toi && !state.to) toi.focus(); }
     },
-    close: () => { state.open = false; render(); }
+    close: () => { stopDictation(); state.open = false; render(); }
   };
   window.__EMAIL_UI__ = api;
   // contrat attendu par les cartes email de Contacts
