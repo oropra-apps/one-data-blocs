@@ -1,6 +1,19 @@
 // ============================================================================
 //  LEAD MANAGEMENT — module One Data (OD.define 'lead-mgmt')
-//  VERSION TEAM COLIN (v71) — déploiement CIBLÉ (publish-targets :
+//  VERSION TEAM COLIN (v72) — déploiement CIBLÉ (publish-targets :
+//  v72 (28/10/2026) : PLATEAU VROOM revu.
+//  * « Prendre le suivant » : le lead FRAIS (moins de 24 h) le plus en
+//    retard sur son délai ; plus jamais un lead de trois semaines quand des
+//    leads du jour attendent. Pool BACS en trois files : Moins de 24 h (par
+//    défaut), Plus de 24 h, Stock accepté. Hors délai = leads frais.
+//  * Bandeau BACS réduit à une ligne ; boutons grisés avec la raison exacte
+//    (compte non relié à BACS ou BACS fermé).
+//  * Onglet « Rappels dus » (compteur = rappels dus, comme l'en-tête), liste
+//    triée par échéance. Trafic atelier retiré (pastille et signal).
+//  * Une étiquette par lead (campagne, sinon source) ; le site BACS passe
+//    à côté du nom. Liseret VN / VO (champ Nature de BACS), filtre VN / VO,
+//    sélecteur de période (même calendrier que la gestion des ventes),
+//    onglets aux couleurs One Data, demande du client en tête de fiche.
 //  v71 (28/10/2026) : onglets dans l'ordre Pool (vert One Data), À rappeler
 //  (rouge), Relances et Campagnes (bleu) ; le Pool s'ouvre en premier. Chef :
 //  Pool (vert), En souffrance (rouge), Campagnes (bleu). Fiche d'un lead :
@@ -253,6 +266,75 @@
     }
   });
 
+
+  // ==========================================================================
+  //  Calendrier de période (même dessin que la gestion des ventes : un mois,
+  //  deux clics). Partagé par le poste site et le poste VROOM.
+  // ==========================================================================
+  var __calDehors = null;
+  function fermerCalendrier(doc) {
+    var e = doc.getElementById('lm-dp'); if (e) e.remove();
+    if (__calDehors) { doc.removeEventListener('mousedown', __calDehors, true); __calDehors = null; }
+  }
+  function ouvrirCalendrier(doc, FW, anchor, debut, surChoix) {
+    if (doc.getElementById('lm-dp')) { fermerCalendrier(doc); return; }
+    var pk = { mois: null, deb: null, fin: null, survol: null };
+    var m0 = new Date(String(debut) + 'T12:00:00'); if (isNaN(m0)) m0 = new Date(); pk.mois = new Date(m0.getFullYear(), m0.getMonth(), 1);
+    var pop = doc.createElement('div'); pop.id = 'lm-dp';
+    var r = anchor.getBoundingClientRect();
+    pop.style.cssText = 'position:fixed;z-index:99999;top:' + (r.bottom + 6) + 'px;left:' + Math.max(8, Math.min(r.left, ((FW && FW.innerWidth) || 1200) - 280)) + 'px';
+    styleCalendrier(doc); doc.body.appendChild(pop);
+    var ymd = function (y, m, d) { return y + '-' + String(m + 1).padStart(2, '0') + '-' + String(d).padStart(2, '0'); };
+    function choisir(a, b) { fermerCalendrier(doc); surChoix(a, b); }
+    function cal() {
+      var y = pk.mois.getFullYear(), m = pk.mois.getMonth(), p1 = new Date(y, m, 1), dec = (p1.getDay() + 6) % 7, nb = new Date(y, m + 1, 0).getDate();
+      var auj = new Date(), today = ymd(auj.getFullYear(), auj.getMonth(), auj.getDate()), a = pk.deb, b = pk.fin || pk.survol;
+      var lo = a && b ? (a < b ? a : b) : null, hi = a && b ? (a < b ? b : a) : null;
+      var h = '<div class="kan-dp-box"><div class="kan-dp-head"><button type="button" data-nav="-1">‹</button><span>' + esc(p1.toLocaleDateString('fr-FR', { month: 'long', year: 'numeric' })) + '</span><button type="button" data-nav="1">›</button></div><div class="kan-dp-grid">';
+      ['L', 'M', 'M', 'J', 'V', 'S', 'D'].forEach(function (x) { h += '<span class="kan-dp-dow">' + x + '</span>'; });
+      for (var i = 0; i < dec; i++) h += '<span></span>';
+      for (var d = 1; d <= nb; d++) {
+        var ds = ymd(y, m, d), c = 'kan-dp-day';
+        if (ds === today) c += ' today';
+        if (pk.deb === ds || pk.fin === ds) c += ' sel'; else if (lo && hi && ds > lo && ds < hi) c += ' inr';
+        h += '<span class="' + c + '" data-d="' + ds + '">' + d + '</span>';
+      }
+      return h + '</div><div class="kan-dp-foot">' + (pk.deb ? 'Cliquez la date de fin' : 'Cliquez la date de début') + '</div></div>';
+    }
+    function brancher() {
+      pop.querySelectorAll('[data-nav]').forEach(function (b) { b.addEventListener('click', function (e) { e.stopPropagation(); pk.mois = new Date(pk.mois.getFullYear(), pk.mois.getMonth() + Number(b.getAttribute('data-nav')), 1); peindre(); }); });
+      pop.querySelectorAll('.kan-dp-day').forEach(function (c) {
+        c.addEventListener('click', function () { var ds = c.getAttribute('data-d'); if (!pk.deb || pk.fin) { pk.deb = ds; pk.fin = null; pk.survol = null; peindre(); return; } pk.fin = ds; var a = pk.deb, b = pk.fin; if (b < a) { var t = a; a = b; b = t; } choisir(a, b); });
+        c.addEventListener('mouseenter', function () { if (pk.deb && !pk.fin && pk.survol !== c.getAttribute('data-d')) { pk.survol = c.getAttribute('data-d'); peindre(); } });
+      });
+    }
+    function peindre() { pop.innerHTML = cal(); brancher(); }
+    peindre();
+    __calDehors = function (e) { if (!pop.contains(e.target) && e.target !== anchor && !anchor.contains(e.target)) fermerCalendrier(doc); };
+    setTimeout(function () { doc.addEventListener('mousedown', __calDehors, true); }, 0);
+  }
+  function periodeDefaut() { var a = new Date(), d = new Date(Date.now() - 29 * 86400000); var f = function (x) { return x.getFullYear() + '-' + String(x.getMonth() + 1).padStart(2, '0') + '-' + String(x.getDate()).padStart(2, '0'); }; return { du: f(d), au: f(a) }; }
+  function fmtPeriode(per) { var f = function (x) { return new Date(x + 'T12:00:00').toLocaleDateString('fr-FR', { day: '2-digit', month: 'short' }); }; return f(per.du) + ' → ' + f(per.au); }
+  function boutonPeriode(per) { return '<button type="button" class="k-range" data-a="dates" title="Leads reçus sur la période">📅 <span class="k-range-t">' + esc(fmtPeriode(per)) + '</span> <span class="k-caret">▾</span></button>'; }
+  function styleCalendrier(doc) {
+    if (doc.getElementById('lm-dp-style')) return;
+    var st = doc.createElement('style'); st.id = 'lm-dp-style';
+    st.textContent = '#lm-dp .kan-dp-box{background:#fff;border:1.5px solid #e8eef7;border-radius:12px;box-shadow:0 8px 30px rgba(42,94,169,.18);padding:13px;width:262px;font-family:"Nunito Sans",system-ui,sans-serif}'
+      + '#lm-dp .kan-dp-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:8px}'
+      + '#lm-dp .kan-dp-head span{font-size:12px;font-weight:700;color:#2a5ea9;text-transform:capitalize}'
+      + '#lm-dp .kan-dp-head button{width:26px;height:26px;border:1.5px solid #e8eef7;background:#fff;border-radius:8px;cursor:pointer;color:#2a5ea9;font-size:13px;line-height:1;padding:0}'
+      + '#lm-dp .kan-dp-head button:hover{background:#f5f8fc}'
+      + '#lm-dp .kan-dp-grid{display:grid;grid-template-columns:repeat(7,33px);gap:2px}'
+      + '#lm-dp .kan-dp-dow{font-size:9px;color:#acc5e4;text-align:center;font-weight:800;padding-bottom:3px}'
+      + '#lm-dp .kan-dp-day{height:29px;line-height:29px;text-align:center;font-size:11px;color:#2c2c2a;border-radius:7px;cursor:pointer}'
+      + '#lm-dp .kan-dp-day:hover{background:#eef4fc}'
+      + '#lm-dp .kan-dp-day.today{box-shadow:inset 0 0 0 1.5px #acc5e4}'
+      + '#lm-dp .kan-dp-day.sel{background:#2a5ea9;color:#fff;font-weight:800}'
+      + '#lm-dp .kan-dp-day.inr{background:#eef4fc}'
+      + '#lm-dp .kan-dp-foot{margin-top:8px;text-align:center;font-size:10px;color:#9bb3d1;font-style:italic}';
+    doc.head.appendChild(st);
+  }
+
   // ==========================================================================
   //  LE POSTE DU PLATEAU VROOM
   // ==========================================================================
@@ -270,7 +352,7 @@
 
     // ── État ──────────────────────────────────────────────────────────────
     var S = {
-      tab: 'piscine', stock: false, sources: null, campagne: null, miens: false,
+      tab: 'piscine', stock: false, age: 'frais', univ: 'tous', per: periodeDefaut(), sources: null, campagne: null, miens: false,
       kpis: null, piscine: [], rappels: [], transferts: [], campagnes: null, stockListe: null,
       ack: new Set(), vus: new Set(), frais: new Set(), premier: true,
       bacs: null,
@@ -286,13 +368,31 @@
                 'Abandonned': 'Abandonné', 'Interesse': 'Intéressé' })[s] || s || '';
     }
     function tagsLead(l) {
-      var h = '<span class="tag">' + esc(l.source_libelle || l.source_bacs || 'BACS') + '</span>';
-      if (l.campagne) h += '<span class="tag camp" title="' + esc(l.campagne) + '">' + esc(l.campagne.length > 46 ? l.campagne.slice(0, 44) + '…' : l.campagne) + '</span>';
+      var src = l.source_libelle || l.source_bacs || 'BACS';
+      var h = l.campagne ? '<span class="tag camp" title="' + esc(src + ' · ' + l.campagne) + '">' + esc(l.campagne.length > 52 ? l.campagne.slice(0, 50) + '…' : l.campagne) + '</span>'
+                         : '<span class="tag">' + esc(src) + '</span>';
       if (l.statut_eff === 'Accepté') h += '<span class="tag warn">Accepté</span>';
       if (l.tentatives > 0) h += '<span class="tag warn">' + plural(l.tentatives, 'tentative') + '</span>';
-      if (l.site) h += '<span class="tag">BACS : ' + esc(siteNom(l.site)) + '</span>';
       return h;
     }
+    // v71 : univers VN / VO (champ Nature de BACS ; « Entreprise » = VN),
+    // fraîcheur (moins de 24 h) et période de réception.
+    function univ(l) {
+      var n = String(l.nature || '').toUpperCase(), t = String(l.type_demande || '');
+      if (n === 'VO' || /réservation vo/i.test(t)) return 'VO';
+      if (n === 'VN' || n === 'ENTREPRISE' || /réservation vn/i.test(t)) return 'VN';
+      return null;
+    }
+    function univCls(l) { var u = univ(l); return u === 'VN' ? ' vt-vn' : u === 'VO' ? ' vt-vo' : ''; }
+    function frais(l) { return mins(l.recu_le) < 1440; }
+    function dansPeriode(l) {
+      var d = l.recu_le ? new Date(l.recu_le) : null; if (!d) return true;
+      var j = d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+      return j >= S.per.du && j <= S.per.au;
+    }
+    function okUniv(l) { var u = univ(l); return S.univ === 'tous' || !u || u === S.univ; }
+    function vus(list) { return fc(list).filter(function (l) { return okUniv(l) && dansPeriode(l); }); }
+    function libresTous() { return S.piscine.filter(function (l) { return verrouLibre(l) && okUniv(l); }); }
     function demande(l) {
       var p = [l.type_demande, l.modele].filter(Boolean);
       return p.length ? p.join(' · ') : (l.nature || 'Demande BACS');
@@ -311,7 +411,7 @@
     // v60 : BACS doit être ouvert sur CE poste (session de l'opérateur). On
     // bloque AVANT le geste ; la base le refuserait de toute façon.
     function bloque() { return ecritBacs() && S.bacs.canal !== 'moi'; }
-    function dis() { return bloque() ? ' disabled title="Ouvrez BACS dans un onglet de ce navigateur pour agir"' : ''; }
+    function dis() { return bloque() ? ' disabled title="' + (S.bacs && S.bacs.moi_bacs === false ? 'Compte non relié à BACS' : 'Ouvrez BACS dans un onglet de ce navigateur pour agir') + '"' : ''; }
     var GESTES_BACS = ['prendre', 'qualifier', 'injoignable', 'long-terme', 'abandonner'];
     // Réveille l'extension pour qu'elle vide la file tout de suite (sans
     // effet si elle ne connaît pas encore ce signal : elle la videra au
@@ -325,10 +425,10 @@
     }
     function bandeauBacs() {
       var b = S.bacs; if (!b || !b.ecrire_bacs) return '';
-      if (b.canal !== 'moi') return '<div class="bd crit" role="alert"><b>BACS n\'est pas ouvert sur votre poste.</b>'
-        + '<span>' + (b.moi_bacs === false
-          ? 'Votre compte One Data n\'est pas relié à un compte BACS : demandez à l\'administrateur de renseigner votre identifiant BACS. Vos gestes restent bloqués d\'ici là.'
-          : 'One Data reporte chacun de vos gestes dans BACS, sous votre nom. Ouvrez BACS dans un onglet de ce navigateur et connectez-vous : les gestes se débloquent dès que BACS répond.') + '</span></div>';
+      // v71 : une ligne discrète (les boutons sont grisés, avec la raison en infobulle).
+      if (b.canal !== 'moi') return '<div class="bacs-l" role="status">' + (b.moi_bacs === false
+          ? '<b>Compte non relié à BACS.</b><span>Vos gestes sont reportés dans BACS à votre nom : l\'administrateur doit renseigner votre identifiant BACS.</span>'
+          : '<b>BACS fermé sur ce poste.</b><span>Ouvrez BACS dans un onglet de ce navigateur : les gestes se débloquent dès qu\'il répond.</span>') + '</div>';
       var h = '';
       if (b.en_attente_vieux > 0) h += '<div class="bd warn"><b>' + plural(b.en_attente_vieux, 'geste attend', 'gestes attendent') + ' d\'être appliqué' + (b.en_attente_vieux > 1 ? 's' : '') + ' dans BACS.</b>'
         + '<span>Ils partent au prochain passage de l\'extension. Si cela dure, rechargez l\'onglet BACS.</span></div>';
@@ -417,10 +517,10 @@
           d: demande(l) + (l.site ? ' · ' + siteNom(l.site) : ''), a: [['Prendre', 'prendre', l.sf_lead_id]] });
       });
       // 3. Hors délai dans la piscine.
-      var hd = libres.filter(function (l) { return mins(l.recu_le) >= (l.sla_min || 120); })
+      var hd = libres.filter(function (l) { return frais(l) && mins(l.recu_le) >= (l.sla_min || 120); })
         .sort(function (a, b) { return ts(a.recu_le) - ts(b.recu_le); });
       if (hd.length) out.push({ id: 'hd-' + hd.length + '-' + hd[0].sf_lead_id, niv: 'crit', k: 'Hors délai', t: hd[0].recu_le,
-        titre: plural(hd.length, 'lead hors délai', 'leads hors délai') + ' dans le Pool',
+        titre: plural(hd.length, 'lead frais hors délai', 'leads frais hors délai') + ' dans le Pool',
         d: 'Le plus ancien : ' + nomLead(hd[0]) + ', ' + duree(mins(hd[0].recu_le)) + ' (' + (hd[0].source_libelle || 'BACS') + ', SLA ' + slaTxt(hd[0].sla_min || 120) + ').',
         a: [['Prendre le plus ancien', 'prendre', hd[0].sf_lead_id]] });
       // 4. Rappels : ceux de l'heure, un par un ; le retard, en un seul signal.
@@ -462,10 +562,6 @@
         titre: plural(k.stock_acceptes_anciens, 'lead accepté', 'leads acceptés') + ' sans suite depuis plus de 14 j',
         d: 'Acceptés dans BACS par le plateau, jamais qualifiés ni abandonnés. Rappelez-les ou abandonnez-les avec un motif.',
         a: [['Voir le stock', 'stock', '1']] });
-      var atelierCache = (k.atelier_en_file || 0) > 0 && !(S.sources || []).some(function (c) { return c === 'bacs_atelier'; });
-      if (atelierCache) out.push({ id: 'atelier-' + k.atelier_en_file, niv: 'info', k: 'Trafic atelier', t: null,
-        titre: plural(k.atelier_en_file, 'lead atelier attend', 'leads atelier attendent') + ' dans BACS',
-        d: 'Le trafic atelier n\'est pas affiché dans le Pool par défaut.', a: [['Les afficher', 'source', 'bacs_atelier']] });
       return out.filter(function (s) { return !S.ack.has(s.id); });
     }
 
@@ -483,19 +579,24 @@
     }
 
     // ── En-tête : une phrase et le bouton « suivant » (v62) ───────────────
+    // v71 : le suivant = le lead FRAIS (moins de 24 h) le plus en retard sur
+    // son délai. Sans lead frais, le plus récent des plus anciens : un lead de
+    // trois semaines n'est plus le premier à appeler.
     function prochainVroom() {
-      var ls = S.piscine.filter(function (l) { return verrouLibre(l) && (l.statut_eff === 'A affecter' || l.statut_eff === 'Nouveau'); });
-      if (!ls.length) ls = S.piscine.filter(verrouLibre);
-      return ls.slice().sort(function (a, b) { return ts(a.recu_le) - ts(b.recu_le); })[0] || null;
+      var libres = libresTous().filter(function (l) { return l.statut_eff === 'A affecter' || l.statut_eff === 'Nouveau'; });
+      var fr = libres.filter(frais);
+      if (fr.length) return fr.slice().sort(function (a, b) { return (mins(b.recu_le) - (b.sla_min || 120)) - (mins(a.recu_le) - (a.sla_min || 120)); })[0];
+      return libres.slice().sort(function (a, b) { return ts(b.recu_le) - ts(a.recu_le); })[0] || null;
     }
     function renderSituation() {
       var k = S.kpis || {};
-      var libres = S.piscine.filter(verrouLibre);
-      var hd = libres.filter(function (l) { return (l.statut_eff === 'A affecter' || l.statut_eff === 'Nouveau') && mins(l.recu_le) >= (l.sla_min || 120); });
+      var libres = libresTous(), fr = libres.filter(frais), vieux = libres.length - fr.length;
+      var hd = fr.filter(function (l) { return (l.statut_eff === 'A affecter' || l.statut_eff === 'Nouveau') && mins(l.recu_le) >= (l.sla_min || 120); });
       var nom = propre([user && user.prenom, user && user.nom].filter(Boolean).join(' ')) || (user && user.nomComplet) || '';
-      var p = '<b>' + plural(libres.length, 'lead libre', 'leads libres') + '</b> dans le Pool BACS'
-        + (hd.length ? ' dont <b class="t-crit">' + hd.length + ' hors délai</b>' : '')
-        + (k.n_rappels_dus ? ' · <b class="t-warn">' + plural(k.n_rappels_dus, 'rappel dû', 'rappels dus') + '</b>' : '')
+      var p = '<b>' + plural(fr.length, 'lead frais', 'leads frais') + '</b> (moins de 24 h) dans le Pool BACS'
+        + (hd.length ? ', dont <b class="t-crit">' + hd.length + ' hors délai</b>' : '')
+        + (vieux ? ' · ' + plural(vieux, 'plus ancien', 'plus anciens') : '')
+        + (nbDus() ? ' · <b class="t-warn">' + plural(nbDus(), 'rappel dû', 'rappels dus') + '</b>' : '')
         + ' · Aujourd\'hui : <b>' + (k.pris || 0) + ' pris</b>, <b>' + (k.qualifies || 0) + ' transférés</b>, <b>' + (k.abandonnes || 0) + ' abandonnés</b>.';
       var syncAge = k.derniere_synchro ? mins(k.derniere_synchro) : null;
       if (syncAge != null && syncAge > 120) p += ' <span class="' + (syncAge > 1440 ? 't-crit' : 't-warn') + '">BACS relu il y a ' + duree(syncAge) + '.</span>';
@@ -503,7 +604,7 @@
       if (s) {
         var m = mins(s.recu_le), sla = s.sla_min || 120;
         cta = '<button type="button" class="cta" data-a="prendre" data-id="' + esc(s.sf_lead_id) + '"' + dis() + '>Prendre le suivant<small>'
-          + esc(nomLead(s)) + ' · ' + (m >= sla ? 'hors délai de ' + duree(m - sla) : 'attend depuis ' + duree(m)) + '</small></button>';
+          + esc(nomLead(s)) + ' · ' + (!frais(s) ? 'reçu le ' + jour(s.recu_le) : m >= sla ? 'hors délai de ' + duree(m - sla) : 'attend depuis ' + duree(m)) + '</small></button>';
       }
       var b = S.bacs || {};
       var voyant = !b.ecrire_bacs ? '' : '<span class="voyant ' + (b.canal !== 'moi' || b.echecs ? 'crit' : b.en_attente ? 'warn' : 'ok') + '">'
@@ -514,16 +615,21 @@
     }
 
     // ── Onglets ───────────────────────────────────────────────────────────
+    function rappelsDus() { return fc(S.rappels).filter(function (l) { return okUniv(l) && l.rappel_le && ts(l.rappel_le) <= Date.now(); }); }
+    function nbDus() { return rappelsDus().length; }
     function onglets() {
-      var k = S.kpis || {};
-      var libres = S.piscine.filter(verrouLibre);
-      var hd = libres.some(function (l) { return (l.statut_eff === 'A affecter' || l.statut_eff === 'Nouveau') && mins(l.recu_le) >= (l.sla_min || 120); });
-      if (S.campagne) return [['piscine', 'Pool BACS', fc(libres).length, false], ['rappels', 'Rappels', fc(S.rappels).length, false],
-                              ['transferts', 'Transferts', fc(S.transferts).length, false], ['campagnes', 'Campagnes', null]];
-      return [['piscine', 'Pool BACS', libres.length, hd],
-              ['rappels', 'Rappels', S.rappels.length, (k.n_rappels_dus || 0) > 0],
-              ['transferts', 'Transferts', S.transferts.length, (k.n_transferts_sans_contact || 0) > 0],
-              ['campagnes', 'Campagnes', null]];
+      var fr = vus(libresTous()).filter(frais);
+      var hd = fr.some(function (l) { return (l.statut_eff === 'A affecter' || l.statut_eff === 'Nouveau') && mins(l.recu_le) >= (l.sla_min || 120); });
+      var tr = vus(S.transferts);
+      return [['piscine', 'Pool BACS', fr.length, hd, 'v'],
+              ['rappels', 'Rappels dus', nbDus(), nbDus() > 0, 'r'],
+              ['transferts', 'Transferts', tr.length, false, 'b'],
+              ['campagnes', 'Campagnes', null, false, 'b']];
+    }
+    function outilsVroom() {
+      return '<div class="outils"><div class="seg-u" role="group" aria-label="Univers">' + [['tous', 'VN + VO'], ['VN', 'VN'], ['VO', 'VO']].map(function (o) {
+        return '<button type="button" class="' + (S.univ === o[0] ? 'on' : '') + '" data-a="univ" data-id="' + o[0] + '" aria-pressed="' + (S.univ === o[0]) + '">' + (o[0] !== 'tous' ? '<i class="pt vt-' + o[0].toLowerCase() + '"></i>' : '') + o[1] + '</button>'; }).join('') + '</div>'
+        + boutonPeriode(S.per) + '</div>';
     }
     function renderTabs() {
       return '<div class="tabs" role="tablist">' + onglets().map(function (o) {
@@ -549,13 +655,13 @@
       return '<button type="button" class="btn pri" data-a="prendre" data-id="' + esc(l.sf_lead_id) + '"' + dis() + '>' + esc(verbe || 'Prendre') + '</button>';
     }
     function ligneLead(l, gauche, verbe) {
-      return '<div class="lr' + (!verrouLibre(l) && !estMien(l) ? ' resa' : '') + '" data-a="open" data-id="' + esc(l.sf_lead_id) + '" tabindex="0">'
+      return '<div class="lr' + (!verrouLibre(l) && !estMien(l) ? ' resa' : '') + univCls(l) + '" data-a="open" data-id="' + esc(l.sf_lead_id) + '" tabindex="0">'
         + '<div>' + gauche + '</div>'
-        + '<div><span class="lr-n">' + esc(nomLead(l)) + '</span> <span class="lr-v">' + esc(l.ville || '') + '</span><p class="lr-d">' + esc(demande(l)) + '</p><div class="tags">' + tagsLead(l) + '</div></div>'
+        + '<div><span class="lr-n">' + esc(nomLead(l)) + '</span> <span class="lr-v">' + esc(l.site ? siteNom(l.site) : (l.ville || '')) + '</span><p class="lr-d">' + esc(demande(l)) + '</p><div class="tags">' + tagsLead(l) + '</div></div>'
         + '<div class="lr-a">' + actionLigne(l, verbe) + '</div></div>';
     }
     function chipsSources() {
-      var k = S.kpis || {}, src = k.sources || [];
+      var k = S.kpis || {}, src = (k.sources || []).filter(function (s) { return s.code !== 'bacs_atelier'; });
       if (!src.length) return '';
       var actives = S.sources || src.filter(function (s) { return s.suivi; }).map(function (s) { return s.code; });
       return '<div class="chips filtres" aria-label="Sources">' + src.map(function (s) {
@@ -565,14 +671,17 @@
     }
     function vuePiscine() {
       var k = S.kpis || {};
-      var h = '<div class="barre"><div class="seg"><button type="button" class="' + (!S.stock ? 'on' : '') + '" data-a="stock" data-id="">À traiter <span class="num">' + fc(S.piscine).length + '</span></button>'
-        + '<button type="button" class="' + (S.stock ? 'on' : '') + '" data-a="stock" data-id="1">Stock accepté <span class="num">' + (S.campagne && S.stockListe ? fc(S.stockListe).length : (k.stock_acceptes_anciens || 0)) + '</span></button></div>'
+      var base = vus(S.piscine).filter(okUniv), nFr = base.filter(frais).length;
+      var h = '<div class="barre"><div class="seg"><button type="button" class="' + (!S.stock && S.age === 'frais' ? 'on' : '') + '" data-a="age" data-id="frais">Moins de 24 h <span class="num">' + nFr + '</span></button>'
+        + '<button type="button" class="' + (!S.stock && S.age === 'vieux' ? 'on' : '') + '" data-a="age" data-id="vieux">Plus de 24 h <span class="num">' + (base.length - nFr) + '</span></button>'
+        + '<button type="button" class="' + (S.stock ? 'on' : '') + '" data-a="stock" data-id="1">Stock accepté <span class="num">' + (S.stockListe ? vus(S.stockListe).length : (k.stock_acceptes_anciens || 0)) + '</span></button></div>'
         + (!S.stock ? chipsSources() : '') + '</div><div class="list">';
-      var ls = fc(S.stock ? (S.stockListe || []) : S.piscine);
+      var ls = S.stock ? vus(S.stockListe || []) : base.filter(function (l) { return S.age === 'frais' ? frais(l) : !frais(l); });
+      if (!S.stock) ls.sort(S.age === 'frais' ? function (a, b) { return (mins(b.recu_le) - (b.sla_min || 120)) - (mins(a.recu_le) - (a.sla_min || 120)); } : function (a, b) { return ts(b.recu_le) - ts(a.recu_le); });
       if (S.stock && !S.stockListe) h += '<div class="empty">Chargement du stock…</div>';
-      else if (!ls.length) h += '<div class="empty">' + (S.campagne ? 'Aucun lead de cette campagne à traiter.' : S.stock ? 'Aucun lead en stock.' : 'Rien à prendre : le Pool BACS est vide pour les sources sélectionnées.') + '</div>';
+      else if (!ls.length) h += '<div class="empty">' + (S.campagne ? 'Aucun lead de cette campagne à traiter.' : S.stock ? 'Aucun lead en stock.' : S.age === 'frais' ? 'Aucun lead de moins de 24 h à prendre.' : 'Aucun lead de plus de 24 h dans le Pool BACS.') + '</div>';
       ls.forEach(function (l) {
-        var gauche = S.stock
+        var gauche = S.stock || !frais(l)
           ? '<span class="tm crit"><b>' + duree(mins(l.recu_le)) + '</b><small>reçu le ' + jour(l.recu_le) + '</small></span>'
           : tm(l.recu_le, l.sla_min || 120);
         h += ligneLead(l, gauche, S.stock || l.statut_eff === 'Accepté' ? 'Rappeler' : 'Prendre');
@@ -580,8 +689,9 @@
       return h + '</div><p class="foot">Prendre réserve le lead à votre nom ' + (k.verrou_minutes || 5) + ' min.' + (S.stock ? ' Stock : leads acceptés il y a plus de 14 jours, sans suite.' : '') + '</p>';
     }
     function vueRappels() {
-      var ls = fc(S.rappels).filter(function (l) { return !S.miens || Number(l.derniere_action_par) === Number(MOI); });
-      var h = '<div class="barre"><div class="ph-r"><div class="seg"><button type="button" class="' + (!S.miens ? 'on' : '') + '" data-a="miens" data-id="">Tout le plateau</button><button type="button" class="' + (S.miens ? 'on' : '') + '" data-a="miens" data-id="1">Les miens</button></div></div></div><div class="list">';
+      var ls = fc(S.rappels).filter(function (l) { return okUniv(l) && (!S.miens || Number(l.derniere_action_par) === Number(MOI)); })
+        .sort(function (a, b) { return ts(a.rappel_le) - ts(b.rappel_le); });
+      var h = '<div class="barre"><span class="lbl-s">' + plural(nbDus(), 'rappel dû', 'rappels dus') + ' sur ' + plural(fc(S.rappels).filter(okUniv).length, 'programmé', 'programmés') + '.</span><div class="ph-r"><div class="seg"><button type="button" class="' + (!S.miens ? 'on' : '') + '" data-a="miens" data-id="">Tout le plateau</button><button type="button" class="' + (S.miens ? 'on' : '') + '" data-a="miens" data-id="1">Les miens</button></div></div></div><div class="list">';
       if (!ls.length) h += '<div class="empty">' + (S.campagne ? 'Aucun rappel pour cette campagne.' : 'Aucun rappel programmé.') + '</div>';
       ls.forEach(function (l) {
         var due = ts(l.rappel_le) - Date.now();
@@ -603,7 +713,7 @@
       return '<span class="tag">En attente' + (l.od_vendeur ? ' chez ' + esc(propre(l.od_vendeur)) : ' sur le site') + '</span>';
     }
     function vueTransferts() {
-      var ls = fc(S.transferts).filter(function (l) { return !S.miens || Number(l.derniere_action_par) === Number(MOI); });
+      var ls = vus(S.transferts).filter(function (l) { return !S.miens || Number(l.derniere_action_par) === Number(MOI); });
       var h = '<div class="barre"><span class="lbl-s">Le site a 2 h pour prendre un transfert.</span><div class="ph-r"><div class="seg"><button type="button" class="' + (!S.miens ? 'on' : '') + '" data-a="miens" data-id="">Tout le plateau</button><button type="button" class="' + (S.miens ? 'on' : '') + '" data-a="miens" data-id="1">Les miens</button></div></div></div><div class="list">';
       if (!ls.length) h += '<div class="empty">' + (S.campagne ? 'Aucun transfert pour cette campagne sur la période.' : 'Aucun transfert sur la période.') + '</div>';
       ls.forEach(function (l) {
@@ -612,8 +722,8 @@
         var gauche = attente ? tm(depuis, SLA_SITE, 'sur le site · SLA 2 h')
           : '<span class="tm neutre"><b>' + esc(depuis ? jour(depuis) : jour(l.recu_le)) + '</b><small>' + (depuis ? 'transféré' : 'reçu') + '</small></span>';
         var q = resumeQualif(l.qualification);
-        h += '<div class="lr" data-a="open" data-id="' + esc(l.sf_lead_id) + '" tabindex="0"><div>' + gauche + '</div>'
-          + '<div><span class="lr-n">' + esc(nomLead(l)) + '</span> <span class="lr-v">→ ' + esc(siteNom(l.site) || 'site non renseigné') + '</span><p class="lr-d">' + esc(q || demande(l)) + '</p><div class="tags">' + tagsLead(l).replace(/<span class="tag">BACS : [^<]*<\/span>/, '') + '</div></div>'
+        h += '<div class="lr' + univCls(l) + '" data-a="open" data-id="' + esc(l.sf_lead_id) + '" tabindex="0"><div>' + gauche + '</div>'
+          + '<div><span class="lr-n">' + esc(nomLead(l)) + '</span> <span class="lr-v">→ ' + esc(siteNom(l.site) || 'site non renseigné') + '</span><p class="lr-d">' + esc(q || demande(l)) + '</p><div class="tags">' + tagsLead(l) + '</div></div>'
           + '<div class="lr-a">' + etatTransfert(l) + '</div></div>';
       });
       return h + '</div>';
@@ -655,7 +765,7 @@
       var y = (FW.scrollY || 0);
       root.innerHTML = renderSituation() + bandeauBacs()
         + (S.erreur ? '<p class="alerte">' + esc(S.erreur) + ' Les données affichées datent du dernier chargement réussi.</p>' : '')
-        + renderTabs() + bandeauFiltre()
+        + '<div class="barre-o">' + renderTabs() + outilsVroom() + '</div>' + bandeauFiltre()
         + '<section class="act" aria-label="Leads"><div class="panel">' + renderPanel() + '</div></section>';
       try { if (FW.scrollY !== y) FW.scrollTo(0, y); } catch (e) {}
       setTimeout(function () { S.frais.clear(); }, 7000);
@@ -696,6 +806,18 @@
     }
     function demainA(h, j) { var d = new Date(); d.setDate(d.getDate() + (j || 1)); d.setHours(h, 0, 0, 0); return d; }
 
+    // v71 : la demande initiale du client, visible du premier coup d'œil.
+    function demandeHautVr(l, fb) {
+      var type = fb.type_demande || l.type_demande || '', veh = [fb.marque, fb.modele || l.modele].filter(Boolean).join(' ');
+      var msg = String(l.commentaire || '').trim(), u = univ(l);
+      if (!type && !veh && !msg && !l.campagne) return '';
+      var long = msg.length > 220, ouvert = S.dr && S.dr.demOuverte;
+      return '<div class="dem-h' + univCls(l) + '"><div class="dem-t"><span>Demande du client</span>' + (u ? '<em class="u' + univCls(l) + '">' + u + '</em>' : '') + (type ? '<em>' + esc(type) + '</em>' : '') + '<small>' + esc(quand(l.recu_le)) + '</small></div>'
+        + (veh ? '<p class="dem-v">' + esc(veh) + '</p>' : '')
+        + (msg ? '<p class="dem-m' + (long && !ouvert ? ' court' : '') + '">« ' + esc(msg) + ' »</p>' + (long ? '<button type="button" class="lien" data-a="dem-plus">' + (ouvert ? 'Réduire' : 'Lire toute la demande') + '</button>' : '')
+          : (l.campagne ? '<p class="dem-m">' + esc(l.campagne) + '</p>' : ''))
+        + '</div>';
+    }
     function renderDrawer() {
       var D = S.dr; if (!D) return;
       var f = D.fiche;
@@ -708,7 +830,7 @@
       var fb = f.fiche_bacs || {};
       var h = '<header class="dr-h"><div><div class="tags" style="margin:0 0 6px">' + tagsLead(l).replace(/<span class="tag">BACS : [^<]*<\/span>/, '')
         + '<span class="tag ' + (l.statut_eff === 'Qualifié' ? 'ok' : l.statut_eff === 'Abandonned' ? 'crit' : '') + '">' + esc(libStatut(l.statut_eff)) + '</span></div>'
-        + '<h2>' + esc(nomLead(l)) + '</h2><p class="dr-s">' + esc([l.ville, l.site ? 'site BACS : ' + siteNom(l.site) : null].filter(Boolean).join(' · ')) + '</p></div>'
+        + '<h2>' + esc(nomLead(l)) + '</h2><p class="dr-s">' + esc([l.ville, l.site ? 'site BACS : ' + siteNom(l.site) : null].filter(Boolean).join(' · ')) + '</p>' + demandeHautVr(l, fb) + '</div>'
         + '<button type="button" class="x" data-a="close" aria-label="Fermer"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg></button></header><div class="dr-b">';
       // Délais
       h += '<section><h3>Délai</h3><div class="delais"><div><span>Depuis la réception BACS</span>' + (actif && l.statut_eff !== 'Accepté' && !l.rappel_le ? tm(l.recu_le, l.sla_min) : '<span class="tm neutre"><b>' + duree(mins(l.recu_le)) + '</b><small>reçu le ' + esc(quand(l.recu_le)) + '</small></span>') + '</div>';
@@ -727,13 +849,12 @@
                 ['Financement', fb.financement], ['Budget', fb.budget], ['Canal préféré', fb.canal_prefere],
                 ['À accepter avant', fb.limite_acceptation ? quand(fb.limite_acceptation) : null]].filter(function (x) { return x[1]; });
       h += '<section><h3>Demande</h3>' + (dl.length ? '<dl class="dl">' + dl.map(function (x) { return '<dt>' + x[0] + '</dt><dd>' + esc(x[1]) + '</dd>'; }).join('') + '</dl>' : '<p style="font-weight:700">' + esc(demande(l)) + '</p>')
-        + (l.commentaire ? '<p class="quote">« ' + esc(l.commentaire) + ' »</p>' : '')
         + (fb.campagne_description ? '<p class="hint">' + esc(fb.campagne_description) + '</p>' : '') + '</section>';
       // Qualification et orientation (lead réservé à mon nom)
       if (mien && actif) {
         var q = l.qualification || {};
         h += '<section><h3>Qualification</h3><div class="qf">'
-          + '<div class="q"><span>Projet</span>' + chipGroup('q-projet', ['Achat VN', 'Achat VO', 'Atelier', 'Simple information'], q.projet || (/VO|occasion/i.test(fb.type_demande || l.campagne || '') ? 'Achat VO' : 'Achat VN')) + '</div>'
+          + '<div class="q"><span>Projet</span>' + chipGroup('q-projet', ['Achat VN', 'Achat VO', 'Atelier', 'Simple information'], q.projet || (univ(l) === 'VO' || (!univ(l) && /VO|occasion/i.test(fb.type_demande || l.campagne || '')) ? 'Achat VO' : 'Achat VN')) + '</div>'
           + '<div class="q"><span>Modèle visé</span><input type="text" id="q-modele" value="' + esc(q.modele || fb.modele || l.modele || '') + '"></div>'
           + '<div class="q"><span>Échéance</span>' + chipGroup('q-echeance', ['Moins d\'un mois', '1 à 3 mois', '3 mois et plus'], q.echeance || '') + '</div>'
           + '<div class="q"><span>Reprise</span>' + chipGroup('q-reprise', ['Oui', 'Non', 'Ne sait pas'], q.reprise || '') + '</div>'
@@ -1023,9 +1144,12 @@
     function memoAck() { try { FW.localStorage.setItem('lmtc-ack', JSON.stringify(Array.from(S.ack).slice(-200))); } catch (e) {} }
     async function action(a, id, ev) {
       if (GESTES_BACS.indexOf(a) !== -1 && bloque()) {
-        toast('BACS n\'est pas ouvert sur votre poste : ouvrez-le dans un onglet de ce navigateur et connectez-vous.', true); return;
+        toast(S.bacs && S.bacs.moi_bacs === false ? 'Votre compte n\'est pas relié à BACS : l\'administrateur doit renseigner votre identifiant BACS.' : 'BACS n\'est pas ouvert sur votre poste : ouvrez-le dans un onglet de ce navigateur et connectez-vous.', true); return;
       }
       switch (a) {
+        case 'age': S.tab = 'piscine'; S.stock = false; S.age = id === 'vieux' ? 'vieux' : 'frais'; render(); return;
+        case 'univ': S.univ = id || 'tous'; render(); return;
+        case 'dem-plus': if (S.dr) { S.dr.demOuverte = !S.dr.demOuverte; renderDrawerPreserve(); } return;
         case 'bacs-relancer':
           return geste(async function () {
             var r = await rpc('plateau_bacs_relancer', { p_sf_lead_id: S.dr.sf });
@@ -1089,6 +1213,7 @@
       var a = t.getAttribute('data-a');
       if (t.classList.contains('lr') && ev.target.closest('button,select,input,a')) return;
       ev.preventDefault(); ev.stopPropagation();
+      if (a === 'dates') { ouvrirCalendrier(doc, FW, t, S.per.du, function (du, au) { S.per = { du: du, au: au }; render(); }); return; }
       action(a, t.getAttribute('data-id') || '', ev);
     }
     root.addEventListener('click', surClic);
@@ -1251,7 +1376,7 @@
       return '<div class="k-vend-sel"><button type="button" class="k-vend k-vend-btn" data-a="comme-menu" aria-expanded="' + !!S.commeMenu + '"><span class="k-vend-l">Vendeur</span><span class="k-vend-n">' + esc(nom) + ' <span class="k-caret">\u25be</span></span></button>'
         + (S.commeMenu ? '<div class="k-vpanel"><input type="text" class="k-vsearch" data-x="comme-q" placeholder="Rechercher un vendeur…" value="' + esc(S.commeQ || '') + '"><div class="k-vlist">' + listeComme() + '</div></div>' : '') + '</div>';
     }
-    function fmtPer() { var f = function (x) { return new Date(x + 'T12:00:00').toLocaleDateString('fr-FR', { day: '2-digit', month: 'short' }); }; return f(S.per.du) + ' \u2192 ' + f(S.per.au); }
+    function fmtPer() { return fmtPeriode(S.per); }
     function outils() {
       return '<div class="outils">' + selComme() + segUniv()
         + '<button type="button" class="k-range" data-a="dates" title="Leads reçus sur la période">\ud83d\udcc5 <span class="k-range-t">' + esc(fmtPer()) + '</span> <span class="k-caret">\u25be</span></button></div>';
@@ -1280,70 +1405,14 @@
       S.tab = 'pool'; S.cell = null; S.leads = filtrerUniv(S.tous); render(); chargerAide();
     }
     var ACTIONS_APERCU = ['tab', 'comme-off', 'comme', 'comme-menu', 'univ', 'dates', 'dem-plus', 'open', 'close', 'retour-liste', 'ack', 'reessayer', 'cell', 'fermer'];
-    function fermerDates() {
-      var e = doc.getElementById('lm-dp'); if (e) e.remove();
-      if (S._dpDehors) { doc.removeEventListener('mousedown', S._dpDehors, true); S._dpDehors = null; }
-    }
+    function fermerDates() { fermerCalendrier(doc); }
     function appliquerDates(du, au) {
       fermerDates();
       if (!du || !au || (du === S.per.du && au === S.per.au)) return;
       S.per = { du: du, au: au }; S.suggKey = null;
       rafraichir();
     }
-    function ouvrirDates(anchor) {
-      if (doc.getElementById('lm-dp')) { fermerDates(); return; }
-      var pk = { mois: null, deb: null, fin: null, survol: null };
-      var m0 = new Date(S.per.du + 'T12:00:00'); pk.mois = new Date(m0.getFullYear(), m0.getMonth(), 1);
-      var pop = doc.createElement('div'); pop.id = 'lm-dp';
-      var r = anchor.getBoundingClientRect();
-      pop.style.cssText = 'position:fixed;z-index:99999;top:' + (r.bottom + 6) + 'px;left:' + Math.max(8, Math.min(r.left, (FW.innerWidth || 1200) - 280)) + 'px';
-      styleDates(); doc.body.appendChild(pop);
-      var ymd = function (y, m, d) { return y + '-' + String(m + 1).padStart(2, '0') + '-' + String(d).padStart(2, '0'); };
-      function cal() {
-        var y = pk.mois.getFullYear(), m = pk.mois.getMonth(), p1 = new Date(y, m, 1), dec = (p1.getDay() + 6) % 7, nb = new Date(y, m + 1, 0).getDate();
-        var auj = new Date(), today = ymd(auj.getFullYear(), auj.getMonth(), auj.getDate()), a = pk.deb, b = pk.fin || pk.survol;
-        var lo = a && b ? (a < b ? a : b) : null, hi = a && b ? (a < b ? b : a) : null;
-        var h = '<div class="kan-dp-box"><div class="kan-dp-head"><button type="button" data-nav="-1">\u2039</button><span>' + esc(p1.toLocaleDateString('fr-FR', { month: 'long', year: 'numeric' })) + '</span><button type="button" data-nav="1">\u203a</button></div><div class="kan-dp-grid">';
-        ['L', 'M', 'M', 'J', 'V', 'S', 'D'].forEach(function (x) { h += '<span class="kan-dp-dow">' + x + '</span>'; });
-        for (var i = 0; i < dec; i++) h += '<span></span>';
-        for (var d = 1; d <= nb; d++) {
-          var ds = ymd(y, m, d), c = 'kan-dp-day';
-          if (ds === today) c += ' today';
-          if (pk.deb === ds || pk.fin === ds) c += ' sel'; else if (lo && hi && ds > lo && ds < hi) c += ' inr';
-          h += '<span class="' + c + '" data-d="' + ds + '">' + d + '</span>';
-        }
-        return h + '</div><div class="kan-dp-foot">' + (pk.deb ? 'Cliquez la date de fin' : 'Cliquez la date de d\u00e9but') + '</div></div>';
-      }
-      function brancher() {
-        pop.querySelectorAll('[data-nav]').forEach(function (b) { b.addEventListener('click', function (e) { e.stopPropagation(); pk.mois = new Date(pk.mois.getFullYear(), pk.mois.getMonth() + Number(b.getAttribute('data-nav')), 1); peindre(); }); });
-        pop.querySelectorAll('.kan-dp-day').forEach(function (c) {
-          c.addEventListener('click', function () { var ds = c.getAttribute('data-d'); if (!pk.deb || pk.fin) { pk.deb = ds; pk.fin = null; pk.survol = null; peindre(); return; } pk.fin = ds; var a = pk.deb, b = pk.fin; if (b < a) { var t = a; a = b; b = t; } appliquerDates(a, b); });
-          c.addEventListener('mouseenter', function () { if (pk.deb && !pk.fin && pk.survol !== c.getAttribute('data-d')) { pk.survol = c.getAttribute('data-d'); peindre(); } });
-        });
-      }
-      function peindre() { pop.innerHTML = cal(); brancher(); }
-      peindre();
-      S._dpDehors = function (e) { if (!pop.contains(e.target) && e.target !== anchor && !anchor.contains(e.target)) fermerDates(); };
-      setTimeout(function () { doc.addEventListener('mousedown', S._dpDehors, true); }, 0);
-    }
-    function styleDates() {
-      if (doc.getElementById('lm-dp-style')) return;
-      var st = doc.createElement('style'); st.id = 'lm-dp-style';
-      st.textContent = '#lm-dp .kan-dp-box{background:#fff;border:1.5px solid #e8eef7;border-radius:12px;box-shadow:0 8px 30px rgba(42,94,169,.18);padding:13px;width:262px;font-family:"Nunito Sans",system-ui,sans-serif}'
-        + '#lm-dp .kan-dp-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:8px}'
-        + '#lm-dp .kan-dp-head span{font-size:12px;font-weight:700;color:#2a5ea9;text-transform:capitalize}'
-        + '#lm-dp .kan-dp-head button{width:26px;height:26px;border:1.5px solid #e8eef7;background:#fff;border-radius:8px;cursor:pointer;color:#2a5ea9;font-size:13px;line-height:1;padding:0}'
-        + '#lm-dp .kan-dp-head button:hover{background:#f5f8fc}'
-        + '#lm-dp .kan-dp-grid{display:grid;grid-template-columns:repeat(7,33px);gap:2px}'
-        + '#lm-dp .kan-dp-dow{font-size:9px;color:#acc5e4;text-align:center;font-weight:800;padding-bottom:3px}'
-        + '#lm-dp .kan-dp-day{height:29px;line-height:29px;text-align:center;font-size:11px;color:#2c2c2a;border-radius:7px;cursor:pointer}'
-        + '#lm-dp .kan-dp-day:hover{background:#eef4fc}'
-        + '#lm-dp .kan-dp-day.today{box-shadow:inset 0 0 0 1.5px #acc5e4}'
-        + '#lm-dp .kan-dp-day.sel{background:#2a5ea9;color:#fff;font-weight:800}'
-        + '#lm-dp .kan-dp-day.inr{background:#eef4fc}'
-        + '#lm-dp .kan-dp-foot{margin-top:8px;text-align:center;font-size:10px;color:#9bb3d1;font-style:italic}';
-      doc.head.appendChild(st);
-    }
+    function ouvrirDates(anchor) { ouvrirCalendrier(doc, FW, anchor, S.per.du, appliquerDates); }
     function libres(id) { return piscine(id).filter(function (l) { return !verrouAutre(l); }); }
     function mesLeads() {
       return S.leads.filter(estMien).sort(function (a, b) { return (slaDe(a) - mins(arrive(a))) - (slaDe(b) - mins(arrive(b))); });
@@ -2279,7 +2348,7 @@
       var y = (FW.scrollY || 0);
       root.innerHTML = bandeauComme() + renderSituation() + bandeauBacsSite()
         + (S.erreur ? '<p class="alerte">' + esc(S.erreur) + ' Les données affichées datent du dernier chargement réussi.</p>' : '')
-        + '<div class="barre">' + renderTabs() + outils() + '</div>'
+        + '<div class="barre-o">' + renderTabs() + outils() + '</div>'
         + '<section class="act" aria-label="Leads"><div class="panel">' + renderPanel() + '</div></section>';
       try { if (FW.scrollY !== y) FW.scrollTo(0, y); } catch (e) {}
       setTimeout(function () { S.frais.clear(); }, 7000);
@@ -3641,8 +3710,8 @@
 :is(.lmtc,.lmtc-ov) .tag.u-vn{background:#e8f0fb;color:#2a5ea9}
 :is(.lmtc,.lmtc-ov) .tag.u-vo{background:#fdf2e3;color:#a8660a}
 .lmtc .carte-l .tag.u-vn,.lmtc .carte-l .tag.u-vo{margin-top:6px;font-size:11px;padding:2px 8px;border-radius:6px}
-.lmtc .barre{display:flex;align-items:flex-end;justify-content:space-between;gap:10px 16px;flex-wrap:wrap;border-bottom:1px solid var(--line);margin:0 0 18px}
-.lmtc .barre .tabs{border-bottom:0;margin:0;flex:1 1 auto}
+.lmtc .barre-o{display:flex;align-items:flex-end;justify-content:space-between;gap:10px 16px;flex-wrap:wrap;border-bottom:1px solid var(--line);margin:0 0 18px}
+.lmtc .barre-o .tabs{border-bottom:0;margin:0;flex:1 1 auto}
 .lmtc .outils{display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:0 0 9px}
 .lmtc .seg-u{display:inline-flex;border:1px solid #ece9e1;border-radius:10px;overflow:hidden;background:#fff}
 .lmtc .seg-u button{border:0;background:none;padding:7px 11px;font:inherit;font-size:12px;font-weight:700;color:var(--ink-2);cursor:pointer}
