@@ -64,6 +64,8 @@ OD.define('vn-liste', {
     return p.length === 3 ? p[2] + '/' + p[1] + '/' + p[0] : String(iso);
   }
   function jolieValeur(v) { return notEmpty(v) ? esc(v) : '—'; }
+  // N° de commande DBS (commande fournisseur) ; « 0 » = pas de commande.
+  function numCommande(r) { var c = r && r.commande_fournisseur; c = c == null ? '' : String(c).trim(); return c && c !== '0' ? c : ''; }
 
   // Les statuts arrivent en majuscules techniques : on les rend lisibles.
   var LIB_STATUT = {
@@ -263,6 +265,7 @@ OD.define('vn-liste', {
 
   var COLS = [
     { k: 'marque', t: 'Véhicule', cl: 'c-veh' },
+    { k: 'commande_fournisseur', t: 'N° commande', cl: 'c-cmd' },
     { k: 'statut', t: 'Statut', cl: 'c-st' },
     { k: 'site', t: 'Site', cl: 'c-site' },
     { k: 'date_entree_stock', t: 'Entrée', cl: 'c-d' },
@@ -290,6 +293,7 @@ OD.define('vn-liste', {
           + '<span class="vn-ver">' + jolieValeur(r.version) + '</span>'
           + '<span class="vn-sub">' + (notEmpty(r.vin) ? esc(r.vin) : '<i>VIN non attribué</i>')
           + (notEmpty(r.couleur) ? ' · ' + esc(r.couleur) : '') + '</span></td>'
+        + '<td class="c-cmd">' + (numCommande(r) ? '<span class="vn-cmd">' + esc(numCommande(r)) + '</span>' : '—') + '</td>'
         + '<td class="c-st">' + puce(r) + '</td>'
         + '<td class="c-site">' + jolieValeur(r.site)
           + (notEmpty(r.lieu_stockage) ? '<span class="vn-sub">' + esc(r.lieu_stockage) + '</span>' : '') + '</td>'
@@ -356,7 +360,7 @@ OD.define('vn-liste', {
         + '</div>'
         + '<div><h3>Approvisionnement</h3>'
           + ligne('Fournisseur', jolieValeur(r.fournisseur))
-          + ligne('Commande', jolieValeur(r.commande_fournisseur))
+          + ligne('N° commande', numCommande(r) ? esc(numCommande(r)) : '—')
           + ligne('Facture fournisseur', dateFR(r.date_facture_fournisseur))
           + ligne('Stock payé', r.stock_paye == null ? '—' : (r.stock_paye ? 'Oui' : 'Non'))
           + ligne('Financement', jolieValeur(r.type_financement))
@@ -445,6 +449,7 @@ OD.define('vn-liste', {
     + '.vn-tab .c-n.neg{color:#b05a3c}'
     + '.vn-tab .c-d{white-space:nowrap;color:#54678a;font-variant-numeric:tabular-nums}'
     + '.vn-tab .c-veh{min-width:260px}.vn-tab .c-site{min-width:130px}'
+    + '.vn-tab .c-cmd{white-space:nowrap}.vn-cmd{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:12.5px;font-weight:600;color:#1F4A85;background:#eef3fa;border-radius:6px;padding:2px 7px}'
     + '.vn-mod{display:block;font-weight:700;color:#1F4A85}'
     + '.vn-ver{display:block;font-size:12px;color:#54678a;margin-top:1px}'
     + '.vn-sub{display:block;font-size:11px;color:#a8bcd4;margin-top:2px;font-variant-numeric:tabular-nums}'
