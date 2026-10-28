@@ -1,13 +1,19 @@
 // ============================================================================
 //  LEAD MANAGEMENT — module One Data (OD.define 'lead-mgmt')
-//  VERSION TEAM COLIN (v69) — déploiement CIBLÉ (publish-targets :
-//  v69 (28/10/2026) : « Inviter un collègue » au rendez-vous ne propose plus
-//  que l'équipe du site du lead (chef des ventes, secrétariat commercial,
-//  vendeurs hors grands comptes) au lieu de tous les utilisateurs, choisie
-//  dans le menu de la gestion des ventes (recherche, groupes Chef des ventes
+//  VERSION TEAM COLIN (v71) — déploiement CIBLÉ (publish-targets :
+//  v71 (28/10/2026) : onglets dans l'ordre Pool (vert One Data), À rappeler
+//  (rouge), Relances et Campagnes (bleu) ; le Pool s'ouvre en premier. Chef :
+//  Pool (vert), En souffrance (rouge), Campagnes (bleu). Fiche d'un lead :
+//  un seul défilement (le volet entier), plus de zones qui défilent seules.
+//  VN / VO distingués comme dans la gestion des ventes,
+//  par un liseret à gauche (vert VN, orange VO) sur les lignes, les cartes
+//  du Pool et la demande du client ; plus de pastille. Invités au rendez-vous
+//  choisis dans le menu de la gestion des ventes (recherche, groupes Chef des ventes
 //  / Secrétariat / VN / VO / VN-VO) ; les invités choisis s'affichent en
 //  étiquettes retirables. La DEMANDE DU CLIENT (type, véhicule, message) est
 //  en tête de la fiche du lead, sous le téléphone, visible sans défiler.
+//  v69 (28/10/2026) : invités au rendez-vous = l'équipe du site du lead
+//  seulement (lead_invitables), plus tous les utilisateurs.
 //  v68 (28/10/2026) : la « Vue vendeur » du chef utilise le même menu de
 //  vendeurs que la gestion des ventes (bouton VENDEUR / nom, recherche,
 //  groupes VN / VO / VN-VO, le chef en tête = sa propre vue). Les vendeurs
@@ -522,7 +528,7 @@
     function renderTabs() {
       return '<div class="tabs" role="tablist">' + onglets().map(function (o) {
         var on = o[0] === S.tab;
-        return '<button type="button" role="tab" aria-selected="' + on + '" class="' + (on ? 'on' : '') + '" data-a="tab" data-id="' + o[0] + '">' + esc(o[1])
+        return '<button type="button" role="tab" aria-selected="' + on + '" class="' + (on ? 'on' : '') + (o[4] ? ' t-' + o[4] : '') + '" data-a="tab" data-id="' + o[0] + '">' + esc(o[1])
           + (o[2] != null ? ' <span class="cnt ' + (o[2] === 0 ? 'z' : (o[3] ? 'c' : '')) + '">' + o[2] + '</span>' : '') + '</button>';
       }).join('') + '</div>';
     }
@@ -796,10 +802,10 @@
           + '<button type="button" class="btn sm ghost" data-a="liberer">Libérer</button></div>';
       }
       h += '</footer>';
-      var sc = $drawer.querySelector('.dr-b'); var top = sc ? sc.scrollTop : 0;
+      var top = $drawer.scrollTop;
       if (D.demo) h = h.replace('<div class="dr-b">', '<p class="demo">Fiche d\'exemple de la visite guidée : rien n\'est enregistré, rien ne part dans BACS.</p><div class="dr-b">');
       $drawer.innerHTML = h;
-      var sc2 = $drawer.querySelector('.dr-b'); if (sc2) sc2.scrollTop = top;
+      $drawer.scrollTop = top;
     }
 
     // Ce que One Data a envoyé à BACS pour ce lead, et ce qu'il en est advenu.
@@ -1162,7 +1168,7 @@
     var COLS = [['ok', 'Dans les temps'], ['warn', 'À risque'], ['crit', 'Hors délai'], ['stock', 'Ouverts + 24 h']];
 
     var S = {
-      tab: POSTE === 'vendeur' ? 'arappeler' : 'pool',
+      tab: 'pool',
       sugg: {}, suggKey: null, regle: {}, perimOuvert: false, invitables: {},
       leads: [], stats: null, bacs: null, charge: false, erreur: null,
       site: null,              // site affiché (chef, direction après « Ouvrir »)
@@ -1202,12 +1208,15 @@
       var u = univActif();
       return (ls || []).filter(function (l) { return u === 'tous' || !l.univers || l.univers === u || (S.comme && l.zone !== 'piscine'); });
     }
-    function univTag(l) { return l.univers ? '<span class="tag u-' + l.univers.toLowerCase() + '" title="Lead ' + (l.univers === 'VN' ? 'véhicule neuf' : 'véhicule d\'occasion') + '">' + l.univers + '</span>' : ''; }
+    // v70 : VN / VO comme dans la gestion des ventes : un liseret à gauche,
+    // vert pour le VN, orange pour le VO (plus de pastille).
+    function univTag(l) { return ''; }
+    function univCls(l) { return l && l.univers === 'VN' ? ' vt-vn' : l && l.univers === 'VO' ? ' vt-vo' : ''; }
     function segUniv() {
       if (S.comme) return '';
       if (POSTE === 'vendeur' && univDe(S.stats && S.stats.mon_univers) !== 'tous') return '';
       return '<div class="seg-u" role="group" aria-label="Univers">' + [['tous', 'VN + VO'], ['VN', 'VN'], ['VO', 'VO']].map(function (o) {
-        return '<button type="button" class="' + (S.univ === o[0] ? 'on' : '') + '" data-a="univ" data-id="' + o[0] + '" aria-pressed="' + (S.univ === o[0]) + '">' + o[1] + '</button>'; }).join('') + '</div>';
+        return '<button type="button" class="' + (S.univ === o[0] ? 'on' : '') + '" data-a="univ" data-id="' + o[0] + '" aria-pressed="' + (S.univ === o[0]) + '">' + (o[0] !== 'tous' ? '<i class="pt vt-' + o[0].toLowerCase() + '"></i>' : '') + o[1] + '</button>'; }).join('') + '</div>';
     }
     // Même sélecteur que la gestion des ventes : bouton « VENDEUR / nom ▾ »,
     // recherche, groupes VN / VO / VN-VO, le chef en tête (= sa propre vue).
@@ -1260,7 +1269,7 @@
       var sites = ((S.stats && S.stats.vendeurs) || []).filter(function (x) { return Number(x.id_user) === Number(id); }).map(function (x) { return Number(x.id_site); });
       if (!S.comme) S.poste0 = POSTE;
       S.comme = { id: Number(id), nom: v.nom, vnvo: v.vn_vo || '', sites: sites, site: sid };
-      POSTE = 'vendeur'; MOI = Number(id); S.tab = 'arappeler'; S.cell = null;
+      POSTE = 'vendeur'; MOI = Number(id); S.tab = 'pool'; S.cell = null;
       if (S.dr || !$drawer.hidden) fermerTout();
       S.leads = filtrerUniv(S.tous); render();
       try { FW.scrollTo(0, 0); } catch (e) {}
@@ -1687,21 +1696,21 @@
     // ── Filtres-pastilles ─────────────────────────────────────────────────
     function onglets() {
       if (POSTE === 'vendeur') {
-        return [['arappeler', 'À rappeler', aRappeler().length, aRappeler().some(function (l) { return niveau(l) === 'crit'; })],
-                ['relances', 'Relances', aRelancer().length, false],
-                ['campagnes', 'Campagnes', S.mesSollis ? S.mesSollis.length : null, false],
-                ['pool', poolNom(), libres(null).length, false]].filter(function (o) { return !(S.comme && o[0] === 'campagnes'); });
+        return [['pool', poolNom(), libres(null).length, false, 'v'],
+                ['arappeler', 'À rappeler', aRappeler().length, aRappeler().some(function (l) { return niveau(l) === 'crit'; }), 'r'],
+                ['relances', 'Relances', aRelancer().length, false, 'b'],
+                ['campagnes', 'Campagnes', S.mesSollis ? S.mesSollis.length : null, false, 'b']].filter(function (o) { return !(S.comme && o[0] === 'campagnes'); });
       }
       var sid = sitePoste(), pool = libres(sid);
-      return [['pool', sid == null ? 'Pool' : poolNom(sid), pool.length, pool.some(function (l) { return niveau(l) === 'crit'; })],
-              ['bloques', 'En souffrance', bloques(sid).length, bloques(sid).length > 0],
-              ['campagnes', 'Campagnes', null, false]];
+      return [['pool', sid == null ? 'Pool' : poolNom(sid), pool.length, pool.some(function (l) { return niveau(l) === 'crit'; }), 'v'],
+              ['bloques', 'En souffrance', bloques(sid).length, bloques(sid).length > 0, 'r'],
+              ['campagnes', 'Campagnes', null, false, 'b']];
     }
     function renderTabs() {
       var analyse = ['mur', 'mursites', 'relais'].indexOf(S.tab) !== -1;
       return '<div class="tabs" role="tablist">' + (analyse ? '<button type="button" data-a="tab" data-id="pool">← Retour au Pool</button>' : '') + onglets().map(function (o) {
         var on = o[0] === S.tab;
-        return '<button type="button" role="tab" aria-selected="' + on + '" class="' + (on ? 'on' : '') + '" data-a="tab" data-id="' + o[0] + '">' + esc(o[1])
+        return '<button type="button" role="tab" aria-selected="' + on + '" class="' + (on ? 'on' : '') + (o[4] ? ' t-' + o[4] : '') + '" data-a="tab" data-id="' + o[0] + '">' + esc(o[1])
           + (o[2] != null ? ' <span class="cnt ' + (o[2] === 0 ? 'z' : (o[3] ? 'c' : '')) + '">' + o[2] + '</span>' : '') + '</button>';
       }).join('') + '</div>';
     }
@@ -1724,7 +1733,7 @@
       var a;
       if (act === 'prendre') a = verrouAutre(l) ? '<span class="resa-l">Réservé par ' + esc(propre(l.verrou_nom || 'un collègue')) + '</span>' : '<button type="button" class="btn vr" data-a="prendre" data-id="' + l.id_lead + '">Prendre</button>';
       else a = '<button type="button" class="btn pri" data-a="appeler" data-id="' + l.id_lead + '">' + (__lmPeutAppeler() ? (l.tentatives ? 'Rappeler' : 'Appeler') : 'Traiter') + '</button>';
-      return '<div class="lr v2" data-a="open" data-id="' + l.id_lead + '" tabindex="0"><div>' + rebours(l) + '</div>'
+      return '<div class="lr v2' + univCls(l) + '" data-a="open" data-id="' + l.id_lead + '" tabindex="0"><div>' + rebours(l) + '</div>'
         + '<div class="who"><span class="lr-n">' + esc(nomLead(l)) + '</span><p class="lr-d">' + esc(demandeDe(l)) + ' · ' + esc(etatCourt(l)) + '</p></div>'
         + '<div class="src">' + univTag(l) + '<span class="tag">' + esc(l.source_libelle || l.source || 'Lead') + '</span></div>'
         + '<div class="lr-a">' + a + '</div></div>';
@@ -1741,13 +1750,13 @@
         var vn = propre(l.vendeur_nom || 'Un vendeur');
         var ini = vn.split(/\s+/).filter(Boolean).slice(0, 2).map(function (x) { return x[0]; }).join('').toUpperCase();
         var depuis = (l.attribue_le ? 'depuis ' + duree(mins(l.attribue_le)) : '') + (l.tentatives ? ' · ' + plural(l.tentatives, 'tentative') : ' · pas encore appelé');
-        return '<div class="lr v2 attr souf" data-a="open" data-id="' + l.id_lead + '" tabindex="0"><div>' + rebours(l) + '</div>'
+        return '<div class="lr v2 attr souf' + univCls(l) + '" data-a="open" data-id="' + l.id_lead + '" tabindex="0"><div>' + rebours(l) + '</div>'
           + '<div class="who"><span class="lr-n">' + esc(nomLead(l)) + '</span>' + (sitePoste() == null ? ' <span class="lr-v">' + esc(siteNom(l.site)) + '</span>' : '')
           + '<p class="lr-d">' + esc(demandeDe(l)) + ' · ' + esc(l.source_libelle || l.source || 'Lead') + '</p></div>'
           + '<div class="chez"><span class="av">' + esc(ini) + '</span><span class="chez-t"><small>En souffrance chez</small><b>' + esc(vn) + '</b><em>' + esc(depuis) + '</em></span></div>'
           + '<div class="lr-a">' + a + '</div></div>';
       }
-      return '<div class="lr v2 attr" data-a="open" data-id="' + l.id_lead + '" tabindex="0"><div>' + rebours(l) + '</div>'
+      return '<div class="lr v2 attr' + univCls(l) + '" data-a="open" data-id="' + l.id_lead + '" tabindex="0"><div>' + rebours(l) + '</div>'
         + '<div class="who"><span class="lr-n">' + esc(nomLead(l)) + '</span>' + (sitePoste() == null ? ' <span class="lr-v">' + esc(siteNom(l.site)) + '</span>' : '')
         + '<p class="lr-d">' + esc(demandeDe(l)) + '</p>' + (why ? '<p class="why">' + esc(why) + '</p>' : '') + '</div>'
         + '<div class="src">' + univTag(l) + '<span class="tag">' + esc(l.source_libelle || l.source || 'Lead') + '</span></div>'
@@ -1837,7 +1846,7 @@
         + (g && g.id_user ? '<button type="button" class="btn ghost sm" data-a="choix" data-id="' + l.id_lead + '">Annuler</button>' : '') + '</div>';
       else act = '<div class="go"><button type="button" class="main" data-a="attribuer-sugg" data-id="' + l.id_lead + '">Attribuer à ' + esc(prenom(g.nom)) + '<small>' + esc(g.raison) + '</small></button>'
         + '<button type="button" class="alt" data-a="choix" data-id="' + l.id_lead + '" title="Choisir un autre vendeur" aria-label="Choisir un autre vendeur">▾</button></div>';
-      return '<div class="carte-l" data-a="open" data-id="' + l.id_lead + '" tabindex="0">' + ageLead(l)
+      return '<div class="carte-l' + univCls(l) + '" data-a="open" data-id="' + l.id_lead + '" tabindex="0">' + ageLead(l)
         + '<div class="qui"><b>' + esc(nomLead(l)) + (sitePoste() == null ? ' <span class="lr-v">' + esc(siteNom(l.site)) + '</span>' : '') + '</b><p>' + esc(demandeDe(l)) + '</p>' + univTag(l) + '<span class="src">' + esc(l.source_libelle || l.source || 'Lead') + '</span></div>'
         + act + '</div>';
     }
@@ -1982,7 +1991,7 @@
         ? '<span class="tm neutre"><b>' + duree(mins(l.recu_le)) + '</b><small>au plateau · ' + esc(l.statut_bacs || '') + '</small></span>'
         : mins(arrive(l)) >= 1440 ? '<span class="tm crit"><b>' + duree(mins(arrive(l))) + '</b><small>arrivé le ' + jour(arrive(l)) + '</small></span>'
         : tm(arrive(l), slaDe(l), (S.depuis === 'bacs' ? 'depuis la réception' : 'sur le site') + ' · SLA ' + slaTxt(slaDe(l)));
-      return '<div class="lr' + (verrouAutre(l) ? ' resa' : '') + '" data-a="open" data-id="' + l.id_lead + '" tabindex="0">'
+      return '<div class="lr' + (verrouAutre(l) ? ' resa' : '') + univCls(l) + '" data-a="open" data-id="' + l.id_lead + '" tabindex="0">'
         + '<div>' + gauche + '</div>'
         + '<div><span class="lr-n">' + esc(nomLead(l)) + '</span> <span class="lr-v">' + esc(siteNom(l.site) + qui) + '</span><p class="lr-d">' + esc(demandeDe(l)) + '</p><div class="tags">' + tagsLead(l) + '</div></div>'
         + '<div class="lr-a">' + a + '</div></div>';
@@ -2116,9 +2125,9 @@
       if (z.leads.length > 150) h += '<div class="empty">… et ' + (z.leads.length - 150) + ' autres.</div>';
       h += '</div></div>';
       if (z.r === 'piscine' && z.c === 'stock' && z.gere && z.leads.length) h += '<footer class="dr-f"><div class="row pied"><span class="hint">Leads sans contact depuis plus de 24 h.</span><button type="button" class="btn pri" data-a="solder" data-id="' + z.sid + '">Solder le stock</button></div></footer>';
-      var sc = $drawer.querySelector('.dr-b'); var top = (sc && sc.classList.contains('vol')) ? sc.scrollTop : 0;
+      var top = $drawer.querySelector('.dr-b.vol') ? $drawer.scrollTop : 0;
       $drawer.innerHTML = h;
-      var sc2 = $drawer.querySelector('.dr-b'); if (sc2) sc2.scrollTop = top;
+      $drawer.scrollTop = top;
       $scrim.hidden = false; $drawer.hidden = false;
     }
     function groupesRelais() {
@@ -2305,17 +2314,17 @@
       }
       h += '</div></section>';
       // Demande
-      h += '<section><h3>Demande</h3><dl class="dl">' + [['Source', l.source_libelle], ['Véhicule', l.vehicule], ['Campagne', l.campagne], ['Reçu le', quand(l.recu_le)], ['Statut BACS', l.statut_bacs]]
+      h += '<section><h3>Demande</h3><dl class="dl">' + [['Source', l.source_libelle], ['Campagne', l.campagne], ['Reçu le', quand(l.recu_le)], ['Statut BACS', l.statut_bacs]]
           .filter(function (y) { return y[1]; }).map(function (y) { return '<dt>' + y[0] + '</dt><dd>' + esc(y[1]) + '</dd>'; }).join('') + '</dl>'
         + '</section>';
       if (l.qualification) h += '<section><h3>' + (l.par_plateau ? 'Qualification du plateau VROOM' : 'Qualification') + '</h3><p class="qualif">' + esc(l.qualification) + '</p>' + (l.transfere_par_nom ? '<p class="hint">Par ' + esc(propre(l.transfere_par_nom)) + ', le ' + esc(quand(l.transfere_le)) + '.</p>' : '') + '</section>';
       h += sectionBacs();
       h += '</div><footer class="dr-f">' + piedDrawer(l, gere, mien) + '</footer>';
       if (D.demo) h = h.replace('<div class="dr-b">', '<p class="demo">Fiche d\'exemple de la visite guidée : rien n\'est enregistré.</p><div class="dr-b">');
-      var sc = $drawer.querySelector('.dr-b'); var top = sc ? sc.scrollTop : 0;
+      var top = $drawer.scrollTop;
       $drawer.innerHTML = h;
       $drawer.classList.toggle('composing', !!(D.canal && D.canal !== 'appel'));
-      var sc2 = $drawer.querySelector('.dr-b'); if (sc2) sc2.scrollTop = top;
+      $drawer.scrollTop = top;
     }
     // v69 : la demande initiale du client, visible du premier coup d'œil.
     function demandeHaut(l) {
@@ -2324,7 +2333,7 @@
       var veh = l.vehicule || '';
       if (!msg && !veh && !l.campagne) return '';
       var long = msg.length > 220, ouvert = S.dr && S.dr.demOuverte;
-      return '<div class="dem-h"><div class="dem-t"><span>Demande du client</span>' + univTag(l) + (type ? '<em>' + esc(type) + '</em>' : '') + '<small>' + esc(quand(l.recu_le)) + '</small></div>'
+      return '<div class="dem-h' + univCls(l) + '"><div class="dem-t"><span>Demande du client</span>' + (l.univers ? '<em class="u' + univCls(l) + '">' + l.univers + '</em>' : '') + (type ? '<em>' + esc(type) + '</em>' : '') + '<small>' + esc(quand(l.recu_le)) + '</small></div>'
         + (veh ? '<p class="dem-v">' + esc(veh) + '</p>' : '')
         + (msg ? '<p class="dem-m' + (long && !ouvert ? ' court' : '') + '">« ' + esc(msg) + ' »</p>' + (long ? '<button type="button" class="lien" data-a="dem-plus">' + (ouvert ? 'Réduire' : 'Lire toute la demande') + '</button>' : '')
           : (l.campagne ? '<p class="dem-m">' + esc(l.campagne) + '</p>' : ''))
@@ -2567,9 +2576,9 @@
     function renderDrawerPreserve() {
       var v = lireForm();
       lireRdvF(); lireCompose();
-      var pf = $drawer.querySelector('.dr-f'), pTop = pf ? pf.scrollTop : 0;
+      var pTop = $drawer.scrollTop;
       renderDrawer();
-      var pf2 = $drawer.querySelector('.dr-f'); if (pf2) pf2.scrollTop = pTop;
+      $drawer.scrollTop = pTop;
       Object.keys(v).forEach(function (k) {
         if (v[k] == null) return;
         var sel = { vendeur: '#dr-vendeur', site: '#dr-site', note: '#res-note', motif: '#clore-motif', cnote: '#clore-note' }[k];
@@ -2855,7 +2864,7 @@
       lireRdvF();
       D.canal = act; D.tpl = null; D.txt = null; D.subj = null;
       renderDrawer();
-      var b = $drawer.querySelector('.dr-b'); if (b) b.scrollTop = 0;
+      $drawer.scrollTop = 0;
     }
     function ouvrirCanalModele() {
       var D = S.dr; if (!D || !D.canal) return;
@@ -3578,6 +3587,12 @@
 .lmtc-ov .compose .row .hint{flex:1 1 200px}
 .lmtc-ov .dr-f{max-height:62vh;overflow:auto;grid-auto-rows:max-content;align-content:start}
 .lmtc-ov .drawer.composing .dr-f{max-height:30vh}
+/* v70 : UN SEUL défilement, celui du volet entier (plus de petites zones
+   qui défilent chacune avec du contenu caché). */
+.lmtc-ov .drawer{overflow-y:auto;overscroll-behavior:contain}
+.lmtc-ov .drawer .dr-b{flex:none;overflow:visible}
+.lmtc-ov .drawer .dr-f,.lmtc-ov .drawer.composing .dr-f{max-height:none;overflow:visible;flex:none}
+.lmtc-ov .drawer .dr-h{flex:none}
 .lmtc-ov .rdvf{display:grid;gap:12px;margin-top:4px}
 .lmtc-ov .rdvf .q{display:grid;gap:6px}
 .lmtc-ov .rdvf .q > span{font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:.05em;color:var(--lbl)}
@@ -3664,6 +3679,30 @@
 .lmtc .k-range{background:#fff;border:1px solid #ece9e1;border-radius:10px;padding:7px 12px;font-family:inherit;font-size:12px;font-weight:700;color:#2a5ea9;cursor:pointer;display:inline-flex;align-items:center;gap:6px}
 .lmtc .k-range:hover{border-color:#2a5ea9}
 :is(.lmtc,.lmtc-ov) .k-caret{font-size:10px;color:#888780}
+.lmtc .lr.vt-vn{box-shadow:inset 3px 0 0 #53bda7}
+.lmtc .lr.vt-vo{box-shadow:inset 3px 0 0 #fac055}
+.lmtc .carte-l.vt-vn{border-left:3px solid #53bda7}
+.lmtc .carte-l.vt-vo{border-left:3px solid #fac055}
+.lmtc-ov .dem-h.vt-vn{border-left-color:#53bda7}
+.lmtc-ov .dem-h.vt-vo{border-left-color:#fac055}
+.lmtc-ov .dem-t em.u.vt-vn{color:#2c8a76;border-color:#bfe6dc}
+.lmtc-ov .dem-t em.u.vt-vo{color:#a8660a;border-color:#f6dca8}
+.lmtc .seg-u .pt{display:inline-block;width:3px;height:12px;border-radius:2px;margin-right:6px;vertical-align:-1px}
+.lmtc .seg-u .pt.vt-vn{background:#53bda7}
+.lmtc .seg-u .pt.vt-vo{background:#fac055}
+.lmtc .tabs button.t-v .cnt{background:var(--ok-bg);color:var(--m-vert)}
+.lmtc .tabs button.t-r .cnt{background:var(--chaud-bg);color:var(--m-rouge)}
+.lmtc .tabs button.t-b .cnt{background:var(--sel);color:var(--bleu)}
+.lmtc .tabs button.t-v .cnt.z,.lmtc .tabs button.t-r .cnt.z,.lmtc .tabs button.t-b .cnt.z{background:var(--calme-bg);color:var(--ink-3)}
+.lmtc .tabs button.t-v:hover{color:var(--m-vert)}
+.lmtc .tabs button.t-r:hover{color:var(--m-rouge)}
+.lmtc .tabs button.t-b:hover{color:var(--bleu)}
+.lmtc .tabs button.t-v.on{color:var(--m-vert);border-bottom-color:var(--vert)}
+.lmtc .tabs button.t-r.on{color:var(--m-rouge);border-bottom-color:var(--rouge)}
+.lmtc .tabs button.t-b.on{color:var(--bleu-dk);border-bottom-color:var(--bleu)}
+.lmtc .tabs button.t-v.on .cnt{background:var(--vert);color:#fff}
+.lmtc .tabs button.t-r.on .cnt{background:var(--m-rouge);color:#fff}
+.lmtc .tabs button.t-b.on .cnt{background:var(--bleu);color:#fff}
 .lmtc .comme-b{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;background:var(--sel);border:1.5px solid var(--bleu-clair);color:var(--bleu-dk);border-radius:12px;padding:10px 14px;margin:0 0 14px;font-size:13px;line-height:1.45}
 .lmtc .go{display:flex;align-items:stretch}
 .lmtc .go .main{border:0;background:var(--bleu);color:#fff;font:inherit;font-weight:800;font-size:13.5px;padding:9px 16px;border-radius:11px 0 0 11px;cursor:pointer;white-space:nowrap;text-align:left;line-height:1.25}
