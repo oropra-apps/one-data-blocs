@@ -1,4 +1,11 @@
 // ============================================================================
+//  v20 (28/10/2026) : critères en accès direct — Nom, Prénom, Téléphone,
+//  Email, Véhicule, ID Client (Société : SIRET, Raison sociale, Téléphone,
+//  Email, Véhicule, ID Client). Le champ « Véhicule » prend une
+//  immatriculation (avec ou sans tirets) ou un VIN (complet ou ses derniers
+//  caractères) et renvoie le client qui possède le véhicule, détenteur actuel
+//  d'abord puis anciens (RPC client_recherche_vehicule). Le véhicule trouvé
+//  s'affiche sous le nom. « Marque véhicule » quitte « Plus de critères ».
 //  v19 (28/10/2026) : création depuis les Notifications. La carte « inconnu »
 //  (notifications v8) dépose { tel | email } dans sessionStorage
 //  (od_creation_client) puis ouvre cette page : la recherche se lance sur ce
@@ -107,8 +114,8 @@ OD.define('client-search', {
   const npaiOptionsRaw = readVar(NPAI_VAR_ID);
   const npaiOptions = Array.isArray(npaiOptionsRaw) && npaiOptionsRaw.length ? npaiOptionsRaw : ['Aucun', 'NPAI', 'Décédé'];
 
-  const emptyP = () => ({ NOM: '', PRENOM: '', EMAIL: '', IDVu: '', tel: '', ville: '', cp: '', birthMin: '', birthMax: '', CSP: '', marque: '' });
-  const emptyS = () => ({ SIRET: '', NOM: '', EMAIL: '', IDVu: '' });
+  const emptyP = () => ({ NOM: '', PRENOM: '', EMAIL: '', IDVu: '', tel: '', vehicule: '', ville: '', cp: '', birthMin: '', birthMax: '', CSP: '' });
+  const emptyS = () => ({ SIRET: '', NOM: '', EMAIL: '', IDVu: '', tel: '', vehicule: '' });
 
   const state = window.__crs || {};
   if (state.activeTab === undefined) state.activeTab = 'particulier';
@@ -221,6 +228,28 @@ OD.define('client-search', {
     // catch (e) { console.warn('[crs] executeGlobal fiche client KO', e && e.message); }
   }
 
+  // v19 : les 9 derniers chiffres retrouvent aussi les fiches saisies avec
+  // espaces, points ou indicatif (+33), via les colonnes normalisées.
+  function filtreTel(q, tel) {
+    if (!tel) return q;
+    const k9 = cleanDigits(tel).slice(-9);
+    return k9.length === 9
+      ? q.or(`TEl_MOB.ilike.%${tel}%,TEL_FIXE.ilike.%${tel}%,tel_mob_e164.like.%${k9},tel_fixe_e164.like.%${k9}`)
+      : q.or(`TEl_MOB.ilike.%${tel}%,TEL_FIXE.ilike.%${tel}%`);
+  }
+
+  // v20 : immatriculation ou VIN -> { IDVu: [véhicules] }. null = pas de critère.
+  async function resoudreVehicule(supabase, saisie) {
+    const k = String(saisie || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+    if (!k) return null;
+    if (k.length < 5) throw new Error('Véhicule : saisissez une immatriculation complète ou au moins les 6 derniers caractères du VIN.');
+    const { data, error } = await supabase.rpc('client_recherche_vehicule', { p_q: k, p_limite: 200 });
+    if (error) throw error;
+    const m = {};
+    (data || []).forEach(v => { const id = String(v.idvu); (m[id] = m[id] || []).push(v); });
+    return m;
+  }
+
   function buildQuery(supabase) {
     const tab = state.activeTab;
     const f = state.filters[tab];
@@ -231,26 +260,21 @@ OD.define('client-search', {
       if (f.PRENOM) q = q.ilike('PRENOM', `%${f.PRENOM}%`);
       if (f.EMAIL) q = q.ilike('EMAIL', `%${f.EMAIL}%`);
       if (f.IDVu) q = q.eq('IDVu', Number(f.IDVu));
-      if (f.tel) {
-        // v19 : les 9 derniers chiffres retrouvent aussi les fiches saisies avec
-        // espaces, points ou indicatif (+33), via les colonnes normalisées.
-        const k9 = cleanDigits(f.tel).slice(-9);
-        q = k9.length === 9
-          ? q.or(`TEl_MOB.ilike.%${f.tel}%,TEL_FIXE.ilike.%${f.tel}%,tel_mob_e164.like.%${k9},tel_fixe_e164.like.%${k9}`)
-          : q.or(`TEl_MOB.ilike.%${f.tel}%,TEL_FIXE.ilike.%${f.tel}%`);
-      }
+      q = filtreTel(q, f.tel);
       if (f.ville) q = q.ilike('ville', `%${f.ville}%`);
       if (f.cp) q = q.ilike('code_postal', `${f.cp}%`);
       if (f.birthMin) q = q.gte('BIRTHDAY', f.birthMin);
       if (f.birthMax) q = q.lte('BIRTHDAY', f.birthMax);
       if (f.CSP) q = q.ilike('CSP', `%${f.CSP}%`);
-      if (f.marque) q = q.ilike('MARQUE_CLIENT_VEHICULE', `%${f.marque}%`);
     } else {
       if (f.SIRET) { const c = cleanDigits(f.SIRET); if (c) q = q.eq('SIRET', c); }
       if (f.NOM) q = q.ilike('NOM', `%${f.NOM}%`);
       if (f.EMAIL) q = q.ilike('EMAIL', `%${f.EMAIL}%`);
       if (f.IDVu) q = q.eq('IDVu', Number(f.IDVu));
+      q = filtreTel(q, f.tel);
     }
+    // v20 : véhicule -> clients qui le possèdent (résolus avant, dans runSearch)
+    if (f.vehicule && state.vehMatch) q = q.in('IDVu', Object.keys(state.vehMatch).map(Number));
     const start = (state.page - 1) * PAGE_SIZE;
     q = q.order('NOM', { ascending: true, nullsFirst: false }).range(start, start + PAGE_SIZE - 1);
     return q;
@@ -262,6 +286,12 @@ OD.define('client-search', {
     render();
     try {
       const supabase = ctx.supabase;
+      const fv = state.filters[state.activeTab];
+      state.vehMatch = fv.vehicule ? await resoudreVehicule(supabase, fv.vehicule) : null;
+      if (state.vehMatch && !Object.keys(state.vehMatch).length) {
+        state.results = []; state.totalCount = 0; state.error = null;
+        return;   // aucun client ne possède ce véhicule (finally : loading + render)
+      }
       const { data, error, count } = await buildQuery(supabase);
       if (error) throw error;
       state.results = data || [];
@@ -640,6 +670,7 @@ OD.define('client-search', {
     render();
   }
 
+  const ICON_VEH = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 17h14v-5l-2-5H7l-2 5v5z"/><circle cx="7.5" cy="17" r="1.6"/><circle cx="16.5" cy="17" r="1.6"/></svg>';
   const ICON_P = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/></svg>';
   const ICON_S = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="3" width="16" height="18" rx="1"/><path d="M9 21V12h6v9"/></svg>';
   const ICON_MOB = '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="7" y="2" width="10" height="20" rx="2"/></svg>';
@@ -686,6 +717,11 @@ OD.define('client-search', {
 #oropra-client-search .crs-btn-primary:disabled{background:#a9d9cd;border-color:#a9d9cd;cursor:not-allowed}
 #oropra-client-search .crs-btn-ghost{background:transparent;color:#2a5ea9;border-color:#2a5ea9}
 #oropra-client-search .crs-btn-ghost:hover{background:#f2f6fc}
+#oropra-client-search .crs-veh{display:flex;align-items:center;gap:6px;margin-top:5px;font-size:12px;font-weight:600;color:#1F4A85;flex-wrap:wrap}
+#oropra-client-search .crs-veh svg{width:14px;height:14px;flex:0 0 auto}
+#oropra-client-search .crs-veh em{font-style:normal;font-weight:700;font-size:10.5px;padding:1px 7px;border-radius:9px;background:#e4f4f0;color:#00997f}
+#oropra-client-search .crs-veh.ancien{color:#5a6b86}
+#oropra-client-search .crs-veh.ancien em{background:#eef2f8;color:#8b99b0}
 #oropra-client-search .crs-table{width:100%;border-collapse:collapse;font-size:13px;margin-top:8px}
 #oropra-client-search .crs-table thead th{background:#f2f6fc;padding:11px 16px;text-align:left;color:#2a5ea9;font-weight:600;font-size:12px;text-transform:uppercase;letter-spacing:.3px}
 #oropra-client-search .crs-table tbody tr{border-bottom:1px solid #f0f4fa;cursor:pointer;transition:background-color .1s}
@@ -812,24 +848,24 @@ OD.define('client-search', {
     if (tab === 'particulier') {
       h += fieldHtml('Nom', 'NOM');
       h += fieldHtml('Prénom', 'PRENOM');
+      h += fieldHtml('Téléphone', 'tel');
       h += fieldHtml('Email', 'EMAIL');
+      h += fieldHtml('Véhicule', 'vehicule', 'text', 'Véhicule : immat. ou VIN');
       h += fieldHtml('ID Client', 'IDVu');
-      h += '<div></div><div></div>';
       if (state.showMore) {
-        h += fieldHtml('Téléphone', 'tel');
         h += fieldHtml('Ville', 'ville');
         h += fieldHtml('Code postal', 'cp');
         h += fieldHtml('Né(e) après le', 'birthMin', 'date');
         h += fieldHtml('Né(e) avant le', 'birthMax', 'date');
         h += fieldHtml('CSP', 'CSP');
-        h += fieldHtml('Marque véhicule', 'marque');
       }
     } else {
       h += fieldHtml('SIRET', 'SIRET');
       h += fieldHtml('Raison sociale', 'NOM');
+      h += fieldHtml('Téléphone', 'tel');
       h += fieldHtml('Email', 'EMAIL');
+      h += fieldHtml('Véhicule', 'vehicule', 'text', 'Véhicule : immat. ou VIN');
       h += fieldHtml('ID Client', 'IDVu');
-      h += '<div></div><div></div>';
     }
     h += '</div>';
     return h;
@@ -884,7 +920,9 @@ OD.define('client-search', {
       let telHtml = '';
       if (r.TEl_MOB) telHtml += `<div class="crs-tel-row">${ICON_MOB} ${esc(r.TEl_MOB)}</div>`;
       if (r.TEL_FIXE) telHtml += `<div class="crs-tel-row">${ICON_FIXE} ${esc(r.TEL_FIXE)}</div>`;
-      h += `<tr data-crs-action="select-row" data-idvu="${esc(r.IDVu)}"><td data-label="ID Client">${esc(r.IDVu)}</td><td class="crs-c-nom" data-label="Nom">${esc(fullName)}</td><td data-label="Adresse">${adresseHtml}</td><td data-label="Email">${esc(r.EMAIL || '')}</td><td class="crs-cell-tel" data-label="Téléphone">${telHtml}</td><td class="crs-cell-action"><span class="crs-action-btn">${isSoc ? ICON_S : ICON_P}</span></td></tr>`;
+      const vehs = state.vehMatch && state.vehMatch[String(r.IDVu)];
+      const vehHtml = vehs ? vehs.map(v => `<div class="crs-veh${v.actuel ? '' : ' ancien'}">${ICON_VEH}<span>${esc([v.immat, v.libelle].filter(Boolean).join(' · ') || v.vin)}</span><em>${v.actuel ? 'détenteur actuel' : 'ancien détenteur'}</em></div>`).join('') : '';
+      h += `<tr data-crs-action="select-row" data-idvu="${esc(r.IDVu)}"><td data-label="ID Client">${esc(r.IDVu)}</td><td class="crs-c-nom" data-label="Nom">${esc(fullName)}${vehHtml}</td><td data-label="Adresse">${adresseHtml}</td><td data-label="Email">${esc(r.EMAIL || '')}</td><td class="crs-cell-tel" data-label="Téléphone">${telHtml}</td><td class="crs-cell-action"><span class="crs-action-btn">${isSoc ? ICON_S : ICON_P}</span></td></tr>`;
     }
     h += '</tbody></table></div>';
     return h;
