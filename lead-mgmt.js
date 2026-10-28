@@ -1,6 +1,10 @@
 // ============================================================================
 //  LEAD MANAGEMENT — module One Data (OD.define 'lead-mgmt')
-//  VERSION TEAM COLIN (v73) — déploiement CIBLÉ (publish-targets :
+//  VERSION TEAM COLIN (v74) — déploiement CIBLÉ (publish-targets :
+//  v74 (28/10/2026) : plateau VROOM, MODE DÉMONSTRATION (bouton dans le
+//  bandeau « BACS fermé ») : Prendre / ouvrir un lead montre la fiche comme
+//  après la prise, avec qualification, transfert, rappel et abandon, sans
+//  rien réserver ni écrire (One Data comme BACS). Pour présenter l'outil.
 //  v73 (28/10/2026) : plateau VROOM, bandeau BACS corrigé — ce qui bloque
 //  est l'absence de BACS ouvert sur le poste, pas l'identifiant BACS du compte
 //  (facultatif : il sert seulement à nommer l'opérateur propriétaire du lead).
@@ -355,7 +359,7 @@
 
     // ── État ──────────────────────────────────────────────────────────────
     var S = {
-      tab: 'piscine', stock: false, age: 'frais', univ: 'tous', per: periodeDefaut(), sources: null, campagne: null, miens: false,
+      tab: 'piscine', stock: false, age: 'frais', demoMode: false, univ: 'tous', per: periodeDefaut(), sources: null, campagne: null, miens: false,
       kpis: null, piscine: [], rappels: [], transferts: [], campagnes: null, stockListe: null,
       ack: new Set(), vus: new Set(), frais: new Set(), premier: true,
       bacs: null,
@@ -413,7 +417,7 @@
     function ecritBacs() { return !!(S.bacs && S.bacs.ecrire_bacs); }
     // v60 : BACS doit être ouvert sur CE poste (session de l'opérateur). On
     // bloque AVANT le geste ; la base le refuserait de toute façon.
-    function bloque() { return ecritBacs() && S.bacs.canal !== 'moi'; }
+    function bloque() { return !S.demoMode && ecritBacs() && S.bacs.canal !== 'moi'; }
     function dis() { return bloque() ? ' disabled title="Ouvrez BACS dans un onglet de ce navigateur pour agir"' : ''; }
     var GESTES_BACS = ['prendre', 'qualifier', 'injoignable', 'long-terme', 'abandonner'];
     // Réveille l'extension pour qu'elle vide la file tout de suite (sans
@@ -433,7 +437,9 @@
       // 22/10 : un geste qui touche BACS exige BACS ouvert chez l'utilisateur).
       // L'identifiant BACS du compte n'est pas requis : il sert seulement à
       // mettre l'opérateur propriétaire du lead dans BACS.
-      if (b.canal !== 'moi') return '<div class="bacs-l" role="status"><b>BACS fermé sur ce poste.</b><span>Prendre, transférer ou abandonner un lead s\'écrit dans BACS : ouvrez BACS dans un onglet de ce navigateur, avec l\'extension One Data. Les gestes se débloquent dès qu\'il répond.</span></div>';
+      if (S.demoMode) return '<div class="demo-l" role="status"><b>Mode démonstration.</b><span>Tout est consultable et chaque geste se joue sur la fiche, mais rien n\'est enregistré, ni dans One Data ni dans BACS.</span><button type="button" class="btn sm" data-a="demo-off">Quitter la démonstration</button></div>';
+      if (b.canal !== 'moi') return '<div class="bacs-l" role="status"><b>BACS fermé sur ce poste.</b><span>Prendre, transférer ou abandonner un lead s\'écrit dans BACS : ouvrez BACS dans un onglet de ce navigateur, avec l\'extension One Data. Les gestes se débloquent dès qu\'il répond.</span>'
+        + '<button type="button" class="btn sm" data-a="demo-on">Mode démonstration</button></div>';
       var h = '';
       if (b.en_attente_vieux > 0) h += '<div class="bd warn"><b>' + plural(b.en_attente_vieux, 'geste attend', 'gestes attendent') + ' d\'être appliqué' + (b.en_attente_vieux > 1 ? 's' : '') + ' dans BACS.</b>'
         + '<span>Ils partent au prochain passage de l\'extension. Si cela dure, rechargez l\'onglet BACS.</span></div>';
@@ -929,7 +935,7 @@
       }
       h += '</footer>';
       var top = $drawer.scrollTop;
-      if (D.demo) h = h.replace('<div class="dr-b">', '<p class="demo">Fiche d\'exemple de la visite guidée : rien n\'est enregistré, rien ne part dans BACS.</p><div class="dr-b">');
+      if (D.demo) h = h.replace('<div class="dr-b">', '<p class="demo">' + (S.demoMode ? 'Démonstration : la fiche est montrée comme après la prise du lead. Rien n\'est enregistré, rien ne part dans BACS.' : 'Fiche d\'exemple de la visite guidée : rien n\'est enregistré, rien ne part dans BACS.') + '</p><div class="dr-b">');
       $drawer.innerHTML = h;
       $drawer.scrollTop = top;
     }
@@ -974,8 +980,9 @@
     // l'opérateur pour montrer la qualification, l'orientation et les issues.
     // Aucun geste n'est enregistré (geste() et canal() refusent), rien n'est
     // réservé ni libéré dans BACS.
-    async function ouvrirExemple() {
-      var cand = [].concat(S.piscine || [], S.stockListe || [], S.rappels || [], S.transferts || []).filter(function (x) { return x && x.sf_lead_id; })[0];
+    async function ouvrirExemple(sfVoulu) {
+      var tous = [].concat(S.piscine || [], S.stockListe || [], S.rappels || [], S.transferts || []).filter(function (x) { return x && x.sf_lead_id; });
+      var cand = (sfVoulu && tous.find(function (x) { return x.sf_lead_id === sfVoulu; })) || tous[0];
       var fiche = null;
       if (cand) { try { fiche = await rpc('plateau_fiche', { p_sf_lead_id: cand.sf_lead_id }); } catch (e) { fiche = null; } }
       if (!fiche) fiche = { sf_lead_id: 'exemple', prenom: 'Client', nom: 'Exemple', recu_le: new Date(Date.now() - 1200000).toISOString(), fiche_bacs: { type_demande: 'Demande d\'essai', modele: 'Yaris Cross' } };
@@ -1046,7 +1053,7 @@
     // ── Gestes ────────────────────────────────────────────────────────────
     var occupe = false;
     async function geste(fn) {
-      if (S.dr && S.dr.demo) { toast('Visite guidée : rien n\'est enregistré sur la fiche d\'exemple.'); return; }
+      if (S.dr && S.dr.demo) { toast(S.demoMode ? 'Démonstration : en situation réelle, ce geste serait enregistré dans One Data et reporté dans BACS.' : 'Visite guidée : rien n\'est enregistré sur la fiche d\'exemple.'); return; }
       if (occupe) return; occupe = true;
       ov.classList.add('busy'); root.classList.add('busy');
       try { await fn(); }
@@ -1151,7 +1158,17 @@
       if (GESTES_BACS.indexOf(a) !== -1 && bloque()) {
         toast('BACS n\'est pas ouvert sur votre poste : ouvrez-le dans un onglet de ce navigateur et connectez-vous.', true); return;
       }
+      // v74 : mode démonstration — « Prendre » et l'ouverture d'un lead
+      // montrent la fiche telle qu'après la prise (qualification, transfert,
+      // rappel, abandon), sans rien réserver ni écrire ; les gestes qui
+      // écriraient sont refusés.
+      if (S.demoMode) {
+        if (a === 'prendre' || a === 'open') return ouvrirExemple(id);
+        if (a === 'relancer' || a === 'bacs-relancer') { toast('Démonstration : en situation réelle, le chef des ventes du site serait relancé.'); return; }
+      }
       switch (a) {
+        case 'demo-on': S.demoMode = true; render(); toast('Mode démonstration : rien n\'est enregistré.'); return;
+        case 'demo-off': S.demoMode = false; if (S.dr && S.dr.demo) fermerDrawer(true); render(); return;
         case 'age': S.tab = 'piscine'; S.stock = false; S.age = id === 'vieux' ? 'vieux' : 'frais'; render(); return;
         case 'univ': S.univ = id || 'tous'; render(); return;
         case 'dem-plus': if (S.dr) { S.dr.demOuverte = !S.dr.demOuverte; renderDrawerPreserve(); } return;
@@ -2799,7 +2816,7 @@
     // ── Gestes ────────────────────────────────────────────────────────────
     var occupe = false;
     async function geste(fn) {
-      if (S.dr && S.dr.demo) { toast('Visite guidée : rien n\'est enregistré sur la fiche d\'exemple.'); return; }
+      if (S.dr && S.dr.demo) { toast(S.demoMode ? 'Démonstration : en situation réelle, ce geste serait enregistré dans One Data et reporté dans BACS.' : 'Visite guidée : rien n\'est enregistré sur la fiche d\'exemple.'); return; }
       if (occupe) return; occupe = true;
       ov.classList.add('busy'); root.classList.add('busy');
       try { await fn(); }
@@ -3693,6 +3710,9 @@
 .lmtc .act:has(.cartes,.vend,.panel > .vide){background:none;border:0;box-shadow:none}
 .lmtc .act:has(.cartes,.vend,.panel > .vide) .panel{padding:0}
 .lmtc .bacs-l{display:flex;flex-wrap:wrap;gap:4px 10px;align-items:baseline;background:var(--card);border:1px solid var(--line);border-left:4px solid var(--m-rouge);border-radius:12px;padding:10px 14px;margin-bottom:18px;font-size:13px;color:var(--ink-2)}
+.lmtc .demo-l{display:flex;flex-wrap:wrap;gap:4px 10px;align-items:center;background:var(--sel);border:1px solid var(--bleu-clair);border-left:4px solid var(--bleu);border-radius:12px;padding:10px 14px;margin-bottom:18px;font-size:13px;color:var(--bleu-dk)}
+.lmtc .demo-l b{font-weight:800}
+.lmtc .demo-l .btn,.lmtc .bacs-l .btn{margin-left:auto}
 .lmtc .bacs-l b{color:var(--m-rouge);font-weight:800}
 .lmtc .regle{background:none;border:0;padding:0 2px;margin:0 0 16px}
 .lmtc .regle .i{background:var(--sel)}
