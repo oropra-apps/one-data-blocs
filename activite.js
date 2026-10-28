@@ -1,5 +1,9 @@
 // ============================================================================
 //  SUIVI D'ACTIVITÉ v4 (28/10/2026) — un écran par rôle, une question par écran
+//  v8 (29/10/2026) : à côté des raccourcis (Aujourd'hui, 7 jours, Ce mois…), le
+//    sélecteur de dates est celui de la gestion des ventes (bouton « 📅 du → au »,
+//    calendrier d'un mois, deux clics), sur les écrans Chef, Site et Groupe. Il
+//    remplace les deux champs date du point du matin.
 //
 //    Vendeur           « Que dois-je faire aujourd'hui ? »
 //    Chef des ventes   « Avec qui, sur quoi, avec quel levier ? » (point du matin)
@@ -29,6 +33,96 @@ OD.define('activite', {
     const doc = __anchor.ownerDocument || document;
     const FW = () => { try { return (wwLib.getFrontWindow && wwLib.getFrontWindow()) || window; } catch (e) { return window; } };
     const sb = () => ctx.supabase;
+  // ==========================================================================
+  //  SÉLECTEUR DE PÉRIODE — même dessin que la gestion des ventes (kanban) :
+  //  un bouton « 📅 01 oct. → 28 oct. ▾ », un calendrier d'un mois, deux clics
+  //  (début puis fin). Copie conforme dans chaque module (aucun chargement
+  //  externe) : odPeriodeKit(doc, FW) rend { bouton, ouvrir, fermer, moisEnCours }.
+  // ==========================================================================
+  function odPeriodeKit(doc, FW) {
+    var dehors = null;
+    var e = function (s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); };
+    var ymd = function (y, m, d) { return y + '-' + String(m + 1).padStart(2, '0') + '-' + String(d).padStart(2, '0'); };
+    function style() {
+      if (doc.getElementById('od-dp-style')) return;
+      var st = doc.createElement('style'); st.id = 'od-dp-style';
+      st.textContent = '.od-range{background:#fff;border:1px solid #ece9e1;border-radius:10px;padding:7px 12px;font-family:inherit;font-size:12px;font-weight:700;color:#2a5ea9;cursor:pointer;display:inline-flex;align-items:center;gap:6px;white-space:nowrap;line-height:1.2}'
+        + '.od-range:hover{border-color:#2a5ea9}.od-range:disabled{opacity:.6;cursor:default}'
+        + '.od-range .od-caret{font-size:10px;color:#888780}'
+        + '#od-dp .kan-dp-box{background:#fff;border:1.5px solid #e8eef7;border-radius:12px;box-shadow:0 8px 30px rgba(42,94,169,.18);padding:13px;width:262px;font-family:"Nunito Sans",system-ui,sans-serif}'
+        + '#od-dp .kan-dp-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:8px}'
+        + '#od-dp .kan-dp-head span{font-size:12px;font-weight:700;color:#2a5ea9;text-transform:capitalize}'
+        + '#od-dp .kan-dp-head button{width:26px;height:26px;border:1.5px solid #e8eef7;background:#fff;border-radius:8px;cursor:pointer;color:#2a5ea9;font-size:13px;line-height:1;padding:0}'
+        + '#od-dp .kan-dp-head button:hover{background:#f5f8fc}'
+        + '#od-dp .kan-dp-grid{display:grid;grid-template-columns:repeat(7,33px);gap:2px}'
+        + '#od-dp .kan-dp-dow{font-size:9px;color:#acc5e4;text-align:center;font-weight:800;padding-bottom:3px}'
+        + '#od-dp .kan-dp-day{height:29px;line-height:29px;text-align:center;font-size:11px;color:#2c2c2a;border-radius:7px;cursor:pointer}'
+        + '#od-dp .kan-dp-day:hover{background:#eef4fc}'
+        + '#od-dp .kan-dp-day.today{box-shadow:inset 0 0 0 1.5px #acc5e4}'
+        + '#od-dp .kan-dp-day.sel{background:#2a5ea9;color:#fff;font-weight:800}'
+        + '#od-dp .kan-dp-day.inr{background:#eef4fc}'
+        + '#od-dp .kan-dp-foot{margin-top:8px;text-align:center;font-size:10px;color:#9bb3d1;font-style:italic}';
+      doc.head.appendChild(st);
+    }
+    function fmt(du, au) {
+      var f = function (s) { if (!s) return '?'; var d = new Date(String(s).slice(0, 10) + 'T12:00:00'); return d.toLocaleDateString('fr-FR', { day: '2-digit', month: 'short' }); };
+      return f(du) + ' → ' + f(au);
+    }
+    function bouton(du, au, attrs, titre) {
+      style();
+      return '<button type="button" class="od-range" ' + (attrs || '') + (titre ? ' title="' + e(titre) + '"' : '') + '>📅 <span class="od-range-t">' + e(fmt(du, au)) + '</span> <span class="od-caret">▾</span></button>';
+    }
+    function fermer() {
+      var p = doc.getElementById('od-dp'); if (p) p.remove();
+      if (dehors) { doc.removeEventListener('mousedown', dehors, true); dehors = null; }
+    }
+    function ouvrir(anchor, debut, surChoix) {
+      if (doc.getElementById('od-dp')) { fermer(); return; }
+      style();
+      var pk = { mois: null, deb: null, fin: null, survol: null };
+      var m0 = new Date(String(debut || '').slice(0, 10) + 'T12:00:00'); if (isNaN(m0)) m0 = new Date();
+      pk.mois = new Date(m0.getFullYear(), m0.getMonth(), 1);
+      var pop = doc.createElement('div'); pop.id = 'od-dp';
+      var r = anchor.getBoundingClientRect();
+      var largeur = ((FW && FW.innerWidth) || (doc.defaultView && doc.defaultView.innerWidth) || 1200);
+      pop.style.cssText = 'position:fixed;z-index:99999;top:' + (r.bottom + 6) + 'px;left:' + Math.max(8, Math.min(r.left, largeur - 280)) + 'px';
+      doc.body.appendChild(pop);
+      function cal() {
+        var y = pk.mois.getFullYear(), m = pk.mois.getMonth(), p1 = new Date(y, m, 1), dec = (p1.getDay() + 6) % 7, nb = new Date(y, m + 1, 0).getDate();
+        var auj = new Date(), today = ymd(auj.getFullYear(), auj.getMonth(), auj.getDate()), a = pk.deb, b = pk.fin || pk.survol;
+        var lo = a && b ? (a < b ? a : b) : null, hi = a && b ? (a < b ? b : a) : null;
+        var h = '<div class="kan-dp-box"><div class="kan-dp-head"><button type="button" data-nav="-1">‹</button><span>' + e(p1.toLocaleDateString('fr-FR', { month: 'long', year: 'numeric' })) + '</span><button type="button" data-nav="1">›</button></div><div class="kan-dp-grid">';
+        ['L', 'M', 'M', 'J', 'V', 'S', 'D'].forEach(function (x) { h += '<span class="kan-dp-dow">' + x + '</span>'; });
+        for (var i = 0; i < dec; i++) h += '<span></span>';
+        for (var d = 1; d <= nb; d++) {
+          var ds = ymd(y, m, d), c = 'kan-dp-day';
+          if (ds === today) c += ' today';
+          if (pk.deb === ds || pk.fin === ds) c += ' sel'; else if (lo && hi && ds > lo && ds < hi) c += ' inr';
+          h += '<span class="' + c + '" data-d="' + ds + '">' + d + '</span>';
+        }
+        return h + '</div><div class="kan-dp-foot">' + (pk.deb ? 'Cliquez la date de fin' : 'Cliquez la date de début') + '</div></div>';
+      }
+      function brancher() {
+        pop.querySelectorAll('[data-nav]').forEach(function (b) { b.addEventListener('click', function (ev) { ev.stopPropagation(); pk.mois = new Date(pk.mois.getFullYear(), pk.mois.getMonth() + Number(b.getAttribute('data-nav')), 1); peindre(); }); });
+        pop.querySelectorAll('.kan-dp-day').forEach(function (c) {
+          c.addEventListener('click', function () {
+            var ds = c.getAttribute('data-d');
+            if (!pk.deb || pk.fin) { pk.deb = ds; pk.fin = null; pk.survol = null; peindre(); return; }
+            pk.fin = ds; var a = pk.deb, b = pk.fin; if (b < a) { var t = a; a = b; b = t; }
+            fermer(); surChoix(a, b);
+          });
+          c.addEventListener('mouseenter', function () { if (pk.deb && !pk.fin && pk.survol !== c.getAttribute('data-d')) { pk.survol = c.getAttribute('data-d'); peindre(); } });
+        });
+      }
+      function peindre() { pop.innerHTML = cal(); brancher(); }
+      peindre();
+      dehors = function (ev) { if (!pop.contains(ev.target) && ev.target !== anchor && !anchor.contains(ev.target)) fermer(); };
+      setTimeout(function () { doc.addEventListener('mousedown', dehors, true); }, 0);
+    }
+    function moisEnCours() { var a = new Date(); return { du: ymd(a.getFullYear(), a.getMonth(), 1), au: ymd(a.getFullYear(), a.getMonth(), a.getDate()) }; }
+    return { bouton: bouton, ouvrir: ouvrir, fermer: fermer, fmt: fmt, moisEnCours: moisEnCours };
+  }
+    const DP = odPeriodeKit(doc, FW());
     const SUPABASE_URL = ctx.tenant.supabase_url;
 
     // L'utilisateur est chargé par le Shell ; en navigation SPA on patiente un peu.
@@ -45,6 +139,7 @@ OD.define('activite', {
     S.ecran = S.ecran || null;
     S.periode = S.periode || { chef: 'mois', site: 'mois', groupe: 'mois' };
     S.plage = S.plage || null;           // { deb, fin } quand dates libres (chef)
+    S.plages = S.plages || {};           // v8 : { chef|site|groupe : { deb, fin } } choisies au calendrier
     S.vendeur = S.vendeur || null;       // vendeur sélectionné au point du matin
     S.data = {};                         // réponses par clé de chargement
     S.charge = {};
@@ -67,6 +162,8 @@ OD.define('activite', {
     const plur = (n, s, p) => n + ' ' + (n > 1 ? (p || s + 's') : s);
     const heure = iso => { const d = new Date(iso); return isNaN(d) ? '' : String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0'); };
 
+    // v8 : la période est-elle le mois en cours (1er du mois → aujourd'hui) ?
+    function estMois(b) { const m = bornes('mois'); return b.deb === m.deb && b.fin === m.fin; }
     function bornes(code) {
       const d = auj(), y = d.getFullYear(), m = d.getMonth();
       switch (code) {
@@ -76,6 +173,10 @@ OD.define('activite', {
         case 'mois_prec': return { deb: ymd(new Date(y, m - 1, 1)), fin: ymd(new Date(y, m, 0)), lib: MOIS[(m + 11) % 12] };
         case '3mois': return { deb: ymd(new Date(y, m - 2, 1)), fin: ymd(d), lib: '3 derniers mois' };
         case 'annee': return { deb: ymd(new Date(y, 0, 1)), fin: ymd(d), lib: String(y) };
+        case 'libre:chef': case 'libre:site': case 'libre:groupe': {
+          const p = S.plages[code.slice(6)];
+          return p ? { deb: p.deb, fin: p.fin, lib: 'du ' + p.deb.split('-').reverse().join('/') + ' au ' + p.fin.split('-').reverse().join('/') } : bornes('mois');
+        }
         case 'libre': return S.plage ? { deb: S.plage.deb, fin: S.plage.fin, lib: 'du ' + S.plage.deb.split('-').reverse().join('/') + ' au ' + S.plage.fin.split('-').reverse().join('/') } : bornes('mois');
         default: return { deb: ymd(new Date(y, m, 1)), fin: ymd(d), lib: MOIS[m] };
       }
@@ -569,7 +670,7 @@ OD.define('activite', {
       const d = S.data[cle];
       const rail = '<div class="rail"><h1>Point du matin</h1><span class="badge">' + esc(nomSite(site)) + '</span><div class="droite">' +
         seg('chef', [['jour', 'Aujourd\'hui'], ['hier', 'Hier'], ['7j', '7 jours'], ['mois', 'Ce mois']], per) +
-        '<label class="plage">Du <input type="date" data-plage="deb" value="' + esc(b.deb) + '"> au <input type="date" data-plage="fin" value="' + esc(b.fin) + '"></label></div></div>';
+        DP.bouton(b.deb, b.fin, 'data-dp="chef"', 'Choisir les dates') + '</div></div>';
       if (d === undefined) { charger(cle, () => rpc('act_chef', { p_id_site: site, p_deb: b.deb, p_fin: b.fin })); return rail + charge('Préparation du point du matin…'); }
       if (d && d.__err) return rail + erreur(d);
       const eq = (d.equipe || []).filter(p => p.role === 4 || p.cdes > 0 || p.ouvertes > 0);
@@ -586,7 +687,7 @@ OD.define('activite', {
       setTimeout(() => {
         const q = __anchor.querySelector('[data-g="quad"]'); if (q) q.__d = eq.map(p => ({ id: p.id, ini: initiales(p), nom: nomCourt(p), x: atteinte(p), objectif: p.objectif, bloquees: p.bloquees }));
         const e = __anchor.querySelector('[data-g="ecart"]'); if (e) e.__d = [['Appels', 'appels'], ['RDV tenus', 'rdv'], ['Devis', 'devis'], ['Commandes', 'cdes'], ['Leads joints', 'leads_contactes']].map(x => ({ lib: x[0], v: Number(v[x[1]]) || 0, moy: moy(x[1]) }));
-        const a = __anchor.querySelector('[data-g="anneau"]'); if (a) a.__d = { fait: v.cdes, cible: v.objectif, proj: per === 'mois' && dv && dv.mois ? projection(dv.mois) : null, sous: prenom(v) + ' · ' + b.lib, label: v.cdes + ' commandes' };
+        const a = __anchor.querySelector('[data-g="anneau"]'); if (a) a.__d = { fait: v.cdes, cible: v.objectif, proj: estMois(b) && dv && dv.mois ? projection(dv.mois) : null, sous: prenom(v) + ' · ' + b.lib, label: v.cdes + ' commandes' };
       });
       const team = '<div class="team" role="tablist" aria-label="Vendeur">' + eq.map(p => '<button class="who" role="tab" data-vendeur="' + p.id + '" aria-selected="' + (String(p.id) === String(S.vendeur)) + '"><span class="av">' + esc(initiales(p)) + '</span><span><b>' + esc(nomCourt(p)) + '</b><small' + (p.bloquees ? ' class="r"' : '') + '>' + (p.bloquees ? plur(p.bloquees, 'bloquée', 'bloquées') : 'rien de bloqué') + '</small></span></button>').join('') + '</div>';
       const reste = Math.max(0, v.objectif - v.cdes);
@@ -629,7 +730,7 @@ OD.define('activite', {
       const k1 = 's:' + (sites || 'tout') + ':' + b.deb + ':' + b.fin, k2 = 'e:' + (sites || 'tout') + ':' + b.deb + ':' + b.fin;
       const titre = sites ? nomSite(sites[0]) : (S.ctx.sites.length === 1 ? S.ctx.sites[0].nom : 'Tout le périmètre');
       const rail = '<div class="rail"><h1>' + esc(titre) + '</h1><span class="badge">Directeur de site</span><div class="droite">' +
-        seg('site', [['mois', 'Ce mois'], ['mois_prec', 'Mois dernier'], ['3mois', '3 mois'], ['annee', 'Année']], per) + '</div></div>';
+        seg('site', [['mois', 'Ce mois'], ['mois_prec', 'Mois dernier'], ['3mois', '3 mois'], ['annee', 'Année']], per) + DP.bouton(b.deb, b.fin, 'data-dp="site"', 'Choisir les dates') + '</div></div>';
       const d = S.data[k1], e = S.data[k2];
       if (d === undefined) charger(k1, () => rpc('act_site', { p_sites: sites, p_deb: b.deb, p_fin: b.fin }));
       if (e === undefined) charger(k2, () => rpc('act_entonnoir', { p_sites: sites, p_deb: b.deb, p_fin: b.fin }));
@@ -637,7 +738,7 @@ OD.define('activite', {
       if (d.__err) return rail + erreur(d);
       if (e.__err) return rail + erreur(e);
       const m = d.mois || {}, t = (e && e.total) || { affaires: 0, devis: 0, gagnees: 0 }, L = d.entonnoir || {}, P = d.precedent || {};
-      const pj = projection(m), enCours = per === 'mois';
+      const pj = projection(m), enCours = estMois(b);
       const tr = pct(t.gagnees, t.affaires);
       const fuite = (t.affaires - t.devis) >= (t.devis - t.gagnees) ? 'avant le devis' : 'entre le devis et la commande';
       setTimeout(() => {
@@ -687,7 +788,7 @@ OD.define('activite', {
       const per = S.periode.groupe, b = bornes(per);
       const k1 = 'g:' + b.deb + ':' + b.fin, k2 = 'e:tout:' + b.deb + ':' + b.fin;
       const rail = '<div class="rail"><h1>' + esc(S.ctx.sites.length > 3 ? 'Groupe' : 'Mes sites') + '</h1><span class="badge">Direction</span><div class="droite">' +
-        seg('groupe', [['mois', 'Ce mois'], ['mois_prec', 'Mois dernier'], ['3mois', '3 mois'], ['annee', 'Année']], per) + '</div></div>';
+        seg('groupe', [['mois', 'Ce mois'], ['mois_prec', 'Mois dernier'], ['3mois', '3 mois'], ['annee', 'Année']], per) + DP.bouton(b.deb, b.fin, 'data-dp="groupe"', 'Choisir les dates') + '</div></div>';
       const d = S.data[k1], e = S.data[k2];
       if (d === undefined) charger(k1, () => rpc('act_groupe', { p_deb: b.deb, p_fin: b.fin }));
       if (e === undefined) charger(k2, () => rpc('act_entonnoir', { p_sites: null, p_deb: b.deb, p_fin: b.fin }));
@@ -734,7 +835,7 @@ OD.define('activite', {
         (meilleur && pire && meilleur !== pire ? ', de <b>' + pire.x + ' %</b> à ' + esc(pire.nom) + ' à <b>' + meilleur.x + ' %</b> à ' + esc(meilleur.nom) : '') + '.</h2>' +
         '<div class="pouls"><div><div class="n">' + pctTxt(tot.fi, tot.cdes) + '</div><div class="l">ventes financées par nos soins</div></div>' +
         '<div><div class="n">' + nf(tot.bloq) + '</div><div class="l">affaires bloquées · ' + keur(tot.val) + '</div></div>' +
-        (pjG != null && per === 'mois' ? '<div><div class="n">' + nf(pjG) + '</div><div class="l">commandes projetées fin de mois</div></div>' : '') + '</div></div>' +
+        (pjG != null && estMois(b) ? '<div><div class="n">' + nf(pjG) + '</div><div class="l">commandes projetées fin de mois</div></div>' : '') + '</div></div>' +
         graph('anneau', 'anneau') + '</div>' +
         '<div class="cols"><div class="card"><div class="ch"><h3>Transformation et financement</h3><span>Bulle = commandes · clic pour ouvrir le site</span></div>' +
         (pts.length >= 2 ? graph('constellation') + lecture('En vert : les sites au-dessus de la moyenne du groupe sur les deux axes. Plus la bulle est à droite, plus les affaires deviennent des commandes ; plus elle est haute, plus les ventes passent par notre financement.') : '<div class="vide">Pas assez de sites actifs pour les comparer.</div>') + '</div>' +
@@ -773,6 +874,10 @@ OD.define('activite', {
         const nom = g.getAttribute('data-seg'), v = b.getAttribute('data-v');
         if (nom === 'ecran') S.ecran = v; else { S.periode[nom] = v; if (nom === 'chef') S.plage = null; }
         rendre();
+      }));
+      __anchor.querySelectorAll('[data-dp]').forEach(btn => btn.addEventListener('click', () => {
+        const nom = btn.getAttribute('data-dp'), b = bornes(S.periode[nom]);
+        DP.ouvrir(btn, b.deb, (deb, fin) => { S.plages[nom] = { deb, fin }; S.periode[nom] = 'libre:' + nom; rendre(); });
       }));
       __anchor.querySelectorAll('[data-plage]').forEach(inp => inp.addEventListener('change', () => {
         const deb = __anchor.querySelector('[data-plage="deb"]').value, fin = __anchor.querySelector('[data-plage="fin"]').value;
