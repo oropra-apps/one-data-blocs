@@ -1,5 +1,21 @@
 // ============================================================================
-//  NOTIFICATIONS — module One Data (OD.define)   v3 — PROFIL TEAM COLIN
+//  NOTIFICATIONS — module One Data (OD.define)   v8 — PROFIL TEAM COLIN
+//
+//  v8 (28/10/2026) : LES INCONNUS SE TRANSFORMENT EN FICHE.
+//   * Bouton « Créer la fiche » sur chaque inconnu : la recherche client
+//     s'ouvre avec le numéro (ou l'adresse) déjà saisi, montre les fiches qui
+//     le portent peut-être sous une autre forme, et ouvre la fenêtre de
+//     création pré-remplie s'il n'y en a aucune (client-search v19). À la
+//     création, la base rattache à la fiche les appels, SMS, WhatsApp et
+//     mails reçus de ce correspondant (trigger trg_client_rattacher_inconnus) :
+//     la carte disparaît d'elle-même.
+//   * La carte dit ce qui s'est passé selon le canal : « A appelé », « A
+//     écrit un SMS », « A envoyé un mail »… Elle ne parle plus de « numéro »
+//     pour une adresse e-mail, et ne propose ni copie ni appel sans numéro.
+//   * Côté base (migration 20261028140000_notifications_entrants_3cx) : un
+//     appel de client pris par l'accueil ou un collègue entre dans la file du
+//     vendeur ; les livraisons « estimées » au bon de commande ont disparu ;
+//     les mails automatiques ne sont plus des inconnus.
 //
 //  LE COMPTE RENDU EST LE MEME DES DEUX COTES. Trois boutons posaient ici
 //  trois questions fermees — venu, pas venu, reporté — et appelaient une RPC
@@ -720,9 +736,9 @@ OD.define('notifications', {
         const multi = inc.filter(x => num(x.nb_messages) > 1).length;
         q = 'Votre travail du matin';
         txt = inc.length === 0
-          ? 'Aucun numéro inconnu : tous les appels reçus sont rattachés à une fiche.'
-          : '<b>' + fmt(inc.length) + '</b> numéro' + (inc.length > 1 ? 's ont' : ' a')
-            + ' appelé sans qu’on sache qui c’est'
+          ? 'Aucun inconnu : tous les appels et messages reçus sont rattachés à une fiche.'
+          : '<b>' + fmt(inc.length) + '</b> correspondant' + (inc.length > 1 ? 's ont' : ' a')
+            + ' appelé ou écrit sans qu’on sache qui c’est'
             + (multi > 0 ? '. <b>' + fmt(multi) + '</b> ' + (multi > 1 ? 'ont' : 'a')
                 + ' rappelé plus d’une fois : ceux-là d’abord.' : '.');
         jauge = [
@@ -900,18 +916,31 @@ OD.define('notifications', {
         + '</div></article>';
     }
 
+    // Un inconnu peut-il devenir une fiche ? Il faut un numéro exploitable
+    // (pas « Anonymous ») ou une adresse e-mail.
+    function estNumero(x) { return String(x || '').replace(/\D/g, '').length >= 9; }
+    function estMail(x) { return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(x || '').trim()); }
+    const VERBE_INCONNU = {
+      VOIP: ['A appelé', 'appels'], SMS: ['A écrit un SMS', 'SMS'], WHATSAPP: ['A écrit sur WhatsApp', 'messages'],
+      EMAIL: ['A envoyé un mail', 'mails'], RCS: ['A écrit un message', 'messages']
+    };
     function carteInconnu(i) {
       const n = num(i.nb_messages);
       const ton = n > 1 ? 'tiede' : 'froid';
+      const media = String(i.media || 'VOIP').toUpperCase();
+      const v = VERBE_INCONNU[media] || VERBE_INCONNU.VOIP;
+      const mail = estMail(i.interlocuteur), tel = !mail && estNumero(i.interlocuteur);
+      const titre = mail ? esc(i.interlocuteur) : (tel ? esc(telLisible(i.interlocuteur)) : 'Numéro masqué');
       return '<article class="cli ' + ton + '" data-inconnu="' + esc(i.interlocuteur) + '">'
         + '<div class="av">?</div>'
-        + '<div><h3 class="tel" data-tel="' + esc(i.interlocuteur) + '">'
-        +   esc(telLisible(i.interlocuteur))
-        +   (n > 1 ? ' <span class="enjeu livr">' + fmt(n) + ' appels</span>' : '') + '</h3>'
-        + '<p class="attend">A appelé <span class="depuis'
+        + '<div><h3' + (tel ? ' class="tel" data-tel="' + esc(i.interlocuteur) + '"' : '') + '>'
+        +   titre
+        +   (n > 1 ? ' <span class="enjeu livr">' + fmt(n) + ' ' + v[1] + '</span>' : '') + '</h3>'
+        + '<p class="attend">' + v[0] + ' <span class="depuis'
         +   (n > 1 ? ' tiede' : ' calme') + '">'
-        +   (n > 1 ? fmt(n) + ' fois' : 'une fois, ' + quandLisible(i.last_contact)) + '</span>'
-        +   ' — aucune fiche ne porte ce numéro</p>'
+        +   (n > 1 ? fmt(n) + ' fois' : quandLisible(i.last_contact)) + '</span>'
+        +   ' — ' + (mail ? 'aucune fiche ne porte cette adresse'
+                          : tel ? 'aucune fiche ne porte ce numéro' : 'impossible de savoir qui c’était') + '</p>'
         + '<div class="fil">' + pastillesCanaux([i.media], false)
         +   '<span class="ev">Dernier : ' + esc(quandLisible(i.last_contact)) + '</span>'
         +   (i.site ? '<span class="ev">Reçu sur ' + esc(i.site) + '</span>' : '') + '</div>'
@@ -919,11 +948,37 @@ OD.define('notifications', {
             + esc(libelleApercu(i.apercu)) + '</p>' : '')
         + '</div>'
         + '<div class="actes">'
-        +   '<button type="button" class="btn p" data-role="appeler" data-tel="'
+        +   ((tel || mail) ? '<button type="button" class="btn p" data-role="creer-fiche" data-qui="'
+        +     esc(i.interlocuteur) + '">Créer la fiche</button>' : '')
+        +   (tel ? '<button type="button" class="btn s" data-role="appeler" data-tel="'
         +     esc(i.interlocuteur) + '">' + (SUR_MOBILE ? 'Appeler' : 'Copier le numéro')
-        +     '</button>'
+        +     '</button>' : '')
         +   '<button type="button" class="btn t" data-role="ecarter">Écarter 7 jours</button>'
         + '</div></article>';
+    }
+
+    // --- créer la fiche d'un inconnu : la recherche client prend le relais.
+    //     Le numéro ou l'adresse passe par sessionStorage (survit à la
+    //     navigation SPA) ; client-search v19 le consomme une seule fois, dans
+    //     les dix minutes.
+    const CLIENT_SEARCH_PAGE_ID = 'f5b60fe2-bc14-4b3e-ba84-82ddfa11248c';
+    const CLIENT_SEARCH_PATH = '/client';
+    function creerFicheInconnu(qui) {
+      const brut = String(qui || '').trim();
+      const demande = { le: Date.now(), origine: 'notifications' };
+      if (estMail(brut)) demande.email = brut.toLowerCase();
+      else if (estNumero(brut)) demande.tel = brut;
+      else return;
+      try { sessionStorage.setItem('od_creation_client', JSON.stringify(demande)); } catch (e) { }
+      try { FW().__odCreationClient = demande; } catch (e) { }
+      if (dansEditeur()) {
+        try { WW.wwApp.goTo(CLIENT_SEARCH_PAGE_ID); return; } catch (e) { }
+        try { WW.goTo(CLIENT_SEARCH_PAGE_ID); return; } catch (e) { }
+        return;
+      }
+      const href = LANG_PREFIX + CLIENT_SEARCH_PATH;
+      try { WW.goTo(href); return; } catch (e) { }
+      try { FW().location.href = href; } catch (e) { }
     }
 
     // Les livraisons d'une flotte arrivent par six, même client, même heure :
@@ -1070,8 +1125,8 @@ OD.define('notifications', {
       if (sec === 'inconnus') {
         return '<div class="vide"><div class="ico">'
           + '<svg viewBox="0 0 24 24"><path d="m5 13 4 4L19 7"/></svg></div>'
-          + '<h3>Aucun numéro inconnu</h3>'
-          + '<p>Tous les appels reçus sont rattachés à une fiche client.</p></div>';
+          + '<h3>Aucun inconnu</h3>'
+          + '<p>Tous les appels et messages reçus sont rattachés à une fiche client.</p></div>';
       }
       if (sec === 'reportees') {
         return '<div class="vide"><div class="ico">'
@@ -1894,6 +1949,13 @@ OD.define('notifications', {
           await rpc('notif_reprendre_report', { p_scope: 'client', p_cle: String(clientDe(rr)) });
           await recharger();
         } catch (e) { rr.textContent = 'échec'; }
+        return;
+      }
+
+      // --- un inconnu devient une fiche
+      const cf = ev.target.closest('[data-role="creer-fiche"]');
+      if (cf && r.contains(cf)) {
+        creerFicheInconnu(cf.getAttribute('data-qui'));
         return;
       }
 
