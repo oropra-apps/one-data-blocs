@@ -1,5 +1,3 @@
-// v17 (27/10/2026) : open({ client, motif, text }) pré-remplit le motif du
-// message modèle et/ou le texte libre (modèles du lead management).
 // v16 (27/10/2026) : champs de saisie en 16 px sur mobile.
 // iPhone : un champ dont le texte fait moins de 16 px déclenche un ZOOM
 // automatique de Safari au toucher. La page entière devient alors plus grande que
@@ -958,8 +956,6 @@ OD.define('whatsapp', {
     open: async (opts) => {
       const c = (opts && opts.client) || readVar(SELECTED_CLIENT_VAR_ID) || {};
       state.client = c; state.open = true; state.minimized = false; state.error = null; state.items = [];
-      if (opts && typeof opts.motif === 'string') state.motif = opts.motif;
-      if (opts && typeof opts.text === 'string') state.input = opts.text;
       ensureRoot(); render();
       await resolve(c);
       render();
