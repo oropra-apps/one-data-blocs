@@ -1,6 +1,21 @@
 // ============================================================================
 //  LEAD MANAGEMENT — module One Data (OD.define 'lead-mgmt')
-//  VERSION TEAM COLIN (v76) — déploiement CIBLÉ (publish-targets :
+//  VERSION TEAM COLIN (v78) — déploiement CIBLÉ (publish-targets :
+//  v78 (28/10/2026) : sur la base de la v77 publiée (modèles de messages).
+//  * LEADS « DEMANDE CLIENT (1h) » (pénalité constructeur hors délai) : toujours
+//    en tête du Pool BACS, quels que soient les filtres, liseret rouge, compte
+//    à rebours à la seconde, « Prendre le suivant » les sert d'abord ; rappel
+//    des leads 1h en attente en haut des autres onglets ; son, notification
+//    du navigateur et nombre dans le titre de l'onglet à chaque arrivée.
+//    « Relance concession (48h) » ensuite, en orange. Type de traitement :
+//    champ BACS, sinon déduit de la source (marqué « ? »), via la file enrichie.
+//  * ÉCRAN DE SUPERVISION du chef du plateau (plateau_superviseurs, ID 323
+//    Magali Castets ; admin et directeur de groupe avec #supervision) :
+//    situation, leads 1h en direct (Confier à…), rappels dus, alertes,
+//    l'équipe (état, prises, part prise dans l'heure, délai, abandons
+//    rapides, activité), arrivées / prises par heure, transmissions aux
+//    sites, motifs d'abandon. plateau_supervision, plateau_attribuer,
+//    plateau_prevenir. Le chef garde le poste opérateur (#poste-operateur).
 //  v76 (28/10/2026) : les modèles SMS / WhatsApp / e-mail de la fiche d'un
 //  lead viennent de Administration › Modèles de messages (module `modeles`,
 //  fonction modele_rendus : variables du lead remplacées en base, modèles VN
@@ -274,6 +289,19 @@
       var u = await utilisateur(ctx);
       var role = Number(u && u.ID_Role);
       var apercu = ROLES_APERCU.indexOf(role) !== -1 && demandeApercu();
+      // v77 : le chef du plateau ouvre la supervision (le poste opérateur
+      // reste accessible par #poste-operateur) ; admin et directeur de
+      // groupe y viennent par #supervision.
+      if (ROLES_PLATEAU.indexOf(role) !== -1 || ROLES_APERCU.indexOf(role) !== -1) {
+        var hashSup = '';
+        try { hashSup = frontWindow().location.hash || ''; } catch (e) {}
+        var veutSup = ROLES_PLATEAU.indexOf(role) !== -1 ? !/poste-operateur/i.test(hashSup) : /supervision/i.test(hashSup);
+        if (veutSup) {
+          var estSup = false;
+          try { var rs = await ctx.supabase.rpc('plateau_superviseur'); estSup = !rs.error && rs.data === true; } catch (e) {}
+          if (estSup) return posteSupervision(el, ctx, u, { role: role });
+        }
+      }
       if (ROLES_PLATEAU.indexOf(role) !== -1 || apercu) {
         return posteVroom(el, ctx, u, { apercu: apercu, role: role });
       }
@@ -387,8 +415,8 @@
     }
     function tagsLead(l) {
       var src = l.source_libelle || l.source_bacs || 'BACS';
-      var h = l.campagne ? '<span class="tag camp" title="' + esc(src + ' · ' + l.campagne) + '">' + esc(l.campagne.length > 52 ? l.campagne.slice(0, 50) + '…' : l.campagne) + '</span>'
-                         : '<span class="tag">' + esc(src) + '</span>';
+      var h = tagTraitement(l) + (l.campagne ? '<span class="tag camp" title="' + esc(src + ' · ' + l.campagne) + '">' + esc(l.campagne.length > 52 ? l.campagne.slice(0, 50) + '…' : l.campagne) + '</span>'
+                         : '<span class="tag">' + esc(src) + '</span>');
       if (l.statut_eff === 'Accepté') h += '<span class="tag warn">Accepté</span>';
       if (l.tentatives > 0) h += '<span class="tag warn">' + plural(l.tentatives, 'tentative') + '</span>';
       return h;
@@ -403,6 +431,33 @@
     }
     function univCls(l) { var u = univ(l); return u === 'VN' ? ' vt-vn' : u === 'VO' ? ' vt-vo' : ''; }
     function frais(l) { return mins(l.recu_le) < 1440; }
+    // v77 : le chef du plateau revient à sa supervision depuis le poste opérateur.
+    function aSupervision() { try { return /poste-operateur/i.test(FW.location.hash || '') && S.superviseur === true; } catch (e) { return false; } }
+    // v77 : type de traitement BACS. ch1 = « Demande client (1h) » pas encore
+    // traité, reçu il y a moins de 24 h ; ch48 = « Relance concession (48h) ».
+    function ch1(l) { return !!(l && l.chrono && l.traitement === '1h' && frais(l)); }
+    function ch48(l) { return !!(l && l.chrono && l.traitement === '48h' && mins(l.recu_le) < 4320); }
+    function reste(l) { return l.echeance ? (ts(l.echeance) - Date.now()) / 60000 : null; }
+    function hms(m) {
+      m = Math.max(0, m);
+      if (m >= 60) { var h = Math.floor(m / 60), r = Math.floor(m % 60); return h + ' h ' + String(r).padStart(2, '0'); }
+      return Math.floor(m) + ' min ' + String(Math.floor((m % 1) * 60)).padStart(2, '0') + ' s';
+    }
+    function texteChrono(l) { var r = reste(l); return r == null ? '' : r > 0 ? 'reste ' + hms(r) : 'hors délai · ' + duree(-r); }
+    function clsChrono(l) { var r = reste(l); return r == null ? '' : r <= 0 ? 'hors' : (l.traitement === '1h' ? (r <= 15 ? 'urg' : 'c1') : (r <= 12 * 60 ? 'urg48' : 'c48')); }
+    function gaucheChrono(l) {
+      return '<span class="tm chr ' + clsChrono(l) + '" data-ech="' + esc(l.echeance) + '" data-tr="' + esc(l.traitement) + '"><b>' + esc(texteChrono(l)) + '</b><small>'
+        + 'échéance ' + esc(quand(l.echeance)) + '</small></span>';
+    }
+    function tagTraitement(l) {
+      if (!l || !l.traitement) return '';
+      var t = l.traitement === '1h' ? 'Demande client (1h)' : 'Relance concession (48h)';
+      return '<span class="tag ' + (l.traitement === '1h' ? 'crit' : 'warn') + '"' + (l.traitement_deduit ? ' title="Type de traitement déduit de la source : BACS ne l\'a pas encore transmis"' : '') + '>' + t + (l.traitement_deduit ? ' ?' : '') + '</span>';
+    }
+    function chronoLibres() { return S.piscine.filter(function (l) { return ch1(l) && verrouLibre(l); }).sort(function (a, b) { return ordreChrono(a) - ordreChrono(b); }); }
+    // D'abord ceux qu'on peut encore sauver (échéance à venir, la plus proche),
+    // puis ceux déjà hors délai (le plus récent d'abord).
+    function ordreChrono(l) { var r = reste(l); return r > 0 ? r : 100000 - r; }
     function dansPeriode(l) {
       var d = l.recu_le ? new Date(l.recu_le) : null; if (!d) return true;
       var j = d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
@@ -496,19 +551,62 @@
       var args = { p_sources: sourcesArg() };
       var res = await Promise.all([
         rpc('plateau_kpis'),
-        rpc('plateau_file', Object.assign({ p_vue: 'piscine' }, args)),
-        rpc('plateau_file', { p_vue: 'rappels' }),
-        rpc('plateau_file', { p_vue: 'transferts' }),
-        S.stock ? rpc('plateau_file', { p_vue: 'stock' }) : Promise.resolve(S.stockListe),
+        rpc('plateau_file2', Object.assign({ p_vue: 'piscine' }, args)),
+        rpc('plateau_file2', { p_vue: 'rappels' }),
+        rpc('plateau_file2', { p_vue: 'transferts' }),
+        S.stock ? rpc('plateau_file2', { p_vue: 'stock' }) : Promise.resolve(S.stockListe),
         S.tab === 'campagnes' ? rpc('plateau_campagnes', { p_jours: 90 }) : Promise.resolve(S.campagnes),
-        rpc('plateau_bacs_etat').catch(function () { return S.bacs; })
+        rpc('plateau_bacs_etat').catch(function () { return S.bacs; }),
+        S.superviseur == null ? rpc('plateau_superviseur').catch(function () { return false; }) : Promise.resolve(S.superviseur)
       ]);
+      S.superviseur = res[7] === true;
       S.bacs = res[6] || S.bacs;
       S.kpis = res[0] || {}; MOI = S.kpis.moi;
       S.piscine = res[1] || []; S.rappels = res[2] || []; S.transferts = res[3] || [];
+      signalerArrivees();
       S.stockListe = res[4] || null; S.campagnes = res[5] || null;
       S.erreur = null; S.charge = true;
     }
+    // v77 : un nouveau lead « Demande client (1h) » se signale (son,
+    // notification du navigateur) ; le titre de l'onglet porte leur nombre.
+    var connus1h = null, titreBase = null, audio = null;
+    function bip() {
+      try {
+        if (!audio) { var AC = FW.AudioContext || FW.webkitAudioContext; if (!AC) return; audio = new AC(); }
+        if (audio.state === 'suspended') audio.resume();
+        [0, 0.22].forEach(function (d) {
+          var o = audio.createOscillator(), g = audio.createGain();
+          o.type = 'sine'; o.frequency.value = 880; g.gain.value = 0.0001;
+          o.connect(g); g.connect(audio.destination);
+          var t = audio.currentTime + d; g.gain.exponentialRampToValueAtTime(0.18, t + 0.02); g.gain.exponentialRampToValueAtTime(0.0001, t + 0.18);
+          o.start(t); o.stop(t + 0.2);
+        });
+      } catch (e) {}
+    }
+    function signalerArrivees() {
+      var ids = S.piscine.filter(ch1).map(function (l) { return l.sf_lead_id; });
+      if (connus1h) {
+        var nv = S.piscine.filter(function (l) { return ch1(l) && !connus1h.has(l.sf_lead_id); });
+        if (nv.length) {
+          bip();
+          var t = nv.length > 1 ? nv.length + ' nouveaux leads « Demande client (1h) »' : 'Nouveau lead « Demande client (1h) »';
+          var b = nv.map(function (l) { return nomLead(l) + ' · ' + demande(l); }).slice(0, 3).join('\n');
+          try { if (FW.Notification && FW.Notification.permission === 'granted') new FW.Notification(t, { body: b, tag: 'od-1h' }); } catch (e) {}
+          toast(t + ' : ' + nomLead(nv[0]));
+        }
+      }
+      connus1h = new Set(ids);
+      try {
+        var d = FW.document; if (titreBase == null) titreBase = d.title.replace(/^\(\d+ · 1 h\) /, '');
+        var n = chronoLibres().length; d.title = (n ? '(' + n + ' · 1 h) ' : '') + titreBase;
+      } catch (e) {}
+    }
+    function premierGeste() {
+      try { if (FW.Notification && FW.Notification.permission === 'default') FW.Notification.requestPermission(); } catch (e) {}
+      try { if (!audio) { var AC = FW.AudioContext || FW.webkitAudioContext; if (AC) audio = new AC(); } } catch (e) {}
+      root.removeEventListener('click', premierGeste, true);
+    }
+    root.addEventListener('click', premierGeste, true);
     async function rafraichir(silencieux) {
       try { await charger(); }
       catch (e) { S.erreur = messageErreur(e); if (!silencieux) toast(S.erreur, true); }
@@ -605,6 +703,7 @@
     // son délai. Sans lead frais, le plus récent des plus anciens : un lead de
     // trois semaines n'est plus le premier à appeler.
     function prochainVroom() {
+      var c1 = chronoLibres(); if (c1.length) return c1[0];
       var libres = libresTous().filter(function (l) { return l.statut_eff === 'A affecter' || l.statut_eff === 'Nouveau'; });
       var fr = libres.filter(frais);
       if (fr.length) return fr.slice().sort(function (a, b) { return (mins(b.recu_le) - (b.sla_min || 120)) - (mins(a.recu_le) - (a.sla_min || 120)); })[0];
@@ -615,7 +714,10 @@
       var libres = libresTous(), fr = libres.filter(frais), vieux = libres.length - fr.length;
       var hd = fr.filter(function (l) { return (l.statut_eff === 'A affecter' || l.statut_eff === 'Nouveau') && mins(l.recu_le) >= (l.sla_min || 120); });
       var nom = propre([user && user.prenom, user && user.nom].filter(Boolean).join(' ')) || (user && user.nomComplet) || '';
-      var p = '<b>' + plural(fr.length, 'lead frais', 'leads frais') + '</b> (moins de 24 h) dans le Pool BACS'
+      var c1 = chronoLibres(), c1ok = c1.filter(function (l) { return reste(l) > 0; });
+      var p = (c1.length ? '<b class="t-crit">' + plural(c1.length, 'lead « Demande client (1h) »', 'leads « Demande client (1h) »') + '</b> à prendre'
+          + (c1ok.length ? ', le prochain échoit dans <b class="t-crit" data-ech-txt="' + esc(c1ok[0].echeance) + '">' + esc(hms(reste(c1ok[0]))) + '</b>' : ', tous hors délai') + ' · ' : '')
+        + '<b>' + plural(fr.length, 'lead frais', 'leads frais') + '</b> (moins de 24 h) dans le Pool BACS'
         + (hd.length ? ', dont <b class="t-crit">' + hd.length + ' hors délai</b>' : '')
         + (vieux ? ' · ' + plural(vieux, 'plus ancien', 'plus anciens') : '')
         + (nbDus() ? ' · <b class="t-warn">' + plural(nbDus(), 'rappel dû', 'rappels dus') + '</b>' : '')
@@ -625,14 +727,15 @@
       var s = prochainVroom(), cta = '';
       if (s) {
         var m = mins(s.recu_le), sla = s.sla_min || 120;
-        cta = '<button type="button" class="cta" data-a="prendre" data-id="' + esc(s.sf_lead_id) + '"' + dis() + '>Prendre le suivant<small>'
-          + esc(nomLead(s)) + ' · ' + (!frais(s) ? 'reçu le ' + jour(s.recu_le) : m >= sla ? 'hors délai de ' + duree(m - sla) : 'attend depuis ' + duree(m)) + '</small></button>';
+        cta = '<button type="button" class="cta' + (ch1(s) ? ' cta1' : '') + '" data-a="prendre" data-id="' + esc(s.sf_lead_id) + '"' + dis() + '>Prendre le suivant<small>'
+          + esc(nomLead(s)) + ' · ' + (ch1(s) ? 'Demande client (1h) · ' + texteChrono(s) : !frais(s) ? 'reçu le ' + jour(s.recu_le) : m >= sla ? 'hors délai de ' + duree(m - sla) : 'attend depuis ' + duree(m)) + '</small></button>';
       }
       var b = S.bacs || {};
       var voyant = !b.ecrire_bacs ? '' : '<span class="voyant ' + (b.canal !== 'moi' || b.echecs ? 'crit' : b.en_attente ? 'warn' : 'ok') + '">'
         + (b.canal !== 'moi' ? 'BACS fermé' : b.echecs ? plural(b.echecs, 'échec BACS', 'échecs BACS') : b.en_attente ? b.en_attente + ' en attente BACS' : 'BACS connecté') + '</span>';
       return '<section class="hello"><div class="hello-t"><p class="hello-l">Plateau VROOM' + (nom ? ' · ' + esc(nom) : '') + voyant
-        + (opt.apercu ? ' · aperçu <button type="button" class="lien" data-a="quitter-apercu">revenir à la vue habituelle</button>' : '') + '</p>'
+        + (opt.apercu ? ' · aperçu <button type="button" class="lien" data-a="quitter-apercu">revenir à la vue habituelle</button>' : '')
+        + (aSupervision() ? ' · <button type="button" class="lien" data-a="supervision">supervision du plateau</button>' : '') + '</p>'
         + '<h1>' + (nom ? 'Bonjour ' + esc(nom.split(' ')[0]) : 'Plateau VROOM') + '</h1><p class="hello-p">' + p + '</p></div>' + cta + '</section>';
     }
 
@@ -641,7 +744,7 @@
     function nbDus() { return rappelsDus().length; }
     function onglets() {
       var fr = vus(libresTous()).filter(frais);
-      var hd = fr.some(function (l) { return (l.statut_eff === 'A affecter' || l.statut_eff === 'Nouveau') && mins(l.recu_le) >= (l.sla_min || 120); });
+      var hd = chronoLibres().length > 0 || fr.some(function (l) { return (l.statut_eff === 'A affecter' || l.statut_eff === 'Nouveau') && mins(l.recu_le) >= (l.sla_min || 120); });
       var tr = vus(S.transferts);
       return [['piscine', 'Pool BACS', fr.length, hd, 'v'],
               ['rappels', 'Rappels dus', nbDus(), nbDus() > 0, 'r'],
@@ -662,6 +765,15 @@
     }
     function fc(list) { return S.campagne ? (list || []).filter(function (l) { return l.campagne === S.campagne; }) : (list || []); }
     // Bandeau visible sur TOUS les onglets tant qu'un filtre de campagne est actif.
+    function bandeau1h() {
+      if (S.tab === 'piscine' && !S.stock && S.age === 'frais') return '';
+      var c1 = chronoLibres(); if (!c1.length) return '';
+      return '<div class="b1h" role="status"><div class="b1h-t"><b>' + plural(c1.length, 'lead « Demande client (1h) » attend', 'leads « Demande client (1h) » attendent') + '</b><span>Pénalité constructeur au-delà d\'une heure.</span></div><div class="b1h-l">'
+        + c1.slice(0, 3).map(function (l) {
+          return '<div class="b1h-i"><span class="tm chr ' + clsChrono(l) + '" data-ech="' + esc(l.echeance) + '" data-tr="1h"><b>' + esc(texteChrono(l)) + '</b></span><span class="b1h-n">' + esc(nomLead(l)) + '<small>' + esc(demande(l)) + '</small></span>'
+            + '<button type="button" class="btn sm pri" data-a="prendre" data-id="' + esc(l.sf_lead_id) + '"' + dis() + '>Prendre</button></div>';
+        }).join('') + '</div>' + (c1.length > 3 ? '<button type="button" class="lien" data-a="age" data-id="frais">Voir les ' + c1.length + '</button>' : '') + '</div>';
+    }
     function bandeauFiltre() {
       if (!S.campagne) return '';
       var n = [[fc(S.piscine).length, 'à traiter'], [fc(S.rappels).length, 'en rappel'], [fc(S.transferts).length, 'transféré', 'transférés']];
@@ -677,7 +789,7 @@
       return '<button type="button" class="btn pri" data-a="prendre" data-id="' + esc(l.sf_lead_id) + '"' + dis() + '>' + esc(verbe || 'Prendre') + '</button>';
     }
     function ligneLead(l, gauche, verbe) {
-      return '<div class="lr' + (!verrouLibre(l) && !estMien(l) ? ' resa' : '') + univCls(l) + '" data-a="open" data-id="' + esc(l.sf_lead_id) + '" tabindex="0">'
+      return '<div class="lr' + (!verrouLibre(l) && !estMien(l) ? ' resa' : '') + (ch1(l) ? ' ch1' : ch48(l) ? ' ch48' : univCls(l)) + '" data-a="open" data-id="' + esc(l.sf_lead_id) + '" tabindex="0">'
         + '<div>' + gauche + '</div>'
         + '<div><span class="lr-n">' + esc(nomLead(l)) + '</span> <span class="lr-v">' + esc(l.site ? siteNom(l.site) : (l.ville || '')) + '</span><p class="lr-d">' + esc(demande(l)) + '</p><div class="tags">' + tagsLead(l) + '</div></div>'
         + '<div class="lr-a">' + actionLigne(l, verbe) + '</div></div>';
@@ -700,6 +812,24 @@
         + (!S.stock ? chipsSources() : '') + '</div><div class="list">';
       var ls = S.stock ? vus(S.stockListe || []) : base.filter(function (l) { return S.age === 'frais' ? frais(l) : !frais(l); });
       if (!S.stock) ls.sort(S.age === 'frais' ? function (a, b) { return (mins(b.recu_le) - (b.sla_min || 120)) - (mins(a.recu_le) - (a.sla_min || 120)); } : function (a, b) { return ts(b.recu_le) - ts(a.recu_le); });
+      // v77 : les leads « Demande client (1h) » d'abord, quels que soient les
+      // filtres VN / VO et la période ; puis les « Relance concession (48h) ».
+      if (!S.stock && S.age === 'frais') {
+        var g1 = S.piscine.filter(ch1).sort(function (a, b) { return ordreChrono(a) - ordreChrono(b); });
+        var g48 = ls.filter(function (l) { return !ch1(l) && ch48(l); }).sort(function (a, b) { return ts(a.echeance) - ts(b.echeance); });
+        var reste0 = ls.filter(function (l) { return !ch1(l) && !ch48(l); });
+        if (g1.length) {
+          h += '<p class="grp g1">Demande client (1h) · à prendre maintenant <span class="num">' + g1.length + '</span></p>';
+          g1.forEach(function (l) { h += ligneLead(l, gaucheChrono(l), l.statut_eff === 'Accepté' ? 'Rappeler' : 'Prendre'); });
+        }
+        if (g48.length) {
+          h += '<p class="grp g48">Relance concession (48h) <span class="num">' + g48.length + '</span></p>';
+          g48.forEach(function (l) { h += ligneLead(l, gaucheChrono(l), l.statut_eff === 'Accepté' ? 'Rappeler' : 'Prendre'); });
+        }
+        if ((g1.length || g48.length) && reste0.length) h += '<p class="grp g0">Autres leads de moins de 24 h</p>';
+        ls = reste0;
+        if (!ls.length && (g1.length || g48.length)) return h + '</div><p class="foot">Prendre réserve le lead à votre nom ' + (k.verrou_minutes || 5) + ' min. Les leads « Demande client (1h) » sont pénalisés par le constructeur au-delà d\'une heure.</p>';
+      }
       if (S.stock && !S.stockListe) h += '<div class="empty">Chargement du stock…</div>';
       else if (!ls.length) h += '<div class="empty">' + (S.campagne ? 'Aucun lead de cette campagne à traiter.' : S.stock ? 'Aucun lead en stock.' : S.age === 'frais' ? 'Aucun lead de moins de 24 h à prendre.' : 'Aucun lead de plus de 24 h dans le Pool BACS.') + '</div>';
       ls.forEach(function (l) {
@@ -787,7 +917,7 @@
       var y = (FW.scrollY || 0);
       root.innerHTML = renderSituation() + bandeauBacs()
         + (S.erreur ? '<p class="alerte">' + esc(S.erreur) + ' Les données affichées datent du dernier chargement réussi.</p>' : '')
-        + '<div class="barre-o">' + renderTabs() + outilsVroom() + '</div>' + bandeauFiltre()
+        + bandeau1h() + '<div class="barre-o">' + renderTabs() + outilsVroom() + '</div>' + bandeauFiltre()
         + '<section class="act" aria-label="Leads"><div class="panel">' + renderPanel() + '</div></section>';
       try { if (FW.scrollY !== y) FW.scrollTo(0, y); } catch (e) {}
       setTimeout(function () { S.frais.clear(); }, 7000);
@@ -1178,6 +1308,10 @@
         if (a === 'relancer' || a === 'bacs-relancer') { toast('Démonstration : en situation réelle, le chef des ventes du site serait relancé.'); return; }
       }
       switch (a) {
+        case 'supervision':
+          try { FW.history.replaceState(null, '', FW.location.pathname + FW.location.search); } catch (e) { try { FW.location.hash = ''; } catch (e2) {} }
+          detruire();
+          return posteSupervision(el, ctx, user, { role: opt.role });
         case 'demo-on': S.demoMode = true; render(); toast('Mode démonstration : rien n\'est enregistré.'); return;
         case 'demo-off': S.demoMode = false; if (S.dr && S.dr.demo) fermerDrawer(true); render(); return;
         case 'age': S.tab = 'piscine'; S.stock = false; S.age = id === 'vieux' ? 'vieux' : 'frais'; render(); return;
@@ -1199,7 +1333,7 @@
         case 'relancer': return relancer(id);
         case 'stock':
           S.tab = 'piscine'; S.stock = !!id; render();
-          if (S.stock && !S.stockListe) { try { S.stockListe = await rpc('plateau_file', { p_vue: 'stock' }); } catch (e) { toast(messageErreur(e), true); S.stockListe = []; } render(); }
+          if (S.stock && !S.stockListe) { try { S.stockListe = await rpc('plateau_file2', { p_vue: 'stock' }); } catch (e) { toast(messageErreur(e), true); S.stockListe = []; } render(); }
           return;
         case 'source': {
           var src = (S.kpis && S.kpis.sources) || [];
@@ -1207,7 +1341,7 @@
           S.sources = actives.indexOf(id) !== -1 ? actives.filter(function (c) { return c !== id; }) : actives.concat([id]);
           S.tab = 'piscine'; S.stock = false;
           return geste(async function () {
-            S.piscine = await rpc('plateau_file', { p_vue: 'piscine', p_sources: sourcesArg() }) || [];
+            S.piscine = await rpc('plateau_file2', { p_vue: 'piscine', p_sources: sourcesArg() }) || [];
             render();
           });
         }
@@ -1271,9 +1405,10 @@
     try { FW.__lmtcTour = { poste: 'vroom', exemple: ouvrirExemple, fermer: function () { if (S.dr) fermerDrawer(); } }; } catch (e) {}
 
     // ── Cycle de vie ──────────────────────────────────────────────────────
-    var minuteur = null, horloge = null;
+    var minuteur = null, horloge = null, trotteuse = null;
     function detruire() {
-      clearInterval(minuteur); clearInterval(horloge); clearInterval(renouvellement);
+      clearInterval(minuteur); clearInterval(horloge); clearInterval(renouvellement); clearInterval(trotteuse);
+      try { if (titreBase != null) FW.document.title = titreBase; } catch (e) {}
       doc.removeEventListener('keydown', surTouche);
       if (S.dr && S.dr.fiche && estMien(S.dr.fiche) && !S.dr.demo) { try { rpc('plateau_liberer', { p_sf_lead_id: S.dr.sf }); } catch (e) {} }
       S.dr = null;
@@ -1298,7 +1433,515 @@
       render();
     }, 15000);
 
+    // v77 : les comptes à rebours des leads 1h / 48h avancent à la seconde.
+    trotteuse = setInterval(function () {
+      if (!root.isConnected) return;
+      tictac(root);
+    }, 1000);
+
     await rafraichir();
+  }
+
+  // Met à jour les comptes à rebours d'un écran (data-ech = échéance ISO).
+  function texteReste(r) {
+    if (r > 0) return 'reste ' + (r >= 60 ? Math.floor(r / 60) + ' h ' + String(Math.floor(r % 60)).padStart(2, '0') : Math.floor(r) + ' min ' + String(Math.floor((r % 1) * 60)).padStart(2, '0') + ' s');
+    var m = -r; return 'hors délai · ' + (m < 60 ? Math.floor(m) + ' min' : Math.floor(m / 60) + ' h ' + String(Math.floor(m % 60)).padStart(2, '0'));
+  }
+  function tictac(scope) {
+    var now = Date.now();
+    scope.querySelectorAll('[data-ech]').forEach(function (n) {
+      var r = (new Date(n.getAttribute('data-ech')).getTime() - now) / 60000, tr = n.getAttribute('data-tr');
+      var b = n.querySelector('b'); if (!b || isNaN(r)) return;
+      var txt = texteReste(r);
+      if (b.textContent !== txt) b.textContent = txt;
+      var cls = r <= 0 ? 'hors' : tr === '1h' ? (r <= 15 ? 'urg' : 'c1') : (r <= 720 ? 'urg48' : 'c48');
+      ['hors', 'urg', 'c1', 'urg48', 'c48'].forEach(function (c) { n.classList.toggle(c, c === cls); });
+      var bar = n.querySelector('.jg i'); if (bar) bar.style.width = Math.max(0, Math.min(100, 100 - r / (tr === '1h' ? 60 : 2880) * 100)) + '%';
+    });
+    scope.querySelectorAll('[data-ech-txt]').forEach(function (n) {
+      var r = (new Date(n.getAttribute('data-ech-txt')).getTime() - now) / 60000;
+      n.textContent = r > 0 ? texteReste(r).replace(/^reste /, '') : 'maintenant';
+    });
+  }
+
+  // ==========================================================================
+  //  LA SUPERVISION DU PLATEAU VROOM (v77)
+  //
+  //  L'écran du chef du plateau : la situation en une phrase, six chiffres du
+  //  jour, les leads « Demande client (1h) » en direct (Confier à…), les
+  //  rappels dus, les alertes sur l'équipe, le tableau des opératrices, puis
+  //  ce qui se passe après le plateau (transmissions aux sites, motifs).
+  //  Données : plateau_supervision (une lecture par minute). Gestes :
+  //  plateau_attribuer, plateau_prevenir. Les seuils des alertes viennent de
+  //  lead_collecte_config (plateau_*), modifiables sans toucher au code.
+  // ==========================================================================
+  async function posteSupervision(el, ctx, user, opt) {
+    var doc = el.ownerDocument || document;
+    var sb = ctx.supabase;
+    var FW = frontWindow();
+    var S = { d: null, erreur: null, charge: false, ack: new Set(), pop: null };
+    try { (JSON.parse(FW.localStorage.getItem('lmsv-ack') || '[]') || []).forEach(function (x) { S.ack.add(x); }); } catch (e) {}
+
+    injecterCss(doc); injecterCssSup(doc);
+    el.innerHTML = '';
+    var root = doc.createElement('div'); root.className = 'lmtc lmsv'; el.appendChild(root);
+    var ov = doc.createElement('div'); ov.className = 'lmtc lmtc-ov lmsv-ov';
+    ov.innerHTML = '<div class="toast" role="status" aria-live="polite"></div><div class="sv-scrim" hidden></div><div class="sv-pop" role="dialog" aria-modal="true" hidden></div>';
+    doc.body.appendChild(ov);
+    var $toast = ov.querySelector('.toast'), $pop = ov.querySelector('.sv-pop'), $scrim = ov.querySelector('.sv-scrim');
+
+    function toast(msg, err) {
+      $toast.textContent = msg; $toast.classList.toggle('err', !!err); $toast.classList.add('on');
+      clearTimeout(toast._t); toast._t = setTimeout(function () { $toast.classList.remove('on'); }, err ? 5200 : 3200);
+    }
+    async function rpc(nom, args) {
+      var r = await sb.rpc(nom, args || {});
+      if (r.error) { var e = new Error(r.error.message || nom); e.code = r.error.code; throw e; }
+      return r.data;
+    }
+    function msgErr(e) {
+      var m = String((e && e.message) || e || '');
+      if (/Could not find the function|does not exist/i.test(m)) return 'Cette fonction n\'est pas encore installée sur la base. Prévenez l\'administrateur.';
+      if (/Failed to fetch|NetworkError/i.test(m)) return 'Connexion perdue. Réessayez dans un instant.';
+      return m || 'Erreur inattendue';
+    }
+    function cfg(k, def) { var v = S.d && S.d.reglages && S.d.reglages[k]; var n = Number(v); return (v !== '' && v != null && isFinite(n)) ? n : def; }
+    function reste(l) { return l.echeance ? (ts(l.echeance) - Date.now()) / 60000 : null; }
+    function nomL(l) { return propre(l.nom) || 'Client sans nom'; }
+    function dem(l) { var p = [l.type_demande, l.modele].filter(Boolean); return p.length ? p.join(' · ') : (l.nature || 'Demande BACS'); }
+    function initiales(n) { return String(n || '?').split(/\s+/).filter(Boolean).map(function (x) { return x[0]; }).join('').slice(0, 2).toUpperCase(); }
+    function pct(a, b) { return b ? Math.round(100 * a / b) : null; }
+
+    // ── État d'une opératrice ─────────────────────────────────────────────
+    function etat(e) {
+      var bacs = e.bacs_vu && mins(e.bacs_vu) < 3;
+      var depuis = e.dernier ? mins(e.dernier) : null;
+      if (e.sur_fiche) return { k: 'fiche', t: 'sur une fiche', actif: true };
+      if (bacs && (depuis == null || depuis >= cfg('inactif_min', 20))) return { k: 'inactif', t: depuis == null ? 'connectée, aucun geste' : 'inactive · ' + duree(depuis), actif: true, inactif: true };
+      if (bacs) return { k: 'travail', t: 'au travail', actif: true };
+      if (depuis != null && depuis < 30) return { k: 'bacs', t: 'BACS fermé', actif: false, bacsFerme: true };
+      return { k: 'off', t: 'hors ligne', actif: false };
+    }
+
+    // ── Les alertes, recalculées à chaque lecture ─────────────────────────
+    function alertes() {
+      var d = S.d || {}, j = d.jour || {}, out = [];
+      var libres = (d.chrono || []).filter(function (l) { return !l.pris_par; });
+      var att = cfg('1h_attention_min', 30), grave = cfg('1h_grave_min', 45);
+      var hors1 = libres.filter(function (l) { return reste(l) <= 0; });
+      if (hors1.length > 3) {
+        out.push({ id: 'hors-n-' + hors1.length, niv: 'r', fam: 'Réactivité', t: null, titre: plural(hors1.length, 'lead « Demande client (1h) » hors délai', 'leads « Demande client (1h) » hors délai') + ', toujours pas pris',
+          d: hors1.slice(0, 3).map(nomL).join(', ') + '… Pénalité constructeur.', a: [['Confier le premier à…', 'confier', hors1[0].sf]] });
+        libres = libres.filter(function (l) { return reste(l) > 0; });
+      }
+      libres.forEach(function (l) {
+        var age = mins(l.recu_le), r = reste(l);
+        if (r <= 0) out.push({ id: 'hors-' + l.sf, niv: 'r', fam: 'Réactivité', t: l.echeance, titre: 'Hors délai : ' + nomL(l),
+          d: 'Reçu à ' + hh(l.recu_le) + ', toujours pas pris après ' + duree(age) + '. Pénalité constructeur.', a: [['Confier à…', 'confier', l.sf]] });
+        else if (age >= grave) out.push({ id: 'grave-' + l.sf, niv: 'r', fam: 'Réactivité', t: l.recu_le, titre: 'Sans opératrice depuis ' + Math.floor(age) + ' min : ' + nomL(l),
+          d: dem(l) + '. Échéance ' + hh(l.echeance) + '.', a: [['Confier à…', 'confier', l.sf]] });
+        else if (age >= att) out.push({ id: 'att-' + l.sf, niv: 'o', fam: 'Réactivité', t: l.recu_le, titre: 'Pas encore pris après ' + Math.floor(age) + ' min : ' + nomL(l),
+          d: dem(l) + '. Échéance ' + hh(l.echeance) + '.', a: [['Confier à…', 'confier', l.sf]] });
+      });
+      var vivants = libres.filter(function (l) { return reste(l) > 0; });
+      if (vivants.length >= cfg('surcharge', 5)) out.push({ id: 'surcharge-' + new Date().getHours(), niv: 'r', fam: 'Charge', t: null,
+        titre: vivants.length + ' leads « Demande client (1h) » attendent une opératrice', d: 'Mobilisez un renfort ou suspendez les relances sortantes.', a: [] });
+      var eq = d.equipe || [], actives = 0;
+      eq.forEach(function (e) {
+        var s = etat(e); if (s.actif) actives++;
+        if (s.inactif && libres.length) out.push({ id: 'inactif-' + e.id + '-' + (e.dernier || 'x'), niv: 'o', fam: 'Présence', t: e.dernier,
+          titre: propre(e.nom) + ' ' + s.t, d: plural(libres.length, 'lead 1h attend', 'leads 1h attendent') + ' dans le Pool.', a: [['La prévenir', 'prevenir', e.id]] });
+        if (s.bacsFerme) out.push({ id: 'bacs-' + e.id + '-' + (e.dernier || 'x'), niv: 'o', fam: 'Présence', t: e.dernier,
+          titre: 'BACS fermé sur le poste de ' + propre(e.nom), d: 'Ses prises et ses qualifications ne partent pas dans BACS.', a: [['La prévenir', 'prevenir', e.id]] });
+        if (e.pris >= 3 && e.prise_mediane_min != null && e.prise_mediane_min > cfg('lent_min', 30)) out.push({ id: 'lent-' + e.id + '-' + e.pris, niv: 'o', fam: 'Réactivité', t: null,
+          titre: propre(e.nom) + ' prend ses leads en ' + e.prise_mediane_min + ' min', d: 'Délai médian du jour, sur ' + e.pris + ' leads pris.', a: [['La prévenir', 'prevenir', e.id]] });
+        if (e.abandons_rapides > 0) out.push({ id: 'abr-' + e.id + '-' + e.abandons_rapides, niv: 'b', fam: 'Qualité', t: null,
+          titre: plural(e.abandons_rapides, 'abandon', 'abandons') + ' avant 3 tentatives : ' + propre(e.nom), d: 'La règle : trois tentatives avant d\'abandonner un lead.', a: [['La prévenir', 'prevenir', e.id]] });
+        var traites = (e.qualifies || 0) + (e.abandons || 0) + (e.rappels || 0);
+        if (traites >= 6 && pct(e.abandons, traites) > cfg('abandon_max_pct', 50)) out.push({ id: 'tab-' + e.id + '-' + e.abandons, niv: 'o', fam: 'Qualité', t: null,
+          titre: propre(e.nom) + ' abandonne ' + pct(e.abandons, traites) + ' % de ses leads', d: e.abandons + ' abandons sur ' + traites + ' leads traités aujourd\'hui.', a: [['La prévenir', 'prevenir', e.id]] });
+      });
+      if (libres.length && eq.length && !actives) out.push({ id: 'personne-' + new Date().getHours(), niv: 'r', fam: 'Présence', t: null,
+        titre: 'Aucune opératrice connectée', d: plural(libres.length, 'lead « Demande client (1h) » attend', 'leads « Demande client (1h) » attendent') + ' dans le Pool.', a: [] });
+      var mesures = (j.un_h_ok || 0) + (j.un_h_hors || 0);
+      if (mesures >= 3 && pct(j.un_h_ok, mesures) < cfg('objectif_1h', 90)) out.push({ id: 'obj-' + mesures, niv: 'o', fam: 'Réactivité', t: null,
+        titre: pct(j.un_h_ok, mesures) + ' % des leads 1h pris dans l\'heure aujourd\'hui', d: 'Objectif : ' + cfg('objectif_1h', 90) + ' %. ' + plural(j.un_h_hors, 'lead hors délai', 'leads hors délai') + '.', a: [] });
+      var l48 = (d.chrono_48h || []).filter(function (l) { return !l.pris_par; });
+      var g48 = l48.filter(function (l) { return reste(l) > 0 && mins(l.recu_le) / 60 >= cfg('48h_grave_h', 46); });
+      var a48 = l48.filter(function (l) { var h = mins(l.recu_le) / 60; return reste(l) > 0 && h >= cfg('48h_attention_h', 36) && h < cfg('48h_grave_h', 46); });
+      var d48 = l48.filter(function (l) { return reste(l) <= 0; });
+      [[g48, 'r', 'à moins de ' + (48 - cfg('48h_grave_h', 46)) + ' h de l\'échéance'], [a48, 'o', 'à moins de ' + (48 - cfg('48h_attention_h', 36)) + ' h de l\'échéance'], [d48, 'o', 'ont dépassé l\'échéance']].forEach(function (x) {
+        if (!x[0].length) return;
+        out.push({ id: '48-' + x[1] + '-' + x[2].length + '-' + x[0].length, niv: x[1], fam: 'Réactivité', t: null,
+          titre: plural(x[0].length, 'relance concession (48h)', 'relances concession (48h)') + ' ' + x[2],
+          d: x[0].slice(0, 3).map(nomL).join(', ') + (x[0].length > 3 ? '…' : '') + ' Sans opératrice.', a: [['Confier la première à…', 'confier', x[0][0].sf]] });
+      });
+      if (j.transferts_sans_contact > 0) out.push({ id: 'trans-' + j.transferts_sans_contact, niv: 'b', fam: 'Transmission', t: null,
+        titre: plural(j.transferts_sans_contact, 'lead transmis', 'leads transmis') + ' sans rappel du site depuis plus de 2 h', d: 'Le détail par site est en bas de l\'écran.', a: [] });
+      if (j.rappels_retard > 0) out.push({ id: 'rap-' + j.rappels_retard, niv: 'o', fam: 'Qualité', t: null,
+        titre: plural(j.rappels_retard, 'rappel en retard', 'rappels en retard') + ' de plus de 2 h', d: 'Ils sont dans l\'onglet « Rappels dus » du poste opérateur.', a: [] });
+      if (d.derniere_synchro && mins(d.derniere_synchro) > 30) out.push({ id: 'sync-' + d.derniere_synchro, niv: 'o', fam: 'BACS', t: d.derniere_synchro,
+        titre: 'BACS n\'a pas été relu depuis ' + duree(mins(d.derniere_synchro)), d: 'Les leads arrivés depuis ne sont pas encore ici. Une opératrice doit ouvrir BACS avec l\'extension One Data.', a: [] });
+      var ordre = { r: 0, o: 1, b: 2 };
+      return out.filter(function (a) { return !S.ack.has(a.id); }).sort(function (a, b) { return ordre[a.niv] - ordre[b.niv]; });
+    }
+
+    // ── Rendu ─────────────────────────────────────────────────────────────
+    function jauge(l, tr) {
+      return '<span class="sv-tm" data-ech="' + esc(l.echeance) + '" data-tr="' + tr + '"><b>' + esc(texteReste(reste(l))) + '</b><span class="jg"><i style="width:' + Math.max(0, Math.min(100, 100 - reste(l) / (tr === '1h' ? 60 : 2880) * 100)) + '%"></i></span></span>';
+    }
+    function renderHaut() {
+      var d = S.d, j = d.jour || {}, ch = d.chrono || [], libres = ch.filter(function (l) { return !l.pris_par; });
+      var urg = libres.filter(function (l) { var r = reste(l); return r > 0 && r <= 15; }).length, hors = libres.filter(function (l) { return reste(l) <= 0; }).length;
+      var eq = d.equipe || [], act = eq.filter(function (e) { return etat(e).actif; }).length;
+      var titre = libres.length ? plural(libres.length, 'lead « Demande client (1h) » à prendre', 'leads « Demande client (1h) » à prendre')
+          + (urg ? ', dont <span class="t-crit">' + urg + ' à moins de 15 minutes de l\'échéance</span>' : '') + (hors ? ', <span class="t-crit">' + hors + ' hors délai</span>' : '')
+        : 'Aucun lead « Demande client (1h) » en attente';
+      var nb = eq.filter(function (e) { return etat(e).inactif; }).map(function (e) { return propre(e.nom); });
+      var ferme = eq.filter(function (e) { return etat(e).bacsFerme; }).map(function (e) { return propre(e.nom); });
+      var sous = act + ' opératrice' + (act > 1 ? 's' : '') + ' active' + (act > 1 ? 's' : '') + ' sur ' + eq.length + '.'
+        + (nb.length ? ' <b>Inactive' + (nb.length > 1 ? 's' : '') + ' : ' + esc(nb.slice(0, 3).join(', ')) + (nb.length > 3 ? '…' : '') + '.</b>' : '')
+        + (ferme.length ? ' <b>BACS fermé : ' + esc(ferme.slice(0, 3).join(', ')) + '.</b>' : '');
+      var mes = (j.un_h_ok || 0) + (j.un_h_hors || 0), taux = pct(j.un_h_ok, mes), obj = cfg('objectif_1h', 90);
+      var k = function (cls, lab, val, sm) { return '<div class="sv-k ' + cls + '"><span>' + lab + '</span><b>' + val + '</b><small>' + sm + '</small></div>'; };
+      var nom = propre([user && user.prenom, user && user.nom].filter(Boolean).join(' '));
+      return '<section class="hello sv-hello"><div class="hello-t"><p class="hello-l">Plateau VROOM · supervision' + (d.chef_nom && d.chef_nom !== nom ? ' · équipe de ' + esc(propre(d.chef_nom)) : '')
+          + ' · ' + esc(new Date().toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long' })) + '</p>'
+          + '<h1 class="sv-h1">' + titre + '</h1><p class="hello-p">' + sous + '</p></div>'
+          + '<div class="sv-acts"><button type="button" class="btn" data-a="poste">Poste opérateur</button><button type="button" class="btn pri" data-a="maj">Actualiser</button></div></section>'
+        + '<div class="sv-kpis">'
+        + k('', 'Reçus aujourd\'hui', j.recus || 0, (j.recus_1h || 0) + ' « Demande client (1h) »')
+        + k(taux == null ? '' : taux >= obj ? 'good' : taux >= obj - 15 ? 'warn' : 'bad', 'Leads 1h pris dans l\'heure', taux == null ? '—' : taux + ' %', mes ? j.un_h_ok + ' sur ' + mes + ' · objectif ' + obj + ' %' : 'objectif ' + obj + ' %')
+        + k(j.prise_mediane_min == null ? '' : j.prise_mediane_min <= 30 ? 'good' : j.prise_mediane_min <= 60 ? 'warn' : 'bad', 'Prise médiane', j.prise_mediane_min == null ? '—' : j.prise_mediane_min + ' min', 'leads reçus aujourd\'hui')
+        + k('', 'Qualifiés et transmis', j.qualifies || 0, (j.abandons || 0) + ' abandons · ' + (j.rappels || 0) + ' en rappel')
+        + k(j.rappels_retard ? 'warn' : '', 'Rappels dus', j.rappels_dus || 0, (j.rappels_retard || 0) + ' en retard de plus de 2 h')
+        + k(j.un_h_hors ? 'bad' : 'good', 'Leads 1h hors délai', j.un_h_hors || 0, 'aujourd\'hui · pénalité constructeur')
+        + '</div>';
+    }
+    function renderChrono() {
+      var d = S.d, ch = d.chrono || [], c48 = d.chrono_48h || [];
+      var h = '<div class="sv-pan"><div class="sv-ph"><h2>Demande client (1h), en direct <span class="cnt">' + ch.length + '</span></h2><small>se met à jour seul</small></div>';
+      if (!ch.length) h += '<p class="sv-vide">Aucun lead « Demande client (1h) » en attente. Les nouveaux s\'affichent ici dès que BACS est relu.</p>';
+      ch.slice().sort(function (a, b) { return (a.pris_par ? 1 : 0) - (b.pris_par ? 1 : 0) || ts(a.echeance) - ts(b.echeance); }).forEach(function (l) {
+        h += '<div class="sv-lv' + (l.pris_par ? ' pris' : '') + (reste(l) <= 0 ? ' hors' : '') + '"><div class="n"><b>' + esc(nomL(l)) + (l.nature ? ' · ' + esc(l.nature) : '') + (l.deduit ? ' <span class="ded" title="Type de traitement déduit de la source">?</span>' : '') + '</b>'
+          + '<span>' + esc(dem(l)) + (l.site ? ' · ' + esc(siteNom(l.site)) : '') + ' · ' + (l.pris_par ? 'pris par ' + esc(propre(l.pris_par)) : 'reçu à ' + hh(l.recu_le) + ', personne ne l\'a pris') + '</span></div>'
+          + jauge(l, '1h')
+          + (l.pris_par ? '<span class="sv-pp">' + esc(propre(l.pris_par)) + '</span>' : '<button type="button" class="btn sm pri" data-a="confier" data-id="' + esc(l.sf) + '">Confier à…</button>') + '</div>';
+      });
+      if (c48.length) {
+        var libres48 = c48.filter(function (l) { return !l.pris_par; });
+        h += '<div class="sv-ph sv-ph2"><h3>Relance concession (48h) <span class="cnt">' + c48.length + '</span></h3><small>' + libres48.length + ' sans opératrice</small></div>';
+        c48.slice(0, 4).forEach(function (l) {
+          h += '<div class="sv-lv l48"><div class="n"><b>' + esc(nomL(l)) + '</b><span>' + esc(dem(l)) + (l.site ? ' · ' + esc(siteNom(l.site)) : '') + '</span></div>' + jauge(l, '48h')
+            + (l.pris_par ? '<span class="sv-pp">' + esc(propre(l.pris_par)) + '</span>' : '<button type="button" class="btn sm" data-a="confier" data-id="' + esc(l.sf) + '">Confier à…</button>') + '</div>';
+        });
+        if (c48.length > 4) h += '<p class="sv-plus">et ' + (c48.length - 4) + ' autres dans le Pool BACS.</p>';
+      }
+      var rd = d.rappels_dus || [];
+      h += '<div class="sv-ph sv-ph2"><h3>Rappels dus <span class="cnt">' + ((d.jour || {}).rappels_dus || 0) + '</span></h3><small>les plus anciens</small></div>';
+      if (!rd.length) h += '<p class="sv-vide">Aucun rappel dû.</p>';
+      else h += '<div class="scroll"><table class="sv-t"><thead><tr><th>Client</th><th>Opératrice</th><th>Prévu</th><th>Tentatives</th></tr></thead><tbody>'
+        + rd.map(function (r) { var ret = mins(r.rappel_le); return '<tr><td>' + esc(propre(r.nom) || 'Sans nom') + (r.nature ? ' · ' + esc(r.nature) : '') + '</td><td>' + esc(propre(r.operateur) || '—') + '</td><td class="' + (ret > 120 ? 'bad' : 'warn') + '">' + esc(quand(r.rappel_le)) + '</td><td>' + (r.tentatives || 0) + ' / 3</td></tr>'; }).join('')
+        + '</tbody></table></div>';
+      return h + '</div>';
+    }
+    function renderAlertes() {
+      var al = alertes();
+      var h = '<div class="sv-pan"><div class="sv-ph"><h2>Alertes <span class="cnt' + (al.some(function (a) { return a.niv === 'r'; }) ? ' c' : '') + '">' + al.length + '</span></h2><small>les graves arrivent aussi dans votre cloche</small></div>';
+      if (!al.length) return h + '<p class="sv-vide">Rien à signaler pour l\'instant.</p></div>';
+      h += '<div class="sv-feed">';
+      al.forEach(function (a) {
+        h += '<div class="sv-al ' + a.niv + '"><i></i><div><b>' + esc(a.titre) + '</b><span>' + esc(a.d) + '</span><small>' + esc(a.fam) + (a.t ? ' · ' + esc(quand(a.t)) : '') + '</small>'
+          + '<div class="sv-aa">' + a.a.map(function (x, i) { return '<button type="button" class="btn sm' + (i === 0 && a.niv === 'r' ? ' pri' : '') + '" data-a="' + x[1] + '" data-id="' + esc(x[2]) + '">' + esc(x[0]) + '</button>'; }).join('')
+          + '<button type="button" class="btn sm ghost" data-a="ack" data-id="' + esc(a.id) + '">Vu</button></div></div></div>';
+      });
+      return h + '</div></div>';
+    }
+    function spark(v) {
+      v = v || []; if (v.length < 2) v = [0].concat(v.length ? v : [0]);
+      var w = 96, ht = 22, mx = Math.max(2, Math.max.apply(null, v));
+      var pts = v.map(function (x, i) { return [(i / (v.length - 1)) * (w - 4) + 2, ht - 2 - (x / mx) * (ht - 4)]; });
+      var dd = pts.map(function (p, i) { return (i ? 'L' : 'M') + p[0].toFixed(1) + ' ' + p[1].toFixed(1); }).join(' ');
+      var last = pts[pts.length - 1];
+      return '<svg class="sv-sp" width="' + w + '" height="' + ht + '" viewBox="0 0 ' + w + ' ' + ht + '" aria-hidden="true"><path d="' + dd + ' L' + (w - 2) + ' ' + (ht - 2) + ' L2 ' + (ht - 2) + ' Z" fill="#eaf1fa"/><path d="' + dd + '" fill="none" stroke="#2a5ea9" stroke-width="1.6"/><circle cx="' + last[0] + '" cy="' + last[1] + '" r="2.6" fill="#2a5ea9"/></svg>';
+    }
+    function renderEquipe() {
+      var eq = (S.d.equipe || []).slice().sort(function (a, b) {
+        var ea = etat(a), eb = etat(b); return (eb.actif ? 1 : 0) - (ea.actif ? 1 : 0) || (b.pris || 0) - (a.pris || 0) || String(a.nom).localeCompare(String(b.nom));
+      });
+      var h = '<div class="sv-pan"><div class="sv-ph"><h2>L\'équipe aujourd\'hui <span class="cnt">' + eq.length + '</span></h2><small>gestes faits dans One Data, chacune avec son compte</small></div>';
+      if (!eq.length) return h + '<p class="sv-vide">Aucune opératrice rattachée à cette équipe.</p></div>';
+      h += '<div class="scroll"><table class="sv-t sv-eq"><thead><tr><th>Opératrice</th><th>Maintenant</th><th>Pris</th><th>Leads 1h dans l\'heure</th><th>Prise médiane</th><th>Qualifiés</th><th>Rappels</th><th>Abandons</th><th>Activité depuis 8 h</th><th></th></tr></thead><tbody>';
+      eq.forEach(function (e) {
+        var s = etat(e), lent = e.prise_mediane_min != null && e.prise_mediane_min > cfg('lent_min', 30);
+        var t1 = e.un_h_total ? e.un_h_ok + ' / ' + e.un_h_total : '—', c1 = !e.un_h_total ? '' : e.un_h_ok === e.un_h_total ? 'good' : 'warn';
+        h += '<tr><td><span class="sv-op"><span class="sv-av">' + esc(initiales(propre(e.nom))) + '</span><span><b>' + esc(propre(e.nom)) + '</b><small>' + (e.dernier ? 'dernier geste à ' + hh(e.dernier) : 'aucun geste aujourd\'hui') + '</small></span></span></td>'
+          + '<td><span class="sv-et e-' + s.k + '">' + esc(s.t) + '</span></td>'
+          + '<td class="n">' + (e.pris || 0) + '</td><td class="n ' + c1 + '">' + t1 + '</td>'
+          + '<td class="n' + (lent ? ' warn' : '') + '">' + (e.prise_mediane_min == null ? '—' : e.prise_mediane_min + ' min') + '</td>'
+          + '<td class="n">' + (e.qualifies || 0) + '</td><td class="n">' + (e.rappels || 0) + '</td>'
+          + '<td class="n' + (e.abandons_rapides ? ' bad' : '') + '">' + (e.abandons || 0) + (e.abandons_rapides ? ' <small>(' + e.abandons_rapides + ' trop tôt)</small>' : '') + '</td>'
+          + '<td>' + spark(e.activite) + '</td>'
+          + '<td><button type="button" class="btn sm' + (s.inactif || s.bacsFerme ? ' pri' : '') + '" data-a="prevenir" data-id="' + e.id + '">La prévenir</button></td></tr>';
+      });
+      return h + '</tbody></table></div></div>';
+    }
+    function renderFlux() {
+      var f = S.d.flux || [], mx = Math.max(4, Math.max.apply(null, f.map(function (x) { return Math.max(x.arrives, x.pris); }).concat([0])));
+      var W = 340, H = 170, L = 26, B = 138, T = 12, g = (W - L - 6) / Math.max(1, f.length), bw = Math.max(4, Math.min(14, g / 2 - 2));
+      var s = '<svg viewBox="0 0 ' + W + ' ' + H + '" class="sv-flux" role="img" aria-label="Leads arrivés et pris par heure aujourd\'hui">';
+      var pas = mx <= 6 ? 2 : mx <= 12 ? 4 : Math.ceil(mx / 4);
+      for (var v = 0; v <= mx; v += pas) { var y = B - (v / mx) * (B - T); s += '<line x1="' + L + '" x2="' + (W - 6) + '" y1="' + y + '" y2="' + y + '" stroke="#e3e9f3"/><text x="' + (L - 5) + '" y="' + (y + 4) + '" text-anchor="end" font-size="10" fill="#8b99b0">' + v + '</text>'; }
+      f.forEach(function (x, i) {
+        var cx = L + i * g + g / 2, ha = (x.arrives / mx) * (B - T), hp = (x.pris / mx) * (B - T);
+        s += '<rect x="' + (cx - bw - 1) + '" y="' + (B - ha) + '" width="' + bw + '" height="' + ha + '" rx="2" fill="#acc5e4"/>'
+          + '<rect x="' + (cx + 1) + '" y="' + (B - hp) + '" width="' + bw + '" height="' + hp + '" rx="2" fill="' + (x.pris < x.arrives ? '#c0524f' : '#53bda7') + '"/>';
+        if (f.length <= 14 || i % 2 === 0) s += '<text x="' + cx + '" y="' + (B + 13) + '" text-anchor="middle" font-size="10" fill="#5a6b86">' + x.h + 'h</text>';
+      });
+      s += '<rect x="' + L + '" y="' + (H - 10) + '" width="9" height="8" rx="2" fill="#acc5e4"/><text x="' + (L + 13) + '" y="' + (H - 3) + '" font-size="10" fill="#5a6b86">arrivés</text>'
+        + '<rect x="' + (L + 62) + '" y="' + (H - 10) + '" width="9" height="8" rx="2" fill="#53bda7"/><text x="' + (L + 75) + '" y="' + (H - 3) + '" font-size="10" fill="#5a6b86">pris</text>'
+        + '<rect x="' + (L + 104) + '" y="' + (H - 10) + '" width="9" height="8" rx="2" fill="#c0524f"/><text x="' + (L + 117) + '" y="' + (H - 3) + '" font-size="10" fill="#5a6b86">moins de prises que d\'arrivées</text></svg>';
+      return '<div class="sv-pan"><div class="sv-ph"><h3>Arrivées et prises par heure</h3><small>aujourd\'hui</small></div>' + s + '</div>';
+    }
+    function renderSites() {
+      var ps = S.d.par_site || [], t = S.d.transferts || {};
+      var h = '<div class="sv-pan"><div class="sv-ph"><h3>Transmissions aux sites</h3><small>7 derniers jours</small></div>';
+      if (!ps.length) return h + '<p class="sv-vide">Aucun lead transmis sur la période.</p></div>';
+      h += '<div class="scroll"><table class="sv-t"><thead><tr><th>Site</th><th>Transmis</th><th>Rappelés</th><th>Retard</th><th>Délai</th></tr></thead><tbody>'
+        + ps.slice(0, 8).map(function (s) { return '<tr><td>' + esc(siteNom(s.site)) + '</td><td class="n">' + s.n + '</td><td class="n">' + (s.contactes || 0) + '</td><td class="n' + (s.en_retard ? ' bad' : '') + '">' + (s.en_retard || 0) + '</td><td class="n">' + (s.median_min == null ? '—' : duree(s.median_min)) + '</td></tr>'; }).join('')
+        + '</tbody></table></div>';
+      if (ps.length > 8) h += '<p class="sv-plus">et ' + (ps.length - 8) + ' autres sites.</p>';
+      if (t.n) h += '<p class="sv-plus">' + (t.dans_2h || 0) + ' sur ' + t.n + ' rappelés par le site dans les 2 h.</p>';
+      return h + '</div>';
+    }
+    function renderMotifs() {
+      var m = S.d.motifs || [], sem = (S.d.semaine || {}).periode || {};
+      var h = '<div class="sv-pan"><div class="sv-ph"><h3>Pourquoi les leads s\'arrêtent</h3><small>abandons dans One Data, 7 jours</small></div>';
+      if (!m.length) h += '<p class="sv-vide">Aucun abandon enregistré dans One Data sur la période.</p>';
+      else { var mx = Math.max.apply(null, m.map(function (x) { return x.n; })); h += '<div class="sv-mo">' + m.slice(0, 6).map(function (x) { return '<div><span>' + esc(x.motif || 'Sans motif') + '</span><span class="jg"><i style="width:' + Math.round(100 * x.n / mx) + '%"></i></span><b>' + x.n + '</b></div>'; }).join('') + '</div>'; }
+      if (sem.traites) h += '<p class="sv-plus">Sur 7 jours : ' + (sem.qualifies || 0) + ' leads qualifiés et transmis pour ' + sem.traites + ' traités (' + pct(sem.qualifies || 0, sem.traites) + ' %).</p>';
+      return h + '</div>';
+    }
+    function renderNote() {
+      var c = S.d.champ_bacs || {};
+      if (!c.recus_48h || c.connus >= c.recus_48h) return '';
+      return '<p class="sv-note">Le type de traitement vient de BACS pour ' + (c.connus || 0) + ' des ' + c.recus_48h + ' leads des dernières 48 h ; pour les autres, il est déduit de la source (Toyota.fr, Lexus.fr, campagnes « sous 1h » → 1 h) et marqué « ? ».</p>';
+    }
+    function render() {
+      if (!root.isConnected) return;
+      if (!S.charge) {
+        root.innerHTML = '<section class="situ"><p class="situ-l"><span class="vr">Plateau VROOM · supervision</span></p><p class="situ-t">' + esc(S.erreur || 'Chargement…') + '</p>'
+          + (S.erreur ? '<div><button type="button" class="btn pri" data-a="maj">Réessayer</button> <button type="button" class="btn" data-a="poste">Poste opérateur</button></div>' : '') + '</section>';
+        return;
+      }
+      var y = FW.scrollY || 0;
+      root.innerHTML = renderHaut()
+        + (S.erreur ? '<p class="alerte">' + esc(S.erreur) + ' Les données affichées datent du dernier chargement réussi.</p>' : '')
+        + '<div class="sv-g2">' + renderChrono() + renderAlertes() + '</div>'
+        + renderEquipe()
+        + '<div class="sv-g3">' + renderFlux() + renderSites() + renderMotifs() + '</div>' + renderNote();
+      try { if (FW.scrollY !== y) FW.scrollTo(0, y); } catch (e) {}
+      try {
+        var n = (S.d.chrono || []).filter(function (l) { return !l.pris_par; }).length, d0 = FW.document;
+        if (S.titre == null) S.titre = d0.title.replace(/^\(\d+ · 1 h\) /, '');
+        d0.title = (n ? '(' + n + ' · 1 h) ' : '') + S.titre;
+      } catch (e) {}
+    }
+
+    // ── Fenêtres : confier, prévenir ──────────────────────────────────────
+    function fermerPop() { $pop.hidden = true; $scrim.hidden = true; $pop.innerHTML = ''; S.pop = null; }
+    function ouvrirPop(html) { $pop.innerHTML = html; $pop.hidden = false; $scrim.hidden = false; var f = $pop.querySelector('textarea,button'); if (f) try { f.focus(); } catch (e) {} }
+    function chercherLead(sf) { return (S.d.chrono || []).concat(S.d.chrono_48h || []).find(function (l) { return l.sf === sf; }) || null; }
+    function popConfier(sf) {
+      var l = chercherLead(sf); S.pop = { type: 'confier', sf: sf };
+      var eq = (S.d.equipe || []).slice().sort(function (a, b) { var ea = etat(a), eb = etat(b); return (eb.actif ? 1 : 0) - (ea.actif ? 1 : 0) || (a.pris || 0) - (b.pris || 0); });
+      ouvrirPop('<div class="sv-ph"><h2>Confier ' + esc(l ? nomL(l) : 'ce lead') + '</h2><button type="button" class="x" data-a="fermer" aria-label="Fermer">×</button></div>'
+        + (l ? '<p class="sv-pd">' + esc(dem(l)) + (l.echeance ? ' · échéance ' + esc(quand(l.echeance)) : '') + '</p>' : '')
+        + '<p class="sv-pd">Le lead lui est réservé ' + cfg('confie_minutes', 15) + ' min et elle est prévenue dans sa cloche.</p><div class="sv-choix">'
+        + eq.map(function (e) { var s = etat(e); return '<button type="button" class="sv-ch" data-a="confier-a" data-id="' + e.id + '"><span class="sv-av">' + esc(initiales(propre(e.nom))) + '</span><span><b>' + esc(propre(e.nom)) + '</b><small>' + esc(s.t) + ' · ' + (e.pris || 0) + ' pris aujourd\'hui</small></span></button>'; }).join('')
+        + '</div>');
+    }
+    function popPrevenir(id) {
+      var e = (S.d.equipe || []).find(function (x) { return String(x.id) === String(id); }) || {}; S.pop = { type: 'prevenir', id: id };
+      var proposes = ['Des leads « Demande client (1h) » attendent dans le Pool BACS.', 'BACS est fermé sur ton poste : rouvre-le pour que tes gestes y partent.', 'Pense à tenter trois appels avant d\'abandonner un lead.', 'Tes rappels dus attendent dans l\'onglet « Rappels dus ».'];
+      ouvrirPop('<div class="sv-ph"><h2>Prévenir ' + esc(propre(e.nom) || 'l\'opératrice') + '</h2><button type="button" class="x" data-a="fermer" aria-label="Fermer">×</button></div>'
+        + '<p class="sv-pd">Le message arrive dans sa cloche One Data.</p><div class="sv-props">'
+        + proposes.map(function (p) { return '<button type="button" class="fchip" data-a="prop" data-id="' + esc(p) + '">' + esc(p) + '</button>'; }).join('') + '</div>'
+        + '<label class="sv-lab" for="sv-msg">Message</label><textarea id="sv-msg" rows="3" maxlength="500"></textarea>'
+        + '<div class="sv-pf"><button type="button" class="btn" data-a="fermer">Annuler</button><button type="button" class="btn pri" data-a="envoyer">Envoyer</button></div>');
+    }
+
+    // ── Actions ───────────────────────────────────────────────────────────
+    var occupe = false;
+    async function action(a, id) {
+      switch (a) {
+        case 'maj': return charger(false);
+        case 'poste':
+          try { FW.location.hash = 'poste-operateur'; } catch (e) {}
+          detruire();
+          return posteVroom(el, ctx, user, { apercu: ROLES_APERCU.indexOf(opt.role) !== -1, role: opt.role });
+        case 'ack': S.ack.add(id); try { FW.localStorage.setItem('lmsv-ack', JSON.stringify(Array.from(S.ack).slice(-300))); } catch (e) {} render(); return;
+        case 'confier': return popConfier(id);
+        case 'prevenir': return popPrevenir(id);
+        case 'fermer': return fermerPop();
+        case 'prop': { var t = $pop.querySelector('#sv-msg'); if (t) t.value = id; return; }
+        case 'confier-a':
+          if (occupe || !S.pop) return; occupe = true;
+          try {
+            var r = await rpc('plateau_attribuer', { p_sf_lead_id: S.pop.sf, p_id_user: Number(id) });
+            if (r && r.ok === false) toast('Impossible : ' + (r.motif || 'refusé'), true);
+            else { var e = (S.d.equipe || []).find(function (x) { return String(x.id) === String(id); }); toast('Lead confié à ' + propre((e && e.nom) || 'l\'opératrice')); fermerPop(); await charger(true); }
+          } catch (er) { toast(msgErr(er), true); } finally { occupe = false; }
+          return;
+        case 'envoyer':
+          if (occupe || !S.pop) return;
+          var msg = ($pop.querySelector('#sv-msg') || {}).value || '';
+          if (!msg.trim()) { toast('Écrivez un message ou choisissez-en un.', true); return; }
+          occupe = true;
+          try {
+            var r2 = await rpc('plateau_prevenir', { p_id_user: Number(S.pop.id), p_message: msg.trim() });
+            if (r2 && r2.ok === false) toast('Impossible : ' + (r2.motif || 'refusé'), true); else { toast('Message envoyé'); fermerPop(); }
+          } catch (er) { toast(msgErr(er), true); } finally { occupe = false; }
+          return;
+      }
+    }
+    function surClic(ev) {
+      var t = ev.target.closest('[data-a]'); if (!t || t.disabled) return;
+      ev.preventDefault(); action(t.getAttribute('data-a'), t.getAttribute('data-id') || '');
+    }
+    root.addEventListener('click', surClic);
+    ov.addEventListener('click', surClic);
+    $scrim.addEventListener('click', fermerPop);
+    function surTouche(ev) { if (ev.key === 'Escape' && S.pop) fermerPop(); }
+    doc.addEventListener('keydown', surTouche);
+
+    // ── Chargement et cycle de vie ────────────────────────────────────────
+    async function charger(silencieux) {
+      try { S.d = await rpc('plateau_supervision'); S.charge = true; S.erreur = null; }
+      catch (e) { S.erreur = msgErr(e); if (!silencieux && S.charge) toast(S.erreur, true); }
+      if (!S.pop) render();
+    }
+    var minuteur = null, trotteuse = null;
+    function detruire() {
+      clearInterval(minuteur); clearInterval(trotteuse);
+      doc.removeEventListener('keydown', surTouche);
+      try { if (S.titre != null) FW.document.title = S.titre; } catch (e) {}
+      try { ov.remove(); } catch (e) {}
+      try { root.remove(); } catch (e) {}
+    }
+    minuteur = setInterval(function () {
+      if (!el.isConnected || !root.isConnected) { detruire(); return; }
+      if (doc.visibilityState === 'hidden' || occupe || S.pop) return;
+      charger(true);
+    }, 60000);
+    trotteuse = setInterval(function () { if (root.isConnected) tictac(root); }, 1000);
+    render();
+    await charger(false);
+  }
+
+  function injecterCssSup(doc) {
+    if (doc.getElementById('lmsv-css')) return;
+    var st = doc.createElement('style'); st.id = 'lmsv-css';
+    st.textContent = `
+/* Supervision du plateau (v77) — charte One Data, jamais de noir. */
+.lmsv .sv-hello{align-items:flex-start}
+.lmsv .sv-h1{font-size:clamp(19px,2.3vw,24px);font-weight:800;color:var(--bleu-dk);line-height:1.25;text-wrap:balance;margin:2px 0 4px}
+.lmsv .hello-p b{color:var(--m-orange)}
+.lmsv .sv-acts{display:flex;gap:8px;flex-wrap:wrap}
+.lmsv .sv-kpis{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:10px;margin:14px 0}
+.lmsv .sv-k{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:10px 12px;display:grid;gap:2px;min-width:0}
+.lmsv .sv-k span{font-size:11.5px;font-weight:700;color:var(--ink-2)}
+.lmsv .sv-k b{font-size:22px;font-weight:800;color:var(--bleu-dk);line-height:1.15;font-variant-numeric:tabular-nums}
+.lmsv .sv-k small{font-size:11px;color:var(--ink-3);font-weight:600}
+.lmsv .sv-k.good b{color:var(--m-vert)}
+.lmsv .sv-k.warn{background:var(--alerte-bg);border-color:#f0d9a0}.lmsv .sv-k.warn b{color:var(--m-orange)}
+.lmsv .sv-k.bad{background:var(--chaud-bg);border-color:#f2c4c4}.lmsv .sv-k.bad b{color:var(--m-rouge)}
+.lmsv .sv-g2{display:grid;grid-template-columns:minmax(0,1.45fr) minmax(0,1fr);gap:14px;align-items:start;margin-bottom:14px}
+.lmsv .sv-g3{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px;align-items:start;margin-top:14px}
+.lmsv .sv-pan{background:var(--card);border:1px solid var(--line);border-radius:14px;box-shadow:var(--ombre);padding:14px;display:grid;gap:8px;min-width:0;align-content:start}
+.lmsv-ov .sv-ph,.lmsv .sv-ph{display:flex;justify-content:space-between;align-items:baseline;gap:10px;flex-wrap:wrap}
+.lmsv .sv-ph h2,.lmsv-ov .sv-ph h2{font-size:15px;font-weight:800;color:var(--bleu-dk);display:flex;align-items:center;gap:8px;margin:0}
+.lmsv .sv-ph h3{font-size:14px;font-weight:800;color:var(--bleu-dk);display:flex;align-items:center;gap:8px;margin:0}
+.lmsv .sv-ph small{font-size:11.5px;color:var(--ink-3);font-weight:600}
+.lmsv .sv-ph2{margin-top:8px;padding-top:10px;border-top:1px solid var(--line)}
+.lmsv .cnt.c{background:var(--m-rouge);color:#fff}
+.lmsv .sv-vide{font-size:12.5px;color:var(--mut);font-weight:600;padding:6px 0}
+.lmsv .sv-plus{font-size:12px;color:var(--ink-2);font-weight:600}
+.lmsv .sv-lv{display:grid;grid-template-columns:minmax(0,1fr) 150px auto;gap:12px;align-items:center;padding:9px 10px;border-radius:10px;background:var(--chaud-bg);box-shadow:inset 4px 0 0 var(--m-rouge)}
+.lmsv .sv-lv.pris{background:var(--calme-bg);box-shadow:inset 4px 0 0 var(--bleu)}
+.lmsv .sv-lv.hors{box-shadow:inset 4px 0 0 #d8433f}
+.lmsv .sv-lv.l48{background:var(--alerte-bg);box-shadow:inset 4px 0 0 var(--orange)}
+.lmsv .sv-lv .n{display:grid;min-width:0}
+.lmsv .sv-lv .n b{font-size:13.5px;color:var(--ink);font-weight:800}
+.lmsv .sv-lv .n span{font-size:12px;color:var(--ink-2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.lmsv .ded{display:inline-grid;place-items:center;width:15px;height:15px;border-radius:50%;background:var(--card);color:var(--ink-3);font-size:10px;font-weight:800;vertical-align:1px}
+.lmsv .sv-pp{font-size:12px;font-weight:800;color:var(--bleu);white-space:nowrap}
+.lmsv .sv-tm{display:grid;gap:4px}
+.lmsv .sv-tm b{font-size:12.5px;font-weight:800;color:var(--m-rouge);font-variant-numeric:tabular-nums;white-space:nowrap}
+.lmsv .sv-lv.pris .sv-tm b{color:var(--bleu-dk)}
+.lmsv .sv-lv.l48 .sv-tm b{color:var(--m-orange)}
+.lmsv .sv-tm.urg b{color:#fff;background:#d8433f;border-radius:6px;padding:0 6px;justify-self:start}
+.lmsv .sv-tm.hors b{color:#d8433f}
+.lmsv .jg{display:block;width:100%;height:5px;border-radius:3px;background:var(--line);overflow:hidden}
+.lmsv .jg i{display:block;height:100%;background:var(--m-rouge);border-radius:3px}
+.lmsv .sv-lv.pris .jg i{background:var(--bleu)}
+.lmsv .sv-lv.l48 .jg i{background:var(--orange)}
+.lmsv .sv-feed{display:grid;gap:8px;max-height:720px;overflow:auto;padding-right:2px}
+.lmsv .sv-t td{font-size:13px;padding:7px 6px}
+.lmsv .sv-al{display:grid;grid-template-columns:8px minmax(0,1fr);gap:10px;padding:9px 10px;border:1px solid var(--line);border-radius:10px;font-size:13px}
+.lmsv .sv-al i{width:8px;height:8px;border-radius:50%;margin-top:6px;background:var(--bleu)}
+.lmsv .sv-al.r{background:var(--chaud-bg);border-color:#f2c4c4}.lmsv .sv-al.r i{background:#d8433f}
+.lmsv .sv-al.o i{background:var(--orange)}
+.lmsv .sv-al > div{display:grid;gap:2px;min-width:0}
+.lmsv .sv-al b{color:var(--ink);font-weight:800}
+.lmsv .sv-al span{color:var(--ink-2)}
+.lmsv .sv-al small{color:var(--ink-3);font-size:11px;font-weight:600}
+.lmsv .sv-aa{display:flex;gap:6px;flex-wrap:wrap;margin-top:4px}
+.lmsv .sv-t{min-width:0}
+.lmsv .sv-t td,.lmsv .sv-t th{text-align:left;white-space:nowrap}
+.lmsv .sv-t td.n{text-align:right;font-variant-numeric:tabular-nums}
+.lmsv .sv-t td.bad{color:var(--m-rouge);font-weight:800}
+.lmsv .sv-t td.warn{color:var(--m-orange);font-weight:800}
+.lmsv .sv-t td.good{color:var(--m-vert);font-weight:800}
+.lmsv .sv-t td small{font-size:11px;color:var(--ink-3);font-weight:600}
+.lmsv .sv-eq{min-width:860px}
+.lmsv .sv-op{display:flex;align-items:center;gap:9px}
+.lmsv .sv-op b{display:block;color:var(--ink);font-weight:800}
+.lmsv .sv-op small{display:block;font-size:11px;color:var(--ink-3)}
+.lmsv .sv-av,.lmsv-ov .sv-av{width:28px;height:28px;flex:0 0 28px;border-radius:50%;background:#eaf1fa;color:var(--bleu-dk);display:inline-grid;place-items:center;font-size:11px;font-weight:800}
+.lmsv .sv-et{display:inline-flex;align-items:center;gap:6px;font-size:12px;font-weight:700;border-radius:999px;padding:2px 9px;background:var(--calme-bg);color:var(--ink-3)}
+.lmsv .sv-et::before{content:"";width:7px;height:7px;border-radius:50%;background:currentColor}
+.lmsv .sv-et.e-travail{background:var(--ok-bg);color:var(--m-vert)}
+.lmsv .sv-et.e-fiche{background:#eaf1fa;color:var(--bleu)}
+.lmsv .sv-et.e-inactif{background:var(--alerte-bg);color:var(--m-orange)}
+.lmsv .sv-et.e-bacs{background:var(--chaud-bg);color:var(--m-rouge)}
+.lmsv .sv-sp{display:block}
+.lmsv .sv-flux{width:100%;height:auto;display:block;font-family:var(--ui)}
+.lmsv .sv-mo{display:grid;gap:7px;font-size:12.5px}
+.lmsv .sv-mo div{display:grid;grid-template-columns:minmax(0,1fr) 80px 26px;gap:8px;align-items:center}
+.lmsv .sv-mo .jg i{background:var(--bleu-clair)}
+.lmsv .sv-mo b{text-align:right;font-variant-numeric:tabular-nums}
+.lmsv .sv-note{font-size:12px;color:var(--mut);font-weight:600;margin-top:12px;max-width:90ch}
+.lmsv-ov .sv-scrim{position:fixed;inset:0;background:rgba(42,94,169,.18);z-index:9990}
+.lmsv-ov .sv-pop{position:fixed;z-index:9991;left:50%;top:50%;transform:translate(-50%,-50%);width:min(460px,calc(100vw - 32px));max-height:calc(100vh - 48px);overflow:auto;background:#fff;border-radius:16px;box-shadow:0 16px 50px rgba(42,94,169,.22);padding:16px 18px;display:grid;gap:10px}
+.lmsv-ov .sv-pd{font-size:12.5px;color:var(--ink-2);font-weight:600}
+.lmsv-ov .sv-choix{display:grid;gap:6px}
+.lmsv-ov .sv-ch{display:flex;align-items:center;gap:10px;text-align:left;border:1px solid var(--line);background:var(--card);border-radius:10px;padding:8px 10px;cursor:pointer;font:inherit}
+.lmsv-ov .sv-ch:hover{border-color:var(--bleu-clair);background:var(--hov)}
+.lmsv-ov .sv-ch b{display:block;color:var(--ink);font-size:13.5px}
+.lmsv-ov .sv-ch small{display:block;color:var(--ink-3);font-size:11.5px;font-weight:600}
+.lmsv-ov .sv-props{display:flex;flex-wrap:wrap;gap:6px}
+.lmsv-ov .sv-props .fchip{text-align:left}
+.lmsv-ov .sv-lab{font-size:11px;font-weight:800;letter-spacing:.05em;text-transform:uppercase;color:var(--lbl)}
+.lmsv-ov textarea{width:100%;box-sizing:border-box;resize:vertical}
+.lmsv-ov .sv-pf{display:flex;justify-content:flex-end;gap:8px}
+.lmsv-ov .x{font-size:18px;line-height:1}
+@media (max-width:1100px){.lmsv .sv-kpis{grid-template-columns:repeat(3,minmax(0,1fr))}.lmsv .sv-g2,.lmsv .sv-g3{grid-template-columns:minmax(0,1fr)}}
+@media (max-width:620px){.lmsv .sv-kpis{grid-template-columns:repeat(2,minmax(0,1fr))}.lmsv .sv-lv{grid-template-columns:minmax(0,1fr) auto}.lmsv .sv-lv .sv-tm{grid-column:1/-1;grid-row:2}}
+@media (prefers-reduced-motion:no-preference){.lmsv .sv-tm.urg b{animation:lmsvPouls 1.6s ease-in-out infinite}}
+@keyframes lmsvPouls{50%{opacity:.6}}
+`;
+    (doc.head || doc.documentElement).appendChild(st);
   }
 
   // ==========================================================================
@@ -3899,6 +4542,33 @@
 .lmtc .vend .l .qui b{font-size:14.5px;font-weight:800;color:var(--ink)}
 .lmtc .lien-r{border:0;background:none;color:var(--bleu);font:inherit;font-weight:800;font-size:12.5px;cursor:pointer;padding:6px 4px;white-space:nowrap}
 @media (max-width:720px){.lmtc .carte-l{grid-template-columns:60px minmax(0,1fr)}.lmtc .carte-l > .go,.lmtc .carte-l > .choix,.lmtc .carte-l > .btn{grid-column:1/-1}.lmtc .go .main{flex:1}.lmtc .vend-h{flex-wrap:wrap}.lmtc .vend .l{grid-template-columns:56px minmax(0,1fr)}.lmtc .vend .l .lien-r{grid-column:2;justify-self:start}}
+/* v77 : leads « Demande client (1h) » et « Relance concession (48h) » */
+.lmtc .lr.ch1{box-shadow:inset 4px 0 0 #c0524f;background:linear-gradient(90deg,#fbeceb,#fff 40%)}
+.lmtc .lr.ch1:hover{background:linear-gradient(90deg,#f8e2e1,#f2f6fc 40%)}
+.lmtc .lr.ch1,.lmtc .lr.ch48{grid-template-columns:168px minmax(0,1fr) auto}
+@media (max-width:600px){.lmtc .lr.ch1,.lmtc .lr.ch48{grid-template-columns:minmax(0,1fr)}}
+.lmtc .lr.ch48{box-shadow:inset 4px 0 0 #fac055;background:linear-gradient(90deg,#fdf3de,#fff 40%)}
+.lmtc .grp{display:flex;align-items:center;gap:10px;font-size:11px;font-weight:800;letter-spacing:.06em;text-transform:uppercase;margin:12px 8px 4px;color:var(--ink-3)}
+.lmtc .grp::after{content:"";flex:1;height:1px;background:var(--line)}
+.lmtc .grp .num{font-size:11px;background:var(--line);color:var(--ink-2);border-radius:9px;padding:1px 7px;letter-spacing:0}
+.lmtc .grp.g1{color:var(--m-rouge)} .lmtc .grp.g1 .num{background:var(--m-rouge);color:#fff} .lmtc .grp.g1::after{background:#f2c4c4}
+.lmtc .grp.g48{color:var(--m-orange)} .lmtc .grp.g48::after{background:#f0d9a0}
+.lmtc .tm.chr b{background:var(--chaud-bg);color:var(--m-rouge)}
+.lmtc .tm.chr.c48 b,.lmtc .tm.chr.urg48 b{background:var(--alerte-bg);color:var(--m-orange)}
+.lmtc .tm.chr.urg b{background:#d8433f;color:#fff}
+.lmtc .tm.chr.hors b{background:#fff;color:#d8433f;box-shadow:inset 0 0 0 1.5px #d8433f}
+@media (prefers-reduced-motion:no-preference){.lmtc .tm.chr.urg b{animation:lmtcPouls 1.6s ease-in-out infinite}}
+@keyframes lmtcPouls{50%{opacity:.6}}
+.lmtc .cta.cta1{background:#c0524f;box-shadow:0 4px 14px rgba(192,82,79,.35)}
+.lmtc .cta.cta1:hover{background:#a94643}
+.lmtc .b1h{display:grid;gap:8px;margin:0 0 12px;padding:10px 12px;border-radius:12px;background:var(--chaud-bg);border:1px solid #f2c4c4;box-shadow:inset 4px 0 0 #c0524f}
+.lmtc .b1h-t{display:flex;flex-wrap:wrap;gap:4px 10px;align-items:baseline;font-size:13px;color:#a32d2d}
+.lmtc .b1h-t span{font-size:12px;color:var(--ink-2);font-weight:600}
+.lmtc .b1h-l{display:grid;gap:6px}
+.lmtc .b1h-i{display:grid;grid-template-columns:auto minmax(0,1fr) auto;gap:10px;align-items:center}
+.lmtc .b1h-n{font-weight:800;color:var(--ink);min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.lmtc .b1h-n small{font-weight:600;color:var(--ink-2);margin-left:8px}
+.lmtc .b1h .lien{justify-self:start;font-size:12.5px}
 @media (prefers-reduced-motion:reduce){.lmtc *{animation:none!important;transition:none!important}}
 `;
     (doc.head || doc.documentElement).appendChild(st);
