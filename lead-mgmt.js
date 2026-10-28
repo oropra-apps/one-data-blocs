@@ -1,6 +1,9 @@
 // ============================================================================
 //  LEAD MANAGEMENT — module One Data (OD.define 'lead-mgmt')
-//  VERSION TEAM COLIN (v68) — déploiement CIBLÉ (publish-targets :
+//  VERSION TEAM COLIN (v69) — déploiement CIBLÉ (publish-targets :
+//  v69 (28/10/2026) : « Inviter un collègue » au rendez-vous ne propose plus
+//  que l'équipe du site du lead (chef des ventes, secrétariat commercial,
+//  vendeurs hors grands comptes) au lieu de tous les utilisateurs.
 //  v68 (28/10/2026) : la « Vue vendeur » du chef utilise le même menu de
 //  vendeurs que la gestion des ventes (bouton VENDEUR / nom, recherche,
 //  groupes VN / VO / VN-VO, le chef en tête = sa propre vue). Les vendeurs
@@ -1156,7 +1159,7 @@
 
     var S = {
       tab: POSTE === 'vendeur' ? 'arappeler' : 'pool',
-      sugg: {}, suggKey: null, regle: {}, perimOuvert: false, invitables: null,
+      sugg: {}, suggKey: null, regle: {}, perimOuvert: false, invitables: {},
       leads: [], stats: null, bacs: null, charge: false, erreur: null,
       site: null,              // site affiché (chef, direction après « Ouvrir »)
       vueSite: null,           // direction : site ouvert
@@ -2415,8 +2418,9 @@
     function formRdv(l) {
       var D = S.dr, f = D.rdvF || (D.rdvF = { objet: estVO(l) ? 'Essai' : 'RDV Vente', date: dateLocale(creneau(1, 10)), duree: '60', inv: [], com: '' });
       var rapides = [['Demain 10:00', creneau(1, 10)], ['Demain 14:00', creneau(1, 14)], ['Samedi 10:00', samediProchain()]];
-      if (!S.invitables) chargerInvitables();
-      var inv = (S.invitables || []).filter(function (u) { return Number(u.id_user) !== Number(l.id_user_attribue || MOI); });
+      var invS = S.invitables[l.id_site];
+      if (!invS) chargerInvitables(l.id_site);
+      var inv = (invS || []).filter(function (u) { return Number(u.id_user) !== Number(l.id_user_attribue || MOI); });
       // Les collègues du site d'abord : vendeurs, chef des ventes.
       var duSite = {}; vendeursDu(l.id_site).forEach(function (v) { duSite[v.id_user] = 1; });
       inv.sort(function (a, b) { return ((duSite[b.id_user] ? 1 : 0) - (duSite[a.id_user] ? 1 : 0)) || String(a.nom).localeCompare(String(b.nom), 'fr'); });
@@ -2431,15 +2435,17 @@
         + '<div class="q"><span>Inviter un collègue</span><div class="chips">' + prop.concat(inv.filter(function (u) { return f.inv.indexOf(Number(u.id_user)) !== -1 && prop.indexOf(u) === -1; })).map(function (u) {
             return '<button type="button" class="qk' + (f.inv.indexOf(Number(u.id_user)) !== -1 ? ' on' : '') + '" data-a="rdv-inv" data-id="' + u.id_user + '">' + esc(propre(u.nom)) + '</button>'; }).join('')
         + (autres.length ? '<select id="rdv-inv-plus" aria-label="Autre collègue"><option value="">Autre collègue…</option>' + autres.map(function (u) { return '<option value="' + u.id_user + '">' + esc(propre(u.nom)) + '</option>'; }).join('') + '</select>' : '')
-        + (S.invitables == null ? '<span class="hint">Chargement des collègues…</span>' : '') + '</div></div>'
+        + (invS == null ? '<span class="hint">Chargement des collègues…</span>' : !inv.length ? '<span class="hint">Aucun collègue du site à inviter.</span>' : '') + '</div></div>'
         + '<div class="q"><span>Commentaire</span><textarea id="rdv-com" rows="2" placeholder="Ex. vient avec sa Clio pour la reprise, préparer le véhicule">' + esc(f.com) + '</textarea></div>'
         + '<div class="row"><button type="button" class="btn vr big" data-a="rdv" data-id="' + l.id_lead + '">Valider le rendez-vous</button></div>'
         + '<p class="hint">' + (l.sf_lead_id ? 'Le rendez-vous part dans l\'agenda One Data et dans BACS, avec son objet et ses invités.' : 'Le rendez-vous part dans l\'agenda One Data.') + '</p></div>';
       return h;
     }
-    async function chargerInvitables() {
-      if (S.invitables || S._invEnCours) return; S._invEnCours = true;
-      try { S.invitables = await rpc('agenda_invitables') || []; } catch (e) { S.invitables = []; }
+    // v69 : seulement l'équipe du site du lead (chef des ventes, secrétariat
+    // commercial, vendeurs hors grands comptes) — lead_invitables.
+    async function chargerInvitables(site) {
+      if (site == null || S.invitables[site] || S._invEnCours) return; S._invEnCours = true;
+      try { S.invitables[site] = await rpc('lead_invitables', { p_id_site: Number(site) }) || []; } catch (e) { S.invitables[site] = []; }
       S._invEnCours = false;
       if (S.dr) renderDrawerPreserve();
     }
