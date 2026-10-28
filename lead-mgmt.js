@@ -1,6 +1,10 @@
 // ============================================================================
 //  LEAD MANAGEMENT — module One Data (OD.define 'lead-mgmt')
-//  VERSION TEAM COLIN (v74) — déploiement CIBLÉ (publish-targets :
+//  VERSION TEAM COLIN (v75) — déploiement CIBLÉ (publish-targets :
+//  v75 (28/10/2026) : règle affichée (Pool du vendeur, règle du site côté
+//  chef) : un lead pris et non traité dans les 15 minutes revient dans le
+//  Pool (lead_retour_pool, en base, toutes les minutes). Sur la ligne d'un
+//  lead pris : « à traiter : retour au Pool dans N min ».
 //  v74 (28/10/2026) : plateau VROOM, MODE DÉMONSTRATION (bouton dans le
 //  bandeau « BACS fermé ») : Prendre / ouvrir un lead montre la fiche comme
 //  après la prise, avec qualification, transfert, rappel et abandon, sans
@@ -1814,8 +1818,19 @@
       if (r <= 0) return '<span class="tm crit"><b>+' + duree(-r) + '</b><small>hors délai</small></span>';
       return '<span class="tm ' + (r <= slaDe(l) * 0.4 ? 'warn' : 'ok') + '"><b>' + duree(r) + '</b><small>avant le délai</small></span>';
     }
+    // v75 : un lead pris dans le Pool et non traité revient au Pool au bout
+    // de N minutes (lead_retour_pool, en base). N = stats.pool_retour_minutes.
+    function minRetour() { return Number((S.stats && S.stats.pool_retour_minutes) || 15); }
+    function texteRetour() { return 'Un lead pris et non traité (ni appel, ni geste) dans les ' + minRetour() + ' minutes revient automatiquement dans le Pool.'; }
+    function retourDans(l) {
+      if (l.zone !== 'vendeur' || l.tentatives || l.attribue_par_nom || !l.attribue_le) return null;
+      if (['libre', 'prise_directe', 'rendu', 'retour_pool', null, undefined, ''].indexOf(l.attribution_regle) === -1) return null;
+      var r = minRetour() - mins(l.attribue_le);
+      return r > 0 && r <= minRetour() ? r : null;
+    }
     function etatCourt(l) {
       if (l.tentatives) return 'pas joint ×' + l.tentatives + (l.dernier_essai ? ', ' + quand(l.dernier_essai) : '');
+      var rt = retourDans(l); if (rt != null) return 'à traiter : retour au Pool dans ' + Math.ceil(rt) + ' min';
       if (l.par_plateau) return 'qualifié par VROOM';
       if (l.zone === 'piscine') return 'libre';
       return 'nouveau';
@@ -1871,7 +1886,7 @@
       var h = '<div class="list">';
       if (!ls.length) h += '<div class="empty">Le Pool est vide.</div>';
       ls.forEach(function (l) { h += ligneAction(l, 'prendre'); });
-      return h + '</div><p class="foot">Libre-service : premier arrivé, premier servi. Un lead pris passe dans « À rappeler » ; s\'il ne vous concerne pas, rendez-le au Pool.</p>';
+      return h + '</div><p class="foot">Libre-service : premier arrivé, premier servi. Un lead pris passe dans « À rappeler » ; s\'il ne vous concerne pas, rendez-le au Pool. ' + texteRetour() + '</p>';
     }
     function vueCampagnesVendeur() {
       var h = '';
@@ -1908,10 +1923,10 @@
         : r.repartition === 'conversion' ? 'le vendeur le moins chargé, et à charge égale celui qui convertit le mieux'
         : 'le vendeur le moins chargé');
       var c = crit.join(', sinon ');
-      var h = r.mode === 'libre' ? '<b>Libre-service</b> : les vendeurs prennent eux-mêmes leurs leads dans le Pool. Quand vous attribuez, One Data suggère ' + c + '.'
+      var h = r.mode === 'libre' ? '<b>Libre-service</b> : les vendeurs prennent eux-mêmes leurs leads dans le Pool. ' + texteRetour() + ' Quand vous attribuez, One Data suggère ' + c + '.'
         : r.mode === 'manuel' ? '<b>Attribution par le chef des ventes</b> : vous attribuez chaque lead. One Data suggère ' + c + '.'
         : '<b>Attribution automatique</b> : chaque lead part aussitôt chez ' + c + '. Le Pool ne garde que ceux qu\'aucun vendeur ne peut prendre.';
-      if (r.filtre_vn_vo) h += ' Un lead VO ne va qu\'aux vendeurs VO.';
+      if (r.filtre_vn_vo) h += ' Un lead VN va aux vendeurs VN, un lead VO aux vendeurs VO ; les vendeurs VN/VO reçoivent les deux.';
       var ex = (r.exclus || []).filter(function (e) { return !/recette|administration/i.test(e.motif || ''); });
       if (ex.length) h += ' Écartés du tour de rôle : ' + ex.map(function (e) { return esc(propre(e.nom)) + (e.au ? ' (jusqu\'au ' + jour(e.au) + ')' : ''); }).join(', ') + '.';
       return h;
@@ -2116,7 +2131,7 @@
     }
     function vuePiscineVendeur() {
       var ls = piscine(null).sort(function (a, b) { return (slaDe(a) - mins(arrive(a))) - (slaDe(b) - mins(arrive(b))); });
-      var h = '<div class="ph"><div><h2>' + esc(poolNom()) + '</h2><p>Libre-service : premier arrivé, premier servi. Prendre met le lead à votre nom ; s\'il ne vous concerne pas, rendez-le au Pool.</p></div></div><div class="list">';
+      var h = '<div class="ph"><div><h2>' + esc(poolNom()) + '</h2><p>Libre-service : premier arrivé, premier servi. Prendre met le lead à votre nom ; s\'il ne vous concerne pas, rendez-le au Pool.<br><b>' + esc(texteRetour()) + '</b></p></div></div><div class="list">';
       if (!ls.length) h += '<div class="empty">Le Pool est vide.</div>';
       ls.forEach(function (l) { h += ligneLead(l); });
       return h + '</div>';
