@@ -1,6 +1,15 @@
 // ============================================================================
 //  LEAD MANAGEMENT — module One Data (OD.define 'lead-mgmt')
-//  VERSION TEAM COLIN (v65) — déploiement CIBLÉ (publish-targets :
+//  VERSION TEAM COLIN (v67) — déploiement CIBLÉ (publish-targets :
+//  v67 (28/10/2026) : leads segmentés VN / VO (pastille sur chaque lead,
+//  filtre Tous / VN / VO ; un vendeur VN ou VO ne voit que son univers dans
+//  le Pool, un VNVO voit les deux — filtrage fait en base, poste_site_leads).
+//  Période de réception choisie avec le même calendrier que la gestion des
+//  ventes (30 derniers jours par défaut). Le chef des ventes peut afficher
+//  l'écran d'un de ses vendeurs (aperçu en lecture seule). La confirmation du
+//  rendez-vous par SMS est retirée (coût).
+//  v66 (28/10/2026) : cartes de l'équipe, badge sous le nom (plus de
+//  débordement).
 //  v65 (27/10/2026) : nouveau dessin, plus aéré. « En souffrance » est
 //  groupé par VENDEUR (une carte par personne : avatar, nom, nombre de leads,
 //  ancienneté ; « Le prévenir » = poste_prevenir_vendeur, « Tout
@@ -1150,7 +1159,9 @@
       campagnes: null, campVend: null, campOuverte: null, mesSollis: null,
       relais: null,
       ack: new Set(), vus: new Set(), frais: new Set(), premier: true,
-      dr: null, modal: null
+      dr: null, modal: null,
+      tous: [], univ: 'tous', comme: null, poste0: null,
+      per: (function () { var a = new Date(), d = new Date(Date.now() - 29 * 86400000); var f = function (x) { return x.getFullYear() + '-' + String(x.getMonth() + 1).padStart(2, '0') + '-' + String(x.getDate()).padStart(2, '0'); }; return { du: f(d), au: f(a) }; })()
     };
     try { (JSON.parse(FW.localStorage.getItem('lmtc-ack-site') || '[]') || []).forEach(function (x) { S.ack.add(x); }); } catch (e) {}
     var MOI = null;
@@ -1170,7 +1181,125 @@
     function manager(id) { var s = siteInfo(id); return !!(s && s.manager); }
     function vendeursDu(id) { return ((S.stats && S.stats.vendeurs) || []).filter(function (v) { return Number(v.id_site) === Number(id); }); }
     function leadsDu(id) { return S.leads.filter(function (l) { return Number(l.id_site) === Number(id); }); }
-    function piscine(id) { return S.leads.filter(function (l) { return l.zone === 'piscine' && (id == null || Number(l.id_site) === Number(id)); }); }
+    function piscine(id) { return S.leads.filter(function (l) { return l.zone === 'piscine' && (id == null || Number(l.id_site) === Number(id)) && (!S.comme || S.comme.sites.indexOf(Number(l.id_site)) !== -1); }); }
+    // ── v67 : univers VN / VO, vue d'un vendeur, période ──────────────────
+    function sitesVendeur() { return S.comme ? sitesStats().filter(function (x) { return S.comme.sites.indexOf(Number(x.id_site)) !== -1; }) : sitesStats(); }
+    function univDe(v) { var t = String(v || '').toUpperCase(); return t === 'VN' ? 'VN' : t === 'VO' ? 'VO' : 'tous'; }
+    function univActif() { return S.comme ? univDe(S.comme.vnvo) : S.univ; }
+    function filtrerUniv(ls) {
+      var u = univActif();
+      return (ls || []).filter(function (l) { return u === 'tous' || !l.univers || l.univers === u || (S.comme && l.zone !== 'piscine'); });
+    }
+    function univTag(l) { return l.univers ? '<span class="tag u-' + l.univers.toLowerCase() + '" title="Lead ' + (l.univers === 'VN' ? 'véhicule neuf' : 'véhicule d\'occasion') + '">' + l.univers + '</span>' : ''; }
+    function segUniv() {
+      if (S.comme) return '';
+      if (POSTE === 'vendeur' && univDe(S.stats && S.stats.mon_univers) !== 'tous') return '';
+      return '<div class="seg-u" role="group" aria-label="Univers">' + [['tous', 'VN + VO'], ['VN', 'VN'], ['VO', 'VO']].map(function (o) {
+        return '<button type="button" class="' + (S.univ === o[0] ? 'on' : '') + '" data-a="univ" data-id="' + o[0] + '" aria-pressed="' + (S.univ === o[0]) + '">' + o[1] + '</button>'; }).join('') + '</div>';
+    }
+    function selComme() {
+      var p0 = S.comme ? S.poste0 : POSTE;
+      if (p0 === 'vendeur') return '';
+      var sid = S.comme ? S.comme.site : sitePoste();
+      if (sid == null) return '';
+      var vus = {}, vs = vendeursDu(sid).filter(function (v) { if (vus[v.id_user]) return false; vus[v.id_user] = 1; return true; });
+      if (!vs.length) return '';
+      return '<select class="comme-s" data-x="comme" aria-label="Voir l\'écran d\'un vendeur"><option value="">Vue vendeur…</option>' + vs.map(function (v) {
+        return '<option value="' + v.id_user + '"' + (S.comme && Number(S.comme.id) === Number(v.id_user) ? ' selected' : '') + '>' + esc(propre(v.nom)) + (v.vn_vo ? ' · ' + esc(v.vn_vo === 'VNVO' ? 'VN/VO' : v.vn_vo) : '') + '</option>'; }).join('') + '</select>';
+    }
+    function fmtPer() { var f = function (x) { return new Date(x + 'T12:00:00').toLocaleDateString('fr-FR', { day: '2-digit', month: 'short' }); }; return f(S.per.du) + ' \u2192 ' + f(S.per.au); }
+    function outils() {
+      return '<div class="outils">' + selComme() + segUniv()
+        + '<button type="button" class="k-range" data-a="dates" title="Leads reçus sur la période">\ud83d\udcc5 <span class="k-range-t">' + esc(fmtPer()) + '</span> <span class="k-caret">\u25be</span></button></div>';
+    }
+    function bandeauComme() {
+      if (!S.comme) return '';
+      var u = S.comme.vnvo === 'VNVO' ? 'VN et VO' : S.comme.vnvo ? S.comme.vnvo : 'VN et VO';
+      return '<div class="comme-b" role="status"><span>Vous voyez l\'écran de <b>' + esc(propre(S.comme.nom)) + '</b> (vendeur ' + esc(u) + ') : son Pool, ses leads à rappeler et ses relances. Aperçu en lecture seule.</span>'
+        + '<button type="button" class="btn sm" data-a="comme-off">Revenir à ma vue</button></div>';
+    }
+    function entrerComme(id) {
+      var sid = sitePoste();
+      var v = ((S.stats && S.stats.vendeurs) || []).find(function (x) { return Number(x.id_user) === Number(id); });
+      if (!v) return;
+      var sites = ((S.stats && S.stats.vendeurs) || []).filter(function (x) { return Number(x.id_user) === Number(id); }).map(function (x) { return Number(x.id_site); });
+      if (!S.comme) S.poste0 = POSTE;
+      S.comme = { id: Number(id), nom: v.nom, vnvo: v.vn_vo || '', sites: sites, site: sid };
+      POSTE = 'vendeur'; MOI = Number(id); S.tab = 'arappeler'; S.cell = null;
+      if (S.dr || !$drawer.hidden) fermerTout();
+      S.leads = filtrerUniv(S.tous); render();
+      try { FW.scrollTo(0, 0); } catch (e) {}
+    }
+    function sortirComme() {
+      if (!S.comme) return;
+      POSTE = S.poste0 || POSTE; S.comme = null; S.poste0 = null; MOI = S.stats ? S.stats.moi : MOI;
+      S.tab = 'pool'; S.cell = null; S.leads = filtrerUniv(S.tous); render(); chargerAide();
+    }
+    var ACTIONS_APERCU = ['tab', 'comme-off', 'univ', 'dates', 'open', 'close', 'retour-liste', 'ack', 'reessayer', 'cell', 'fermer'];
+    function fermerDates() {
+      var e = doc.getElementById('lm-dp'); if (e) e.remove();
+      if (S._dpDehors) { doc.removeEventListener('mousedown', S._dpDehors, true); S._dpDehors = null; }
+    }
+    function appliquerDates(du, au) {
+      fermerDates();
+      if (!du || !au || (du === S.per.du && au === S.per.au)) return;
+      S.per = { du: du, au: au }; S.suggKey = null;
+      rafraichir();
+    }
+    function ouvrirDates(anchor) {
+      if (doc.getElementById('lm-dp')) { fermerDates(); return; }
+      var pk = { mois: null, deb: null, fin: null, survol: null };
+      var m0 = new Date(S.per.du + 'T12:00:00'); pk.mois = new Date(m0.getFullYear(), m0.getMonth(), 1);
+      var pop = doc.createElement('div'); pop.id = 'lm-dp';
+      var r = anchor.getBoundingClientRect();
+      pop.style.cssText = 'position:fixed;z-index:99999;top:' + (r.bottom + 6) + 'px;left:' + Math.max(8, Math.min(r.left, (FW.innerWidth || 1200) - 280)) + 'px';
+      styleDates(); doc.body.appendChild(pop);
+      var ymd = function (y, m, d) { return y + '-' + String(m + 1).padStart(2, '0') + '-' + String(d).padStart(2, '0'); };
+      function cal() {
+        var y = pk.mois.getFullYear(), m = pk.mois.getMonth(), p1 = new Date(y, m, 1), dec = (p1.getDay() + 6) % 7, nb = new Date(y, m + 1, 0).getDate();
+        var auj = new Date(), today = ymd(auj.getFullYear(), auj.getMonth(), auj.getDate()), a = pk.deb, b = pk.fin || pk.survol;
+        var lo = a && b ? (a < b ? a : b) : null, hi = a && b ? (a < b ? b : a) : null;
+        var h = '<div class="kan-dp-box"><div class="kan-dp-head"><button type="button" data-nav="-1">\u2039</button><span>' + esc(p1.toLocaleDateString('fr-FR', { month: 'long', year: 'numeric' })) + '</span><button type="button" data-nav="1">\u203a</button></div><div class="kan-dp-grid">';
+        ['L', 'M', 'M', 'J', 'V', 'S', 'D'].forEach(function (x) { h += '<span class="kan-dp-dow">' + x + '</span>'; });
+        for (var i = 0; i < dec; i++) h += '<span></span>';
+        for (var d = 1; d <= nb; d++) {
+          var ds = ymd(y, m, d), c = 'kan-dp-day';
+          if (ds === today) c += ' today';
+          if (pk.deb === ds || pk.fin === ds) c += ' sel'; else if (lo && hi && ds > lo && ds < hi) c += ' inr';
+          h += '<span class="' + c + '" data-d="' + ds + '">' + d + '</span>';
+        }
+        return h + '</div><div class="kan-dp-foot">' + (pk.deb ? 'Cliquez la date de fin' : 'Cliquez la date de d\u00e9but') + '</div></div>';
+      }
+      function brancher() {
+        pop.querySelectorAll('[data-nav]').forEach(function (b) { b.addEventListener('click', function (e) { e.stopPropagation(); pk.mois = new Date(pk.mois.getFullYear(), pk.mois.getMonth() + Number(b.getAttribute('data-nav')), 1); peindre(); }); });
+        pop.querySelectorAll('.kan-dp-day').forEach(function (c) {
+          c.addEventListener('click', function () { var ds = c.getAttribute('data-d'); if (!pk.deb || pk.fin) { pk.deb = ds; pk.fin = null; pk.survol = null; peindre(); return; } pk.fin = ds; var a = pk.deb, b = pk.fin; if (b < a) { var t = a; a = b; b = t; } appliquerDates(a, b); });
+          c.addEventListener('mouseenter', function () { if (pk.deb && !pk.fin && pk.survol !== c.getAttribute('data-d')) { pk.survol = c.getAttribute('data-d'); peindre(); } });
+        });
+      }
+      function peindre() { pop.innerHTML = cal(); brancher(); }
+      peindre();
+      S._dpDehors = function (e) { if (!pop.contains(e.target) && e.target !== anchor && !anchor.contains(e.target)) fermerDates(); };
+      setTimeout(function () { doc.addEventListener('mousedown', S._dpDehors, true); }, 0);
+    }
+    function styleDates() {
+      if (doc.getElementById('lm-dp-style')) return;
+      var st = doc.createElement('style'); st.id = 'lm-dp-style';
+      st.textContent = '#lm-dp .kan-dp-box{background:#fff;border:1.5px solid #e8eef7;border-radius:12px;box-shadow:0 8px 30px rgba(42,94,169,.18);padding:13px;width:262px;font-family:"Nunito Sans",system-ui,sans-serif}'
+        + '#lm-dp .kan-dp-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:8px}'
+        + '#lm-dp .kan-dp-head span{font-size:12px;font-weight:700;color:#2a5ea9;text-transform:capitalize}'
+        + '#lm-dp .kan-dp-head button{width:26px;height:26px;border:1.5px solid #e8eef7;background:#fff;border-radius:8px;cursor:pointer;color:#2a5ea9;font-size:13px;line-height:1;padding:0}'
+        + '#lm-dp .kan-dp-head button:hover{background:#f5f8fc}'
+        + '#lm-dp .kan-dp-grid{display:grid;grid-template-columns:repeat(7,33px);gap:2px}'
+        + '#lm-dp .kan-dp-dow{font-size:9px;color:#acc5e4;text-align:center;font-weight:800;padding-bottom:3px}'
+        + '#lm-dp .kan-dp-day{height:29px;line-height:29px;text-align:center;font-size:11px;color:#2c2c2a;border-radius:7px;cursor:pointer}'
+        + '#lm-dp .kan-dp-day:hover{background:#eef4fc}'
+        + '#lm-dp .kan-dp-day.today{box-shadow:inset 0 0 0 1.5px #acc5e4}'
+        + '#lm-dp .kan-dp-day.sel{background:#2a5ea9;color:#fff;font-weight:800}'
+        + '#lm-dp .kan-dp-day.inr{background:#eef4fc}'
+        + '#lm-dp .kan-dp-foot{margin-top:8px;text-align:center;font-size:10px;color:#9bb3d1;font-style:italic}';
+      doc.head.appendChild(st);
+    }
     function libres(id) { return piscine(id).filter(function (l) { return !verrouAutre(l); }); }
     function mesLeads() {
       return S.leads.filter(estMien).sort(function (a, b) { return (slaDe(a) - mins(arrive(a))) - (slaDe(b) - mins(arrive(b))); });
@@ -1189,7 +1318,7 @@
     function stockDu(id) { return S.leads.filter(function (l) { return l.zone !== 'plateau' && Number(l.id_site) === Number(id) && mins(l.arrive_le) >= 1440; }).length; }
     function demandeDe(l) { return l.vehicule || (l.message ? String(l.message).replace(/^\[[^\]]*\]\s*/, '').slice(0, 90) : '') || l.source_libelle || 'Demande'; }
     function tagsLead(l) {
-      var h = '<span class="tag">' + esc(l.source_libelle || l.source || 'Lead') + '</span>';
+      var h = univTag(l) + '<span class="tag">' + esc(l.source_libelle || l.source || 'Lead') + '</span>';
       if (l.par_plateau) h += '<span class="tag vr">Qualifié par VROOM</span>';
       if (l.campagne) h += '<span class="tag camp" title="' + esc(l.campagne) + '">' + esc(l.campagne.length > 40 ? l.campagne.slice(0, 38) + '…' : l.campagne) + '</span>';
       if (l.tentatives > 0) h += '<span class="tag warn">' + plural(l.tentatives, 'tentative') + '</span>';
@@ -1231,12 +1360,13 @@
     // ── Chargement ────────────────────────────────────────────────────────
     async function charger() {
       var res = await Promise.all([
-        rpc('poste_site_leads', { p_sites: null }),
+        rpc('poste_site_leads', { p_sites: null, p_du: S.per.du, p_au: S.per.au }),
         rpc('poste_site_stats', { p_sites: null }),
         rpc('bacs_canal_etat').catch(function () { return S.bacs; })
       ]);
-      S.leads = res[0] || []; S.stats = res[1] || {}; S.bacs = res[2] || null;
-      MOI = S.stats.moi;
+      S.tous = res[0] || []; S.stats = res[1] || {}; S.bacs = res[2] || null;
+      MOI = S.comme ? S.comme.id : S.stats.moi;
+      S.leads = filtrerUniv(S.tous);
       if (POSTE === 'chef' && (S.site == null || !siteInfo(S.site))) {
         var gere = sitesStats().filter(function (s) { return s.manager; });
         var avecLeads = gere.slice().sort(function (a, b) { return leadsDu(b.id_site).length - leadsDu(a.id_site).length; });
@@ -1438,7 +1568,7 @@
     function aRelancer() { return mesLeads().filter(function (l) { return l.tentatives > 0; }); }
     function poolNom(sid) {
       if (sid != null) return 'Pool ' + siteNom((siteInfo(sid) || {}).site);
-      var ss = sitesStats();
+      var ss = sitesVendeur();
       return ss.length === 1 ? 'Pool ' + siteNom(ss[0].site) : 'Pool de vos sites';
     }
     function reste(l) { return slaDe(l) - mins(arrive(l)); }
@@ -1477,13 +1607,13 @@
       return h + '</div>';
     }
     function renderSituation() {
-      var nom = propre((S.stats && S.stats.nom) || [user && user.prenom, user && user.nom].filter(Boolean).join(' '));
+      var nom = S.comme ? propre(S.comme.nom) : propre((S.stats && S.stats.nom) || [user && user.prenom, user && user.nom].filter(Boolean).join(' '));
       var pre = prenom(nom);
       var cta = '', p = '', lbl = '';
       if (POSTE === 'vendeur') {
         var ml = mesLeads(), crit = ml.filter(function (x) { return niveau(x) === 'crit'; }).length;
         var li = libres(null).length, s = ml[0];
-        lbl = esc(sitesStats().length === 1 ? siteNom(sitesStats()[0].site) : plural(sitesStats().length, 'site')) + ' · ' + esc(nom);
+        lbl = esc(sitesVendeur().length === 1 ? siteNom(sitesVendeur()[0].site) : plural(sitesVendeur().length, 'site')) + ' · ' + esc(nom);
         p = '<b>' + plural(ml.length, 'lead à rappeler', 'leads à rappeler') + '</b>'
           + (crit ? ' · <b class="t-crit">' + crit + ' en retard</b>' : '')
           + (s && reste(s) > 0 ? ' · le prochain expire dans <b>' + duree(reste(s)) + '</b>' : '')
@@ -1525,7 +1655,7 @@
         return [['arappeler', 'À rappeler', aRappeler().length, aRappeler().some(function (l) { return niveau(l) === 'crit'; })],
                 ['relances', 'Relances', aRelancer().length, false],
                 ['campagnes', 'Campagnes', S.mesSollis ? S.mesSollis.length : null, false],
-                ['pool', poolNom(), libres(null).length, false]];
+                ['pool', poolNom(), libres(null).length, false]].filter(function (o) { return !(S.comme && o[0] === 'campagnes'); });
       }
       var sid = sitePoste(), pool = libres(sid);
       return [['pool', sid == null ? 'Pool' : poolNom(sid), pool.length, pool.some(function (l) { return niveau(l) === 'crit'; })],
@@ -1561,7 +1691,7 @@
       else a = '<button type="button" class="btn pri" data-a="appeler" data-id="' + l.id_lead + '">' + (__lmPeutAppeler() ? (l.tentatives ? 'Rappeler' : 'Appeler') : 'Traiter') + '</button>';
       return '<div class="lr v2" data-a="open" data-id="' + l.id_lead + '" tabindex="0"><div>' + rebours(l) + '</div>'
         + '<div class="who"><span class="lr-n">' + esc(nomLead(l)) + '</span><p class="lr-d">' + esc(demandeDe(l)) + ' · ' + esc(etatCourt(l)) + '</p></div>'
-        + '<div class="src"><span class="tag">' + esc(l.source_libelle || l.source || 'Lead') + '</span></div>'
+        + '<div class="src">' + univTag(l) + '<span class="tag">' + esc(l.source_libelle || l.source || 'Lead') + '</span></div>'
         + '<div class="lr-a">' + a + '</div></div>';
     }
     function ligneAttrib(l, bloque) {
@@ -1585,7 +1715,7 @@
       return '<div class="lr v2 attr" data-a="open" data-id="' + l.id_lead + '" tabindex="0"><div>' + rebours(l) + '</div>'
         + '<div class="who"><span class="lr-n">' + esc(nomLead(l)) + '</span>' + (sitePoste() == null ? ' <span class="lr-v">' + esc(siteNom(l.site)) + '</span>' : '')
         + '<p class="lr-d">' + esc(demandeDe(l)) + '</p>' + (why ? '<p class="why">' + esc(why) + '</p>' : '') + '</div>'
-        + '<div class="src"><span class="tag">' + esc(l.source_libelle || l.source || 'Lead') + '</span></div>'
+        + '<div class="src">' + univTag(l) + '<span class="tag">' + esc(l.source_libelle || l.source || 'Lead') + '</span></div>'
         + '<div class="lr-a">' + a + '</div></div>';
     }
 
@@ -1673,7 +1803,7 @@
       else act = '<div class="go"><button type="button" class="main" data-a="attribuer-sugg" data-id="' + l.id_lead + '">Attribuer à ' + esc(prenom(g.nom)) + '<small>' + esc(g.raison) + '</small></button>'
         + '<button type="button" class="alt" data-a="choix" data-id="' + l.id_lead + '" title="Choisir un autre vendeur" aria-label="Choisir un autre vendeur">▾</button></div>';
       return '<div class="carte-l" data-a="open" data-id="' + l.id_lead + '" tabindex="0">' + ageLead(l)
-        + '<div class="qui"><b>' + esc(nomLead(l)) + (sitePoste() == null ? ' <span class="lr-v">' + esc(siteNom(l.site)) + '</span>' : '') + '</b><p>' + esc(demandeDe(l)) + '</p><span class="src">' + esc(l.source_libelle || l.source || 'Lead') + '</span></div>'
+        + '<div class="qui"><b>' + esc(nomLead(l)) + (sitePoste() == null ? ' <span class="lr-v">' + esc(siteNom(l.site)) + '</span>' : '') + '</b><p>' + esc(demandeDe(l)) + '</p>' + univTag(l) + '<span class="src">' + esc(l.source_libelle || l.source || 'Lead') + '</span></div>'
         + act + '</div>';
     }
     function vuePool() {
@@ -1851,7 +1981,7 @@
     }
     function vuePiscineVendeur() {
       var ls = piscine(null).sort(function (a, b) { return (slaDe(a) - mins(arrive(a))) - (slaDe(b) - mins(arrive(b))); });
-      var h = '<div class="ph"><div><h2>' + esc(sitesStats().length === 1 ? 'Pool ' + siteNom(sitesStats()[0].site) : 'Pool de vos sites') + '</h2><p>Libre-service : premier arrivé, premier servi. Prendre met le lead à votre nom ; s\'il ne vous concerne pas, rendez-le au Pool.</p></div></div><div class="list">';
+      var h = '<div class="ph"><div><h2>' + esc(poolNom()) + '</h2><p>Libre-service : premier arrivé, premier servi. Prendre met le lead à votre nom ; s\'il ne vous concerne pas, rendez-le au Pool.</p></div></div><div class="list">';
       if (!ls.length) h += '<div class="empty">Le Pool est vide.</div>';
       ls.forEach(function (l) { h += ligneLead(l); });
       return h + '</div>';
@@ -2103,9 +2233,9 @@
         return;
       }
       var y = (FW.scrollY || 0);
-      root.innerHTML = renderSituation() + bandeauBacsSite()
+      root.innerHTML = bandeauComme() + renderSituation() + bandeauBacsSite()
         + (S.erreur ? '<p class="alerte">' + esc(S.erreur) + ' Les données affichées datent du dernier chargement réussi.</p>' : '')
-        + renderTabs()
+        + '<div class="barre">' + renderTabs() + outils() + '</div>'
         + '<section class="act" aria-label="Leads"><div class="panel">' + renderPanel() + '</div></section>';
       try { if (FW.scrollY !== y) FW.scrollTo(0, y); } catch (e) {}
       setTimeout(function () { S.frais.clear(); }, 7000);
@@ -2255,7 +2385,7 @@
     function creneau(j, hr) { var d = new Date(); d.setDate(d.getDate() + j); d.setHours(hr, 0, 0, 0); return d; }
     function samediProchain() { var d = new Date(); var k = (6 - d.getDay() + 7) % 7 || 7; return creneau(k, 10); }
     function formRdv(l) {
-      var D = S.dr, f = D.rdvF || (D.rdvF = { objet: estVO(l) ? 'Essai' : 'RDV Vente', date: dateLocale(creneau(1, 10)), duree: '60', inv: [], com: '', sms: true });
+      var D = S.dr, f = D.rdvF || (D.rdvF = { objet: estVO(l) ? 'Essai' : 'RDV Vente', date: dateLocale(creneau(1, 10)), duree: '60', inv: [], com: '' });
       var rapides = [['Demain 10:00', creneau(1, 10)], ['Demain 14:00', creneau(1, 14)], ['Samedi 10:00', samediProchain()]];
       if (!S.invitables) chargerInvitables();
       var inv = (S.invitables || []).filter(function (u) { return Number(u.id_user) !== Number(l.id_user_attribue || MOI); });
@@ -2275,7 +2405,6 @@
         + (autres.length ? '<select id="rdv-inv-plus" aria-label="Autre collègue"><option value="">Autre collègue…</option>' + autres.map(function (u) { return '<option value="' + u.id_user + '">' + esc(propre(u.nom)) + '</option>'; }).join('') + '</select>' : '')
         + (S.invitables == null ? '<span class="hint">Chargement des collègues…</span>' : '') + '</div></div>'
         + '<div class="q"><span>Commentaire</span><textarea id="rdv-com" rows="2" placeholder="Ex. vient avec sa Clio pour la reprise, préparer le véhicule">' + esc(f.com) + '</textarea></div>'
-        + '<label class="hint chk"><input type="checkbox" id="rdv-sms"' + (f.sms ? ' checked' : '') + (l.telephone ? '' : ' disabled') + '> Envoyer la confirmation au client par SMS</label>'
         + '<div class="row"><button type="button" class="btn vr big" data-a="rdv" data-id="' + l.id_lead + '">Valider le rendez-vous</button></div>'
         + '<p class="hint">' + (l.sf_lead_id ? 'Le rendez-vous part dans l\'agenda One Data et dans BACS, avec son objet et ses invités.' : 'Le rendez-vous part dans l\'agenda One Data.') + '</p></div>';
       return h;
@@ -2292,7 +2421,6 @@
       if (g('#rdv-date')) D.rdvF.date = g('#rdv-date').value;
       if (g('#rdv-duree')) D.rdvF.duree = g('#rdv-duree').value;
       if (g('#rdv-com')) D.rdvF.com = g('#rdv-com').value;
-      if (g('#rdv-sms')) D.rdvF.sms = g('#rdv-sms').checked;
     }
 
     // ── v56 : rattacher le lead à une fiche client ─────────────────────────
@@ -2540,6 +2668,7 @@
         if (r && r.action === 'reserve') { await rafraichir(true); S.tab = POSTE === 'vendeur' ? S.tab : S.tab; toast('Lead pris : il est dans « À rappeler ».'); return ouvrir(id); }
         if (r && r.action === 'occupe') toast('Déjà pris par ' + propre(r.par_nom || 'un collègue') + '.', true);
         else if (r && r.action === 'clos') toast('Ce lead est déjà traité.', true);
+        else if (r && r.action === 'univers') toast('Ce lead ' + r.univers + ' est réservé aux vendeurs ' + r.univers + '.', true);
         rafraichir(true);
       });
     }
@@ -2561,17 +2690,11 @@
       var fin = new Date(d.getTime() + (Number(f.duree) || 60) * 60000);
       var loc = function (x) { var q = function (n) { return String(n).padStart(2, '0'); }; return x.getFullYear() + '-' + q(x.getMonth() + 1) + '-' + q(x.getDate()) + ' ' + q(x.getHours()) + ':' + q(x.getMinutes()) + ':00'; };
       var objet = f.objet || 'RDV Vente', com = String(f.com || '').trim();
-      var sms = !!f.sms && !!l.telephone;
       return geste(async function () {
         var r = await rpc('lead_rdv_creer', { p_id_lead: Number(id), p_start: loc(d), p_end: loc(fin), p_sujet: objet, p_commentaire: com || null, p_invites: (f.inv || []).length ? f.inv.map(Number) : null });
         await rpc('poste_resultat', { p_id_lead: Number(id), p_resultat: 'joint_rdv', p_note: objet + (com ? ' · ' + com : '') });
         var jourTxt = d.toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long' }) + ' à ' + hh(d);
-        if (sms) {
-          var moi = prenom((S.stats && S.stats.nom) || '') || 'votre conseiller';
-          var txt = 'Bonjour ' + salut(l) + ', je vous confirme notre rendez-vous (' + objet.replace(/^RDV /, '').toLowerCase() + ') le ' + jourTxt + ' à ' + (siteNom(l.site) || 'la concession') + '. À bientôt, ' + moi + '.';
-          canal('sms', { text: txt });
-        }
-        apres(objet + ' le ' + jourTxt + ' : dans l\'agenda' + (r && r.vers_bacs ? ' et envoyé à BACS' : '') + ((f.inv || []).length ? ', ' + plural(f.inv.length, 'collègue invité', 'collègues invités') : '') + '.' + (sms ? ' Relisez puis envoyez le SMS de confirmation.' : ''));
+        apres(objet + ' le ' + jourTxt + ' : dans l\'agenda' + (r && r.vers_bacs ? ' et envoyé à BACS' : '') + ((f.inv || []).length ? ', ' + plural(f.inv.length, 'collègue invité', 'collègues invités') : '') + '.');
       });
     }
     function resultat(id, res) {
@@ -2745,6 +2868,8 @@
         case 'appeler': await ouvrir(id); if (S.dr && Number(S.dr.id) === Number(id)) canal('appel'); return;
         case 'prendre': return prendre(id);
         case 'tout-attribuer': return toutAttribuer();
+        case 'univ': S.univ = id || 'tous'; S.leads = filtrerUniv(S.tous); S.suggKey = null; render(); if (POSTE !== 'vendeur') chargerAide(); return;
+        case 'comme-off': return sortirComme();
         case 'attribuer-sugg': return attribuerSugg(id);
         case 'choix': S.choix = S.choix || {}; S.choix[id] = !S.choix[id]; render(); return;
         case 'prevenir': return prevenir(id);
@@ -2825,6 +2950,11 @@
       var t = ev.target.closest('[data-a]');
       if (!t || t.disabled) return;
       var a = t.getAttribute('data-a');
+      if (a === 'dates') { ev.preventDefault(); ev.stopPropagation(); ouvrirDates(t); return; }
+      if (S.comme && ACTIONS_APERCU.indexOf(a) === -1 && !((t.classList.contains('lr') || t.classList.contains('carte-l')) && !ev.target.closest('button,select,input,a'))) {
+        ev.preventDefault(); ev.stopPropagation();
+        toast('Aperçu de l\'écran de ' + prenom(S.comme.nom) + ' : lecture seule. Revenez à votre vue pour agir.', true); return;
+      }
       if ((t.classList.contains('lr') || t.classList.contains('todo') || t.classList.contains('carte-l') || t.classList.contains('l') || t.tagName === 'TR') && ev.target.closest('button,select,input,a')) return;
       ev.preventDefault(); ev.stopPropagation();
       action(a, t.getAttribute('data-id') || '');
@@ -2834,6 +2964,9 @@
       surClic(ev);
     });
     ov.addEventListener('click', surClic);
+    root.addEventListener('change', function (ev) {
+      if (ev.target.getAttribute && ev.target.getAttribute('data-x') === 'comme') { if (ev.target.value) entrerComme(Number(ev.target.value)); else sortirComme(); }
+    });
     $scrim.addEventListener('click', function () { if (S.modal) fermerModal(); else fermerTout(); });
     root.addEventListener('keydown', function (ev) {
       var t = ev.target;
@@ -3411,6 +3544,22 @@
 .lmtc .carte-l .qui b{font-size:15.5px;font-weight:800;color:var(--ink);display:block}
 .lmtc .carte-l .qui p,.lmtc .vend .qui p{margin:2px 0 0;color:var(--ink-2);font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .lmtc .carte-l .src{display:inline-block;margin-top:6px;font-size:11px;font-weight:700;color:var(--ink-3);background:var(--ground);border-radius:6px;padding:2px 8px}
+.lmtc .tag.u-vn,.lmtc .tag.u-vo{font-weight:800;letter-spacing:.02em;margin-right:6px}
+.lmtc .tag.u-vn{background:#e8f0fb;color:#2a5ea9}
+.lmtc .tag.u-vo{background:#fdf2e3;color:#a8660a}
+.lmtc .carte-l .tag.u-vn,.lmtc .carte-l .tag.u-vo{margin-top:6px;font-size:11px;padding:2px 8px;border-radius:6px}
+.lmtc .barre{display:flex;align-items:flex-end;justify-content:space-between;gap:10px 16px;flex-wrap:wrap;border-bottom:1px solid var(--line);margin:0 0 18px}
+.lmtc .barre .tabs{border-bottom:0;margin:0;flex:1 1 auto}
+.lmtc .outils{display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:0 0 9px}
+.lmtc .seg-u{display:inline-flex;border:1px solid #ece9e1;border-radius:10px;overflow:hidden;background:#fff}
+.lmtc .seg-u button{border:0;background:none;padding:7px 11px;font:inherit;font-size:12px;font-weight:700;color:var(--ink-2);cursor:pointer}
+.lmtc .seg-u button+button{border-left:1px solid #ece9e1}
+.lmtc .seg-u button.on{background:#2a5ea9;color:#fff}
+.lmtc .comme-s{border:1px solid #ece9e1;border-radius:10px;padding:7px 10px;font:inherit;font-size:12px;font-weight:700;color:#2a5ea9;background:#fff;cursor:pointer;max-width:220px}
+.lmtc .k-range{background:#fff;border:1px solid #ece9e1;border-radius:10px;padding:7px 12px;font-family:inherit;font-size:12px;font-weight:700;color:#2a5ea9;cursor:pointer;display:inline-flex;align-items:center;gap:6px}
+.lmtc .k-range:hover{border-color:#2a5ea9}
+.lmtc .k-caret{font-size:10px;color:#888780}
+.lmtc .comme-b{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;background:var(--sel);border:1.5px solid var(--bleu-clair);color:var(--bleu-dk);border-radius:12px;padding:10px 14px;margin:0 0 14px;font-size:13px;line-height:1.45}
 .lmtc .go{display:flex;align-items:stretch}
 .lmtc .go .main{border:0;background:var(--bleu);color:#fff;font:inherit;font-weight:800;font-size:13.5px;padding:9px 16px;border-radius:11px 0 0 11px;cursor:pointer;white-space:nowrap;text-align:left;line-height:1.25}
 .lmtc .go .main small{display:block;font-size:10.5px;font-weight:600;opacity:.85}
