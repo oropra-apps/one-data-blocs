@@ -14,6 +14,8 @@
 //    le détail (vn_bacs_fiche), avec un lien direct vers le véhicule dans BACS.
 //  * Le stock reste celui du DMS (v_liste_vn) : c'est lui qui dit ce qui est
 //    en stock, à quel prix et depuis quand ; BACS décrit la voiture.
+//  v11 (28/10/2026) : date AMC lue aussi dans la fiche BACS (AMC_Date__c) tant
+//    que DBS ne la fournit pas ; la date DBS prime dès qu'elle arrive.
 //  v10 (28/10/2026) : filtre Statut = « Disponible » par défaut sur l'onglet En
 //    stock (levé tout seul sur Commandes / Tous, remis au retour tant qu'on n'a
 //    pas choisi un autre statut) ; chips Type (Tous / VP / VU) et chip AMC.
@@ -98,6 +100,9 @@ OD.define('vn-liste', {
   // N° de commande DBS (commande fournisseur) ; « 0 » = pas de commande.
   function numCommande(r) { var c = r && r.commande_fournisseur; c = c == null ? '' : String(c).trim(); return c && c !== '0' ? c : ''; }
   function bacsDe(r) { var c = numCommande(r); return c ? S.bacs[c] || null : null; }
+  // Date AMC : celle de DBS (chargeur) prime ; à défaut celle de la fiche BACS.
+  function amcDate(r) { if (r.date_amc) return r.date_amc; var b = bacsDe(r); return b && b.amc_date || null; }
+  function amcCode(r) { if (r.date_amc) return r.code_amc || null; var b = bacsDe(r); return b && b.amc_code || null; }
   // Photo : celle du véhicule (fiche BACS), à défaut celle d'un véhicule du
   // stock de même modèle et même teinte DMS (libellés identiques à la source).
   function cleTeinte(r) {
@@ -271,8 +276,8 @@ OD.define('vn-liste', {
       if (f.lieu && r.lieu_stockage !== f.lieu) return false;
       if (f.reserve != null && !!r.reserve !== f.reserve) return false;
       if (f.type && String(r.carrosserie || '').toUpperCase() !== f.type) return false;
-      if (f.amc === 'oui' && !r.date_amc) return false;
-      if (f.amc === 'non' && r.date_amc) return false;
+      if (f.amc === 'oui' && !amcDate(r)) return false;
+      if (f.amc === 'non' && amcDate(r)) return false;
       if (q) {
         var b = bacsDe(r) || {};
         var foin = [r.vin, r.immatriculation, r.marque, r.modele, r.version,
@@ -410,13 +415,13 @@ OD.define('vn-liste', {
   }
   // Filtre AMC : visible dès qu'au moins un véhicule porte une date AMC.
   function selAmc() {
-    if (!S.raw.some(function (r) { return r.date_amc; }) && !S.f.amc) return '';
+    if (!S.raw.some(function (r) { return amcDate(r); }) && !S.f.amc) return '';
     return '<select class="vn-sel" data-f="amc"><option value="">AMC</option>'
       + '<option value="oui"' + (S.f.amc === 'oui' ? ' selected' : '') + '>Déclarés AMC</option>'
       + '<option value="non"' + (S.f.amc === 'non' ? ' selected' : '') + '>Non déclarés AMC</option></select>';
   }
   function etiquetteAmc(r) {
-    return r.date_amc ? '<span class="vl-badge amc" title="Déclaré livré au constructeur (AMC) le ' + esc(dateFR(r.date_amc)) + '">AMC</span>' : '';
+    return amcDate(r) ? '<span class="vl-badge amc" title="Déclaré livré au constructeur (AMC) le ' + esc(dateFR(amcDate(r))) + '">AMC</span>' : '';
   }
   function selStatut() {
     var vals = valeursDe('statut');
@@ -640,7 +645,7 @@ OD.define('vn-liste', {
       + ligneF('Entrée en stock', dateFR(r.date_entree_stock))
       + ligneF('Ancienneté', r.jours_de_stock == null ? '—' : ent(r.jours_de_stock) + ' jours')
       + ligneF('Réservation', r.reserve ? 'Contre-marque posée' : 'Libre')
-      + ligneF('Déclaré AMC', r.date_amc ? 'le ' + esc(dateFR(r.date_amc)) + (notEmpty(r.code_amc) ? ' <span class="vn-code">' + esc(r.code_amc) + '</span>' : '') : 'Non')
+      + ligneF('Déclaré AMC', amcDate(r) ? 'le ' + esc(dateFR(amcDate(r))) + (notEmpty(amcCode(r)) ? ' <span class="vn-code">' + esc(amcCode(r)) + '</span>' : '') : 'Non')
       + ligneF('N° véhicule DMS', jolieValeur(r.identite_dms)));
     var prix = section('Prix',
         ligneF('Tarif catalogue', eur(r.tarif_catalogue))
