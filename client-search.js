@@ -1,4 +1,11 @@
 // ============================================================================
+//  v19 (28/10/2026) : création depuis les Notifications. La carte « inconnu »
+//  (notifications v8) dépose { tel | email } dans sessionStorage
+//  (od_creation_client) puis ouvre cette page : la recherche se lance sur ce
+//  numéro ou cette adresse ; si aucune fiche ne le porte, la fenêtre de
+//  création s'ouvre pré-remplie (fixe rangé en « Téléphone fixe »). À
+//  l'enregistrement, la base rattache à la nouvelle fiche les appels et
+//  messages reçus de ce correspondant (trg_client_rattacher_inconnus).
 //  v18 (22/10/2026) : bouton « Enregistrer » verrouillé en rouge (« Bacs doit être
 //  ouvert pour pouvoir valider ») tant que BACS n'est pas ouvert ; il redevient
 //  normal dès que BACS répond (module partagé oropra-bacs-client v2).
@@ -224,7 +231,14 @@ OD.define('client-search', {
       if (f.PRENOM) q = q.ilike('PRENOM', `%${f.PRENOM}%`);
       if (f.EMAIL) q = q.ilike('EMAIL', `%${f.EMAIL}%`);
       if (f.IDVu) q = q.eq('IDVu', Number(f.IDVu));
-      if (f.tel) q = q.or(`TEl_MOB.ilike.%${f.tel}%,TEL_FIXE.ilike.%${f.tel}%`);
+      if (f.tel) {
+        // v19 : les 9 derniers chiffres retrouvent aussi les fiches saisies avec
+        // espaces, points ou indicatif (+33), via les colonnes normalisées.
+        const k9 = cleanDigits(f.tel).slice(-9);
+        q = k9.length === 9
+          ? q.or(`TEl_MOB.ilike.%${f.tel}%,TEL_FIXE.ilike.%${f.tel}%,tel_mob_e164.like.%${k9},tel_fixe_e164.like.%${k9}`)
+          : q.or(`TEl_MOB.ilike.%${f.tel}%,TEL_FIXE.ilike.%${f.tel}%`);
+      }
       if (f.ville) q = q.ilike('ville', `%${f.ville}%`);
       if (f.cp) q = q.ilike('code_postal', `${f.cp}%`);
       if (f.birthMin) q = q.gte('BIRTHDAY', f.birthMin);
@@ -697,6 +711,7 @@ OD.define('client-search', {
 #oropra-client-search .crs-modal-grid .full{grid-column:1 / -1}
 #oropra-client-search .crs-modal-grid .two{grid-column:span 2}
 #oropra-client-search .crs-modal-footer{padding:16px 24px;border-top:1px solid #f0f4fa;display:flex;justify-content:flex-end;gap:8px}
+#oropra-client-search .crs-modal-info{color:#1F4A85;font-size:13px;padding:11px 14px;background:#eef2f8;border-radius:6px;margin-bottom:16px;border:1px solid #cfd9e9}
 #oropra-client-search .crs-modal-error{color:#c63a3a;font-size:13px;padding:11px 14px;background:#fdf0f0;border-radius:6px;margin-bottom:16px;border:1px solid #f5d0d0}
 #oropra-client-search .crs-dup{background:#fff7e6;border:1px solid #f5c785;border-radius:8px;padding:16px;margin-bottom:18px;display:flex;flex-direction:column;gap:12px}
 #oropra-client-search .crs-dup-head{display:flex;gap:10px;align-items:flex-start;color:#a85c0e}
@@ -968,6 +983,7 @@ OD.define('client-search', {
     const title = isSoc ? 'Créer une société' : 'Créer un particulier';
     let body = '';
     body += renderDuplicateBlock();
+    if (m.info && !m.error && !m.duplicate) body += `<div class="crs-modal-info">${esc(m.info)}</div>`;
     if (m.error && !m.duplicate) body += `<div class="crs-modal-error">${esc(m.error)}</div>`;
 
     body += '<div class="crs-modal-section"><div class="crs-modal-section-title">Identité</div><div class="crs-modal-grid">';
@@ -1119,6 +1135,47 @@ OD.define('client-search', {
       else el.addEventListener('input', () => updateModalField(field, el.value));
     });
   }
+
+  // v19 : demande de création venue des Notifications (carte « inconnu »).
+  // Consommée une seule fois, et seulement si elle a moins de dix minutes :
+  // un retour arrière vers cette page ne rouvre pas la fenêtre.
+  function telNational(t) {
+    let d = cleanDigits(t);
+    if (d.indexOf('0033') === 0) d = d.slice(4);
+    else if (d.indexOf('33') === 0 && d.length === 11) d = d.slice(2);
+    if (d.length === 9 && d.charAt(0) !== '0') d = '0' + d;
+    return d;
+  }
+  function telEspace(t) { return String(t || '').replace(/(\d{2})(?=\d)/g, '$1 ').trim(); }
+  (function creationDepuisNotifications() {
+    let p = null;
+    try { p = JSON.parse(sessionStorage.getItem('od_creation_client') || 'null'); } catch (e) { }
+    try { const w = (wwLib.getFrontWindow && wwLib.getFrontWindow()) || window; if (!p && w.__odCreationClient) p = w.__odCreationClient; w.__odCreationClient = null; } catch (e) { }
+    try { sessionStorage.removeItem('od_creation_client'); } catch (e) { }
+    if (!p || !p.le || (Date.now() - Number(p.le)) > 10 * 60 * 1000) return;
+    const tel = p.tel ? telNational(p.tel) : '';
+    const email = p.email && isValidEmail(p.email) ? cleanEmail(p.email) : '';
+    if (!tel && !email) return;
+    state.activeTab = 'particulier';
+    state.filters.particulier = emptyP();
+    if (tel) state.filters.particulier.tel = tel;
+    else state.filters.particulier.EMAIL = email;
+    state.page = 1;
+    state.modal = null;
+    setTimeout(async () => {
+      await runSearch();
+      if (state.totalCount > 0) return;   // une fiche le porte déjà : on la montre
+      openCreateModal();
+      if (!state.modal) return;
+      const d = state.modal.data;
+      if (tel && !isValidMobile(tel)) { d.TEl_MOB = ''; d.TEL_FIXE = tel; }
+      if (email) d.EMAIL = email;
+      state.modal.info = (tel ? 'Le ' + telEspace(tel) : 'L\'adresse ' + email)
+        + ' a contacté la concession et aucune fiche ne le porte. Complétez la fiche : '
+        + 'ses appels et messages s\'y rattacheront à l\'enregistrement.';
+      render();
+    }, 0);
+  })();
 
   render();
   (function ensureRenderedCrs() {
