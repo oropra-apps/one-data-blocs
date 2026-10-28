@@ -14,6 +14,10 @@
 //    le détail (vn_bacs_fiche), avec un lien direct vers le véhicule dans BACS.
 //  * Le stock reste celui du DMS (v_liste_vn) : c'est lui qui dit ce qui est
 //    en stock, à quel prix et depuis quand ; BACS décrit la voiture.
+//  v7 (28/10/2026) : PHOTO du véhicule (vn_bacs_resume.photo_url : photo Toyota du
+//    couple produit BACS × teinte, jamais celle d'une autre teinte) dans la
+//    vignette et la fiche ; DATE AMC DBS (véhicule déclaré livré au
+//    constructeur) : étiquette « AMC » sur la ligne, filtre AMC, date en fiche.
 //  v6 (28/10/2026) : statut du parc BACS traduit (Stock, Livré, Livraison planifiée,
 //    En route) ; un véhicule encore au stock DMS mais livré dans BACS est signalé.
 //  v4 (28/10/2026) : colonne « N° commande » (commande fournisseur DBS).
@@ -135,7 +139,7 @@ OD.define('vn-liste', {
     tri: 'jours_de_stock', sens: 'desc',
     showPA: false, fiche: null, ficheBacs: null, ficheOnglet: 'vehicule',
     f: { reseau: null, affaire: null, site: null, marque: null, modele: null,
-         energie: null, statut: null, lieu: null, reserve: null }
+         energie: null, statut: null, lieu: null, reserve: null, amc: null }
   };
 
   // ───────────────────────────────────────────────────────────── donnees
@@ -208,6 +212,8 @@ OD.define('vn-liste', {
       if (f.statut && r.statut !== f.statut) return false;
       if (f.lieu && r.lieu_stockage !== f.lieu) return false;
       if (f.reserve != null && !!r.reserve !== f.reserve) return false;
+      if (f.amc === 'oui' && !r.date_amc) return false;
+      if (f.amc === 'non' && r.date_amc) return false;
       if (q) {
         var b = bacsDe(r) || {};
         var foin = [r.vin, r.immatriculation, r.marque, r.modele, r.version,
@@ -311,7 +317,7 @@ OD.define('vn-liste', {
       + '<input class="vn-rech" id="vn-q" placeholder="VIN, immatriculation, modèle, n° de commande…" value="' + esc(S.recherche) + '">'
       + sel('reseau', 'Réseau') + sel('affaire', 'Affaire') + sel('site', 'Site')
       + sel('marque', 'Marque') + sel('modele', 'Modèle') + sel('energie', 'Énergie')
-      + selStatut() + sel('lieu', 'Lieu de stockage', 'lieu_stockage')
+      + selStatut() + sel('lieu', 'Lieu de stockage', 'lieu_stockage') + selAmc()
       + '<button class="vn-raz" id="vn-raz">Tout effacer</button>'
       + '</div>';
   }
@@ -324,6 +330,16 @@ OD.define('vn-liste', {
           return '<option value="' + esc(v) + '"' + (S.f[cle] === v ? ' selected' : '') + '>' + esc(v) + '</option>';
         }).join('')
       + '</select>';
+  }
+  // Filtre AMC : visible dès qu'au moins un véhicule porte une date AMC.
+  function selAmc() {
+    if (!S.raw.some(function (r) { return r.date_amc; }) && !S.f.amc) return '';
+    return '<select class="vn-sel" data-f="amc"><option value="">AMC</option>'
+      + '<option value="oui"' + (S.f.amc === 'oui' ? ' selected' : '') + '>Déclarés AMC</option>'
+      + '<option value="non"' + (S.f.amc === 'non' ? ' selected' : '') + '>Non déclarés AMC</option></select>';
+  }
+  function etiquetteAmc(r) {
+    return r.date_amc ? '<span class="vl-badge amc" title="Déclaré livré au constructeur (AMC) le ' + esc(dateFR(r.date_amc)) + '">AMC</span>' : '';
   }
   function selStatut() {
     var vals = valeursDe('statut');
@@ -374,6 +390,15 @@ OD.define('vn-liste', {
     var coul = (b && b.couleur) || r.couleur;
     var en = libEnergie((b && b.energie) || r.energie);
     var fam = propre(r.modele) || marqueDe(r) || 'VN';
+    // Photo Toyota du véhicule : à l'échec du chargement, la vignette texte reprend.
+    if (b && b.photo_url) {
+      return '<div class="vn-vig photo' + (r.en_commande ? ' cmd' : '') + '">'
+        + '<img src="' + esc(b.photo_url) + '" alt="" loading="lazy" onerror="this.parentNode.classList.remove(\'photo\');this.remove()">'
+        + '<span class="vn-vig-m">' + esc(marqueDe(r)) + '</span>'
+        + '<span class="vn-vig-f">' + esc(fam) + '</span>'
+        + '<span class="vn-vig-b">' + pastille(coul) + (en ? '<span>' + esc(en) + '</span>' : '') + '</span>'
+        + '</div>';
+    }
     return '<div class="vn-vig' + (r.en_commande ? ' cmd' : '') + '">'
       + '<span class="vn-vig-m">' + esc(marqueDe(r)) + '</span>'
       + '<span class="vn-vig-f">' + esc(fam) + '</span>'
@@ -411,7 +436,7 @@ OD.define('vn-liste', {
         + (meta2 ? '<div class="vl-m">' + meta2 + '</div>' : '')
         + '<div class="vl-site">' + jolieValeur(r.site) + '</div>'
       + '</div>'
-      + '<div class="vl-st">' + badgeJours(r)
+      + '<div class="vl-st">' + badgeJours(r) + etiquetteAmc(r)
         + '<div class="vl-prix">' + eur(r.prix_vente_ttc) + '</div>'
         + (num(r.tarif_catalogue) ? '<div class="vl-m">Tarif ' + eur(r.tarif_catalogue) + '</div>' : '')
         + (S.showPA && num(r.prix_achat_ht) ? '<div class="vl-pa">PA ' + eur(r.prix_achat_ht) + (num(r.marge_ht) != null ? ' · marge ' + eur(r.marge_ht) : '') + '</div>' : '')
@@ -453,7 +478,7 @@ OD.define('vn-liste', {
         + vignette(r, b)
         + '<div class="vf-tt"><h2>' + jolieValeur(titre) + '</h2>'
         + '<p class="vn-card-sub">' + jolieValeur(sous) + '</p>'
-        + '<div class="vf-puces">' + puce(r)
+        + '<div class="vf-puces">' + puce(r) + etiquetteAmc(r)
           + (b && b.asset_id ? '<a class="vf-bacs" href="' + BACS_URL + esc(b.asset_id) + '" target="_blank" rel="noopener"><i class="vn-bdot"></i>Ouvrir dans BACS</a>' : '')
         + '</div></div>'
       + '</div>'
@@ -537,6 +562,7 @@ OD.define('vn-liste', {
       + ligneF('Entrée en stock', dateFR(r.date_entree_stock))
       + ligneF('Ancienneté', r.jours_de_stock == null ? '—' : ent(r.jours_de_stock) + ' jours')
       + ligneF('Réservation', r.reserve ? 'Contre-marque posée' : 'Libre')
+      + ligneF('Déclaré AMC', r.date_amc ? 'le ' + esc(dateFR(r.date_amc)) + (notEmpty(r.code_amc) ? ' <span class="vn-code">' + esc(r.code_amc) + '</span>' : '') : 'Non')
       + ligneF('N° véhicule DMS', jolieValeur(r.identite_dms)));
     var prix = section('Prix',
         ligneF('Tarif catalogue', eur(r.tarif_catalogue))
@@ -621,7 +647,7 @@ OD.define('vn-liste', {
     var raz = el.querySelector('#vn-raz');
     if (raz) raz.onclick = function () {
       S.f = { reseau: null, affaire: null, site: null, marque: null, modele: null,
-              energie: null, statut: null, lieu: null, reserve: null };
+              energie: null, statut: null, lieu: null, reserve: null, amc: null };
       S.recherche = ''; S.page = 1; rendre();
     };
     var x = el.querySelector('#vn-close'); if (x) x.onclick = fermerFiche;
@@ -688,6 +714,12 @@ OD.define('vn-liste', {
     // vignette VN (pas de photo en VN : marque, modèle, teinte, énergie)
     + '.vn-vig{width:128px;height:86px;border-radius:11px;background:linear-gradient(135deg,#eef4fc,#dfe9f7);display:flex;flex-direction:column;justify-content:space-between;padding:9px 10px;box-sizing:border-box;overflow:hidden}'
     + '.vn-vig.cmd{background:linear-gradient(135deg,#f3f1fb,#e6e9f7)}'
+    + '.vn-vig{position:relative}.vn-vig.photo{background:linear-gradient(180deg,#f7faff,#e8eff9);justify-content:flex-end}'
+    + '.vn-vig.photo img{position:absolute;inset:4px 4px 16px;width:calc(100% - 8px);height:calc(100% - 20px);object-fit:contain}'
+    + '.vn-vig.photo .vn-vig-m,.vn-vig.photo .vn-vig-f{display:none}'
+    + '.vn-vig.photo .vn-vig-b{position:relative;font-size:10px}'
+    + '.vl-badge.amc{background:#e6effb;color:#2a5ea9;margin-left:5px}'
+    + '.vf-puces .vl-badge.amc{margin-left:0}'
     + '.vn-vig-m{font-size:10px;font-weight:800;letter-spacing:.08em;text-transform:uppercase;color:#7a98c5}'
     + '.vn-vig-f{font-size:15px;font-weight:800;color:#1F4A85;line-height:1.1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}'
     + '.vn-vig-b{display:flex;align-items:center;gap:6px;font-size:10.5px;font-weight:700;color:#54678a}'
