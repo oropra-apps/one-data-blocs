@@ -14,6 +14,9 @@
 //    le détail (vn_bacs_fiche), avec un lien direct vers le véhicule dans BACS.
 //  * Le stock reste celui du DMS (v_liste_vn) : c'est lui qui dit ce qui est
 //    en stock, à quel prix et depuis quand ; BACS décrit la voiture.
+//  v10 (28/10/2026) : filtre Statut = « Disponible » par défaut sur l'onglet En
+//    stock (levé tout seul sur Commandes / Tous, remis au retour tant qu'on n'a
+//    pas choisi un autre statut) ; chips Type (Tous / VP / VU) et chip AMC.
 //  v9 (28/10/2026) : photos de secours. Environ une photo Toyota mémorisée sur
 //    quatre n'existe plus chez Toyota (404 : configuration retirée). La base
 //    rend jusqu'à 8 photos contrôlées (même modèle, même teinte) ; la vignette
@@ -187,7 +190,8 @@ OD.define('vn-liste', {
     tri: 'jours_de_stock', sens: 'desc',
     showPA: false, fiche: null, ficheBacs: null, ficheOnglet: 'vehicule',
     f: { reseau: null, affaire: null, site: null, marque: null, modele: null,
-         energie: null, statut: null, lieu: null, reserve: null, amc: null }
+         energie: null, statut: 'DISPONIBLE', lieu: null, reserve: null, amc: null, type: null },
+    statutAuto: true   // « Disponible » posé d'office, pas par l'utilisateur
   };
 
   // ───────────────────────────────────────────────────────────── donnees
@@ -266,6 +270,7 @@ OD.define('vn-liste', {
       if (f.statut && r.statut !== f.statut) return false;
       if (f.lieu && r.lieu_stockage !== f.lieu) return false;
       if (f.reserve != null && !!r.reserve !== f.reserve) return false;
+      if (f.type && String(r.carrosserie || '').toUpperCase() !== f.type) return false;
       if (f.amc === 'oui' && !r.date_amc) return false;
       if (f.amc === 'non' && r.date_amc) return false;
       if (q) {
@@ -371,8 +376,26 @@ OD.define('vn-liste', {
       + '<input class="vn-rech" id="vn-q" placeholder="VIN, immatriculation, modèle, n° de commande…" value="' + esc(S.recherche) + '">'
       + sel('reseau', 'Réseau') + sel('affaire', 'Affaire') + sel('site', 'Site')
       + sel('marque', 'Marque') + sel('modele', 'Modèle') + sel('energie', 'Énergie')
-      + selStatut() + sel('lieu', 'Lieu de stockage', 'lieu_stockage') + selAmc()
+      + selStatut() + sel('lieu', 'Lieu de stockage', 'lieu_stockage')
       + '<button class="vn-raz" id="vn-raz">Tout effacer</button>'
+      + '</div>' + chips();
+  }
+  // Chips : type de véhicule (VP / VU) et AMC. Les compteurs tiennent compte de
+  // tous les autres filtres.
+  function chips() {
+    var compte = function (cle, val) {
+      var memo = S.f[cle]; S.f[cle] = val;
+      var n = filtrees().length; S.f[cle] = memo; return n;
+    };
+    var chip = function (cle, val, lbl) {
+      var on = (S.f[cle] || null) === val;
+      return '<button type="button" class="vn-chip' + (on ? ' on' : '') + '" data-chip="' + cle + '" data-val="' + (val || '') + '">'
+        + esc(lbl) + ' <i>' + ent(compte(cle, val)) + '</i></button>';
+    };
+    return '<div class="vn-chips">'
+      + '<span class="vn-chip-lab">Type</span>' + chip('type', null, 'Tous') + chip('type', 'VP', 'VP') + chip('type', 'VU', 'VU')
+      + '<span class="vn-chip-sep"></span>'
+      + '<button type="button" class="vn-chip amc' + (S.f.amc === 'oui' ? ' on' : '') + '" data-chip="amc" data-val="' + (S.f.amc === 'oui' ? '' : 'oui') + '" title="Véhicules déclarés livrés au constructeur (date AMC DBS)">AMC <i>' + ent(compte('amc', 'oui')) + '</i></button>'
       + '</div>';
   }
   function sel(cle, lbl, champ) {
@@ -663,10 +686,19 @@ OD.define('vn-liste', {
   function brancher() {
     var el = root(); if (!el) return;
     el.querySelectorAll('[data-ong]').forEach(function (b) {
-      b.onclick = function () { S.onglet = b.dataset.ong; S.page = 1; rendre(); };
+      b.onclick = function () {
+        S.onglet = b.dataset.ong; S.page = 1;
+        // « Disponible » par défaut n'a de sens que sur le stock : levé sur
+        // Commandes / Tous, remis au retour s'il n'a pas été changé à la main.
+        if (S.statutAuto) S.f.statut = S.onglet === 'stock' ? 'DISPONIBLE' : null;
+        rendre();
+      };
     });
     el.querySelectorAll('[data-f]').forEach(function (s) {
-      s.onchange = function () { S.f[s.dataset.f] = s.value || null; S.page = 1; rendre(); };
+      s.onchange = function () { S.f[s.dataset.f] = s.value || null; if (s.dataset.f === 'statut') S.statutAuto = false; S.page = 1; rendre(); };
+    });
+    el.querySelectorAll('[data-chip]').forEach(function (b) {
+      b.onclick = function () { S.f[b.dataset.chip] = b.dataset.val || null; S.page = 1; rendre(); };
     });
     var t = el.querySelector('#vl-tri');
     if (t) t.onchange = function () { S.tri = t.value; S.sens = (t.value === 'modele' || t.value === 'site' || t.value === 'commande_fournisseur') ? 'asc' : 'desc'; S.page = 1; rendre(); };
@@ -702,7 +734,8 @@ OD.define('vn-liste', {
     var raz = el.querySelector('#vn-raz');
     if (raz) raz.onclick = function () {
       S.f = { reseau: null, affaire: null, site: null, marque: null, modele: null,
-              energie: null, statut: null, lieu: null, reserve: null, amc: null };
+              energie: null, statut: null, lieu: null, reserve: null, amc: null, type: null };
+      S.statutAuto = false;
       S.recherche = ''; S.page = 1; rendre();
     };
     var x = el.querySelector('#vn-close'); if (x) x.onclick = fermerFiche;
@@ -736,6 +769,13 @@ OD.define('vn-liste', {
     + '.vn-rech{flex:1 1 260px;min-width:220px;border:1px solid #e2eaf5;border-radius:9px;padding:8px 12px;font:inherit;font-size:13.5px;background:#fff;color:#1F4A85}'
     + '.vn-sel{border:1px solid #e2eaf5;border-radius:9px;padding:8px 10px;font:inherit;font-size:13px;background:#fff;color:#1F4A85;max-width:180px}'
     + '.vn-raz{border:none;background:none;color:#2a5ea9;font:inherit;font-size:13px;font-weight:600;cursor:pointer;padding:8px 6px}'
+    + '.vn-chips{display:flex;flex-wrap:wrap;align-items:center;gap:7px;margin:10px 2px 2px}'
+    + '.vn-chip-lab{font-size:11px;font-weight:800;letter-spacing:.05em;text-transform:uppercase;color:#7a98c5;margin-right:2px}'
+    + '.vn-chip-sep{width:1px;height:20px;background:#d6e2f2;margin:0 6px}'
+    + '.vn-chip{display:inline-flex;align-items:center;gap:6px;border:1.5px solid #d6e2f2;background:#fff;color:#2a5ea9;font:inherit;font-size:12.5px;font-weight:700;padding:5px 12px;border-radius:20px;cursor:pointer}'
+    + '.vn-chip i{font-style:normal;font-size:11px;color:#7a98c5;font-variant-numeric:tabular-nums}'
+    + '.vn-chip.on{background:#1F4A85;border-color:#1F4A85;color:#fff}.vn-chip.on i{color:rgba(255,255,255,.75)}'
+    + '.vn-chip.amc.on{background:#2a5ea9;border-color:#2a5ea9}'
     // barre de pages (comme la liste VO)
     + '.vl-pbar{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;margin:14px 2px 0}'
     + '.vl-pinfo{display:flex;align-items:center;gap:14px;flex-wrap:wrap;font-size:13px;font-weight:700;color:#7a98c5}'
