@@ -1,4 +1,10 @@
 // RPV (overlay) — module One Data (OD.define) v1 (Lot B)
+// v4 (29/10/2026) : le résultat « Choc » s'affiche « RDV » (la valeur
+// enregistrée reste 'Choc' : statistiques, historique et suivi d'activité la
+// lisent telle quelle). L'heure de la prochaine action se choisit (créneaux
+// de 15 min, 7h-20h) : heure du RDV pour un RDV (10h par défaut), heure de
+// rappel pour une relance (9h par défaut). Une date et heure déjà passée est
+// refusée.
 // ============================================================================
 //  POPUP NEW RPV — CRM360
 //  Root : #rpv-root (Embed dans le popup "New RPV").
@@ -23,10 +29,16 @@ OD.define('rpv', {
   // reopen : Abandon = clôture du cycle ouvert + ouverture d'un nouveau cycle.
   const RESULTATS = [
     { key: 'Relance', color: '#2a5ea9', bg: 'rgba(42,94,169,.10)', fg: '#214e8c', closure: false },
-    { key: 'Choc', color: '#e8950c', bg: 'rgba(250,192,85,.20)', fg: '#9a6a07', closure: false },
+    { key: 'Choc', label: 'RDV', color: '#e8950c', bg: 'rgba(250,192,85,.20)', fg: '#9a6a07', closure: false },
     { key: 'Abandon', color: '#e24b4a', bg: 'rgba(226,75,74,.12)', fg: '#b23433', closure: true, reopen: true }
   ];
   const NEXT_DEFAULT_DAYS = { Relance: 7, Choc: 2, Abandon: null };
+  // Heure proposée par défaut selon le résultat (modifiable).
+  const NEXT_DEFAULT_TIME = { Relance: '09:00', Choc: '10:00' };
+  // Créneaux proposés : toutes les 15 minutes de 7h à 20h.
+  const CRENEAUX = (() => { const a = []; for (let h = 7; h <= 20; h++) for (let m = 0; m < 60; m += 15) { if (h === 20 && m > 0) break; a.push(String(h).padStart(2, '0') + ':' + String(m).padStart(2, '0')); } return a; })();
+  function libRes(k) { const r = RESULTATS.find(x => x.key === k); return (r && r.label) || k; }
+  function hhmm(t) { const p = String(t || '').split(':'); return Number(p[0]) + 'h' + (p[1] && p[1] !== '00' ? p[1] : ''); }
 
   // Canaux de contact (canal_contact) — valeurs réelles dominantes.
   const CANAUX = ['Concession', 'Email', 'Agent', 'Showroom', 'Téléphone'];
@@ -62,7 +74,7 @@ OD.define('rpv', {
     state.idvu = null; state.idSite = null; state.idCycle = null;
     state.ctx = null; state.ctxLoading = false; state.ctxError = null; state.clientName = '';
     state.resultat = null; state.canal = null; state.origine = null; state.commentaire = '';
-    state.nextDate = null; state.nextTouched = false;
+    state.nextDate = null; state.nextTouched = false; state.nextTime = null; state.timeTouched = false;
     state.saving = false; state.saved = false; state.error = null;
     state.booted = true;
   }
@@ -215,6 +227,7 @@ OD.define('rpv', {
   function applyResultat(key) {
     state.resultat = key;
     if (!state.nextTouched) state.nextDate = defaultNextDate(key);
+    if (!state.timeTouched) state.nextTime = NEXT_DEFAULT_TIME[key] || NEXT_ACTION_TIME.slice(0, 5);
     render();
   }
   function setNextRelative(days) {
@@ -231,7 +244,11 @@ OD.define('rpv', {
     if (!state.canal) errs.push('Choisis un canal.');
     if (!state.origine) errs.push("Choisis l'origine de l'échange.");
     if (!(state.commentaire || '').trim()) errs.push('Renseigne un compte-rendu.');
-    if (!isClosure(state.resultat) && !state.nextDate) errs.push('Programme une prochaine action.');
+    if (!isClosure(state.resultat) && !state.nextDate) errs.push(state.resultat === 'Choc' ? 'Choisis la date du RDV.' : 'Programme une prochaine action.');
+    if (!isClosure(state.resultat) && state.nextDate) {
+      const quand = new Date(state.nextDate + 'T' + (state.nextTime || NEXT_ACTION_TIME.slice(0, 5)) + ':00');
+      if (!isNaN(quand) && quand < new Date()) errs.push(state.resultat === 'Choc' ? "L'heure du RDV est déjà passée." : "L'heure de la prochaine action est déjà passée.");
+    }
     return errs.length ? errs : null;
   }
   async function nextRapportId(sb) {
@@ -261,7 +278,7 @@ OD.define('rpv', {
         id_site: state.idSite,
         creation_date: fmtSqlTs(now),
         update_date: fmtSqlTs(now),
-        dt_activation: state.nextDate ? (state.nextDate + ' ' + NEXT_ACTION_TIME) : null,
+        dt_activation: state.nextDate ? (state.nextDate + ' ' + (state.nextTime ? state.nextTime + ':00' : NEXT_ACTION_TIME)) : null,
         commentaire: (state.commentaire || '').trim(),
         canal_contact: state.canal,
         resultat_rdv: state.resultat,
@@ -312,7 +329,7 @@ OD.define('rpv', {
   }
   function resetForm() {
     state.resultat = null; state.canal = null; state.origine = null; state.commentaire = '';
-    state.nextDate = null; state.nextTouched = false; state.saved = false; state.error = null;
+    state.nextDate = null; state.nextTouched = false; state.nextTime = null; state.timeTouched = false; state.saved = false; state.error = null;
     render();
   }
   function closePopup() {
@@ -363,7 +380,7 @@ OD.define('rpv', {
       const on = state.resultat === r.key;
       const st = on ? ('background:' + r.bg + ';border-color:' + r.color + ';color:' + r.fg) : '';
       return '<button type="button" class="rpv-res' + (on ? ' on' : '') + '" data-res="' + esc(r.key) + '" style="' + st + '">' +
-        '<span class="rpv-res-dot" style="background:' + r.color + '"></span>' + esc(r.key) + '</button>';
+        '<span class="rpv-res-dot" style="background:' + r.color + '"></span>' + esc(r.label || r.key) + '</button>';
     }).join('') + '</div>';
   }
   function chipRow(items, dataAttr, current) {
@@ -402,10 +419,15 @@ OD.define('rpv', {
       h += '<button type="button" class="rpv-seg-b' + (on ? ' on' : '') + '" data-next="' + d + '">' + esc(lbl) + '</button>';
     });
     h += '</div>';
-    h += '<div class="rpv-date-wrap"><input type="date" class="rpv-date" value="' + esc(state.nextDate || '') + '" data-next-date="1"></div>';
+    const t = state.nextTime || NEXT_DEFAULT_TIME[state.resultat] || NEXT_ACTION_TIME.slice(0, 5);
+    const creneaux = CRENEAUX.indexOf(t) === -1 ? CRENEAUX.concat([t]).sort() : CRENEAUX;
+    h += '<div class="rpv-date-wrap"><input type="date" class="rpv-date" value="' + esc(state.nextDate || '') + '" data-next-date="1" aria-label="Date"></div>';
+    h += '<div class="rpv-select-wrap rpv-time-wrap"><select class="rpv-select rpv-time" data-next-time="1" aria-label="Heure">' +
+      creneaux.map(c => '<option value="' + c + '"' + (c === t ? ' selected' : '') + '>' + hhmm(c) + '</option>').join('') + '</select>' +
+      '<svg class="rpv-select-ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg></div>';
     h += '</div>';
     if (state.nextDate) {
-      h += '<div class="rpv-next-hint">Relance calée au ' + esc(fmtDateShort(state.nextDate)) + ' à ' + NEXT_ACTION_TIME.slice(0, 5).replace(':', 'h') + '</div>';
+      h += '<div class="rpv-next-hint">' + (state.resultat === 'Choc' ? 'RDV le ' : 'Relance calée au ') + esc(fmtDateShort(state.nextDate)) + ' à ' + esc(hhmm(t)) + '</div>';
     }
     return h;
   }
@@ -463,7 +485,7 @@ OD.define('rpv', {
     body += '<div class="rpv-gauge" id="rpv-gauge">' + gaugeInner(q) + '</div>';
     body += '</div>';
 
-    body += '<div class="rpv-field"><div class="rpv-lbl">Prochaine action ' + (isClosure(state.resultat) ? '' : '<i>*</i>') + '</div>' + nextActionRow() + '</div>';
+    body += '<div class="rpv-field"><div class="rpv-lbl">' + (state.resultat === 'Choc' ? 'Date et heure du RDV' : 'Prochaine action') + ' ' + (isClosure(state.resultat) ? '' : '<i>*</i>') + '</div>' + nextActionRow() + '</div>';
 
     body += '<div class="rpv-foot">' +
       '<button type="button" class="rpv-btn ghost" data-act="cancel">Annuler</button>' +
@@ -484,6 +506,8 @@ OD.define('rpv', {
     root.querySelectorAll('[data-next]').forEach(el => el.addEventListener('click', () => setNextRelative(Number(el.getAttribute('data-next')))));
     const dateInp = root.querySelector('[data-next-date]');
     if (dateInp) dateInp.addEventListener('change', () => { state.nextTouched = true; state.nextDate = dateInp.value || null; render(); });
+    const timeInp = root.querySelector('[data-next-time]');
+    if (timeInp) timeInp.addEventListener('change', () => { state.timeTouched = true; state.nextTime = timeInp.value || null; render(); });
 
     root.querySelectorAll('[data-amorce]').forEach(el => el.addEventListener('click', () => {
       const list = (state.resultat && AMORCES[state.resultat]) || [];
@@ -575,6 +599,8 @@ OD.define('rpv', {
     '#' + RPV_ROOT_ID + ' .rpv-seg-b.on{background:#fff;color:var(--blue);box-shadow:0 1px 4px rgba(42,94,169,.14)}' +
     '#' + RPV_ROOT_ID + ' .rpv-date{border:1.5px solid var(--line);border-radius:10px;padding:9px 12px;font-family:inherit;font-size:13px;font-weight:600;color:var(--ink);outline:none;background:#fff}' +
     '#' + RPV_ROOT_ID + ' .rpv-date:focus{border-color:var(--blue)}' +
+    '#' + RPV_ROOT_ID + ' .rpv-time-wrap{width:auto;min-width:96px}' +
+    '#' + RPV_ROOT_ID + ' .rpv-time{font-weight:600}' +
     '#' + RPV_ROOT_ID + ' .rpv-next-hint{font-size:12px;color:var(--green);font-weight:700;margin-top:9px}' +
     '#' + RPV_ROOT_ID + ' .rpv-close-note{display:flex;align-items:flex-start;gap:10px;font-size:13px;color:#b23433;background:rgba(226,75,74,.08);border:1px solid #f3cfcf;border-radius:11px;padding:13px 15px;font-weight:600;line-height:1.5}' +
     '#' + RPV_ROOT_ID + ' .rpv-close-note svg{width:18px;height:18px;flex-shrink:0;margin-top:1px}' +
@@ -643,7 +669,7 @@ OD.define('rpv', {
     viewerId = getViewerId();
     resolveClientAndSite();
     state.resultat = null; state.canal = null; state.origine = null; state.commentaire = '';
-    state.nextDate = null; state.nextTouched = false; state.saved = false;
+    state.nextDate = null; state.nextTouched = false; state.nextTime = null; state.timeTouched = false; state.saved = false;
     state.error = null; state.ctx = null; state.idCycle = null;
     if (state.__closeTimer) { clearTimeout(state.__closeTimer); state.__closeTimer = null; }
     render();
