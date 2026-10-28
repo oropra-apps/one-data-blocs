@@ -1,3 +1,10 @@
+// v18 (28/10/2026) : modèles de messages (Administration › Modèles de
+// messages, module `modeles` chargé à la demande). Bouton « Modèles » dans la
+// zone de saisie quand la conversation est ouverte, et lien « Choisir un
+// modèle » au-dessus du motif quand seul un message Meta peut partir : le
+// texte du modèle devient alors le motif. open({ client, motif, text, idLead }).
+// v17 (27/10/2026) : open({ client, motif, text }) pré-remplit le motif du
+// message modèle et/ou le texte libre (modèles du lead management).
 // v16 (27/10/2026) : champs de saisie en 16 px sur mobile.
 // iPhone : un champ dont le texte fait moins de 16 px déclenche un ZOOM
 // automatique de Safari au toucher. La page entière devient alors plus grande que
@@ -266,6 +273,7 @@ OD.define('whatsapp', {
     stopDictation();
     const text = (state.input || '').trim();
     if (!text || !state.conv || state.sending) return;
+    { const tr = trousRestants(text); if (tr.length) { state.error = 'Complétez avant l’envoi : ' + tr.join(', ') + '.'; render(); return; } }
     state.sending = true; render();
     try {
       const r = await fetch(SUPABASE_URL + '/functions/v1/wa-send-text', {
@@ -290,6 +298,7 @@ OD.define('whatsapp', {
       state.error = 'Indiquez le motif de votre message avant de l’envoyer.';
       render(); return;
     }
+    { const tr = trousRestants(state.motif); if (tr.length) { state.error = 'Complétez le motif avant l’envoi : ' + tr.join(', ') + '.'; render(); return; } }
     if (state.sending) return;
     state.sending = true; state.error = null; render();
     try {
@@ -363,7 +372,8 @@ OD.define('whatsapp', {
     const attr = acte ? ' data-act="' + acte + '"' : ' data-tpl="' + mode + '"';
     return '<div class="wa-tpl">' +
       avisSansReponse() +
-      '<div class="wa-tpl-t">' + esc(state.sending ? libelleEnvoi : titre) + '</div>' +
+      '<div class="wa-tpl-t">' + esc(state.sending ? libelleEnvoi : titre) +
+        (modelesDispo() && !state.sending ? ' <button class="wa-tpl-mod" data-act="modeles-motif">Choisir un modèle</button>' : '') + '</div>' +
       '<textarea class="wa-tpl-in" data-act="motif" rows="2" placeholder="Ex. : votre Yaris Cross hybride est arrivée, je peux vous la présenter cette semaine.">' + esc(state.motif) + '</textarea>' +
       '<div class="wa-tpl-ap">' + esc(apercu) + '</div>' +
       '<div class="wa-tpl-t" style="margin:0 0 2px">Boutons proposés au client :</div>' +
@@ -382,6 +392,7 @@ OD.define('whatsapp', {
       render();
       return;
     }
+    { const tr = trousRestants(p.p4); if (tr.length) { state.error = 'Complétez le motif avant l’envoi : ' + tr.join(', ') + '.'; render(); return; } }
     state.sending = true; state.error = null; render();
     try {
       const r = await fetch(SUPABASE_URL + '/functions/v1/wa-send-text', {
@@ -686,6 +697,8 @@ OD.define('whatsapp', {
     '.wa-banner{background:#fff6d5;border-top:1px solid #f2e6a8;padding:9px 12px;font-size:12px;color:#7a6a1e;text-align:center}' +
     '.wa-tpl{padding:10px 12px;background:#f0f2f5}' +
     '.wa-tpl-t{font-size:12px;color:#54656f;margin-bottom:8px}' +
+    '.wa-tpl-mod{border:1px solid #53bda7;background:#fff;color:#1b7a44;border-radius:999px;padding:2px 10px;font-size:11.5px;font-weight:600;cursor:pointer;margin-left:6px;font-family:inherit}' +
+    '.wa-tpl-mod:hover{background:#e1f5ee}' +
     '.wa-tpl-btn{width:100%;border:1px solid #c9d3d9;background:#fff;border-radius:10px;padding:9px 12px;font:inherit;font-size:13px;font-weight:600;color:#075E54;cursor:pointer;margin-bottom:7px;text-align:left}' +
     '.wa-tpl-btn:hover:not(:disabled){background:#f6faf9}' +
     '.wa-tpl-btn:disabled{opacity:.45;cursor:default}' +
@@ -710,6 +723,7 @@ OD.define('whatsapp', {
 
   const IC_CLOSE = '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg>';
   const IC_MIN = '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M5 12h14"/></svg>';
+  const IC_TPL = '<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/><path d="M14 3v6h6M8 13h8M8 17h5"/></svg>';
   const IC_CLIP = '<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>';
   const IC_MIC = '<svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor"><path d="M12 15a3 3 0 0 0 3-3V6a3 3 0 0 0-6 0v6a3 3 0 0 0 3 3z"/><path fill="none" stroke="currentColor" stroke-width="2" d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg>';
   const IC_DICT = '<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M6 11a6 6 0 0 0 12 0M12 17v3M9 20h6"/></svg>';
@@ -781,6 +795,7 @@ OD.define('whatsapp', {
     let footHtml;
     if (state.conv && open24) {
       footHtml = '<div class="wa-foot">' +
+        (modelesDispo() ? '<button class="wa-fbtn" data-act="modeles" title="Insérer un modèle">' + IC_TPL + '</button>' : '') +
         '<button class="wa-fbtn" data-act="attach" title="Joindre">' + IC_CLIP + '</button>' +
         (dictSupported() ? '<button class="wa-fbtn ' + (state.dictating ? 'wa-dict-on' : '') + '" data-act="dict" title="Dictée vocale">' + IC_DICT + '</button>' : '') +
         '<textarea class="wa-inp" data-act="input" rows="1" placeholder="' + (state.dictating ? 'Parlez…' : 'Message') + '">' + esc(state.input) + '</textarea>' +
@@ -913,6 +928,8 @@ OD.define('whatsapp', {
       else if (a === 'send') el.onclick = sendText;
       else if (a === 'clr-err') el.onclick = () => { state.error = null; render(); };
       else if (a === 'attach') el.onclick = pickFile;
+      else if (a === 'modeles') el.onclick = () => choisirModele(false);
+      else if (a === 'modeles-motif') el.onclick = () => choisirModele(true);
       else if (a === 'rec') el.onclick = toggleRecord;
       else if (a === 'dict') el.onclick = toggleDictation;
       else if (a === 'firstcontact') el.onclick = startFirstContact;
@@ -951,11 +968,49 @@ OD.define('whatsapp', {
     root.querySelectorAll('[data-tpl]').forEach(el => { el.onclick = () => sendTemplate(el.getAttribute('data-tpl')); });
   }
 
+  /* ---- Modèles de messages (v18) ---- */
+  function odGlobal() { return win.OD || window.OD || null; }
+  function modelesDispo() { const o = odGlobal(); return !!(win.__OD_MODELES__ || window.__OD_MODELES__ || (o && o.manifest && o.manifest.modeles && o.manifest.modeles.cdn_url)); }
+  function chargerModeles() {
+    const api = win.__OD_MODELES__ || window.__OD_MODELES__;
+    if (api) return Promise.resolve(api);
+    const o = odGlobal(), e = o && o.manifest && o.manifest.modeles;
+    if (!e || !e.cdn_url) return Promise.resolve(null);
+    if (!window.__odModelesP) window.__odModelesP = new Promise((res) => {
+      const s = document.createElement('script'); s.src = e.cdn_url; s.async = true;
+      s.onload = () => res(window.__OD_MODELES__ || win.__OD_MODELES__ || null);
+      s.onerror = () => { window.__odModelesP = null; res(null); };
+      document.head.appendChild(s);
+    });
+    return window.__odModelesP;
+  }
+  function trousRestants(t) { return (state.trous || []).filter((l) => String(t || '').indexOf('[' + l + ']') !== -1); }
+  // motif = true : le texte remplit le motif du message Meta (fenêtre fermée)
+  async function choisirModele(motif) {
+    try { stopDictation(); } catch (e) { }
+    const api = await chargerModeles();
+    if (!api) { state.error = 'Les modèles de messages ne sont pas disponibles.'; render(); return; }
+    const c = state.client || {};
+    let site = null; try { site = readVar(SELECTED_SITE_VAR_ID); } catch (e) { }
+    const m = await api.choisir({ canal: 'whatsapp', motif: !!motif, idClient: c.IDVu, idLead: state.idLead, idSite: site, contexte: state.idLead ? 'lead' : 'client', doc: doc });
+    if (!m) return;
+    const txt = String(m.corps || '').replace(/[\r\n\t]+/g, ' ').trim();
+    if (motif) state.motif = txt; else state.input = txt;
+    state.trous = m.manquantes || []; state.error = null;
+    render();
+    const sel = getRoot && getRoot() ? getRoot().querySelector(motif ? '[data-act="motif"]' : '[data-act="input"]') : null;
+    if (sel) { sel.focus(); const i = sel.value.indexOf('['); try { if (state.trous.length && i >= 0) sel.setSelectionRange(i, sel.value.indexOf(']', i) + 1); else sel.setSelectionRange(sel.value.length, sel.value.length); } catch (e) { } }
+  }
+
   /* ---- API ---- */
   const api = {
     open: async (opts) => {
       const c = (opts && opts.client) || readVar(SELECTED_CLIENT_VAR_ID) || {};
       state.client = c; state.open = true; state.minimized = false; state.error = null; state.items = [];
+      if (opts && typeof opts.motif === 'string') state.motif = opts.motif;
+      state.idLead = (opts && (opts.idLead || opts.lead)) || null;
+      state.trous = (opts && opts.trous) || [];
+      if (opts && typeof opts.text === 'string') state.input = opts.text;
       ensureRoot(); render();
       await resolve(c);
       render();
