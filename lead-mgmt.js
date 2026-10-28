@@ -3,7 +3,11 @@
 //  VERSION TEAM COLIN (v69) — déploiement CIBLÉ (publish-targets :
 //  v69 (28/10/2026) : « Inviter un collègue » au rendez-vous ne propose plus
 //  que l'équipe du site du lead (chef des ventes, secrétariat commercial,
-//  vendeurs hors grands comptes) au lieu de tous les utilisateurs.
+//  vendeurs hors grands comptes) au lieu de tous les utilisateurs, choisie
+//  dans le menu de la gestion des ventes (recherche, groupes Chef des ventes
+//  / Secrétariat / VN / VO / VN-VO) ; les invités choisis s'affichent en
+//  étiquettes retirables. La DEMANDE DU CLIENT (type, véhicule, message) est
+//  en tête de la fiche du lead, sous le téléphone, visible sans défiler.
 //  v68 (28/10/2026) : la « Vue vendeur » du chef utilise le même menu de
 //  vendeurs que la gestion des ventes (bouton VENDEUR / nom, recherche,
 //  groupes VN / VO / VN-VO, le chef en tête = sa propre vue). Les vendeurs
@@ -1266,7 +1270,7 @@
       POSTE = S.poste0 || POSTE; S.comme = null; S.poste0 = null; MOI = S.stats ? S.stats.moi : MOI;
       S.tab = 'pool'; S.cell = null; S.leads = filtrerUniv(S.tous); render(); chargerAide();
     }
-    var ACTIONS_APERCU = ['tab', 'comme-off', 'comme', 'comme-menu', 'univ', 'dates', 'open', 'close', 'retour-liste', 'ack', 'reessayer', 'cell', 'fermer'];
+    var ACTIONS_APERCU = ['tab', 'comme-off', 'comme', 'comme-menu', 'univ', 'dates', 'dem-plus', 'open', 'close', 'retour-liste', 'ack', 'reessayer', 'cell', 'fermer'];
     function fermerDates() {
       var e = doc.getElementById('lm-dp'); if (e) e.remove();
       if (S._dpDehors) { doc.removeEventListener('mousedown', S._dpDehors, true); S._dpDehors = null; }
@@ -2287,6 +2291,7 @@
       var h = '<header class="dr-h"><div class="dr-ht">' + retour + '<h2>' + esc(nomLead(l)) + '</h2><p class="dr-s">' + esc([demandeDe(l), l.source_libelle, siteNom(l.site)].filter(Boolean).join(' · '))
         + (l.vendeur_nom ? ' · chez ' + esc(propre(l.vendeur_nom)) : l.zone === 'piscine' ? ' · dans le Pool' : l.zone === 'plateau' ? ' · au plateau VROOM' : '') + '</p>'
         + '<p class="dr-tel">' + (l.telephone ? '<b>' + esc(telAff(l.telephone)) + '</b>' : 'Aucun numéro') + (l.email ? ' · ' + esc(l.email) : '') + '</p>'
+        + demandeHaut(l)
         + '<div class="canaux">' + canaux + '</div>'
         + (l.id_client ? '<button type="button" class="lien fiche-l" data-a="fiche" data-id="' + l.id_client + '">Ouvrir la fiche client ›</button>' : '')
         + '</div>' + x + '</header><div class="dr-b">' + composeHtml(l);
@@ -2302,7 +2307,7 @@
       // Demande
       h += '<section><h3>Demande</h3><dl class="dl">' + [['Source', l.source_libelle], ['Véhicule', l.vehicule], ['Campagne', l.campagne], ['Reçu le', quand(l.recu_le)], ['Statut BACS', l.statut_bacs]]
           .filter(function (y) { return y[1]; }).map(function (y) { return '<dt>' + y[0] + '</dt><dd>' + esc(y[1]) + '</dd>'; }).join('') + '</dl>'
-        + (l.message ? '<p class="quote">« ' + esc(String(l.message).replace(/^\[[^\]]*\]\s*/, '')) + ' »</p>' : '') + '</section>';
+        + '</section>';
       if (l.qualification) h += '<section><h3>' + (l.par_plateau ? 'Qualification du plateau VROOM' : 'Qualification') + '</h3><p class="qualif">' + esc(l.qualification) + '</p>' + (l.transfere_par_nom ? '<p class="hint">Par ' + esc(propre(l.transfere_par_nom)) + ', le ' + esc(quand(l.transfere_le)) + '.</p>' : '') + '</section>';
       h += sectionBacs();
       h += '</div><footer class="dr-f">' + piedDrawer(l, gere, mien) + '</footer>';
@@ -2311,6 +2316,19 @@
       $drawer.innerHTML = h;
       $drawer.classList.toggle('composing', !!(D.canal && D.canal !== 'appel'));
       var sc2 = $drawer.querySelector('.dr-b'); if (sc2) sc2.scrollTop = top;
+    }
+    // v69 : la demande initiale du client, visible du premier coup d'œil.
+    function demandeHaut(l) {
+      var brut = String(l.message || ''), m = brut.match(/^\s*\[([^\]]*)\]\s*/), type = m ? m[1] : '';
+      var msg = brut.replace(/^\s*\[[^\]]*\]\s*/, '').trim();
+      var veh = l.vehicule || '';
+      if (!msg && !veh && !l.campagne) return '';
+      var long = msg.length > 220, ouvert = S.dr && S.dr.demOuverte;
+      return '<div class="dem-h"><div class="dem-t"><span>Demande du client</span>' + univTag(l) + (type ? '<em>' + esc(type) + '</em>' : '') + '<small>' + esc(quand(l.recu_le)) + '</small></div>'
+        + (veh ? '<p class="dem-v">' + esc(veh) + '</p>' : '')
+        + (msg ? '<p class="dem-m' + (long && !ouvert ? ' court' : '') + '">« ' + esc(msg) + ' »</p>' + (long ? '<button type="button" class="lien" data-a="dem-plus">' + (ouvert ? 'Réduire' : 'Lire toute la demande') + '</button>' : '')
+          : (l.campagne ? '<p class="dem-m">' + esc(l.campagne) + '</p>' : ''))
+        + '</div>';
     }
     function piedDrawer(l, gere, mien) {
       var D = S.dr, h = '';
@@ -2421,10 +2439,7 @@
       var invS = S.invitables[l.id_site];
       if (!invS) chargerInvitables(l.id_site);
       var inv = (invS || []).filter(function (u) { return Number(u.id_user) !== Number(l.id_user_attribue || MOI); });
-      // Les collègues du site d'abord : vendeurs, chef des ventes.
-      var duSite = {}; vendeursDu(l.id_site).forEach(function (v) { duSite[v.id_user] = 1; });
-      inv.sort(function (a, b) { return ((duSite[b.id_user] ? 1 : 0) - (duSite[a.id_user] ? 1 : 0)) || String(a.nom).localeCompare(String(b.nom), 'fr'); });
-      var prop = inv.slice(0, 8), autres = inv.slice(8);
+      var choisis = inv.filter(function (u) { return f.inv.indexOf(Number(u.id_user)) !== -1; });
       var h = '<div class="rdvf">'
         + '<div class="q"><span>Objet <em class="bacs-tag">libellés BACS</em></span><div class="chips">' + OBJETS_RDV.map(function (o) {
             return '<button type="button" class="qk' + (f.objet === o ? ' on' : '') + '" data-a="rdv-objet" data-id="' + esc(o) + '">' + esc(o) + '</button>'; }).join('') + '</div></div>'
@@ -2432,14 +2447,27 @@
             var v = dateLocale(x[1]); return '<button type="button" class="qk' + (f.date === v ? ' on' : '') + '" data-a="rdv-quand" data-id="' + v + '">' + x[0] + '</button>'; }).join('') + '</div>'
         + '<div class="row"><input type="datetime-local" id="rdv-date" value="' + esc(f.date) + '" aria-label="Date et heure"><select id="rdv-duree" aria-label="Durée">'
         + [['30', '30 min'], ['60', '1h00'], ['90', '1h30'], ['120', '2h00']].map(function (d) { return '<option value="' + d[0] + '"' + (f.duree === d[0] ? ' selected' : '') + '>' + d[1] + '</option>'; }).join('') + '</select></div></div>'
-        + '<div class="q"><span>Inviter un collègue</span><div class="chips">' + prop.concat(inv.filter(function (u) { return f.inv.indexOf(Number(u.id_user)) !== -1 && prop.indexOf(u) === -1; })).map(function (u) {
-            return '<button type="button" class="qk' + (f.inv.indexOf(Number(u.id_user)) !== -1 ? ' on' : '') + '" data-a="rdv-inv" data-id="' + u.id_user + '">' + esc(propre(u.nom)) + '</button>'; }).join('')
-        + (autres.length ? '<select id="rdv-inv-plus" aria-label="Autre collègue"><option value="">Autre collègue…</option>' + autres.map(function (u) { return '<option value="' + u.id_user + '">' + esc(propre(u.nom)) + '</option>'; }).join('') + '</select>' : '')
-        + (invS == null ? '<span class="hint">Chargement des collègues…</span>' : !inv.length ? '<span class="hint">Aucun collègue du site à inviter.</span>' : '') + '</div></div>'
+        + '<div class="q"><span>Inviter un collègue</span><div class="inv-l">'
+        + choisis.map(function (u) { return '<span class="inv-t">' + esc(propre(u.nom)) + '<button type="button" data-a="rdv-inv" data-id="' + u.id_user + '" aria-label="Retirer ' + esc(propre(u.nom)) + '">\u00d7</button></span>'; }).join('')
+        + (invS == null ? '<span class="hint">Chargement des collègues…</span>' : !inv.length ? '<span class="hint">Aucun collègue du site à inviter.</span>'
+          : '<div class="k-vend-sel"><button type="button" class="k-vend k-vend-btn" data-a="inv-menu" aria-expanded="' + !!D.invMenu + '"><span class="k-vend-l">Collègue</span><span class="k-vend-n">' + (choisis.length ? 'Ajouter' : 'Choisir') + ' <span class="k-caret">\u25be</span></span></button>'
+            + (D.invMenu ? '<div class="k-vpanel"><input type="text" class="k-vsearch" data-x="inv-q" placeholder="Rechercher un collègue…" value="' + esc(D.invQ || '') + '"><div class="k-vlist">' + listeInvites(inv, f) + '</div></div>' : '') + '</div>')
+        + '</div></div>'
         + '<div class="q"><span>Commentaire</span><textarea id="rdv-com" rows="2" placeholder="Ex. vient avec sa Clio pour la reprise, préparer le véhicule">' + esc(f.com) + '</textarea></div>'
         + '<div class="row"><button type="button" class="btn vr big" data-a="rdv" data-id="' + l.id_lead + '">Valider le rendez-vous</button></div>'
         + '<p class="hint">' + (l.sf_lead_id ? 'Le rendez-vous part dans l\'agenda One Data et dans BACS, avec son objet et ses invités.' : 'Le rendez-vous part dans l\'agenda One Data.') + '</p></div>';
       return h;
+    }
+    // Liste du menu « Collègue » : mêmes groupes que la gestion des ventes.
+    function listeInvites(inv, f) {
+      var q = String((S.dr && S.dr.invQ) || '').toLowerCase().trim(), last = null, h = '';
+      inv.filter(function (u) { return !q || String(propre(u.nom)).toLowerCase().indexOf(q) !== -1; }).forEach(function (u) {
+        var g = u.groupe || 'Vendeurs';
+        if (g !== last) { h += '<div class="k-vgroup">' + esc(g) + '</div>'; last = g; }
+        var on = f.inv.indexOf(Number(u.id_user)) !== -1;
+        h += '<button type="button" class="k-vitem' + (on ? ' on' : '') + '" data-a="rdv-inv" data-id="' + u.id_user + '">' + (on ? '\u2713 ' : '') + esc(propre(u.nom)) + '</button>';
+      });
+      return h || '<div class="k-vempty">Aucun collègue trouvé.</div>';
     }
     // v69 : seulement l'équipe du site du lead (chef des ventes, secrétariat
     // commercial, vendeurs hors grands comptes) — lead_invitables.
@@ -2539,7 +2567,9 @@
     function renderDrawerPreserve() {
       var v = lireForm();
       lireRdvF(); lireCompose();
+      var pf = $drawer.querySelector('.dr-f'), pTop = pf ? pf.scrollTop : 0;
       renderDrawer();
+      var pf2 = $drawer.querySelector('.dr-f'); if (pf2) pf2.scrollTop = pTop;
       Object.keys(v).forEach(function (k) {
         if (v[k] == null) return;
         var sel = { vendeur: '#dr-vendeur', site: '#dr-site', note: '#res-note', motif: '#clore-motif', cnote: '#clore-note' }[k];
@@ -2965,6 +2995,8 @@
         case 'canal-fermer': if (S.dr) { S.dr.canal = null; renderDrawerPreserve(); } return;
         case 'rdv-objet': if (S.dr && S.dr.rdvF) { lireRdvF(); S.dr.rdvF.objet = id; renderDrawerPreserve(); } return;
         case 'rdv-quand': if (S.dr && S.dr.rdvF) { lireRdvF(); S.dr.rdvF.date = id; renderDrawerPreserve(); } return;
+        case 'dem-plus': if (S.dr) { S.dr.demOuverte = !S.dr.demOuverte; renderDrawerPreserve(); } return;
+        case 'inv-menu': if (S.dr) { lireRdvF(); S.dr.invMenu = !S.dr.invMenu; S.dr.invQ = ''; renderDrawerPreserve(); var qi = $drawer.querySelector('.k-vsearch'); if (qi) try { qi.focus(); } catch (e) {} } return;
         case 'rdv-inv': if (S.dr && S.dr.rdvF) { lireRdvF(); var iv = S.dr.rdvF.inv, n2 = Number(id); S.dr.rdvF.inv = iv.indexOf(n2) !== -1 ? iv.filter(function (z) { return z !== n2; }) : iv.concat([n2]); renderDrawerPreserve(); } return;
         case 'mode': if (S.dr) { S.dr.mode = id; renderDrawerPreserve(); } return;
         case 'res': if (S.dr) { S.dr.res = id; renderDrawerPreserve(); } return;
@@ -3000,7 +3032,16 @@
       if (S.commeMenu && !ev.target.closest('.k-vend-sel')) { S.commeMenu = false; render(); }
       surClic(ev);
     });
-    ov.addEventListener('click', surClic);
+    ov.addEventListener('click', function (ev) {
+      if (S.dr && S.dr.invMenu && !ev.target.closest('.k-vend-sel')) { S.dr.invMenu = false; renderDrawerPreserve(); }
+      surClic(ev);
+    });
+    ov.addEventListener('input', function (ev) {
+      if (S.dr && ev.target.getAttribute && ev.target.getAttribute('data-x') === 'inv-q') {
+        S.dr.invQ = ev.target.value; var li = $drawer.querySelector('.k-vlist'), l = S.dr.l;
+        if (li && l && S.dr.rdvF) li.innerHTML = listeInvites((S.invitables[l.id_site] || []).filter(function (u) { return Number(u.id_user) !== Number(l.id_user_attribue || MOI); }), S.dr.rdvF);
+      }
+    });
     root.addEventListener('input', function (ev) {
       if (ev.target.getAttribute && ev.target.getAttribute('data-x') === 'comme-q') { S.commeQ = ev.target.value; var li = root.querySelector('.k-vlist'); if (li) li.innerHTML = listeComme(); }
     });
@@ -3581,9 +3622,9 @@
 .lmtc .carte-l .qui b{font-size:15.5px;font-weight:800;color:var(--ink);display:block}
 .lmtc .carte-l .qui p,.lmtc .vend .qui p{margin:2px 0 0;color:var(--ink-2);font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .lmtc .carte-l .src{display:inline-block;margin-top:6px;font-size:11px;font-weight:700;color:var(--ink-3);background:var(--ground);border-radius:6px;padding:2px 8px}
-.lmtc .tag.u-vn,.lmtc .tag.u-vo{font-weight:800;letter-spacing:.02em;margin-right:6px}
-.lmtc .tag.u-vn{background:#e8f0fb;color:#2a5ea9}
-.lmtc .tag.u-vo{background:#fdf2e3;color:#a8660a}
+:is(.lmtc,.lmtc-ov) .tag.u-vn,:is(.lmtc,.lmtc-ov) .tag.u-vo{display:inline-flex;align-items:center;border-radius:6px;padding:2px 8px;font-size:11px;font-weight:800;letter-spacing:.02em;margin-right:6px}
+:is(.lmtc,.lmtc-ov) .tag.u-vn{background:#e8f0fb;color:#2a5ea9}
+:is(.lmtc,.lmtc-ov) .tag.u-vo{background:#fdf2e3;color:#a8660a}
 .lmtc .carte-l .tag.u-vn,.lmtc .carte-l .tag.u-vo{margin-top:6px;font-size:11px;padding:2px 8px;border-radius:6px}
 .lmtc .barre{display:flex;align-items:flex-end;justify-content:space-between;gap:10px 16px;flex-wrap:wrap;border-bottom:1px solid var(--line);margin:0 0 18px}
 .lmtc .barre .tabs{border-bottom:0;margin:0;flex:1 1 auto}
@@ -3592,23 +3633,37 @@
 .lmtc .seg-u button{border:0;background:none;padding:7px 11px;font:inherit;font-size:12px;font-weight:700;color:var(--ink-2);cursor:pointer}
 .lmtc .seg-u button+button{border-left:1px solid #ece9e1}
 .lmtc .seg-u button.on{background:#2a5ea9;color:#fff}
-.lmtc .k-vend{display:flex;flex-direction:column;line-height:1.1}
-.lmtc .k-vend-l{font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:.04em;color:#888780}
-.lmtc .k-vend-n{font-size:15px;font-weight:800;color:#2a5ea9}
-.lmtc .k-vend-sel{position:relative}
-.lmtc .k-vend-btn{background:#fff;border:1px solid #ece9e1;border-radius:10px;padding:5px 12px;cursor:pointer;text-align:left;font-family:inherit}
-.lmtc .k-vend-btn:hover{border-color:#2a5ea9}
-.lmtc .k-vpanel{position:absolute;top:calc(100% + 6px);right:0;z-index:30;width:300px;max-height:380px;overflow-y:auto;background:#fff;border:1px solid #ece9e1;border-radius:12px;box-shadow:0 12px 32px rgba(42,94,169,.16);padding:8px;text-align:left}
-.lmtc .k-vsearch{width:100%;border:1px solid #ece9e1;border-radius:8px;padding:8px 11px;font-family:inherit;font-size:13px;color:#1c2b45;box-sizing:border-box;margin-bottom:6px}
-.lmtc .k-vsearch:focus{outline:none;border-color:#2a5ea9}
-.lmtc .k-vgroup{font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:.04em;color:#888780;padding:8px 8px 4px}
-.lmtc .k-vitem{display:flex;align-items:center;gap:6px;width:100%;text-align:left;background:none;border:none;border-radius:8px;padding:8px 10px;font-family:inherit;font-size:13px;font-weight:700;color:#1c2b45;cursor:pointer}
-.lmtc .k-vitem:hover{background:rgba(172,197,228,.18)}
-.lmtc .k-vitem.on{background:#2a5ea9;color:#fff}
-.lmtc .k-vempty{font-size:12px;color:#888780;padding:10px}
+:is(.lmtc,.lmtc-ov) .k-vend{display:flex;flex-direction:column;line-height:1.1}
+:is(.lmtc,.lmtc-ov) .k-vend-l{font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:.04em;color:#888780}
+:is(.lmtc,.lmtc-ov) .k-vend-n{font-size:15px;font-weight:800;color:#2a5ea9}
+:is(.lmtc,.lmtc-ov) .k-vend-sel{position:relative}
+:is(.lmtc,.lmtc-ov) .k-vend-btn{background:#fff;border:1px solid #ece9e1;border-radius:10px;padding:5px 12px;cursor:pointer;text-align:left;font-family:inherit}
+:is(.lmtc,.lmtc-ov) .k-vend-btn:hover{border-color:#2a5ea9}
+:is(.lmtc,.lmtc-ov) .k-vpanel{position:absolute;top:calc(100% + 6px);right:0;z-index:30;width:300px;max-height:380px;overflow-y:auto;background:#fff;border:1px solid #ece9e1;border-radius:12px;box-shadow:0 12px 32px rgba(42,94,169,.16);padding:8px;text-align:left}
+:is(.lmtc,.lmtc-ov) .k-vsearch{width:100%;border:1px solid #ece9e1;border-radius:8px;padding:8px 11px;font-family:inherit;font-size:13px;color:#1c2b45;box-sizing:border-box;margin-bottom:6px}
+:is(.lmtc,.lmtc-ov) .k-vsearch:focus{outline:none;border-color:#2a5ea9}
+:is(.lmtc,.lmtc-ov) .k-vgroup{font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:.04em;color:#888780;padding:8px 8px 4px}
+:is(.lmtc,.lmtc-ov) .k-vitem{display:flex;align-items:center;gap:6px;width:100%;text-align:left;background:none;border:none;border-radius:8px;padding:8px 10px;font-family:inherit;font-size:13px;font-weight:700;color:#1c2b45;cursor:pointer}
+:is(.lmtc,.lmtc-ov) .k-vitem:hover{background:rgba(172,197,228,.18)}
+:is(.lmtc,.lmtc-ov) .k-vitem.on{background:#2a5ea9;color:#fff}
+:is(.lmtc,.lmtc-ov) .k-vempty{font-size:12px;color:#888780;padding:10px}
+.lmtc-ov .inv-l{display:flex;flex-wrap:wrap;align-items:center;gap:8px}
+.lmtc-ov .inv-l .k-vpanel{left:0;right:auto;bottom:calc(100% + 6px);top:auto}
+.lmtc-ov .inv-t{display:inline-flex;align-items:center;gap:6px;background:var(--sel);color:var(--bleu);border:1px solid var(--bleu-clair);border-radius:999px;padding:5px 6px 5px 12px;font-size:12.5px;font-weight:700}
+.lmtc-ov .inv-t button{border:0;background:none;color:var(--bleu);font-size:15px;line-height:1;cursor:pointer;padding:0 4px;border-radius:50%}
+.lmtc-ov .inv-t button:hover{background:#fff}
+.lmtc-ov .dem-h{margin:10px 0 12px;background:#f5f8fc;border:1px solid #dbe6f4;border-left:4px solid #2a5ea9;border-radius:10px;padding:10px 12px}
+.lmtc-ov .dem-t{display:flex;align-items:center;gap:8px;flex-wrap:wrap;font-size:10.5px;font-weight:800;text-transform:uppercase;letter-spacing:.04em;color:#2a5ea9}
+.lmtc-ov .dem-t em{font-style:normal;text-transform:none;letter-spacing:0;font-size:11.5px;font-weight:700;background:#fff;border:1px solid #dbe6f4;border-radius:6px;padding:1px 7px;color:var(--ink-2)}
+.lmtc-ov .dem-t small{margin-left:auto;text-transform:none;letter-spacing:0;font-weight:600;color:var(--ink-3);font-size:11px}
+.lmtc-ov .dem-t .tag{margin:0;font-size:10.5px;padding:1px 7px}
+.lmtc-ov .dem-v{margin:6px 0 0;font-size:14px;font-weight:800;color:var(--bleu-dk)}
+.lmtc-ov .dem-m{margin:6px 0 0;font-size:13.5px;line-height:1.45;color:#1c2b45;white-space:pre-line}
+.lmtc-ov .dem-m.court{display:-webkit-box;-webkit-line-clamp:4;-webkit-box-orient:vertical;overflow:hidden}
+.lmtc-ov .dem-h .lien{margin-top:4px;font-size:12px}
 .lmtc .k-range{background:#fff;border:1px solid #ece9e1;border-radius:10px;padding:7px 12px;font-family:inherit;font-size:12px;font-weight:700;color:#2a5ea9;cursor:pointer;display:inline-flex;align-items:center;gap:6px}
 .lmtc .k-range:hover{border-color:#2a5ea9}
-.lmtc .k-caret{font-size:10px;color:#888780}
+:is(.lmtc,.lmtc-ov) .k-caret{font-size:10px;color:#888780}
 .lmtc .comme-b{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;background:var(--sel);border:1.5px solid var(--bleu-clair);color:var(--bleu-dk);border-radius:12px;padding:10px 14px;margin:0 0 14px;font-size:13px;line-height:1.45}
 .lmtc .go{display:flex;align-items:stretch}
 .lmtc .go .main{border:0;background:var(--bleu);color:#fff;font:inherit;font-weight:800;font-size:13.5px;padding:9px 16px;border-radius:11px 0 0 11px;cursor:pointer;white-space:nowrap;text-align:left;line-height:1.25}
