@@ -1,3 +1,8 @@
+// v11 (28/10/2026) : sans boîte mail reliée, le panneau Signature l'explique
+// (titre « Signature — » vide, boutons sans effet en v10). Le modèle de
+// signature ne porte plus de mobile (consigne Team Colin) : le champ Mobile
+// disparaît du panneau et n'est plus enregistré. La ligne directe vient du
+// poste 3CX du vendeur, côté base.
 // v10 (27/10/2026) : signatures — les icônes collées depuis Outlook ne
 // s'affichaient pas chez le destinataire.
 //  * Outlook bureau colle des images `file:///C:/.../msohtmlclip1/...` (fichier
@@ -11,7 +16,7 @@
 //    (adresse https publique, dédoublonnée par empreinte). Les liens autour des
 //    icônes (Facebook, Instagram, LinkedIn, tel:, mailto:) sont conservés.
 //  * « Appliquer le modèle » : signature générée par la base
-//    (email_signature_modele_rendu) avec la fonction et le mobile saisis. Le
+//    (email_signature_modele_rendu) avec la fonction saisie. Le
 //    bloc n'apparaît que si le locataire a un modèle.
 //  * Retrait de la signature dans le corps fait sur le DOM : l'ancienne
 //    expression régulière s'arrêtait au premier </div> d'une signature
@@ -111,7 +116,7 @@ OD.define('email', {
   if (state.sigDraft === undefined) state.sigDraft = '';
   if (state.sigSaving === undefined) state.sigSaving = false;
   if (state.sigAvis === undefined) state.sigAvis = { t: '', g: '' };   // avis du panneau signature
-  if (state.sigChamps === undefined) state.sigChamps = {};              // { fonction, mobile }
+  if (state.sigChamps === undefined) state.sigChamps = {};              // { fonction }
   if (state.sigModele === undefined) state.sigModele = null;            // null = pas encore vérifié
   if (state.sigTravail === undefined) state.sigTravail = 0;             // hébergements en cours
   window.__emailState = state;
@@ -305,7 +310,7 @@ OD.define('email', {
     const champs = lireChamps();
     majAvis('Génération de la signature…', 'info');
     try {
-      const r = await sb().rpc('email_signature_modele_rendu', { p_account_id: a.id, p_champs: { fonction: champs.fonction || '', mobile: champs.mobile || '' } });
+      const r = await sb().rpc('email_signature_modele_rendu', { p_account_id: a.id, p_champs: { fonction: champs.fonction || '' } });
       if (r.error) throw r.error;
       if (!r.data) { majAvis('Aucun modèle de signature n\'est défini pour votre concession.', 'warn'); return; }
       state.sigDraft = r.data;
@@ -726,13 +731,19 @@ OD.define('email', {
   function sigPanelHtml() {
     if (!state.sigPanel) return '';
     const a = currentAccount(); const who = a ? (a.display_name || a.email_address) : '';
+    // Pas de boîte mail reliée : la signature est rattachée à une boîte, il n'y
+    // a donc rien à modifier. On le dit au lieu d'afficher un éditeur inerte.
+    if (!a) return '<div class="em-sig-ov"><div class="em-sig-box">' +
+      '<div class="em-sig-hd"><span>Signature</span><button class="em-x" data-act="sigclose">&times;</button></div>' +
+      '<div class="em-sig-avis warn" style="margin:16px">Aucune boîte mail n\'est reliée à votre compte One Data. La signature appartient à une boîte mail : reliez d\'abord votre boîte Outlook ou Gmail, puis revenez ici.</div>' +
+      '<div class="em-sig-ft"><span class="em-sig-hint"></span><button class="em-send" data-act="sigclose">Fermer</button></div>' +
+      '</div></div>';
     return '<div class="em-sig-ov"><div class="em-sig-box">' +
       '<div class="em-sig-hd"><span>Signature — ' + esc(who) + '</span><button class="em-x" data-act="sigclose">&times;</button></div>' +
       (state.sigModele ? '<div class="em-sig-mod">' +
         '<div class="em-sig-mod-t">Signature de la concession<span>logo, adresse et icônes à jour</span></div>' +
         '<div class="em-sig-mod-f">' +
         '<label>Fonction<input data-sigchamp="fonction" value="' + esc(state.sigChamps.fonction || '') + '" placeholder="Conseiller commercial"></label>' +
-        '<label>Mobile<input data-sigchamp="mobile" inputmode="tel" value="' + esc(state.sigChamps.mobile || '') + '" placeholder="06 12 34 56 78"></label>' +
         '<button class="em-sig-mod-b" data-act="sigmodele">Appliquer le modèle</button>' +
         '</div></div>' : '') +
       '<div class="em-sig-avis' + (state.sigAvis.g ? ' ' + state.sigAvis.g : '') + '"' + (state.sigAvis.t ? '' : ' style="display:none"') + '>' + esc(state.sigAvis.t) + '</div>' +
@@ -794,7 +805,7 @@ OD.define('email', {
       const sources = Array.from(t.content.querySelectorAll('img')).map(i => i.getAttribute('src') || '').filter(s => /^data:image\//i.test(s));
       const echecs = sources.length ? appliquerAdresses(t.content, await hebergerTable(sources)) : 0;
       const html = t.innerHTML.trim();
-      const champsPropres = { fonction: champs.fonction || '', mobile: champs.mobile || '' };
+      const champsPropres = { fonction: champs.fonction || '' };
       let r = await sb().from('email_accounts').update({ signature_html: html, signature_champs: champsPropres }).eq('id', a.id);
       // Locataire sans la colonne signature_champs
       if (r.error && /signature_champs/i.test(r.error.message || '')) r = await sb().from('email_accounts').update({ signature_html: html }).eq('id', a.id);
