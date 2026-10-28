@@ -1,5 +1,11 @@
 // ============================================================================
-//  ADMIN — module One Data (OD.define)  v12
+//  ADMIN — module One Data (OD.define)  v15
+//  v15 (28/10/2026) : onglet « Modèles de messages » (SMS, WhatsApp, e-mail)
+//  à côté de la gestion des utilisateurs. L'écran vient du module `modeles`
+//  (chargé à la demande depuis le manifeste) ; l'onglet n'apparaît que si le
+//  locataire a ce module — les autres clients ne voient aucun changement.
+//  v14 (22/10/2026) : licence One Data par utilisateur (USER.licence) dans les
+//  fiches de création et d'édition ; vide = gamme par défaut du rôle.
 //  v12 (08/10/2026) : un compte desactive (statut 'inactive' avec un compte de connexion) porte un
 //  badge « Désactivé » a cote du nom et sa ligne est grisee : seule l'action
 //  « Réactiver » du menu le revelait (recette Team Colin, A-91).
@@ -155,7 +161,8 @@ OD.define('admin', {
   var state = {
     rows: [], loading: true, error: null, isAdmin: null,
     filters: { reseau: '', affaire: '', site: '', role: '', q: '' },
-    expanded: {}, fonctionField: null, vnvoField: null, roles: [], topManagers: []
+    expanded: {}, fonctionField: null, vnvoField: null, roles: [], topManagers: [],
+    vue: 'users'
   };
   var root = null;
 
@@ -183,6 +190,10 @@ OD.define('admin', {
   + '.oda-head h1{font-size:18px;font-weight:700;margin:0;color:var(--blue-dk);letter-spacing:-.2px;}'
   + '.oda-head .oda-count{font-size:12px;color:var(--text-mut);}'
   + '.oda-head .oda-create{margin-left:auto;}'
+  + '.oda-vues{display:flex;gap:4px;border-bottom:1px solid var(--border);margin:0 0 16px;overflow-x:auto;}'
+  + '.oda-vues button{border:0;background:none;padding:9px 14px;font-size:13px;font-weight:600;color:var(--text-mut);cursor:pointer;border-bottom:2px solid transparent;margin-bottom:-1px;font-family:inherit;white-space:nowrap;}'
+  + '.oda-vues button:hover{color:var(--blue-dk);}'
+  + '.oda-vues button.on{color:var(--blue-dk);border-bottom-color:var(--blue-dk);}'
   + '.oda-filters{display:flex;flex-wrap:wrap;gap:12px;margin-bottom:16px;align-items:flex-end;}'
   + '.oda-searchfield{position:relative;flex:1 1 260px;min-width:220px;}'
   + '.oda-searchfield input{width:100%;padding:9px 30px 9px 12px;border:1px solid var(--grey-border);border-radius:8px;font-size:14px;font-family:inherit;color:var(--text);background:var(--card);box-sizing:border-box;}'
@@ -394,6 +405,7 @@ OD.define('admin', {
       prenom: data.prenom, nom: data.nom, email: data.email,
       telephone: data.telephone, voip_number: data.voip,
       matricule: data.matricule, fonction: data.fonction, vn_vo: data.vnvo,
+      licence: data.licence || undefined,
       id_site_main: data.id_site_main, id_role: data.id_role ? Number(data.id_role) : undefined,
       reset_password: !!data.reset_password, revoke_sessions: !!data.revoke_sessions
     });
@@ -407,6 +419,7 @@ OD.define('admin', {
       var cV = pickCol(cols, VNVO_FIELDS); if (cV && data.vnvo !== undefined) upd[cV] = data.vnvo || null;
       var cM = pickCol(cols, USER_MATRICULE_FIELDS); if (cM && data.matricule !== undefined) upd[cM] = data.matricule || null;
       var cF = pickCol(cols, USER_FONCTION_FIELDS); if (cF && data.fonction !== undefined) upd[cF] = data.fonction || null;
+      if (data.licence && cols.indexOf('licence') !== -1) upd.licence = data.licence;
       // Périmètre principal porté par la fiche USER (≠ affectations USER_SITE)
       var cS = pickCol(cols, PRINCIPAL_FIELDS); if (cS && data.id_site_main !== undefined) upd[cS] = data.id_site_main == null ? null : Number(data.id_site_main);
       var cR = pickCol(cols, USER_ROLE_FIELDS); if (cR && data.id_role !== undefined && data.id_role) upd[cR] = Number(data.id_role);
@@ -774,9 +787,44 @@ OD.define('admin', {
     return out;
   }
 
+  /* v15 : onglets Utilisateurs / Modèles de messages */
+  function odGlobal() { try { return frontWin().OD || window.OD || null; } catch (e) { return window.OD || null; } }
+  function modelesDispo() { var o = odGlobal(); return !!(o && o.manifest && o.manifest.modeles && o.manifest.modeles.cdn_url) || !!(frontWin().__OD_MODELES__ || window.__OD_MODELES__); }
+  function chargerModeles() {
+    var W = frontWin();
+    if (W.__OD_MODELES__) return Promise.resolve(W.__OD_MODELES__);
+    if (window.__OD_MODELES__) return Promise.resolve(window.__OD_MODELES__);
+    var o = odGlobal(), e = o && o.manifest && o.manifest.modeles;
+    if (!e || !e.cdn_url) return Promise.resolve(null);
+    if (!W.__odModelesP) W.__odModelesP = new Promise(function (res) {
+      var d = document, s = d.createElement('script'); s.src = e.cdn_url; s.async = true;
+      s.onload = function () { res(W.__OD_MODELES__ || window.__OD_MODELES__ || null); };
+      s.onerror = function () { W.__odModelesP = null; res(null); };
+      d.head.appendChild(s);
+    });
+    return W.__odModelesP;
+  }
+  function vuesHtml() {
+    if (!modelesDispo()) return '';
+    return '<div class="oda-vues" role="tablist">'
+      + '<button type="button" role="tab" data-vue="users" class="' + (state.vue === 'users' ? 'on' : '') + '">Utilisateurs</button>'
+      + '<button type="button" role="tab" data-vue="modeles" class="' + (state.vue === 'modeles' ? 'on' : '') + '">Modèles de messages</button></div>';
+  }
+  function renderModeles() {
+    if (root.querySelector('#oda-modeles')) return;
+    root.innerHTML = '<div class="oda-wrap">' + vuesHtml() + '<div class="oda-head"><h1>Modèles de messages</h1></div><div id="oda-modeles"><div class="oda-loading"><span class="oda-spin"></span>Chargement…</div></div></div>';
+    var hote = root.querySelector('#oda-modeles');
+    chargerModeles().then(function (api) {
+      if (!hote.isConnected) return;
+      if (!api) { hote.innerHTML = '<div class="oda-error">Le module des modèles de messages n\'est pas disponible pour ce compte.</div>'; return; }
+      hote.innerHTML = ''; api.gerer(hote);
+    });
+  }
+
   function render() {
     if (!root) return;
     if (state.isAdmin === false) { root.innerHTML = '<div class="oda-wrap"><div class="oda-empty">Accès réservé aux administrateurs.</div></div>'; return; }
+    if (state.vue === 'modeles' && modelesDispo()) { renderModeles(); return; }
     var rows = filteredRows(), ready = listReady();
     state.showSite = distinct(rows.map(function (r) { return r.site_name; })).length > 1;
     // Une ligne = une affectation, pas un utilisateur. Quand les deux nombres
@@ -784,7 +832,7 @@ OD.define('admin', {
     var nbUsers = distinct(rows.map(function (r) { return r.id_user; })).length;
     var compte = nbUsers + ' utilisateur' + (nbUsers > 1 ? 's' : '')
       + (rows.length > nbUsers ? ' · ' + rows.length + ' affectations' : '');
-    var html = '<div class="oda-wrap"><div class="oda-head"><h1>Administration des utilisateurs</h1>'
+    var html = '<div class="oda-wrap">' + vuesHtml() + '<div class="oda-head"><h1>Administration des utilisateurs</h1>'
       + '<span class="oda-count">' + ((state.loading || !ready) ? '' : compte) + '</span>'
       + '<button class="oda-btn primary oda-create" data-action="create-user">+ Créer un utilisateur</button></div>';
     var qv = state.filters.q || '';
@@ -900,6 +948,12 @@ OD.define('admin', {
     };
   }
 
+  /* Licences One Data (22/10/2026) : USER.licence. Vide = gamme du rôle. */
+  var LICENCES = [['performance', 'Performance — 99 €'], ['intelligence', 'Intelligence — 129 € (Delco)'], ['connect', 'Connect — 159 € (téléphonie, conversations)'], ['full', 'Full — 174 € (tout)']];
+  function licenceOptions(cur, vide) {
+    return '<option value="">' + vide + '</option>' + LICENCES.map(function (l) { return '<option value="' + l[0] + '"' + (String(cur || '') === l[0] ? ' selected' : '') + '>' + l[1] + '</option>'; }).join('');
+  }
+
   function modalEdit(row) {
     var ov = overlay('<div class="oda-modal-head"><div><h2>Éditer le profil</h2><p>' + esc(fullName(row)) + '</p></div><button class="oda-iconbtn" data-x>' + ICON.x + '</button></div>'
       + '<div class="oda-modal-body"><div class="oda-form">'
@@ -910,6 +964,8 @@ OD.define('admin', {
       + '<div><label>VN / VO / VNVO</label><select data-f="vnvo">'
       + ['', 'VN', 'VO', 'VNVO'].map(function (o) { return '<option value="' + o + '"' + (String(rowVnvo(row)).toUpperCase() === o ? ' selected' : '') + '>' + (o || '—') + '</option>'; }).join('')
       + '</select></div>'
+      + '<div data-lic-box><label>Licence One Data</label><select data-f="licence">' + licenceOptions('', 'Gamme par défaut du rôle') + '</select>'
+      + '<p class="oda-note">Intelligence et Full ouvrent Delco ; Connect et Full ouvrent la téléphonie. Le changement compte dans la facture du mois, au prorata.</p></div>'
       + '<div class="oda-err-slot"></div></div>'
       + '<div class="oda-sep2"></div><p class="oda-subhead">Périmètre principal (fiche utilisateur)</p>'
       + '<p class="oda-note">Site et rôle portés par la table ' + esc(TABLE_USER) + ' : ils pilotent les défauts du produit (agenda, portefeuille, statistiques). Les affectations site par site se règlent dans « Périmètre et hiérarchie ».</p>'
@@ -959,10 +1015,14 @@ OD.define('admin', {
       mp.cols = cols;
       var cS = pickCol(cols, PRINCIPAL_FIELDS), cR = pickCol(cols, USER_ROLE_FIELDS);
       if (!cS && !cR) { mpBox.innerHTML = '<div class="oda-warn">Colonnes de périmètre principal introuvables sur ' + esc(TABLE_USER) + '.</div>'; return; }
-      var sel = ['ID_User'].concat([cS, cR].filter(Boolean)).join(',');
+      var aLic = !!(cols && cols.indexOf('licence') !== -1);
+      var sel = ['ID_User'].concat([cS, cR].filter(Boolean)).concat(aLic ? ['licence'] : []).join(',');
       var r = await sb().from(TABLE_USER).select(sel).eq('ID_User', row.id_user).limit(1);
       if (r.error) { mpBox.innerHTML = '<div class="oda-warn">Lecture impossible : ' + esc(r.error.message) + '</div>'; return; }
       var u = (r.data && r.data[0]) || {};
+      var licSel = ov.querySelector('[data-f="licence"]'), licBox = ov.querySelector('[data-lic-box]');
+      if (aLic && licSel) { licSel.value = u.licence || ''; mp.licenceLue = true; }
+      else if (licBox) licBox.style.display = 'none';
       mp.id_site = cS && u[cS] != null ? Number(u[cS]) : null;
       mp.id_role = cR && u[cR] != null ? String(u[cR]) : '';
       var info = mp.id_site != null ? mpSiteInfo(mp.id_site) : null;
@@ -995,6 +1055,8 @@ OD.define('admin', {
       btn.disabled = true; btn.textContent = 'Enregistrement…';
       var np = ov.querySelector('[data-f="newpwd"]'), rv = ov.querySelector('[data-f="revoke"]');
       var data = { prenom: g('prenom'), nom: g('nom'), email: g('email'), telephone: g('telephone'), voip: g('voip'), matricule: g('matricule'), fonction: g('fonction'), vnvo: g('vnvo'), reset_password: !!(np && np.checked), revoke_sessions: !!(rv && rv.checked) };
+      // Licence écrite seulement si elle a été lue (colonne présente) et choisie.
+      if (mp.licenceLue && g('licence')) data.licence = g('licence');
       // On n'écrit le périmètre principal que si la lecture a abouti : sinon on
       // risquerait d'effacer une valeur qu'on n'a jamais affichée.
       if (mp.loaded) { data.id_site_main = mp.id_site; data.id_role = mp.id_role; }
@@ -1444,6 +1506,7 @@ OD.define('admin', {
       + '<div class="oda-two"><div><label>Téléphone</label><input data-f="telephone"></div><div><label>Numéro VOIP</label><input data-f="voip"></div></div>'
       + '<div class="oda-two"><div><label>Matricule</label><input data-f="matricule"></div><div><label>Fonction</label><input data-f="fonction"></div></div>'
       + '<div><label>VN / VO / VNVO</label><select data-f="vnvo"><option value="">—</option><option value="VN">VN</option><option value="VO">VO</option><option value="VNVO">VNVO</option></select></div>'
+      + '<div><label>Licence One Data</label><select data-f="licence">' + licenceOptions('', 'Gamme par défaut du rôle') + '</select></div>'
       + '</div><div class="oda-sep2"></div><p class="oda-subhead">Affectation initiale</p><div id="oda-place"></div>'
       + '<div class="oda-reqbox"><h4>Champs requis pour créer le compte</h4><div class="oda-reqlist"></div></div>'
       + '<div class="oda-err-slot"></div></div>'
@@ -1503,6 +1566,7 @@ OD.define('admin', {
         email: email, prenom: prenom, nom: nom,
         telephone: g('telephone') || null, voip_number: g('voip') || null,
         matricule: g('matricule') || null, fonction: g('fonction') || null, vn_vo: g('vnvo') || null,
+        licence: g('licence') || null,
         id_role: Number(p.id_role), id_site_main: Number(p.id_site),
         reseau: p.reseau || null, affaire: p.affaire || null, site: p.site || null,
         id_affaire: ref2 && ref2.id_affaire != null ? Number(ref2.id_affaire) : null,
@@ -2065,6 +2129,8 @@ OD.define('admin', {
     });
     root.addEventListener('click', function (e) {
       if (!e.target.closest('[data-search]')) state._focusSearch = false;
+      var vb = e.target.closest('[data-vue]'); if (vb) { var nv = vb.getAttribute('data-vue'); if (nv !== state.vue) { state.vue = nv; root.innerHTML = ''; render(); } return; }
+      if (e.target.closest('#oda-modeles')) return;
       var create = e.target.closest('[data-action="create-user"]'); if (create) { modalCreate(); return; }
       var reset = e.target.closest('[data-action="reset-filters"]'); if (reset) { state.filters = { reseau: '', affaire: '', site: '', role: '', q: '' }; render(); return; }
       var clr = e.target.closest('[data-action="clear-search"]'); if (clr) { state.filters.q = ''; render(); return; }
