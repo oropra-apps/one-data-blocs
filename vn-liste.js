@@ -14,6 +14,10 @@
 //    le détail (vn_bacs_fiche), avec un lien direct vers le véhicule dans BACS.
 //  * Le stock reste celui du DMS (v_liste_vn) : c'est lui qui dit ce qui est
 //    en stock, à quel prix et depuis quand ; BACS décrit la voiture.
+//  v8 (28/10/2026) : toutes les fiches BACS sont lues (l'appel était plafonné à
+//    1 000 lignes par l'API : 2 900 fiches, une sur trois seulement affichée,
+//    d'où « Pas encore lu » à tort) ; un véhicule sans photo propre prend celle
+//    d'un véhicule du stock de même modèle et même teinte DMS.
 //  v7 (28/10/2026) : PHOTO du véhicule (vn_bacs_resume.photo_url : photo Toyota du
 //    couple produit BACS × teinte, jamais celle d'une autre teinte) dans la
 //    vignette et la fiche ; DATE AMC DBS (véhicule déclaré livré au
@@ -86,6 +90,26 @@ OD.define('vn-liste', {
   // N° de commande DBS (commande fournisseur) ; « 0 » = pas de commande.
   function numCommande(r) { var c = r && r.commande_fournisseur; c = c == null ? '' : String(c).trim(); return c && c !== '0' ? c : ''; }
   function bacsDe(r) { var c = numCommande(r); return c ? S.bacs[c] || null : null; }
+  // Photo : celle du véhicule (fiche BACS), à défaut celle d'un véhicule du
+  // stock de même modèle et même teinte DMS (libellés identiques à la source).
+  function cleTeinte(r) {
+    var n = function (x) { return String(x || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]+/g, ''); };
+    var mo = n(r.modele), co = n(r.couleur);
+    return mo && co ? mo + '|' + co : null;
+  }
+  function indexerPhotos() {
+    var m = {};
+    S.raw.forEach(function (r) {
+      var b = bacsDe(r), k = cleTeinte(r);
+      if (b && b.photo_url && k && !m[k]) m[k] = b.photo_url;
+    });
+    S.photosDms = m;
+  }
+  function photoDe(r, b) {
+    if (b && b.photo_url) return b.photo_url;
+    var k = cleTeinte(r);
+    return k && S.photosDms ? S.photosDms[k] || null : null;
+  }
 
   // Les statuts arrivent en majuscules techniques : on les rend lisibles.
   var LIB_STATUT = {
@@ -145,10 +169,15 @@ OD.define('vn-liste', {
   // ───────────────────────────────────────────────────────────── donnees
   async function chargerBacs() {
     try {
-      var r = await sb().rpc('vn_bacs_resume');
-      if (r.error) return;
-      var m = {};
-      (r.data || []).forEach(function (b) { if (b && b.commande) m[String(b.commande).trim()] = b; });
+      // Pagination explicite : l'API plafonne chaque réponse à 1 000 lignes.
+      var m = {}, taille = 1000;
+      for (var i = 0; i < 30; i++) {
+        var r = await sb().rpc('vn_bacs_resume').order('commande').range(i * taille, (i + 1) * taille - 1);
+        if (r.error) break;
+        var lot = r.data || [];
+        lot.forEach(function (b) { if (b && b.commande) m[String(b.commande).trim()] = b; });
+        if (lot.length < taille) break;
+      }
       S.bacs = m;
     } catch (e) { /* fiche BACS absente chez ce tenant : liste DMS seule */ }
   }
@@ -173,6 +202,7 @@ OD.define('vn-liste', {
       S.error = (e && e.message) || String(e);
     }
     await pBacs;
+    indexerPhotos();
     try {
       var role = num(connectedUser().ID_Role);
       S.showPA = role != null && PA_ROLES.indexOf(role) !== -1;
@@ -391,9 +421,10 @@ OD.define('vn-liste', {
     var en = libEnergie((b && b.energie) || r.energie);
     var fam = propre(r.modele) || marqueDe(r) || 'VN';
     // Photo Toyota du véhicule : à l'échec du chargement, la vignette texte reprend.
-    if (b && b.photo_url) {
+    var ph = photoDe(r, b);
+    if (ph) {
       return '<div class="vn-vig photo' + (r.en_commande ? ' cmd' : '') + '">'
-        + '<img src="' + esc(b.photo_url) + '" alt="" loading="lazy" onerror="this.parentNode.classList.remove(\'photo\');this.remove()">'
+        + '<img src="' + esc(ph) + '" alt="" loading="lazy" onerror="this.parentNode.classList.remove(\'photo\');this.remove()">'
         + '<span class="vn-vig-m">' + esc(marqueDe(r)) + '</span>'
         + '<span class="vn-vig-f">' + esc(fam) + '</span>'
         + '<span class="vn-vig-b">' + pastille(coul) + (en ? '<span>' + esc(en) + '</span>' : '') + '</span>'
