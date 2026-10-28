@@ -1,4 +1,11 @@
 // ============================================================================
+//  v32 (29/10/2026) : STATUT PLANET VO². Le robot suit désormais plusieurs statuts
+//    Planet VO² (En stock, Prévision de rentrée, Immobilisé) ; v_liste_vo porte
+//    STATUT_VO. Boutons « Statut » au-dessus de la liste, EN STOCK seul par
+//    défaut (choix d'Antoine). Le filtre canal ne s'applique qu'aux VO en stock
+//    (un VO en prévision de rentrée n'a pas encore de canal). Pastille de la
+//    ligne : « Prévision de rentrée » / « Immobilisé » au lieu de « En stock ».
+//    Colonne « Statut » dans l'export. Vue sans STATUT_VO : filtre absent.
 //  v31 (28/10/2026) : bouton « Hors PVO² » masqué quand il ne compte aucun VO (stock VO
 //    construit depuis Planet VO² : il est toujours vide chez Team Colin).
 //  v30 (28/10/2026) : FILTRE VO / VD (le tag vo-liste-v29 existait deja, identique a la v28). Depuis le 28/10 le stock VO vient de
@@ -211,7 +218,7 @@ OD.define('vo-liste', {
   var COLS_BASE = COLS;
   // v27 : colonnes Planet VO² (v_liste_vo du 27/10/2026) ; repli sans elles.
   var COLS_PVO = ',PVO_CANAUX,PVO_COMMENTAIRE,PVO_COMMENTAIRE_LE,PVO_EN_STOCK,PVO_VU_LE,PVO_ID,COULEUR_DMS';
-  COLS = COLS_BASE + ',NUMERO_POLICE' + COLS_PVO;
+  COLS = COLS_BASE + ',NUMERO_POLICE' + COLS_PVO + ',STATUT_VO';   // v32 : STATUT_VO
 
   // ─────────────────────────────────────────────────────────── bootstrap WeWeb
   // (garde 'wwLib pas prêt' retirée : le loader ne monte le module qu'une fois wwLib et le tenant résolus)
@@ -243,7 +250,8 @@ OD.define('vo-liste', {
       kmsMin: null, kmsMax: null, nbjMin: null, nbjMax: null, co2Min: null, co2Max: null,
       carrosserie: null, carburant: null, boite: null,
       canaux: ['particulier'],         // v27 : canal Planet VO², particuliers par défaut
-      types: null                      // v30 : VO / VD (null = tous)
+      types: null,                     // v30 : VO / VD (null = tous)
+      statuts: ['EN_STOCK']            // v32 : statut Planet VO², en stock par défaut
     }
   };
   function defaultPerPage() { return S.perPage || 20; }
@@ -3285,6 +3293,12 @@ OD.define('vo-liste', {
     var page = function (from) { return c.from('v_liste_vo').select(cols).order('VIN').range(from, from + size - 1); };
     var duo = await Promise.all([page(0), page(size)]);
     // v21 : base sans NUMERO_POLICE (migration pas encore passee) -> on recharge sans.
+    // v32 : vue sans STATUT_VO -> sans elle (filtre statut absent).
+    if (duo[0].error && /STATUT_VO/i.test(duo[0].error.message || '')) {
+      console.warn('[vo] STATUT_VO absent de v_liste_vo, chargement sans');
+      S.cols = cols = cols.replace(',STATUT_VO', '');
+      duo = await Promise.all([page(0), page(size)]);
+    }
     // v30 : vue sans TYPE_VEH -> sans elle (le filtre VO / VD n'apparait pas).
     if (duo[0].error && /TYPE_VEH/i.test(duo[0].error.message || '')) {
       console.warn('[vo] TYPE_VEH absent de v_liste_vo, chargement sans');
@@ -3354,6 +3368,7 @@ OD.define('vo-liste', {
     if (f.boite && r.BOITEV_EUROTAX !== f.boite) return false;
     if (!canalOk(r, f.canaux)) return false;
     if (f.types && f.types.length && f.types.indexOf(typeDe(r)) === -1) return false;
+    if (!statutOk(r, f.statuts)) return false;
 
     if (f.photos != null && hasPhoto(r) !== f.photos) return false;
     if (f.contremarque != null && contremarque(r) !== f.contremarque) return false;
@@ -3373,6 +3388,15 @@ OD.define('vo-liste', {
     if (notEmpty(S.immat)) { var qi = S.immat.toLowerCase().replace(/[\s-]/g, ''); var im = String(r.NO_IMMAT || '').toLowerCase().replace(/[\s-]/g, ''); if (im.indexOf(qi) === -1) return false; }
     return true;
   }
+  // ── v32 : statut Planet VO² ───────────────────────────────────────────────
+  var STATUTS_VO = [{ k: 'EN_STOCK', t: 'En stock' }, { k: 'PREVISION_RENTREE', t: 'Prévision de rentrée' }, { k: 'IMMOBILISE', t: 'Immobilisé' }];
+  function statutDe(r) { return String(r.STATUT_VO || ''); }
+  function statutsActifs() { return S.raw.some(function (r) { return STATUTS_VO.some(function (x) { return x.k === statutDe(r); }); }); }
+  function statutOk(r, sel) {
+    if (!sel || !sel.length) return true;
+    var k = statutDe(r); if (!STATUTS_VO.some(function (x) { return x.k === k; })) return true;   // statut DMS : pas de filtre
+    return sel.indexOf(k) !== -1;
+  }
   // ── v29 : VO / VD ─────────────────────────────────────────────────────────
   var TYPES_VO = [{ k: 'VO', t: 'VO' }, { k: 'VD', t: 'VD (démos)' }];
   function typeDe(r) { return String(r.TYPE_VEH || '').toUpperCase() === 'VD' ? 'VD' : 'VO'; }
@@ -3391,6 +3415,7 @@ OD.define('vo-liste', {
   }
   function canalOk(r, sel) {
     if (!S.pvoActif || !sel || !sel.length) return true;
+    var st = statutDe(r); if (st && st !== 'EN_STOCK' && STATUTS_VO.some(function (x) { return x.k === st; })) return true;   // v32
     for (var i = 0; i < sel.length; i++) if (canalDe(r, sel[i])) return true;
     return false;
   }
@@ -3439,7 +3464,7 @@ OD.define('vo-liste', {
     return arr;
   }
   function distinct(field, base) { var set = {}; (base || S.raw).forEach(function (r) { if (notEmpty(r[field])) set[r[field]] = 1; }); return Object.keys(set).sort(function (a, b) { return a.localeCompare(b, 'fr'); }); }
-  function activeFilterCount() { var f = S.f, n = 0; for (var k in f) if (f[k] != null && k !== 'canaux' && k !== 'types') n++; return n; }
+  function activeFilterCount() { var f = S.f, n = 0; for (var k in f) if (f[k] != null && k !== 'canaux' && k !== 'types' && k !== 'statuts') n++; return n; }
 
   // ─────────────────────────────────────────────────────────── sélection
   function selVins() { return Object.keys(S.sel).filter(function (v) { return S.sel[v]; }); }
@@ -3523,6 +3548,7 @@ OD.define('vo-liste', {
     + '.vl-can i{font-style:normal;font-size:11px;font-weight:800;opacity:.75}'
     + '.vl-can-lab{font-size:11px;font-weight:800;letter-spacing:.05em;text-transform:uppercase;color:#7a98c5;align-self:center;margin-right:2px}'
     + '.vl-typ-lab{margin-left:14px}'
+    + '.vl-badge.vl-st-pr{background:#fff4dc;color:#8a5d08}.vl-badge.vl-st-im{background:#f0f2f6;color:#5f6f86}'
     + '.vl-vd{font-size:10.5px;font-weight:800;padding:2px 7px;border-radius:7px;background:#e6f6f2;color:#1f8a73;letter-spacing:.02em}'
     + '.vl-head{display:flex;align-items:center;gap:12px;padding:10px 16px;background:#f7faff;border-bottom:1px solid #e8eef7;font-size:12.5px;font-weight:700;color:#7a98c5;flex-wrap:wrap}'
     + '.vl-head label{display:inline-flex;align-items:center;gap:8px;cursor:pointer}'
@@ -3814,7 +3840,10 @@ OD.define('vo-liste', {
       : IC.car;
     var ident = [r.NO_IMMAT, notEmpty(r.NUMERO_POLICE) ? r.NUMERO_POLICE : r.NO_VO, r.VIN].filter(notEmpty).map(esc).join(' | ');
     var meta2 = [moisAn(r.D_1MEC), (num(r.KMS) != null ? num(r.KMS).toLocaleString('fr-FR') + ' km' : null), r.COULEUR_DMS].filter(notEmpty).map(esc).join(' | ');
-    var badge = nb == null ? '' : '<span class="vl-badge' + (nb <= 60 ? ' ok' : nb <= 120 ? ' mid' : '') + '">En stock (' + nb + ' jour' + (nb > 1 ? 's' : '') + ')</span>';
+    var stv = statutDe(r);
+    var badge = stv === 'PREVISION_RENTREE' ? '<span class="vl-badge vl-st-pr">Prévision de rentrée</span>'
+      : stv === 'IMMOBILISE' ? '<span class="vl-badge vl-st-im">Immobilisé</span>'
+      : nb == null ? '' : '<span class="vl-badge' + (nb <= 60 ? ' ok' : nb <= 120 ? ' mid' : '') + '">En stock (' + nb + ' jour' + (nb > 1 ? 's' : '') + ')</span>';
     // canal
     var cb = '';
     if (S.pvoActif) {
@@ -3892,14 +3921,26 @@ OD.define('vo-liste', {
       return '<button type="button" class="vl-can' + (sel.indexOf(c.k) !== -1 ? ' on' : '') + '" data-type="' + c.k + '">' + esc(c.t) + ' <i>' + n + '</i></button>';
     }).join('');
   }
+  // v32 : boutons de statut (compte : tous les autres filtres, sauf le statut)
+  function statutsHtml() {
+    if (!statutsActifs()) return '';
+    var sel = S.f.statuts || [];
+    var memo = S.f.statuts; S.f.statuts = null;
+    var base = S.raw.filter(passFilters);
+    S.f.statuts = memo;
+    return '<div class="vl-canaux"><span class="vl-can-lab">Statut</span>' + STATUTS_VO.map(function (c) {
+      var n = base.filter(function (r) { return statutDe(r) === c.k; }).length;
+      return '<button type="button" class="vl-can' + (sel.indexOf(c.k) !== -1 ? ' on' : '') + '" data-statut="' + c.k + '">' + esc(c.t) + ' <i>' + n + '</i></button>';
+    }).join('') + '</div>';
+  }
   function canauxHtml() {
-    if (!S.pvoActif) { var t0 = typesHtml(); return t0 ? '<div class="vl-canaux">' + t0 + '</div>' : ''; }
+    if (!S.pvoActif) { var t0 = typesHtml(); return statutsHtml() + (t0 ? '<div class="vl-canaux">' + t0 + '</div>' : ''); }
     var sel = S.f.canaux || [];
     // compte : tous les autres filtres appliqués, sauf le canal
     var memo = S.f.canaux; S.f.canaux = null;
     var base = S.raw.filter(passFilters);
     S.f.canaux = memo;
-    return '<div class="vl-canaux"><span class="vl-can-lab">Canal PVO²</span>' + CANAUX_PVO.map(function (c) {
+    return statutsHtml() + '<div class="vl-canaux"><span class="vl-can-lab">Canal PVO²</span>' + CANAUX_PVO.map(function (c) {
       var n = base.filter(function (r) { return canalDe(r, c.k); }).length;
       // v31 : « Hors PVO² » n'a plus de sens quand le stock VO vient de Planet VO² : masqué s'il est vide.
       if (c.k === 'hors' && !n) return '';
@@ -3992,7 +4033,7 @@ OD.define('vo-liste', {
     if (defs.length > 1) html += '<span class="vo-chip-clear" data-clear="1">Tout effacer</span>';
     box.innerHTML = html;
     box.querySelectorAll('[data-chip]').forEach(function (el) { el.addEventListener('click', function () { clearChip(el.getAttribute('data-chip')); S.page = 1; renderChips(); renderContent(); }); });
-    var clr = box.querySelector('[data-clear]'); if (clr) clr.addEventListener('click', function () { var can = S.f.canaux, typ = S.f.types; for (var k in S.f) S.f[k] = null; S.f.canaux = can; S.f.types = typ; S.page = 1; renderChips(); renderContent(); });
+    var clr = box.querySelector('[data-clear]'); if (clr) clr.addEventListener('click', function () { var can = S.f.canaux, typ = S.f.types, sta = S.f.statuts; for (var k in S.f) S.f[k] = null; S.f.canaux = can; S.f.types = typ; S.f.statuts = sta; S.page = 1; renderChips(); renderContent(); });
     refreshFilterBadge();
   }
 
@@ -4106,7 +4147,7 @@ OD.define('vo-liste', {
       ['TVA', function (r) { return r.TVA; }], ['Destination', function (r) { return destination(r); }], ['Couleur', function (r) { return r.COULEUR_DMS; }],
       ['Site', function (r) { return r.SITE; }], ['Affaire', function (r) { return r.AFFAIRE; }], ['Réseau', function (r) { return r.RESEAU; }],
       ['NBJ', function (r) { return nbjDays(r); }], ['Garantie', function (r) { return garantieTxt(r); }], ['Lieu', function (r) { return r.LIEU_STOCKAGE_Codifie; }],
-      ['Emplacement', function (r) { return r.DETAIL_STOCKAGE_Codifie; }], ['Type', function (r) { return typeDe(r); }], ['Canal PVO²', function (r) { return libCanaux(r); }], ['Commentaire PVO²', function (r) { return r.PVO_COMMENTAIRE || ''; }]
+      ['Emplacement', function (r) { return r.DETAIL_STOCKAGE_Codifie; }], ['Type', function (r) { return typeDe(r); }], ['Statut', function (r) { var d = STATUTS_VO.find(function (x) { return x.k === statutDe(r); }); return d ? d.t : statutDe(r); }], ['Canal PVO²', function (r) { return libCanaux(r); }], ['Commentaire PVO²', function (r) { return r.PVO_COMMENTAIRE || ''; }]
     ]);
   }
   function stamp() { var d = new Date(); function p(n) { return ('0' + n).slice(-2); } return d.getFullYear() + p(d.getMonth() + 1) + p(d.getDate()); }
@@ -4230,6 +4271,14 @@ OD.define('vo-liste', {
     });
     host.querySelectorAll('.vo-pg[data-pg]').forEach(function (el) {
       el.addEventListener('click', function () { var p = Number(el.getAttribute('data-pg')); if (p >= 1) { S.page = p; renderContent(); try { root().scrollIntoView({ behavior: 'smooth', block: 'start' }); } catch (e) { } } });
+    });
+    // v32 : statut Planet VO²
+    host.querySelectorAll('[data-statut]').forEach(function (el) {
+      el.addEventListener('click', function () {
+        var k = el.getAttribute('data-statut'), cur = (S.f.statuts || []).slice(), i = cur.indexOf(k);
+        if (i === -1) cur.push(k); else cur.splice(i, 1);
+        S.f.statuts = cur.length ? cur : null; S.page = 1; renderContent();
+      });
     });
     // v30 : VO / VD
     host.querySelectorAll('[data-type]').forEach(function (el) {
