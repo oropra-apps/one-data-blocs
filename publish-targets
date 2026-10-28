@@ -77,9 +77,9 @@ agenda        = teamcolin
 # Le reste de la flotte reste sur la v6 (tag activite-v6).
 activite      = teamcolin
 
-# Recherche client v19 (28/10/2026) : ouverte depuis la carte « inconnu » des
-# Notifications (numéro ou adresse pré-saisis, fenêtre de création
-# pré-remplie) ; la recherche par téléphone interroge aussi tel_mob_e164 /
-# tel_fixe_e164, vérifiées sur la seule base de Team Colin. Le reste de la
-# flotte reste sur la v18 (tag client-search-v18).
+# Recherche client depuis la v19 (28/10/2026) : ouverture depuis la carte
+# « inconnu » des Notifications, recherche par téléphone normalisé
+# (tel_mob_e164 / tel_fixe_e164) et, en v20, par véhicule (RPC
+# client_recherche_vehicule), vérifiés sur la seule base de Team Colin. Le
+# reste de la flotte reste sur la v18 (tag client-search-v18).
 client-search = teamcolin
