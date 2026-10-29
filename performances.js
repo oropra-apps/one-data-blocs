@@ -1,5 +1,10 @@
 // ============================================================================
 //  PERFORMANCES ÉQUIPE — module One Data (OD.define)  v1
+//  v30 (29/10/2026) : LEXUS SANS VU NI ARVAL. Les concessions Lexus ne
+//  vendent pas de véhicules utilitaires et ne travaillent pas avec Arval :
+//  quand tout le périmètre affiché est Lexus, les colonnes VU et Arval
+//  disparaissent (tableau, cartes du haut, graphiques). Sur un périmètre
+//  mixte, elles restent pour Toyota et les lignes Lexus affichent « — ».
 //  v29 (29/10/2026) : sélecteur de dates identique à celui de la gestion des
 //  ventes. Vue Leads : les raccourcis restent (7 jours… 90 jours) et, à droite,
 //  le bouton « 📅 du → au » ouvre le calendrier (deux clics) à la place du
@@ -440,7 +445,20 @@ OD.define('performances', {
   // qui emportait la colonne des noms : on ne savait plus de qui on parlait.
   // Chez Team Colin la grille se lit donc en deux temps — « Pilotage », ce qui
   // porte un objectif, et « Mix produit », ce qui décrit la vente.
-  function kpisVue() { return IS_TC ? KPIS.filter(k => k.vue === state.vueTC) : KPIS; }
+  // --- LEXUS : NI VU NI ARVAL (29/10/2026) -------------------------------------
+  // Ces deux indicateurs n'existent que chez Toyota. Un périmètre entièrement
+  // Lexus ne les affiche pas ; dans un périmètre mixte, la cellule d'un nœud
+  // Lexus (site, vendeur…) affiche « — » au lieu d'un zéro qui ressemblerait
+  // à un retard.
+  const KPI_TOYOTA_SEUL = IS_TC ? ['vu_realises', 'arval_realises'] : [];
+  function estLexus(r) { return String((r && r.RESEAU) || '').trim().toUpperCase() === 'LEXUS'; }
+  function lexusSeul(rows) { return KPI_TOYOTA_SEUL.length > 0 && Array.isArray(rows) && rows.length > 0 && rows.every(estLexus); }
+  function sansToyotaSeul(list, rows) { return lexusSeul(rows) ? list.filter(k => KPI_TOYOTA_SEUL.indexOf(k.r) < 0) : list; }
+  function aggLexus(agg) { return KPI_TOYOTA_SEUL.length > 0 && agg && agg._n > 0 && agg._lexN === agg._n; }
+  // Lignes qui gouvernent les colonnes de l'arbre (posées par renderTree).
+  let __rowsCols = null;
+  function kpisObjAffiches() { return sansToyotaSeul(KPIS_OBJ, rowsForSelection()); }
+  function kpisVue() { return IS_TC ? sansToyotaSeul(KPIS.filter(k => k.vue === state.vueTC), __rowsCols) : KPIS; }
   const KPI_CDE = KPIS[0];   // dénominateur des taux : toujours les commandes
   // --- VOLUME vs ATTEINTE -----------------------------------------------------
   // Arbitrage du 21/08/2026 : une commande signée par un chef des ventes EST
@@ -488,6 +506,7 @@ OD.define('performances', {
       if (k.o) a[k.r + '_sansobj'] = 0;
     }
     a._ids = [];
+    a._n = 0; a._lexN = 0;
     return a;
   }
   function num(v) {
@@ -497,6 +516,7 @@ OD.define('performances', {
     return isNaN(n) ? 0 : n;
   }
   function addAgg(t, row) {
+    t._n++; if (estLexus(row)) t._lexN++;
     if (estVendeurPerf(row)) {
       for (const k of KPIS) {
         t[k.r] += num(row[k.r]);
@@ -523,6 +543,7 @@ OD.define('performances', {
   // Variante brute : compte le réalisé quel que soit le rôle. Réservée à la
   // ligne « Encadrement » de l'arbre, qui doit afficher son propre volume.
   function addAggRaw(t, row) {
+    t._n++; if (estLexus(row)) t._lexN++;
     for (const k of KPIS) { t[k.r] += num(row[k.r]); if (k.o) t[k.o] += num(row[k.o]); }
     if (Array.isArray(row.ids_commandes)) t._ids.push(...row.ids_commandes);
   }
@@ -1047,6 +1068,8 @@ OD.define('performances', {
   // Le chiffre se compare à l'objectif du MOIS ENTIER ; seule la couleur tient
   // compte du rythme écoulé.
   function kpiCellTC(agg, k, kpiLabel, estVendeur) {
+    if (KPI_TOYOTA_SEUL.indexOf(k.r) >= 0 && aggLexus(agg))
+      return '<div class="pf-c sans" title="' + esc(kpiLabel + ' — sans objet chez Lexus') + '"><span class="v">—</span></div>';
     const ids = agg._ids;
     const clic = Array.isArray(ids) && ids.length > 0;
     const idsAttr = clic ? ' data-kpi-ids="' + esc(ids.join(',')) + '" data-kpi-label="' + esc(kpiLabel) + '" data-kpi-key="' + esc(k.r) + '"' : '';
@@ -1343,7 +1366,7 @@ OD.define('performances', {
       ? ' · ' + (state.segment === 'grand_compte' ? 'grands comptes' : 'réseau (hors grands comptes)') : '';
     html += shead('var(--blue-dk)', 'Performance — ' + scopeLabel, periodResume(curDeb, curFin) + ' · vs ' + Math.round(__prorata * 100) + '% du mois' + segTxt);
     html += '<div class="pf-kpi-grid' + (IS_TC ? ' tc' : '') + '">';
-    for (const k of KPIS_OBJ) {
+    for (const k of sansToyotaSeul(KPIS_OBJ, selRows)) {
       // Meme regle que l'arbre : le realise est le VOLUME TOTAL du perimetre.
       const r = volTotal(agg, k), o = agg[k.o], c = kpiColorPro(r, o);
       const badge = pctLabel(r, o);
@@ -1566,6 +1589,7 @@ OD.define('performances', {
     return rb - ra;
   }
   function renderTree(rows) {
+    __rowsCols = rows;
     const tree = buildTree(rows);
     if (!tree.length) return '<div class="pf-empty">Aucune donnée pour ce filtre.</div>';
     const sel = state.selection;
@@ -1674,11 +1698,12 @@ OD.define('performances', {
     const d = effectiveChildDim(rows);
     if (d.dim === 'kpi') {
       const a = sumAgg(rows);
+      const ks = sansToyotaSeul(KPIS_OBJ, rows);
       return {
-        labels: KPIS_OBJ.map(k => k.label),
-        values: KPIS_OBJ.map(k => pct(a[k.r], a[k.o])),
-        rea: KPIS_OBJ.map(k => num(a[k.r])),
-        obj: KPIS_OBJ.map(k => num(a[k.o]))
+        labels: ks.map(k => k.label),
+        values: ks.map(k => pct(a[k.r], a[k.o])),
+        rea: ks.map(k => num(a[k.r])),
+        obj: ks.map(k => num(a[k.o]))
       };
     }
     // Chaque vendeur est jugé sur SON objectif : les commandes quand il en a
@@ -1750,11 +1775,11 @@ OD.define('performances', {
       __c1 = new Chart(c1.getContext('2d'), {
         type: 'bar',
         data: {
-          labels: KPIS_OBJ.map(k => k.label), datasets: modeVolume()
-            ? [{ label: 'Réalisé', data: KPIS_OBJ.map(k => volTotal(agg, k)), backgroundColor: '#2a5ea9', borderRadius: 3, maxBarThickness: 28 }]
+          labels: kpisObjAffiches().map(k => k.label), datasets: modeVolume()
+            ? [{ label: 'Réalisé', data: kpisObjAffiches().map(k => volTotal(agg, k)), backgroundColor: '#2a5ea9', borderRadius: 3, maxBarThickness: 28 }]
             : [
-              { label: 'Réalisé', data: KPIS_OBJ.map(k => agg[k.r]), backgroundColor: '#2a5ea9', borderRadius: 3, maxBarThickness: 28 },
-              { label: 'Objectif', data: KPIS_OBJ.map(k => agg[k.o]), backgroundColor: '#d4e3f5', borderRadius: 3, maxBarThickness: 28 }
+              { label: 'Réalisé', data: kpisObjAffiches().map(k => agg[k.r]), backgroundColor: '#2a5ea9', borderRadius: 3, maxBarThickness: 28 },
+              { label: 'Objectif', data: kpisObjAffiches().map(k => agg[k.o]), backgroundColor: '#d4e3f5', borderRadius: 3, maxBarThickness: 28 }
             ]
         },
         options: {
