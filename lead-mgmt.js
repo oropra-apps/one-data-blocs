@@ -1,6 +1,13 @@
 // ============================================================================
 //  LEAD MANAGEMENT — module One Data (OD.define 'lead-mgmt')
-//  VERSION TEAM COLIN (v79) — déploiement CIBLÉ (publish-targets :
+//  VERSION TEAM COLIN (v80) — déploiement CIBLÉ (publish-targets :
+//  v80 (29/10/2026) : CHEF DES VENTES QUI VEND AUSSI (Elio Bailleul, Lexus
+//  Sceaux). Sur un site Lexus — ou dès qu'un lead est à son nom — le chef :
+//  * prend un lead du Pool lui-même (« Je le prends », sur la carte du Pool
+//    et dans la fiche du lead), comme un vendeur ;
+//  * retrouve ses leads dans un onglet « Mes leads » et les traite : la fiche
+//    s'ouvre directement sur « Résultat d'appel ».
+//  Le retour au Pool après 15 minutes sans traitement s'applique à lui aussi.
 //  v79 (29/10/2026) : concessions Lexus sans plateau VROOM. Le bouton
 //  « Confier au plateau VROOM » n'apparaît plus sur leurs leads (la base le
 //  refuse aussi : poste_confier_plateau). Leur Pool reçoit tous les leads BACS
@@ -2452,9 +2459,10 @@
                 ['campagnes', 'Campagnes', S.mesSollis ? S.mesSollis.length : null, false, 'b']].filter(function (o) { return !(S.comme && o[0] === 'campagnes'); });
       }
       var sid = sitePoste(), pool = libres(sid);
-      return [['pool', sid == null ? 'Pool' : poolNom(sid), pool.length, pool.some(function (l) { return niveau(l) === 'crit'; }), 'v'],
-              ['bloques', 'En souffrance', bloques(sid).length, bloques(sid).length > 0, 'r'],
-              ['campagnes', 'Campagnes', null, false, 'b']];
+      var t = [['pool', sid == null ? 'Pool' : poolNom(sid), pool.length, pool.some(function (l) { return niveau(l) === 'crit'; }), 'v']];
+      if (chefVend(sid)) { var mes = mesLeadsDu(sid); t.push(['mes', 'Mes leads', mes.length, mes.some(function (l) { return niveau(l) === 'crit'; }), 'r']); }
+      return t.concat([['bloques', 'En souffrance', bloques(sid).length, bloques(sid).length > 0, 'r'],
+              ['campagnes', 'Campagnes', null, false, 'b']]);
     }
     function renderTabs() {
       var analyse = ['mur', 'mursites', 'relais'].indexOf(S.tab) !== -1;
@@ -2607,6 +2615,7 @@
         + (g && g.id_user ? '<button type="button" class="btn ghost sm" data-a="choix" data-id="' + l.id_lead + '">Annuler</button>' : '') + '</div>';
       else act = '<div class="go"><button type="button" class="main" data-a="attribuer-sugg" data-id="' + l.id_lead + '">Attribuer à ' + esc(prenom(g.nom)) + '<small>' + esc(g.raison) + '</small></button>'
         + '<button type="button" class="alt" data-a="choix" data-id="' + l.id_lead + '" title="Choisir un autre vendeur" aria-label="Choisir un autre vendeur">▾</button></div>';
+      if (gere && chefVend(l.id_site) && !verrouAutre(l)) act = '<div class="act-c">' + act + '<button type="button" class="btn vr sm moi" data-a="prendre" data-id="' + l.id_lead + '" title="Le lead passe à votre nom, dans « Mes leads »">Je le prends</button></div>';
       return '<div class="carte-l' + univCls(l) + '" data-a="open" data-id="' + l.id_lead + '" tabindex="0">' + ageLead(l)
         + '<div class="qui"><b>' + esc(nomLead(l)) + (sitePoste() == null ? ' <span class="lr-v">' + esc(siteNom(l.site)) + '</span>' : '') + '</b><p>' + esc(demandeDe(l)) + '</p>' + univTag(l) + '<span class="src">' + esc(l.source_libelle || l.source || 'Lead') + '</span></div>'
         + act + '</div>';
@@ -3023,6 +3032,7 @@
 
     function renderPanel() {
       if (POSTE === 'vendeur') return S.tab === 'pool' ? vuePiscineVendeur() : S.tab === 'campagnes' ? vueCampagnesVendeur() : vueListeVendeur();
+      if (S.tab === 'mes') return vueMesLeadsChef();
       if (S.tab === 'bloques') return vueBloques();
       if (S.tab === 'campagnes') return vueCampagnesManager();
       if (S.tab === 'mur') return sitePoste() == null ? vueMurSites() : vueMur();
@@ -3114,13 +3124,14 @@
       }
       // Chef des ventes (ou direction qui encadre le site)
       if (!gere) return '<p class="hint">Vue de pilotage. Le chef des ventes du site agit sur ce lead.</p>';
-      var mode = D.mode || 'attribuer';
+      var mode = D.mode || (mien ? 'resultat' : 'attribuer');
       var MODES = [['attribuer', l.id_user_attribue ? 'Réattribuer' : 'Attribuer'], ['resultat', 'Résultat d\'appel'], ['renvoyer', 'Autre site'], ['clore', 'Clore']];
       h += '<div class="issues" role="radiogroup" aria-label="Geste">' + MODES.map(function (m) { return '<button type="button" role="radio" aria-checked="' + (m[0] === mode) + '" class="' + (m[0] === mode ? 'on' : '') + '" data-a="mode" data-id="' + m[0] + '">' + m[1] + '</button>'; }).join('') + '</div>';
       if (mode === 'attribuer') {
         h += '<div class="row"><select id="dr-vendeur" aria-label="Vendeur">' + optionsVendeurs(l.id_site, l.id_user_attribue) + '</select><button type="button" class="btn pri" data-a="attribuer" data-id="' + l.id_lead + '|dr">' + (l.id_user_attribue ? 'Réattribuer' : 'Attribuer') + '</button></div>'
           + '<div class="row">' + (l.sf_lead_id && !sansPlateau(l) ? '<button type="button" class="btn vr" data-a="confier" data-id="' + l.id_lead + '">Confier au plateau VROOM</button>' : '')
-          + (l.id_user_attribue ? '<button type="button" class="btn" data-a="rendre" data-id="' + l.id_lead + '">Rendre au Pool</button>' : '') + '</div>';
+          + (l.id_user_attribue ? '<button type="button" class="btn" data-a="rendre" data-id="' + l.id_lead + '">Rendre au Pool</button>' : '')
+          + (!l.id_user_attribue && libre && chefVend(l.id_site) ? '<button type="button" class="btn vr" data-a="prendre" data-id="' + l.id_lead + '">Je le prends</button>' : '') + '</div>';
       } else if (mode === 'resultat') {
         h += piedResultat(l, true);
       } else if (mode === 'renvoyer') {
@@ -3156,6 +3167,21 @@
     // ── v62 : modèles de messages adaptés au lead ─────────────────────────
     // v79 : réseaux sans plateau VROOM (Lexus).
     function sansPlateau(l) { return /^LEXUS$/i.test(String((l && l.reseau) || '').trim()); }
+    // v80 : chef des ventes qui vend aussi (site Lexus, ou leads à son nom).
+    function chefVend(sid) {
+      if (POSTE !== 'chef') return false;
+      sid = sid != null ? sid : sitePoste();
+      if (sid == null || !manager(sid)) return false;
+      return sansPlateau(siteInfo(sid)) || mesLeads().some(function (l) { return Number(l.id_site) === Number(sid); });
+    }
+    function mesLeadsDu(sid) { return mesLeads().filter(function (l) { return sid == null || Number(l.id_site) === Number(sid); }); }
+    function vueMesLeadsChef() {
+      var ls = mesLeadsDu(sitePoste());
+      var h = '<div class="list">';
+      if (!ls.length) h += '<div class="empty">Aucun lead à votre nom. Prenez-en dans le Pool avec « Je le prends ».</div>';
+      ls.forEach(function (l) { h += ligneAction(l, 'appeler'); });
+      return h + '</div><p class="foot">Les leads que vous avez pris ou qui vous sont attribués. ' + texteRetour() + '</p>';
+    }
     function estVO(l) { return /\bVO\b|occasion/i.test(l.vehicule || '') || /centrale|leboncoin|lbc|autoscout|paru|spoticar|vo/i.test((l.source || '') + ' ' + (l.source_libelle || '')); }
     function vehCourt(l) { var v = String(l.vehicule || '').replace(/\s+/g, ' ').trim(); return v ? (v.length > 60 ? v.slice(0, 58) + '…' : v) : ''; }
     function salut(l) {
@@ -3551,7 +3577,7 @@
     function prendre(id) {
       return geste(async function () {
         var r = await rpc('poste_prendre', { p_id_lead: Number(id) });
-        if (r && r.action === 'reserve') { await rafraichir(true); S.tab = POSTE === 'vendeur' ? S.tab : S.tab; toast('Lead pris : il est dans « À rappeler ».'); return ouvrir(id); }
+        if (r && r.action === 'reserve') { await rafraichir(true); if (POSTE === 'chef') { S.tab = 'mes'; toast('Lead pris : il est dans « Mes leads ».'); } else toast('Lead pris : il est dans « À rappeler ».'); return ouvrir(id); }
         if (r && r.action === 'occupe') toast('Déjà pris par ' + propre(r.par_nom || 'un collègue') + '.', true);
         else if (r && r.action === 'clos') toast('Ce lead est déjà traité.', true);
         else if (r && r.action === 'univers') toast('Ce lead ' + r.univers + ' est réservé aux vendeurs ' + r.univers + '.', true);
@@ -4445,6 +4471,8 @@
 .lmtc .vide{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:26px;text-align:center;color:var(--mut);font-weight:700}
 /* Pool : une carte par lead */
 .lmtc .cartes{display:grid;gap:10px}
+.lmtc .carte-l > .act-c{display:flex;flex-direction:column;gap:6px;align-items:stretch}
+.lmtc .act-c .moi{align-self:flex-end}
 .lmtc .carte-l{display:grid;grid-template-columns:76px minmax(0,1fr) auto;gap:18px;align-items:center;background:var(--card);border:1px solid var(--line);border-radius:16px;padding:16px 18px;cursor:pointer;transition:box-shadow .15s}
 .lmtc .carte-l:hover{box-shadow:0 6px 20px rgba(28,43,69,.07)}
 .lmtc .age{display:grid;place-items:center;align-content:center;height:58px;border-radius:14px;background:var(--ground);text-align:center;line-height:1.1}
@@ -4548,7 +4576,7 @@
 .lmtc .vend .l .d small{display:block;font-size:10px;color:var(--ink-3);font-weight:700}
 .lmtc .vend .l .qui b{font-size:14.5px;font-weight:800;color:var(--ink)}
 .lmtc .lien-r{border:0;background:none;color:var(--bleu);font:inherit;font-weight:800;font-size:12.5px;cursor:pointer;padding:6px 4px;white-space:nowrap}
-@media (max-width:720px){.lmtc .carte-l{grid-template-columns:60px minmax(0,1fr)}.lmtc .carte-l > .go,.lmtc .carte-l > .choix,.lmtc .carte-l > .btn{grid-column:1/-1}.lmtc .go .main{flex:1}.lmtc .vend-h{flex-wrap:wrap}.lmtc .vend .l{grid-template-columns:56px minmax(0,1fr)}.lmtc .vend .l .lien-r{grid-column:2;justify-self:start}}
+@media (max-width:720px){.lmtc .carte-l{grid-template-columns:60px minmax(0,1fr)}.lmtc .carte-l > .go,.lmtc .carte-l > .choix,.lmtc .carte-l > .btn,.lmtc .carte-l > .act-c{grid-column:1/-1}.lmtc .go .main{flex:1}.lmtc .vend-h{flex-wrap:wrap}.lmtc .vend .l{grid-template-columns:56px minmax(0,1fr)}.lmtc .vend .l .lien-r{grid-column:2;justify-self:start}}
 /* v77 : leads « Demande client (1h) » et « Relance concession (48h) » */
 .lmtc .lr.ch1{box-shadow:inset 4px 0 0 #c0524f;background:linear-gradient(90deg,#fbeceb,#fff 40%)}
 .lmtc .lr.ch1:hover{background:linear-gradient(90deg,#f8e2e1,#f2f6fc 40%)}
