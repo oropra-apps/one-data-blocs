@@ -4,6 +4,10 @@
 //    sélecteur de dates est celui de la gestion des ventes (bouton « 📅 du → au »,
 //    calendrier d'un mois, deux clics), sur les écrans Chef, Site et Groupe. Il
 //    remplace les deux champs date du point du matin.
+//    Vocabulaire BACS : opportunités → simulations → commandes. Chaque écran a
+//    un filtre Tous / VN / VO / Pro (paramètre p_univers des fonctions act_*,
+//    migration 20261029010000_act_univers_vn_vo_pro) ; chaque opportunité porte
+//    sa pastille VN, VO ou Pro.
 //
 //    Vendeur           « Que dois-je faire aujourd'hui ? »
 //    Chef des ventes   « Avec qui, sur quoi, avec quel levier ? » (point du matin)
@@ -16,10 +20,10 @@
 //
 //  Données : fonctions SQL act_* (migration 20261028080000_suivi_activite_roles)
 //    act_contexte()              rôle, écrans permis, sites du périmètre
-//    act_vendeur(id?)            journée, affaires, mois d'un vendeur
+//    act_vendeur(id?, univers?)  journée, opportunités, mois d'un vendeur
 //    act_chef(site, deb, fin)    l'équipe d'un site sur une période
 //    act_site(sites, deb, fin)   leads, motifs de perte, sources, mois
-//    act_entonnoir(sites,d,f)    affaires BACS créées -> devis -> gagnées
+//    act_entonnoir(sites,d,f,u)  opportunités BACS -> simulations -> commandes
 //    act_groupe(deb, fin)        les sites côte à côte
 //  Actions : notif_alerter (note au vendeur), ouverture de la fiche client.
 //
@@ -141,6 +145,7 @@ OD.define('activite', {
     S.plage = S.plage || null;           // { deb, fin } quand dates libres (chef)
     S.plages = S.plages || {};           // v8 : { chef|site|groupe : { deb, fin } } choisies au calendrier
     S.vendeur = S.vendeur || null;       // vendeur sélectionné au point du matin
+    S.univers = S.univers || null;       // 'VN' | 'VO' | 'PRO' | null (tous)
     S.data = {};                         // réponses par clé de chargement
     S.charge = {};
 
@@ -290,6 +295,10 @@ OD.define('activite', {
 #act-root .pill.orange{background:var(--alerte-bg);color:var(--m-orange)}
 #act-root .pill.vert{background:var(--ok-bg);color:var(--m-vert)}
 #act-root .pill.bleu{background:var(--calme-bg);color:var(--m-bleu)}
+#act-root .pill.u-VN{background:var(--calme-bg);color:var(--m-bleu)}
+#act-root .pill.u-VO{background:var(--ok-bg);color:var(--m-vert)}
+#act-root .pill.u-PRO{background:var(--alerte-bg);color:var(--m-orange)}
+#act-root .deal h4 .pill{margin-left:8px;vertical-align:2px;font-size:10px;padding:2px 7px}
 #act-root .pill.attente{border:1px dashed var(--line-2);color:var(--ink-3);background:transparent}
 #act-root .chart{width:100%;min-height:24px}
 #act-root svg{display:block;overflow:visible}
@@ -434,10 +443,10 @@ OD.define('activite', {
     // Carte des affaires : stade x jours depuis la dernière activité.
     const STADES = [
       { cle: 'commande', lib: 'Commande', col: C.vert },
-      { cle: 'devis', lib: 'Devis remis', col: C.orange },
-      { cle: 'affaire', lib: 'Sans devis', col: C.mbleu }];
+      { cle: 'devis', lib: 'Simulation', col: C.orange },
+      { cle: 'affaire', lib: 'Sans simulation', col: C.mbleu }];
     G.carte = function (box) {
-      const A = box.__d || [], W = box.clientWidth, H = 250, s = svgIn(box, W, H, 'Affaires par stade et jours sans activité'),
+      const A = box.__d || [], W = box.clientWidth, H = 250, s = svgIn(box, W, H, 'Opportunités par stade et jours sans activité'),
         L = W < 460 ? 94 : 104, R = W - 6, T = 6, B = H - 34, maxD = 28, bh = (B - T) / STADES.length;
       const X = d => L + (R - L) * Math.min(d, maxD) / maxD;
       const delai = { commande: 3, devis: 3, affaire: 7 };
@@ -450,7 +459,7 @@ OD.define('activite', {
         el('circle', { cx: 8, cy: y + bh / 2, r: 5, fill: b.col }, s);
         tx(s, 19, y + bh / 2 + 4, b.lib, { s: 11.5, w: 800 });
         const n = A.filter(a => a.etape === b.cle).length;
-        tx(s, 19, y + bh / 2 + 18, plur(n, 'affaire'), { s: 10, c: C.ink3, w: 600 });
+        tx(s, 19, y + bh / 2 + 18, plur(n, 'opportunité'), { s: 10, c: C.ink3, w: 600 });
       });
       [0, 7, 14, 21, 28].forEach(d => tx(s, X(d), B + 16, d === 28 ? '28 j +' : d + ' j', { a: 'middle', s: 10.5, c: C.ink3 }));
       tx(s, R, B + 31, 'jours depuis la dernière activité', { a: 'end', s: 10.5, c: C.ink3 });
@@ -471,7 +480,7 @@ OD.define('activite', {
     };
 
     G.quad = function (box) {
-      const P = box.__d || [], W = box.clientWidth, H = 240, s = svgIn(box, W, H, 'Équipe : objectif atteint et affaires bloquées'), L = 30, R = W - 8, T = 8, B = H - 36;
+      const P = box.__d || [], W = box.clientWidth, H = 240, s = svgIn(box, W, H, 'Équipe : objectif atteint et opportunités bloquées'), L = 30, R = W - 8, T = 8, B = H - 36;
       const maxB = Math.max(4, ...P.map(p => p.bloquees));
       const X = p => L + (R - L) * Math.min(p, 120) / 120, Y = n => B - (B - T) * Math.min(n, maxB) / maxB;
       el('rect', { x: L, y: T, width: X(80) - L, height: Y(maxB * .35) - T, rx: 10, fill: C.chaud }, s);
@@ -488,7 +497,7 @@ OD.define('activite', {
         const sel = String(p.id) === String(S.vendeur);
         el('circle', { cx: X(p.x), cy: Y(p.bloquees), r: 15, fill: sel ? C.bleu : C.card, stroke: sel ? C.card : C.bleu, 'stroke-width': 2 }, g);
         tx(g, X(p.x), Y(p.bloquees) + 4, p.ini, { a: 'middle', s: 10.5, w: 800, c: sel ? '#ffffff' : C.bleu });
-        const t = el('title', {}, g); t.textContent = p.nom + ' · ' + (p.objectif ? p.x + ' % de l\'objectif' : 'pas d\'objectif') + ' · ' + plur(p.bloquees, 'affaire bloquée', 'affaires bloquées');
+        const t = el('title', {}, g); t.textContent = p.nom + ' · ' + (p.objectif ? p.x + ' % de l\'objectif' : 'pas d\'objectif') + ' · ' + plur(p.bloquees, 'opportunité bloquée', 'opportunités bloquées');
         g.addEventListener('click', () => choisirVendeur(p.id));
       });
     };
@@ -510,7 +519,7 @@ OD.define('activite', {
     // Flux aligné en haut : la part qui avance continue, la perte tombe.
     G.flux = function (box) {
       const st = box.__d.etapes, loss = box.__d.pertes, W = box.clientWidth, n = st.length, nw = 10, step = (W - nw - 70) / (n - 1),
-        y0 = 62, maxH = W < 640 ? 96 : 128, drop = y0 + maxH + 44, H = drop + 40, s = svgIn(box, W, H, 'Parcours des affaires'), top = Math.max(1, st[0][1]);
+        y0 = 62, maxH = W < 640 ? 96 : 128, drop = y0 + maxH + 44, H = drop + 40, s = svgIn(box, W, H, 'Parcours des opportunités'), top = Math.max(1, st[0][1]);
       const hh = v => Math.max(4, maxH * v / top);
       st.forEach((p, i) => {
         const x = i * step, h = hh(p[1]);
@@ -545,7 +554,7 @@ OD.define('activite', {
       for (let v = x0; v <= x1; v += 5) tx(s, X(v), B + 16, v + ' %', { a: 'middle', s: 10.5, c: C.ink3 });
       el('line', { x1: X(mx), y1: T, x2: X(mx), y2: B, stroke: C.line2, 'stroke-dasharray': '4 4' }, s);
       el('line', { x1: L, y1: Y(my), x2: R, y2: Y(my), stroke: C.line2, 'stroke-dasharray': '4 4' }, s);
-      tx(s, R, B + 32, 'affaires transformées en commande', { a: 'end', s: 10.5, c: C.ink3 });
+      tx(s, R, B + 32, 'opportunités transformées en commande', { a: 'end', s: 10.5, c: C.ink3 });
       tx(s, L, T - 0, 'part financée', { s: 10.5, c: C.ink3 });
       const mxV = Math.max(1, ...P.map(p => p.v)), poses = [];
       const libre = (x, y, w) => { const bx = { x1: x, x2: x + w, y1: y - 11, y2: y + 3 }; if (bx.x1 < 0 || bx.x2 > W) return false; if (poses.some(o => bx.x1 < o.x2 && bx.x2 > o.x1 && bx.y1 < o.y2 && bx.y2 > o.y1)) return false; poses.push(bx); return true; };
@@ -559,7 +568,7 @@ OD.define('activite', {
         const lw = p.nom.length * 6.6;
         if (libre(left ? x - r - 6 - lw : x + r + 6, y + 4, lw)) tx(g, left ? x - r - 6 : x + r + 6, y + 4, p.nom, { a: left ? 'end' : 'start', s: 11, w: 800 });
         else if (libre(left ? x + r + 6 : x - r - 6 - lw, y + 4, lw)) tx(g, left ? x + r + 6 : x - r - 6, y + 4, p.nom, { a: left ? 'start' : 'end', s: 11, w: 800 });
-        const t = el('title', {}, g); t.textContent = p.nom + ' · ' + p.v + ' commandes · ' + p.x + ' % transformées · ' + p.y + ' % financées';
+        const t = el('title', {}, g); t.textContent = p.nom + ' · ' + p.v + ' commandes · ' + p.x + ' % des opportunités transformées · ' + p.y + ' % financées';
         g.addEventListener('click', () => allerSite(p.id));
       });
     };
@@ -601,6 +610,13 @@ OD.define('activite', {
     function seg(nom, options, actuel) {
       return '<div class="seg" role="group" data-seg="' + nom + '">' + options.map(o => '<button data-v="' + o[0] + '" aria-pressed="' + (o[0] === actuel) + '">' + esc(o[1]) + '</button>').join('') + '</div>';
     }
+    // Filtre d'univers commun à tous les écrans.
+    const U = () => S.univers || null;
+    const UK = () => ':' + (S.univers || 'tout');
+    const LIB_U = { VN: 'VN', VO: 'VO', PRO: 'Pro' };
+    const univSeg = () => seg('univers', [['', 'Tous'], ['VN', 'VN'], ['VO', 'VO'], ['PRO', 'Pro']], S.univers || '');
+    const pastille = u => u && LIB_U[u] ? '<span class="pill u-' + u + '">' + LIB_U[u] + '</span>' : '';
+    const repartition = (o, champ) => { if (!o) return ''; const x = ['VN', 'VO', 'PRO'].filter(k => o[k] != null).map(k => LIB_U[k] + ' ' + nf(champ ? o[k][champ] : o[k])); return x.join(' · '); };
     function projection(m) {
       if (!m || !m.jours_ecoules) return null;
       return Math.round(m.cdes * m.jours_total / m.jours_ecoules);
@@ -609,55 +625,56 @@ OD.define('activite', {
       const d = Math.max(0, Number(a.jours) || 0), l = Number(a.delai) || 0;
       if (a.statut_commande === 'Refused') return '<div class="jrow"><span class="jl"><b class="r">Commande refusée</b> · dernière activité il y a ' + plur(d, 'jour') + '</span></div>';
       let c = ''; for (let i = 0; i < Math.min(d, 40); i++) c += '<i class="' + (i < l ? 'ok' : 'ko') + '"></i>';
-      const quoi = { devis: 'depuis le dernier échange sur le devis', affaire: 'sans contact', commande: a.statut_commande === 'Awaiting Approval' ? 'en attente de validation' : 'commande à finaliser' }[a.etape] || '';
+      const quoi = { devis: 'depuis le dernier échange sur la simulation', affaire: 'sans contact', commande: a.statut_commande === 'Awaiting Approval' ? 'en attente de validation' : 'commande à finaliser' }[a.etape] || '';
       return '<div class="jrow"><div class="cases" aria-hidden="true">' + c + '</div><span class="jl"><b>' + plur(d, 'jour') + '</b> ' + quoi + ' · délai ' + l + ' j' + (d > l ? ' · <b class="r">' + (d - l) + ' j de retard</b>' : '') + '</span></div>';
     }
     const LEVIERS = {
-      'Devis sans suite': 'Relance à deux : <b>appel du chef des ventes</b> ou geste commercial sur le devis.',
+      'Simulation sans suite': 'Relance à deux : <b>appel du chef des ventes</b> ou geste commercial sur la simulation.',
       'Sans contact': 'Reprendre la main : <b>invitation à l\'essai</b> ou nouvelle proposition.',
       'En attente de validation': 'C\'est à vous : <b>valider le bon de commande</b> dans BACS.',
       'Commande à finaliser': '<b>Finaliser le bon de commande</b> avec le vendeur.',
       'Commande refusée': 'Revoir <b>le financement ou les conditions</b> avant de relancer.' };
-    const PILL = { 'Devis sans suite': 'rouge', 'Sans contact': 'orange', 'En attente de validation': 'orange', 'Commande à finaliser': 'bleu', 'Commande refusée': 'rouge' };
+    const PILL = { 'Simulation sans suite': 'rouge', 'Sans contact': 'orange', 'En attente de validation': 'orange', 'Commande à finaliser': 'bleu', 'Commande refusée': 'rouge' };
 
     // ------------------------------------------------------------------ écran VENDEUR
     function ecranVendeur() {
-      const d = S.data['v:moi'];
-      if (d === undefined) { charger('v:moi', () => rpc('act_vendeur', {})); return charge('Votre journée se prépare…'); }
-      if (d && d.__err) return erreur(d);
-      if (!d) return '<div class="vide">Aucune donnée.</div>';
+      const d = S.data['v:moi' + UK()];
+      const railV = '<div class="rail"><h1>Ma journée</h1><span class="badge">' + esc((d && d.user && d.user.site) || '') + '</span><div class="droite">' + univSeg() + '</div></div>';
+      if (d === undefined) { charger('v:moi' + UK(), () => rpc('act_vendeur', { p_univers: U() })); return railV + charge('Votre journée se prépare…'); }
+      if (d && d.__err) return railV + erreur(d);
+      if (!d) return railV + '<div class="vide">Aucune donnée.</div>';
       const m = d.mois || {}, aff = d.affaires || [], bloq = aff.filter(a => a.etat === 'bloquee');
       const reste = Math.max(0, (Number(m.objectif) || 0) - (Number(m.cdes) || 0));
       const pj = projection(m), now = auj();
       let titre = prenom(d.user) + ', ';
-      titre += bloq.length ? '<b>' + plur(bloq.length, 'affaire attend', 'affaires attendent') + '</b> une relance' : 'aucune affaire ne vous attend en retard';
+      titre += bloq.length ? '<b>' + plur(bloq.length, 'opportunité attend', 'opportunités attendent') + '</b> une relance' : 'aucune opportunité ne vous attend en retard';
       titre += m.objectif > 0 ? (reste > 0 ? ' et vous êtes à <b>' + plur(reste, 'commande') + '</b> de votre objectif.' : ' et votre objectif du mois est <b>atteint</b>.') : '.';
       // Journée : RDV du jour, leads à contacter, relances en retard (les plus grosses)
       const items = [];
       (d.rdv || []).forEach(r => items.push({ t: heure(r.debut), tri: r.debut, retard: false, titre: (r.type || 'RDV') + (r.client ? ' · ' + r.client : ''), sous: r.traite ? 'Compte rendu fait' : (new Date(r.debut) < now ? 'Compte rendu à faire' : 'À venir'), pill: ['vert', 'RDV'], client: r.id_client }));
       (d.leads || []).slice(0, 4).forEach(l => items.push({ t: 'Lead', tri: '0', retard: true, titre: 'Contacter ' + l.client, sous: l.source + ' · reçu le ' + new Date(l.recu_le).toLocaleDateString('fr-FR'), pill: ['rouge', 'Jamais joint'], client: l.id_client }));
-      bloq.slice().sort((a, b) => (Number(b.montant) || 0) - (Number(a.montant) || 0)).slice(0, 5).forEach(a => items.push({ t: 'Retard', tri: '1', retard: true, titre: 'Relancer ' + a.client, sous: a.motif + (a.vehicule ? ' · ' + a.vehicule : '') + (a.montant ? ' · ' + eur(a.montant) : ''), pill: ['rouge', a.jours + ' j'], client: a.id_client }));
+      bloq.slice().sort((a, b) => (Number(b.montant) || 0) - (Number(a.montant) || 0)).slice(0, 5).forEach(a => items.push({ t: 'Retard', tri: '1', retard: true, titre: 'Relancer ' + a.client, sous: (LIB_U[a.univers] ? LIB_U[a.univers] + ' · ' : '') + a.motif + (a.vehicule ? ' · ' + a.vehicule : '') + (a.montant ? ' · ' + eur(a.montant) : ''), pill: ['rouge', a.jours + ' j'], client: a.id_client }));
       const jour = JOURS[now.getDay()] + ' ' + now.getDate() + ' ' + MOIS[now.getMonth()];
       setTimeout(() => {
         const g1 = __anchor.querySelector('[data-g="anneau"]'); if (g1) g1.__d = { fait: Number(m.cdes) || 0, cible: Number(m.objectif) || 0, proj: pj, sous: 'commandes', label: m.cdes + ' commandes sur ' + m.objectif };
         const g2 = __anchor.querySelector('[data-g="carte"]'); if (g2) g2.__d = aff;
       });
-      return '<div class="rail"><h1>Ma journée</h1><span class="badge">' + esc(d.user && d.user.site || '') + '</span></div>' +
+      return railV +
         '<div class="band"><div><div class="q">' + esc(jour) + '</div><h2>' + titre + '</h2>' +
         '<div class="pouls">' +
-        '<div><div class="n">' + nf(m.cdes) + (m.objectif > 0 ? ' / ' + nf(m.objectif) : '') + '</div><div class="l">commandes du mois</div></div>' +
+        '<div><div class="n">' + nf(m.cdes) + (m.objectif > 0 ? ' / ' + nf(m.objectif) : '') + '</div><div class="l">commandes du mois' + (U() ? ' · ' + LIB_U[U()] : '') + '</div></div>' +
         '<div><div class="n' + (bloq.length ? ' baisse' : '') + '">' + bloq.length + '</div><div class="l">relances en retard</div></div>' +
-        '<div><div class="n">' + aff.filter(a => a.etat !== 'froide').length + '</div><div class="l">affaires actives</div></div>' +
+        '<div><div class="n">' + aff.filter(a => a.etat !== 'froide').length + '</div><div class="l">opportunités actives</div></div>' +
         '<div><div class="n">' + nf(m.jours_restants) + '</div><div class="l">jours ouvrés restants</div></div>' +
         '</div></div>' + graph('anneau', 'anneau') + '</div>' +
-        '<div class="cols"><div class="card"><div class="ch"><h3>La carte de mes affaires</h3><span>Bulle = une affaire · taille = montant</span></div>' +
-        (aff.length ? graph('carte') + lecture('Dans la zone rouge, l\'affaire a dépassé son délai de relance (devis et commande 3 j, affaire sans devis 7 j). Les bulles pâles n\'ont plus bougé depuis plus de 21 jours.') : '<div class="vide">Aucune affaire ouverte sur les 90 derniers jours.</div>') + '</div>' +
+        '<div class="cols"><div class="card"><div class="ch"><h3>La carte de mes opportunités</h3><span>Bulle = une opportunité · taille = montant</span></div>' +
+        (aff.length ? graph('carte') + lecture('Dans la zone rouge, l\'opportunité a dépassé son délai de relance (simulation et commande 3 j, opportunité sans simulation 7 j). Les bulles pâles n\'ont plus bougé depuis plus de 21 jours.') : '<div class="vide">Aucune opportunité ouverte sur les 90 derniers jours.</div>') + '</div>' +
         '<div class="card"><div class="ch"><h3>Aujourd\'hui</h3><span>' + plur(items.length, 'action') + '</span></div>' +
         (items.length ? '<div>' + items.map(i => '<div class="tl' + (i.retard ? ' retard' : '') + '"><time>' + esc(i.t) + '</time><div class="pin"><i></i></div><div class="tx">' +
           (i.client ? '<button class="lien" data-fiche="' + esc(i.client) + '"><b>' + esc(i.titre) + '</b></button>' : '<b>' + esc(i.titre) + '</b>') +
           '<small>' + esc(i.sous) + '</small></div><span class="pill ' + i.pill[0] + '">' + esc(i.pill[1]) + '</span></div>').join('') + '</div>' : '<div class="vide">Rien d\'urgent aujourd\'hui.</div>') +
         (d.leads_n > 4 ? '<div class="plus">+ ' + plur(d.leads_n - 4, 'autre lead') + ' à contacter dans le lead management.</div>' : '') +
-        '<div class="note">Cette semaine : ' + nf(d.semaine && d.semaine.appels) + ' appels, ' + nf(d.semaine && d.semaine.rdv) + ' RDV, ' + nf(d.semaine && d.semaine.devis) + ' devis, ' + nf(d.semaine && d.semaine.cdes) + ' commandes.</div></div></div>';
+        '<div class="note">Cette semaine : ' + nf(d.semaine && d.semaine.appels) + ' appels, ' + nf(d.semaine && d.semaine.rdv) + ' RDV, ' + nf(d.semaine && d.semaine.devis) + ' simulations, ' + nf(d.semaine && d.semaine.cdes) + ' commandes.</div></div></div>';
     }
 
     // ------------------------------------------------------------------ écran CHEF DES VENTES
@@ -666,59 +683,59 @@ OD.define('activite', {
       const site = siteUnique();
       if (site == null) return '<div class="vide">Aucun site dans votre périmètre.</div>';
       const per = S.periode.chef, b = bornes(per);
-      const cle = 'c:' + site + ':' + b.deb + ':' + b.fin;
+      const cle = 'c:' + site + ':' + b.deb + ':' + b.fin + UK();
       const d = S.data[cle];
-      const rail = '<div class="rail"><h1>Point du matin</h1><span class="badge">' + esc(nomSite(site)) + '</span><div class="droite">' +
+      const rail = '<div class="rail"><h1>Point du matin</h1><span class="badge">' + esc(nomSite(site)) + '</span><div class="droite">' + univSeg() +
         seg('chef', [['jour', 'Aujourd\'hui'], ['hier', 'Hier'], ['7j', '7 jours'], ['mois', 'Ce mois']], per) +
         DP.bouton(b.deb, b.fin, 'data-dp="chef"', 'Choisir les dates') + '</div></div>';
-      if (d === undefined) { charger(cle, () => rpc('act_chef', { p_id_site: site, p_deb: b.deb, p_fin: b.fin })); return rail + charge('Préparation du point du matin…'); }
+      if (d === undefined) { charger(cle, () => rpc('act_chef', { p_id_site: site, p_deb: b.deb, p_fin: b.fin, p_univers: U() })); return rail + charge('Préparation du point du matin…'); }
       if (d && d.__err) return rail + erreur(d);
       const eq = (d.equipe || []).filter(p => p.role === 4 || p.cdes > 0 || p.ouvertes > 0);
       if (!eq.length) return rail + '<div class="card"><div class="vide">Personne à suivre sur ce site.</div></div>';
       if (!S.vendeur || !eq.some(p => String(p.id) === String(S.vendeur))) S.vendeur = String(eq[0].id);
       const v = eq.find(p => String(p.id) === String(S.vendeur));
-      const cv = 'v:' + v.id;
+      const cv = 'v:' + v.id + UK();
       const dv = S.data[cv];
-      if (dv === undefined) charger(cv, () => rpc('act_vendeur', { p_id_user: Number(v.id) }));
+      if (dv === undefined) charger(cv, () => rpc('act_vendeur', { p_id_user: Number(v.id), p_univers: U() }));
       // moyenne équipe (vendeurs seulement)
       const vend = eq.filter(p => p.role === 4);
       const moy = k => vend.length ? vend.reduce((a, p) => a + (Number(p[k]) || 0), 0) / vend.length : 0;
       const atteinte = p => p.objectif > 0 ? Math.round(p.cdes / p.objectif * 100) : 0;
       setTimeout(() => {
         const q = __anchor.querySelector('[data-g="quad"]'); if (q) q.__d = eq.map(p => ({ id: p.id, ini: initiales(p), nom: nomCourt(p), x: atteinte(p), objectif: p.objectif, bloquees: p.bloquees }));
-        const e = __anchor.querySelector('[data-g="ecart"]'); if (e) e.__d = [['Appels', 'appels'], ['RDV tenus', 'rdv'], ['Devis', 'devis'], ['Commandes', 'cdes'], ['Leads joints', 'leads_contactes']].map(x => ({ lib: x[0], v: Number(v[x[1]]) || 0, moy: moy(x[1]) }));
+        const e = __anchor.querySelector('[data-g="ecart"]'); if (e) e.__d = [['Appels', 'appels'], ['RDV tenus', 'rdv'], ['Simulations', 'devis'], ['Commandes', 'cdes'], ['Leads joints', 'leads_contactes']].map(x => ({ lib: x[0], v: Number(v[x[1]]) || 0, moy: moy(x[1]) }));
         const a = __anchor.querySelector('[data-g="anneau"]'); if (a) a.__d = { fait: v.cdes, cible: v.objectif, proj: estMois(b) && dv && dv.mois ? projection(dv.mois) : null, sous: prenom(v) + ' · ' + b.lib, label: v.cdes + ' commandes' };
       });
       const team = '<div class="team" role="tablist" aria-label="Vendeur">' + eq.map(p => '<button class="who" role="tab" data-vendeur="' + p.id + '" aria-selected="' + (String(p.id) === String(S.vendeur)) + '"><span class="av">' + esc(initiales(p)) + '</span><span><b>' + esc(nomCourt(p)) + '</b><small' + (p.bloquees ? ' class="r"' : '') + '>' + (p.bloquees ? plur(p.bloquees, 'bloquée', 'bloquées') : 'rien de bloqué') + '</small></span></button>').join('') + '</div>';
       const reste = Math.max(0, v.objectif - v.cdes);
       const band = '<div class="band"><div><div class="q">' + esc(prenom(v) + ' ' + v.nom) + ' · ' + esc(b.lib) + '</div><h2>' +
-        (v.bloquees ? '<b>' + plur(v.bloquees, 'affaire bloque', 'affaires bloquent') + '</b>, <b>' + keur(v.valeur_bloquee) + '</b> en jeu.' : 'Aucune affaire bloquée.') +
+        (v.bloquees ? '<b>' + plur(v.bloquees, 'opportunité bloque', 'opportunités bloquent') + '</b>, <b>' + keur(v.valeur_bloquee) + '</b> en jeu.' : 'Aucune opportunité bloquée.') +
         (v.objectif > 0 ? (reste > 0 ? ' Il manque <b>' + plur(reste, 'commande') + '</b> pour l\'objectif.' : ' Objectif <b>atteint</b>.') : '') + '</h2>' +
         '<div class="pouls"><div><div class="n">' + nf(v.cdes) + (v.objectif > 0 ? ' / ' + nf(v.objectif) : '') + '</div><div class="l">commandes · équipe ' + nf(eq.reduce((a, p) => a + p.cdes, 0)) + '</div></div>' +
-        '<div><div class="n">' + nf(v.devis_ouverts) + '</div><div class="l">devis en cours</div></div>' +
+        '<div><div class="n">' + nf(v.devis_ouverts) + '</div><div class="l">simulations en cours</div></div>' +
         '<div><div class="n">' + pctTxt(v.leads_contactes, v.leads) + '</div><div class="l">leads joints (' + nf(v.leads_contactes) + ' / ' + nf(v.leads) + ')</div></div></div></div>' +
         graph('anneau', 'anneau') + '</div>';
       let liste;
-      if (dv === undefined) liste = charge('Chargement des affaires…');
+      if (dv === undefined) liste = charge('Chargement des opportunités…');
       else if (dv && dv.__err) liste = erreur(dv);
       else {
         const bl = (dv.affaires || []).filter(a => a.etat === 'bloquee').sort((a, b2) => (Number(b2.montant) || 0) - (Number(a.montant) || 0));
         const vis = bl.slice(0, 6);
         liste = vis.length ? vis.map(a => '<div class="deal" data-aff="' + esc(a.id_affaire) + '">' +
-          '<div><h4><button class="lien" data-fiche="' + esc(a.id_client) + '">' + esc(a.client) + '</button></h4><div class="car">' + esc([a.vehicule, a.etape === 'devis' ? 'devis' : a.etape === 'commande' ? 'bon de commande' : 'affaire sans devis', 'ouverte le ' + new Date(a.ouverte_le).toLocaleDateString('fr-FR')].filter(Boolean).join(' · ')) + '</div></div>' +
+          '<div><h4><button class="lien" data-fiche="' + esc(a.id_client) + '">' + esc(a.client) + '</button>' + pastille(a.univers) + '</h4><div class="car">' + esc([a.vehicule, a.etape === 'devis' ? 'simulation' : a.etape === 'commande' ? 'commande' : 'opportunité sans simulation', 'ouverte le ' + new Date(a.ouverte_le).toLocaleDateString('fr-FR')].filter(Boolean).join(' · ')) + '</div></div>' +
           '<div class="val"><b>' + (a.montant ? eur(a.montant) : '—') + '</b><span class="pill ' + (PILL[a.motif] || 'orange') + '">' + esc(a.motif) + '</span></div>' +
           '<div class="jours">' + cases(a) + '</div>' +
           '<div class="levier"><p>' + (LEVIERS[a.motif] || '') + '</p><button class="btn" data-fiche="' + esc(a.id_client) + '">Ouvrir la fiche</button><button class="btn sec" data-note="' + esc(a.id_affaire) + '">Note pour ' + esc(prenom(v)) + '</button></div>' +
           '<div class="notebox" data-notebox="' + esc(a.id_affaire) + '" hidden><textarea aria-label="Note pour ' + esc(prenom(v)) + '">' + esc(a.client + ' : ') + '</textarea><div class="act"><button class="btn" data-envoyer="' + esc(a.id_affaire) + '" data-client="' + esc(a.id_client) + '">Envoyer à ' + esc(prenom(v)) + '</button><button class="btn sec" data-annuler="' + esc(a.id_affaire) + '">Annuler</button><span class="etat"></span></div></div>' +
-          '</div>').join('') + (bl.length > 6 ? '<div class="plus">+ ' + plur(bl.length - 6, 'autre affaire bloquée', 'autres affaires bloquées') + ', de plus petite valeur.</div>' : '')
-          : '<div class="vide">Aucune affaire bloquée pour ' + esc(prenom(v)) + '.</div>';
+          '</div>').join('') + (bl.length > 6 ? '<div class="plus">+ ' + plur(bl.length - 6, 'autre opportunité bloquée', 'autres opportunités bloquées') + ', de plus petite valeur.</div>' : '')
+          : '<div class="vide">Aucune opportunité bloquée pour ' + esc(prenom(v)) + '.</div>';
       }
       const mins = eq.filter(p => p.objectif > 0 && atteinte(p) < 80 && p.bloquees > 0).map(p => prenom(p));
       return rail + team + band +
-        '<div class="cols"><div class="card"><div class="ch"><h3>Affaires qui bloquent</h3><span>Par valeur en jeu · état actuel</span></div>' + liste +
-        '<div class="note">Bloquée : délai de relance dépassé (devis et bon de commande 3 j, affaire sans devis 7 j, validation 2 j), commande refusée. Au-delà de 21 jours sans activité, l\'affaire est considérée comme froide.</div></div>' +
-        '<div class="pile"><div class="card"><div class="ch"><h3>L\'équipe en un regard</h3><span>Objectif × affaires bloquées</span></div>' + graph('quad') +
-        lecture(mins.length ? 'À accompagner en priorité : <b>' + esc(mins.join(', ')) + '</b>, en retard sur l\'objectif avec des affaires qui coincent.' : 'Personne n\'est à la fois en retard sur l\'objectif et bloqué sur des affaires.') + '</div>' +
+        '<div class="cols"><div class="card"><div class="ch"><h3>Opportunités qui bloquent</h3><span>Par valeur en jeu · état actuel</span></div>' + liste +
+        '<div class="note">Bloquée : délai de relance dépassé (simulation et commande 3 j, opportunité sans simulation 7 j, validation 2 j), commande refusée. Au-delà de 21 jours sans activité, l\'opportunité est considérée comme froide.</div></div>' +
+        '<div class="pile"><div class="card"><div class="ch"><h3>L\'équipe en un regard</h3><span>Objectif × opportunités bloquées</span></div>' + graph('quad') +
+        lecture(mins.length ? 'À accompagner en priorité : <b>' + esc(mins.join(', ')) + '</b>, en retard sur l\'objectif avec des opportunités qui coincent.' : 'Personne n\'est à la fois en retard sur l\'objectif et bloqué sur des opportunités.') + '</div>' +
         '<div class="card"><div class="ch"><h3>' + esc(prenom(v)) + ' sur la période</h3><span>Écart à la moyenne des vendeurs</span></div>' + graph('ecart') + '</div></div></div>';
     }
 
@@ -727,27 +744,27 @@ OD.define('activite', {
     function ecranSite() {
       const bus1 = siteBus(); const sites = bus1 != null && S.ctx.sites.some(s => Number(s.id) === Number(bus1)) ? [Number(bus1)] : null;
       const per = S.periode.site, b = bornes(per);
-      const k1 = 's:' + (sites || 'tout') + ':' + b.deb + ':' + b.fin, k2 = 'e:' + (sites || 'tout') + ':' + b.deb + ':' + b.fin;
+      const k1 = 's:' + (sites || 'tout') + ':' + b.deb + ':' + b.fin + UK(), k2 = 'e:' + (sites || 'tout') + ':' + b.deb + ':' + b.fin + UK();
       const titre = sites ? nomSite(sites[0]) : (S.ctx.sites.length === 1 ? S.ctx.sites[0].nom : 'Tout le périmètre');
-      const rail = '<div class="rail"><h1>' + esc(titre) + '</h1><span class="badge">Directeur de site</span><div class="droite">' +
+      const rail = '<div class="rail"><h1>' + esc(titre) + '</h1><span class="badge">Directeur de site</span><div class="droite">' + univSeg() +
         seg('site', [['mois', 'Ce mois'], ['mois_prec', 'Mois dernier'], ['3mois', '3 mois'], ['annee', 'Année']], per) + DP.bouton(b.deb, b.fin, 'data-dp="site"', 'Choisir les dates') + '</div></div>';
       const d = S.data[k1], e = S.data[k2];
-      if (d === undefined) charger(k1, () => rpc('act_site', { p_sites: sites, p_deb: b.deb, p_fin: b.fin }));
-      if (e === undefined) charger(k2, () => rpc('act_entonnoir', { p_sites: sites, p_deb: b.deb, p_fin: b.fin }));
+      if (d === undefined) charger(k1, () => rpc('act_site', { p_sites: sites, p_deb: b.deb, p_fin: b.fin, p_univers: U() }));
+      if (e === undefined) charger(k2, () => rpc('act_entonnoir', { p_sites: sites, p_deb: b.deb, p_fin: b.fin, p_univers: U() }));
       if (d === undefined || e === undefined) return rail + charge('Calcul du mois…');
       if (d.__err) return rail + erreur(d);
       if (e.__err) return rail + erreur(e);
       const m = d.mois || {}, t = (e && e.total) || { affaires: 0, devis: 0, gagnees: 0 }, L = d.entonnoir || {}, P = d.precedent || {};
       const pj = projection(m), enCours = estMois(b);
       const tr = pct(t.gagnees, t.affaires);
-      const fuite = (t.affaires - t.devis) >= (t.devis - t.gagnees) ? 'avant le devis' : 'entre le devis et la commande';
+      const fuite = (t.affaires - t.devis) >= (t.devis - t.gagnees) ? 'avant la simulation' : 'entre la simulation et la commande';
       setTimeout(() => {
         const a = __anchor.querySelector('[data-g="anneau"]'); if (a) a.__d = { fait: Number(m.cdes) || 0, cible: Number(m.objectif) || 0, proj: pj, sous: 'commandes · ' + MOIS[new Date(b.fin).getMonth()], label: m.cdes + ' commandes' };
-        const f = __anchor.querySelector('[data-g="flux"]'); if (f) f.__d = { etapes: [['Affaires créées', t.affaires], ['Devis remis', t.devis], ['Commandes', t.gagnees]], pertes: ['sans devis', 'devis non signés'] };
+        const f = __anchor.querySelector('[data-g="flux"]'); if (f) f.__d = { etapes: [['Opportunités', t.affaires], ['Simulations', t.devis], ['Commandes', t.gagnees]], pertes: ['sans simulation', 'simulations non signées'] };
       });
       const h2 = enCours && m.objectif > 0
-        ? 'Le mois finira à <b>' + plur(pj, 'commande') + ' sur ' + nf(m.objectif) + '</b> si le rythme se maintient. Les affaires se perdent surtout <b>' + fuite + '</b>.'
-        : '<b>' + plur(Number(d.cdes) || 0, 'commande') + '</b> sur la période. Les affaires se perdent surtout <b>' + fuite + '</b>.';
+        ? 'Le mois finira à <b>' + plur(pj, 'commande') + ' sur ' + nf(m.objectif) + '</b> si le rythme se maintient. Les opportunités se perdent surtout <b>' + fuite + '</b>.'
+        : '<b>' + plur(Number(d.cdes) || 0, 'commande') + '</b> sur la période. Les opportunités se perdent surtout <b>' + fuite + '</b>.';
       const motifs0 = d.motifs || [];
       const totM = motifs0.reduce((a, x) => a + x.n, 0);
       const autreN = motifs0.filter(x => x.motif === 'Autre' || x.n / totM < .025).reduce((a, x) => a + x.n, 0);
@@ -758,20 +775,21 @@ OD.define('activite', {
       const cdesV = {}; (d.vendeurs || []).forEach(x => { cdesV[x.id] = x.cdes; });
       return rail +
         '<div class="band"><div><div class="q">' + esc(b.lib) + '</div><h2>' + h2 + '</h2><div class="pouls">' +
-        '<div><div class="n">' + (tr == null ? '—' : tr + ' %') + '</div><div class="l">affaires transformées</div></div>' +
+        '<div><div class="n">' + (tr == null ? '—' : tr + ' %') + '</div><div class="l">opportunités transformées</div></div>' +
+        (!U() && d.cdes_univers ? '<div><div class="n" style="font-size:15px;padding-top:5px">' + esc(repartition(d.cdes_univers)) + '</div><div class="l">commandes par univers</div></div>' : '') +
         '<div><div class="n">' + pctTxt(d.fi, d.cdes) + '</div><div class="l">ventes financées par nos soins</div></div>' +
         '<div><div class="n">' + (L.delai_cde != null ? L.delai_cde + ' j' : '—') + '</div><div class="l">délai lead → commande</div></div>' +
         '</div></div>' + graph('anneau', 'anneau') + '</div>' +
-        '<div class="card"><div class="ch"><h3>Le parcours des ' + plur(t.affaires, 'affaire créée', 'affaires créées') + '</h3><span>Ce qui avance, ce qui tombe à chaque étape</span></div>' +
-        (t.affaires ? graph('flux') : '<div class="vide">Aucune affaire créée sur la période.</div>') + '</div>' +
-        '<div class="cols eq"><div class="card"><div class="ch"><h3>Pourquoi on perd</h3><span>Affaires abandonnées · 90 jours</span></div>' +
+        '<div class="card"><div class="ch"><h3>Le parcours des ' + plur(t.affaires, 'opportunité créée', 'opportunités créées') + '</h3><span>Ce qui avance, ce qui tombe à chaque étape</span></div>' +
+        (t.affaires ? graph('flux') : '<div class="vide">Aucune opportunité créée sur la période.</div>') + '</div>' +
+        '<div class="cols eq"><div class="card"><div class="ch"><h3>Pourquoi on perd</h3><span>Opportunités abandonnées · 90 jours</span></div>' +
         (totM ? '<div class="mosaic">' + motifs.slice(0, 6).map(x => { const c = MOSAIQUE[x.motif] || ['var(--calme-bg)', 'var(--ink-2)']; return '<div style="flex:' + x.n + ' 1 0;background:' + c[0] + ';color:' + c[1] + '"><b>' + Math.round(x.n / totM * 100) + ' %</b><span>' + esc(x.motif) + '</span></div>'; }).join('') + '</div>' +
-          '<div class="note">Motif d\'abandon saisi dans BACS sur ' + plur(totM, 'affaire') + ' (doublons exclus). Seules ' + precis + ' % portent un motif précis : un levier de qualité de saisie.</div>' : '<div class="vide">Aucun motif d\'abandon saisi sur 90 jours.</div>') + '</div>' +
+          '<div class="note">Motif d\'abandon saisi dans BACS sur ' + plur(totM, 'opportunité') + ' (doublons exclus). Seules ' + precis + ' % portent un motif précis : un levier de qualité de saisie.</div>' : '<div class="vide">Aucun motif d\'abandon saisi sur 90 jours.</div>') + '</div>' +
         '<div class="card"><div class="ch"><h3>Leads web : ce que donne chaque source</h3><span>1 point = 2 % des leads · part obtenant un RDV</span></div>' +
         (sources.length ? '<div class="dots">' + sources.map(s => { const p2 = pct(s.rdv, s.n) || 0; let g = ''; for (let i = 0; i < 50; i++) g += '<i' + (i < Math.round(p2 / 2) ? ' class="f"' : '') + '></i>'; return '<div class="dotrow"><span>' + esc(s.source) + '<small>' + plur(s.n, 'lead') + '</small></span><div class="g">' + g + '</div><b>' + p2 + ' %</b></div>'; }).join('') + '</div>' : '<div class="vide">Pas assez de leads sur la période.</div>') +
-        '<div class="note">' + nf(L.recus) + ' leads reçus, ' + pctTxt(L.contactes, L.recus) + ' joints' + (P.recus ? ' (période précédente : ' + nf(P.recus) + ' reçus)' : '') + '.</div></div></div>' +
+        '<div class="note">' + nf(L.recus) + ' leads reçus, ' + pctTxt(L.contactes, L.recus) + ' joints' + (P.recus ? ' (période précédente : ' + nf(P.recus) + ' reçus)' : '') + '.' + (U() === 'PRO' ? ' Un lead n\'indique pas s\'il vient d\'un professionnel : tous les leads sont comptés.' : '') + '</div></div></div>' +
         '<div class="cols"><div class="card"><div class="ch"><h3>Les vendeurs côte à côte</h3><span>' + esc(b.lib) + '</span></div>' +
-        (ev.length ? '<div class="scroll"><table><thead><tr><th>Vendeur</th><th>Affaires</th><th>Devis</th><th>Gagnées</th><th>Transformation</th><th>Commandes</th></tr></thead><tbody>' +
+        (ev.length ? '<div class="scroll"><table><thead><tr><th>Vendeur</th><th>Opportunités</th><th>Simulations</th><th>Commandes</th><th>Transformation</th><th title="Toutes les commandes de la période, quelle que soit la date de l\'opportunité">Total cdes</th></tr></thead><tbody>' +
           ev.map(x => { const p3 = pct(x.gagnees, x.affaires) || 0; return '<tr><td><b>' + esc(x.nom) + '</b></td><td>' + nf(x.affaires) + '</td><td>' + nf(x.devis) + '</td><td>' + nf(x.gagnees) + '</td><td><b>' + p3 + ' %</b><span class="mini"><i style="width:' + Math.min(100, p3 * 2) + '%"></i></span></td><td>' + nf(cdesV[x.id_user] != null ? cdesV[x.id_user] : x.gagnees) + '</td></tr>'; }).join('') +
           '</tbody></table></div>' : '<div class="vide">Pas d\'activité vendeur sur la période.</div>') + '</div>' +
         '<div class="card"><div class="ch"><h3>Anatomie d\'une vente</h3><span class="pill attente">À brancher · ventes DMS</span></div>' +
@@ -786,12 +804,12 @@ OD.define('activite', {
     // ------------------------------------------------------------------ écran GROUPE
     function ecranGroupe() {
       const per = S.periode.groupe, b = bornes(per);
-      const k1 = 'g:' + b.deb + ':' + b.fin, k2 = 'e:tout:' + b.deb + ':' + b.fin;
-      const rail = '<div class="rail"><h1>' + esc(S.ctx.sites.length > 3 ? 'Groupe' : 'Mes sites') + '</h1><span class="badge">Direction</span><div class="droite">' +
+      const k1 = 'g:' + b.deb + ':' + b.fin + UK(), k2 = 'e:tout:' + b.deb + ':' + b.fin + UK();
+      const rail = '<div class="rail"><h1>' + esc(S.ctx.sites.length > 3 ? 'Groupe' : 'Mes sites') + '</h1><span class="badge">Direction</span><div class="droite">' + univSeg() +
         seg('groupe', [['mois', 'Ce mois'], ['mois_prec', 'Mois dernier'], ['3mois', '3 mois'], ['annee', 'Année']], per) + DP.bouton(b.deb, b.fin, 'data-dp="groupe"', 'Choisir les dates') + '</div></div>';
       const d = S.data[k1], e = S.data[k2];
-      if (d === undefined) charger(k1, () => rpc('act_groupe', { p_deb: b.deb, p_fin: b.fin }));
-      if (e === undefined) charger(k2, () => rpc('act_entonnoir', { p_sites: null, p_deb: b.deb, p_fin: b.fin }));
+      if (d === undefined) charger(k1, () => rpc('act_groupe', { p_deb: b.deb, p_fin: b.fin, p_univers: U() }));
+      if (e === undefined) charger(k2, () => rpc('act_entonnoir', { p_sites: null, p_deb: b.deb, p_fin: b.fin, p_univers: U() }));
       if (d === undefined || e === undefined) return rail + charge('Consolidation des sites…');
       if (d.__err) return rail + erreur(d);
       if (e.__err) return rail + erreur(e);
@@ -812,13 +830,13 @@ OD.define('activite', {
       const avecTr = pts.slice().sort((a, b2) => a.x - b2.x);
       if (avecTr.length >= 3) {
         const bas = avecTr[0], haut = avecTr[avecTr.length - 1];
-        if (bas.x < moyX - 3) sig.push(['!', 'rouge', bas.nom + ' : ' + bas.x + ' % des affaires transformées', 'Contre ' + moyX + ' % en moyenne sur le groupe.']);
-        if (haut.x > moyX + 3) sig.push(['✓', 'vert', haut.nom + ' : ' + haut.x + ' % des affaires transformées', 'Le meilleur taux du groupe : une méthode à regarder de près.']);
+        if (bas.x < moyX - 3) sig.push(['!', 'rouge', bas.nom + ' : ' + bas.x + ' % des opportunités transformées', 'Contre ' + moyX + ' % en moyenne sur le groupe.']);
+        if (haut.x > moyX + 3) sig.push(['✓', 'vert', haut.nom + ' : ' + haut.x + ' % des opportunités transformées', 'Le meilleur taux du groupe : une méthode à regarder de près.']);
         const fiBas = pts.slice().sort((a, b2) => a.y - b2.y)[0];
         if (fiBas && fiBas.y < moyY - 8) sig.push(['€', 'orange', fiBas.nom + ' : ' + fiBas.y + ' % de ventes financées', 'Contre ' + moyY + ' % en moyenne.']);
       }
       const bq = S2.slice().sort((a, b2) => b2.valeur_bloquee - a.valeur_bloquee)[0];
-      if (bq && bq.bloquees > 0) sig.push(['⏱', 'orange', bq.nom + ' : ' + plur(bq.bloquees, 'affaire bloquée', 'affaires bloquées'), keur(bq.valeur_bloquee) + ' en jeu, relances en retard.']);
+      if (bq && bq.bloquees > 0) sig.push(['⏱', 'orange', bq.nom + ' : ' + plur(bq.bloquees, 'opportunité bloquée', 'opportunités bloquées'), keur(bq.valeur_bloquee) + ' en jeu, relances en retard.']);
       const sansObj = S2.filter(s => !(Number(s.objectif_mois) > 0)).length;
       // Série hebdomadaire du groupe
       const nbS = (S2[0].semaines || []).length, lundi = new Date(); lundi.setDate(lundi.getDate() - ((lundi.getDay() + 6) % 7));
@@ -831,14 +849,15 @@ OD.define('activite', {
       });
       const meilleur = avecTr.length ? avecTr[avecTr.length - 1] : null, pire = avecTr.length ? avecTr[0] : null;
       return rail +
-        '<div class="band"><div><div class="q">' + esc(b.lib) + ' · ' + plur(S2.length, 'site actif', 'sites actifs') + '</div><h2><b>' + plur(tot.cdes, 'commande') + '</b>, ' + (moyX ? '<b>' + moyX + ' %</b> des affaires transformées' : '') +
+        '<div class="band"><div><div class="q">' + esc(b.lib) + ' · ' + plur(S2.length, 'site actif', 'sites actifs') + '</div><h2><b>' + plur(tot.cdes, 'commande') + '</b>, ' + (moyX ? '<b>' + moyX + ' %</b> des opportunités transformées' : '') +
         (meilleur && pire && meilleur !== pire ? ', de <b>' + pire.x + ' %</b> à ' + esc(pire.nom) + ' à <b>' + meilleur.x + ' %</b> à ' + esc(meilleur.nom) : '') + '.</h2>' +
         '<div class="pouls"><div><div class="n">' + pctTxt(tot.fi, tot.cdes) + '</div><div class="l">ventes financées par nos soins</div></div>' +
-        '<div><div class="n">' + nf(tot.bloq) + '</div><div class="l">affaires bloquées · ' + keur(tot.val) + '</div></div>' +
+        '<div><div class="n">' + nf(tot.bloq) + '</div><div class="l">opportunités bloquées · ' + keur(tot.val) + '</div></div>' +
+        (!U() && e.par_univers ? '<div><div class="n" style="font-size:15px;padding-top:5px">' + esc(repartition(e.par_univers, 'gagnees')) + '</div><div class="l">commandes issues des opportunités</div></div>' : '') +
         (pjG != null && estMois(b) ? '<div><div class="n">' + nf(pjG) + '</div><div class="l">commandes projetées fin de mois</div></div>' : '') + '</div></div>' +
         graph('anneau', 'anneau') + '</div>' +
         '<div class="cols"><div class="card"><div class="ch"><h3>Transformation et financement</h3><span>Bulle = commandes · clic pour ouvrir le site</span></div>' +
-        (pts.length >= 2 ? graph('constellation') + lecture('En vert : les sites au-dessus de la moyenne du groupe sur les deux axes. Plus la bulle est à droite, plus les affaires deviennent des commandes ; plus elle est haute, plus les ventes passent par notre financement.') : '<div class="vide">Pas assez de sites actifs pour les comparer.</div>') + '</div>' +
+        (pts.length >= 2 ? graph('constellation') + lecture('En vert : les sites au-dessus de la moyenne du groupe sur les deux axes. Plus la bulle est à droite, plus les opportunités deviennent des commandes ; plus elle est haute, plus les ventes passent par notre financement.') : '<div class="vide">Pas assez de sites actifs pour les comparer.</div>') + '</div>' +
         '<div class="card"><div class="ch"><h3>Ce qui mérite une question</h3><span>Détecté automatiquement</span></div>' +
         (sig.length ? '<div>' + sig.map(x => '<div class="signal"><span class="lv" style="background:var(--' + (x[1] === 'rouge' ? 'chaud-bg' : x[1] === 'vert' ? 'ok-bg' : 'alerte-bg') + ');color:var(--m-' + x[1] + ')">' + x[0] + '</span><p>' + esc(x[2]) + '<small>' + esc(x[3]) + '</small></p></div>').join('') + '</div>' : '<div class="vide">Aucun écart marquant.</div>') +
         (sansObj ? '<div class="note">' + plur(sansObj, 'site n\'a', 'sites n\'ont') + ' pas d\'objectif saisi ce mois-ci.</div>' : '') + '</div></div>' +
@@ -872,7 +891,7 @@ OD.define('activite', {
       __anchor.querySelectorAll('[data-seg]').forEach(g => g.addEventListener('click', ev => {
         const b = ev.target.closest('button'); if (!b) return;
         const nom = g.getAttribute('data-seg'), v = b.getAttribute('data-v');
-        if (nom === 'ecran') S.ecran = v; else { S.periode[nom] = v; if (nom === 'chef') S.plage = null; }
+        if (nom === 'ecran') S.ecran = v; else if (nom === 'univers') S.univers = v || null; else { S.periode[nom] = v; if (nom === 'chef') S.plage = null; }
         rendre();
       }));
       __anchor.querySelectorAll('[data-dp]').forEach(btn => btn.addEventListener('click', () => {
