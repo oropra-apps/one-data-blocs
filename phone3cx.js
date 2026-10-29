@@ -1,5 +1,8 @@
 // ============================================================================
-//  One Data — TELEPHONIE 3CX cote vendeur (module ambiant, sans ancre WeWeb)  v8
+//  One Data — TELEPHONIE 3CX cote vendeur (module ambiant, sans ancre WeWeb)  v9
+//  v9 (29/10/2026) : a la sonnerie, le panneau s'affiche mais la fiche client
+//  n'est plus ouverte ni selectionnee automatiquement : seul le bouton
+//  « Voir la fiche » l'ouvre.
 //  v8 (27/10/2026) : « Voir la fiche » ouvre la fiche client par son chemin
 //  /fr/fiche-client ; l'ancien appel envoyait vers la page de connexion.
 //  v7 (22/10/2026) : ne se monte que pour les licences Connect et Full
@@ -282,8 +285,8 @@ OD.define('phone3cx', {
         S.appel = Object.assign({}, S.appel, p);
         rendre();
 
-        // La fiche s'ouvre des la sonnerie, avant meme le decroche.
-        if (p.etat === 'sonnerie' && p.idClient) ouvrirFiche(p.idClient);
+        // v9 : la fiche ne s'ouvre plus d'elle-meme a la sonnerie ; seulement
+        // quand le vendeur clique « Voir la fiche » dans le panneau d'appel.
       });
       canal.subscribe((st) => { if (st === 'SUBSCRIBED') console.log('[3cx] téléphonie active'); });
       win.__od3cxCanal = canal;
