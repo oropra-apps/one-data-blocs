@@ -26,6 +26,12 @@
 //  les deux pour sa colonne Cde. L'objectif de financement quitte la saisie :
 //  il vaut la moitié des commandes réalisées hors loueurs (Kinto, Arval) et se
 //  calcule dans v_performances_tc.
+//  v12 (29/10/2026) : LEXUS SANS VU NI ARVAL. Les concessions Lexus ne vendent
+//  pas d'utilitaires et ne travaillent pas avec Arval : ces deux objectifs ne
+//  se saisissent plus pour une ligne Lexus (cellule « — », rien n'est écrit
+//  dans objectif_kpi) et ne sont jamais répartis sur elle. Quand tout le
+//  périmètre affiché est Lexus, les colonnes VU et Arval disparaissent du
+//  tableau, des fiches, de l'atelier et de la vue vendeur.
 //  Rendu dans __anchor ; SUPABASE_URL/KEY -> ctx.tenant ; getUserJwt() ->
 //  session du client runtime ; doc -> __anchor.ownerDocument. User = oropraUser.
 //  Périmètre 100% v_mon_perimetre (VAR_SITES retirée). 0 vestige.
@@ -112,6 +118,13 @@ const FIELDS = OBJ_TABLE_FIELDS.concat(KPI_TABLE_FIELDS)
 const SECONDARY = IS_TC
   ? [{ k: 'pro', label: 'Pro' }, { k: 'phev_ev', label: 'PHEV / EV' }, { k: 'vu', label: 'VU' }, { k: 'kinto', label: 'Kinto' }, { k: 'arval', label: 'Arval' }]
   : [{ k: 'financements', label: 'Financement' }, { k: 'contrat_service', label: 'CS' }, { k: 'waxoyl', label: 'Waxoyl' }, { k: 'gravage', label: 'Gravage' }]
+
+// --- Lexus : ni VU ni Arval (29/10/2026) ---
+const KPI_TOYOTA_SEUL = IS_TC ? ['vu', 'arval'] : []
+function estLexus(r) { return String((r && (r._reseau || r.reseau)) || '').trim().toUpperCase() === 'LEXUS' }
+function kpiApplicable(r, k) { return KPI_TOYOTA_SEUL.indexOf(k) < 0 || !estLexus(r) }
+function lexusSeul(rows) { return KPI_TOYOTA_SEUL.length > 0 && Array.isArray(rows) && rows.length > 0 && rows.every(estLexus) }
+function colonnesPour(list, rows) { return lexusSeul(rows) ? list.filter(function (c) { return KPI_TOYOTA_SEUL.indexOf(c.k) < 0 }) : list }
 
 const userConnected = ((wwLib.getFrontWindow && wwLib.getFrontWindow()) || window).oropraUser
 const role = Number(userConnected?.ID_Role)
@@ -285,7 +298,7 @@ async function saveDraft(btn) {
 // Upsert des KPI Team Colin (une ligne par indicateur dans objectif_kpi).
 // PostgREST : POST + on_conflict + Prefer resolution=merge-duplicates.
 async function saveKpiRow(r, jwt) {
-  const rows = KPI_TABLE_FIELDS.map(function (f) {
+  const rows = KPI_TABLE_FIELDS.filter(function (f) { return kpiApplicable(r, f) }).map(function (f) {
     return { annee: state.annee, mois: state.mois, id_user: r.id_user, id_site: r.id_site, vn_vo: String(r.vn_vo).toUpperCase(), kpi: f, valeur: parseInt(r[f]) || 0 }
   })
   try {
@@ -326,7 +339,11 @@ function repartir() {
   ensureCapDefaults()
   const w = rowWeights(rows, state.methode)
   const cmd = allocate(Math.max(0, parseInt(state.cap.commandes) || 0), w); rows.forEach(function (r, i) { r.commandes = cmd[i] })
-  SECONDARY.forEach(function (s) { const arr = allocate(cibleOf(s.k), w); rows.forEach(function (r, i) { r[s.k] = arr[i] }) })
+  SECONDARY.forEach(function (s) {
+    const idx = []; rows.forEach(function (r, i) { if (kpiApplicable(r, s.k)) idx.push(i); else r[s.k] = 0 })
+    const arr = allocate(cibleOf(s.k), idx.map(function (i) { return w[i] }))
+    idx.forEach(function (i, j) { rows[i][s.k] = arr[j] })
+  })
   const c = Math.max(0, parseInt(state.cap.contacts) || 0); rows.forEach(function (r) { r.contacts_jour = c })
   state._saveMsg = null; renderObj()
 }
@@ -418,7 +435,8 @@ function makeAtelier(doc) {
   secWrap.innerHTML = '<div style="font-size:11px;color:#acc5e4;text-transform:uppercase;letter-spacing:.4px;margin-bottom:6px">Taux (pré-rempli M-1) → cible d\u2019équipe</div>'
   const grid = doc.createElement('div'); grid.style.cssText = 'display:grid;grid-template-columns:repeat(auto-fit,minmax(215px,1fr));gap:8px'
   const refs = {}
-  SECONDARY.forEach(function (s) {
+  const secAff = colonnesPour(SECONDARY, scopeRows())
+  secAff.forEach(function (s) {
     const cell = doc.createElement('div'); cell.style.cssText = 'display:grid;grid-template-columns:minmax(0,1fr) 50px 10px 12px 56px;align-items:center;gap:5px;background:#f5f8fc;border-radius:8px;padding:6px 9px;min-width:0'
     const lab = doc.createElement('span'); lab.style.cssText = 'font-size:11px;color:#7a9cc4;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0'; lab.textContent = s.label
     const taux = numInput(state.cap.taux[s.k], 56)
@@ -432,7 +450,7 @@ function makeAtelier(doc) {
   })
   secWrap.appendChild(grid); cap.appendChild(secWrap)
 
-  inCmd.addEventListener('input', function () { state.cap.commandes = Math.max(0, parseInt(inCmd.value) || 0); SECONDARY.forEach(function (s) { refs[s.k].cible.value = cibleOf(s.k) }); updateBalanceBar() })
+  inCmd.addEventListener('input', function () { state.cap.commandes = Math.max(0, parseInt(inCmd.value) || 0); secAff.forEach(function (s) { refs[s.k].cible.value = cibleOf(s.k) }); updateBalanceBar() })
   inCon.addEventListener('input', function () { state.cap.contacts = Math.max(0, parseInt(inCon.value) || 0) })
   card.appendChild(cap)
 
@@ -485,6 +503,7 @@ function updateBalanceBar() {
 // --- édition cellule (brouillon, pas de PATCH) ---
 function makeEditableCell(r, field, doc) {
   const td = doc.createElement('td')
+  if (!kpiApplicable(r, field)) { td.style.cssText = 'padding:' + CELL_PAD + ';text-align:center;color:#acc5e4;font-size:12px'; td.title = 'Sans objet chez Lexus'; td.textContent = '—'; return td }
   if (!canEdit) { td.style.cssText = 'padding:' + CELL_PAD + ';text-align:center'; const s = doc.createElement('span'); s.style.cssText = 'color:#4a6a8a;font-size:12px'; s.textContent = r[field] || 0; td.appendChild(s); return td }
   td.style.cssText = 'padding:' + CELL_PAD + ';text-align:center;cursor:pointer'; let editing = false
   const dirty = function () { const o = originalSnap[rowKey(r)]; return o && num(o[field]) !== num(r[field]) }
@@ -502,8 +521,9 @@ function makeEditableCell(r, field, doc) {
 // Densité du tableau : resserrée sur le profil Team Colin (7 colonnes chiffrées).
 const CELL_PAD = IS_TC ? '3px 6px' : '6px 8px'
 const COL_W = IS_TC ? '74px' : '90px'
-function aggNew() { const a = {}; GKEYS.forEach(function (k) { a[k.k] = 0 }); return a }
-function aggAdd(a, r) { GKEYS.forEach(function (k) { a[k.k] += num(r[k.k]) }) }
+function aggNew() { const a = { _n: 0, _lexN: 0 }; GKEYS.forEach(function (k) { a[k.k] = 0 }); return a }
+function aggAdd(a, r) { a._n++; if (estLexus(r)) a._lexN++; GKEYS.forEach(function (k) { a[k.k] += num(r[k.k]) }) }
+function aggLexus(a) { return KPI_TOYOTA_SEUL.length > 0 && a && a._n > 0 && a._lexN === a._n }
 function buildTree(rows) {
   const R = {}
   rows.forEach(function (r) { const rk = r._reseau, ak = r._affaire, sk = String(r.id_site), tk = (String(r.vn_vo).toUpperCase() || '—'), vk = String(r.id_user); if (!R[rk]) R[rk] = { label: rk, agg: aggNew(), aff: {} }; aggAdd(R[rk].agg, r); const A = R[rk].aff; if (!A[ak]) A[ak] = { label: ak, agg: aggNew(), sites: {} }; aggAdd(A[ak].agg, r); const S = A[ak].sites; if (!S[sk]) S[sk] = { label: r._site, id_site: r.id_site, agg: aggNew(), types: {} }; aggAdd(S[sk].agg, r); const T = S[sk].types; if (!T[tk]) T[tk] = { label: tk, agg: aggNew(), vend: {} }; aggAdd(T[tk].agg, r); const V = T[tk].vend; if (!V[vk]) V[vk] = { label: r._vendeur, id_user: r.id_user, agg: aggNew(), rows: [] }; aggAdd(V[vk].agg, r); V[vk].rows.push(r) })
@@ -581,7 +601,7 @@ function renderCards(rootEl, doc) {
       if (r.marque) { const mq = doc.createElement('span'); mq.style.cssText = 'font-size:11px;color:#bcd3ef;font-weight:500'; mq.textContent = r.marque; head.appendChild(mq) }
       card.appendChild(head)
       const body = doc.createElement('div'); body.style.cssText = 'padding:2px 14px 6px'
-      GKEYS.forEach(function (k, gi) {
+      GKEYS.filter(function (k) { return kpiApplicable(r, k.k) }).forEach(function (k, gi) {
         const line = doc.createElement('div'); line.style.cssText = 'display:flex;align-items:center;justify-content:space-between;gap:10px;padding:5px 0' + (gi ? ';border-top:0.5px solid #f1f5fb' : '')
         const lab = doc.createElement('span'); lab.style.cssText = 'font-size:13px;color:#4a6a8a'; lab.textContent = k.label; line.appendChild(lab)
         if (canEdit) {
@@ -608,21 +628,24 @@ function renderTree(rootEl, doc) {
   const rows = visibleRows()
   if (!rows.length) { const m = doc.createElement('div'); m.style.cssText = 'text-align:center;padding:30px;color:#7a9cc4;font-size:12px;font-style:italic'; m.textContent = 'Aucun objectif pour cette période.'; rootEl.appendChild(m); return }
   const tree = buildTree(rows)
+  const COLS = colonnesPour(GKEYS, rows)
   const nbSites = tree.reduce(function (s, R) { return s + R.affaires.reduce(function (x, A) { return x + A.sitesArr.length }, 0) }, 0)
   const sitesDef = nbSites <= 3, oneR = tree.length === 1
   const table = doc.createElement('table'); table.className = 'obj-tree'; table.style.cssText = 'width:100%;border-collapse:collapse;font-size:12px;table-layout:fixed'
-  const cg = doc.createElement('colgroup');[IS_TC ? '210px' : '230px'].concat(GKEYS.map(function () { return COL_W })).forEach(function (w) { const c = doc.createElement('col'); c.style.width = w; cg.appendChild(c) }); table.appendChild(cg)
+  const cg = doc.createElement('colgroup');[IS_TC ? '210px' : '230px'].concat(COLS.map(function () { return COL_W })).forEach(function (w) { const c = doc.createElement('col'); c.style.width = w; cg.appendChild(c) }); table.appendChild(cg)
   const th = doc.createElement('thead'), hr = doc.createElement('tr'); hr.style.cssText = 'background:#2a5ea9'
-    ;['Périmètre'].concat(GKEYS.map(function (k) { return k.label })).forEach(function (h, i, arr) { const e = doc.createElement('th'); e.style.cssText = 'color:#fff;font-weight:400;padding:7px 8px;text-align:' + (i === 0 ? 'left' : 'center') + ';font-size:10px'; if (i === 0) e.style.borderRadius = '5px 0 0 5px'; if (i === arr.length - 1) e.style.borderRadius = '0 5px 5px 0'; e.textContent = h; hr.appendChild(e) })
+    ;['Périmètre'].concat(COLS.map(function (k) { return k.label })).forEach(function (h, i, arr) { const e = doc.createElement('th'); e.style.cssText = 'color:#fff;font-weight:400;padding:7px 8px;text-align:' + (i === 0 ? 'left' : 'center') + ';font-size:10px'; if (i === 0) e.style.borderRadius = '5px 0 0 5px'; if (i === arr.length - 1) e.style.borderRadius = '0 5px 5px 0'; e.textContent = h; hr.appendChild(e) })
   th.appendChild(hr); table.appendChild(th)
   const tb = doc.createElement('tbody'); table.appendChild(tb)
   function caret(open, key) { const c = doc.createElement('span'); c.textContent = open ? '▾ ' : '▸ '; c.style.cssText = 'color:#7a9cc4;cursor:pointer'; c.addEventListener('click', function (e) { e.stopPropagation(); state.expanded[key] = !open; renderObj() }); return c }
   function sumTd(v, col, wt) { const td = doc.createElement('td'); td.style.cssText = 'padding:' + CELL_PAD + ';text-align:center;font-size:12px;color:' + col + ';font-weight:' + wt + ';font-variant-numeric:tabular-nums'; td.textContent = Math.round(v); return td }
+  // Cellule d'agrégat : « — » pour VU / Arval sur un nœud entièrement Lexus.
+  function aggTd(agg, k, col, wt) { if (KPI_TOYOTA_SEUL.indexOf(k) >= 0 && aggLexus(agg)) { const td = sumTd(0, '#acc5e4', 400); td.textContent = '—'; td.title = 'Sans objet chez Lexus'; return td } return sumTd(agg[k], col, wt) }
   function aggRow(label, key, agg, bg, pad, col, wt, open, selObj) {
     const tr = doc.createElement('tr'); tr.style.cssText = 'border-bottom:0.5px solid #eaf0f9;background:' + (selObj && selEquals(selObj.level, selObj) ? '#dde9f7' : bg) + ';cursor:pointer'
     const td0 = doc.createElement('td'); td0.style.cssText = 'padding:' + CELL_PAD + ';padding-left:' + pad + 'px;font-size:12px;color:' + col + ';font-weight:' + wt + ';white-space:nowrap;overflow:hidden;text-overflow:ellipsis'
     td0.appendChild(caret(open, key)); td0.appendChild(doc.createTextNode(label)); tr.appendChild(td0)
-    GKEYS.forEach(function (k) { tr.appendChild(sumTd(agg[k.k], col, wt)) })
+    COLS.forEach(function (k) { tr.appendChild(aggTd(agg, k.k, col, wt)) })
     if (selObj) tr.addEventListener('click', function () { if (selObj.level === 'site') state.expanded[key] = true; setSel(selObj) })
     tb.appendChild(tr)
   }
@@ -631,7 +654,7 @@ function renderTree(rootEl, doc) {
     const td0 = doc.createElement('td'); td0.style.cssText = 'padding:' + CELL_PAD + ';padding-left:' + pad + 'px;overflow:hidden'
     const m = doc.createElement('div'); m.style.cssText = 'font-size:12px;color:#2a5ea9;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis'; m.textContent = main; td0.appendChild(m)
     if (sub) { const s = doc.createElement('div'); s.style.cssText = 'font-size:10px;color:#acc5e4;margin-top:1px'; s.textContent = sub; td0.appendChild(s) }
-    tr.appendChild(td0); GKEYS.forEach(function (k) { tr.appendChild(makeEditableCell(r, k.k, doc)) }); tb.appendChild(tr)
+    tr.appendChild(td0); COLS.forEach(function (k) { tr.appendChild(makeEditableCell(r, k.k, doc)) }); tb.appendChild(tr)
   }
   function marqueSub(r) { let s = r.marque || ''; if (realOk) { const m1 = realiseCommandesM1(r.id_user); s += (s ? ' · ' : '') + 'M-1 ' + Math.round(m1) + ' cmd' } return s }
   function typeRow(T, key, open, site) {
@@ -644,7 +667,7 @@ function renderTree(rootEl, doc) {
     const chip = doc.createElement('span'); chip.textContent = 'Objectifs ' + label
     chip.style.cssText = 'display:inline-block;padding:2px 9px;border-radius:6px;font-size:11px;font-weight:500;background:' + (isVN ? '#e1f5ee' : (isVO ? '#faeeda' : '#e6f1fb')) + ';color:' + (isVN ? '#085041' : (isVO ? '#633806' : '#0c447c'))
     td0.appendChild(chip); tr.appendChild(td0)
-    GKEYS.forEach(function (k) { tr.appendChild(sumTd(T.agg[k.k], '#7a9cc4', 500)) })
+    COLS.forEach(function (k) { tr.appendChild(aggTd(T.agg, k.k, '#7a9cc4', 500)) })
     tr.addEventListener('click', function () { state.expanded[key] = true; setSel(selObj) })
     tb.appendChild(tr)
   }
@@ -654,7 +677,7 @@ function renderTree(rootEl, doc) {
     const tr = doc.createElement('tr'); tr.style.cssText = 'border-bottom:0.5px solid #eaf0f9;background:#fff'
     const td0 = doc.createElement('td'); td0.style.cssText = 'padding:' + CELL_PAD + ';padding-left:' + vPad + 'px;font-size:12px;color:#4a6a8a;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis'
     td0.appendChild(caret(vOpen, vKey)); td0.appendChild(doc.createTextNode(V.label + (realOk ? '  ·  M-1 ' + Math.round(realiseCommandesM1(V.id_user)) + ' cmd' : ''))); tr.appendChild(td0)
-    GKEYS.forEach(function (k) { tr.appendChild(sumTd(V.agg[k.k], '#4a6a8a', 500)) }); tb.appendChild(tr)
+    COLS.forEach(function (k) { tr.appendChild(aggTd(V.agg, k.k, '#4a6a8a', 500)) }); tb.appendChild(tr)
     if (vOpen) V.rows.forEach(function (r) { leaf(r, r.marque || '—', null, mPad) })
   }
   tree.forEach(function (R) {
@@ -684,9 +707,9 @@ function renderTree(rootEl, doc) {
   const tot = aggNew(); rows.forEach(function (r) { aggAdd(tot, r) })
   const ft = doc.createElement('tfoot'), tr = doc.createElement('tr'); tr.style.cssText = 'background:#f5f8fc;border-top:1px solid #eaf0f9'
   const td0 = doc.createElement('td'); td0.style.cssText = 'padding:7px 8px;color:#2a5ea9;font-weight:500;font-size:12px'; td0.textContent = 'Total — ' + (state.vnvo === 'VNVO' ? 'VN + VO' : state.vnvo); tr.appendChild(td0)
-  GKEYS.forEach(function (k) { tr.appendChild(sumTd(tot[k.k], '#2a5ea9', 500)) }); ft.appendChild(tr); table.appendChild(ft)
+  COLS.forEach(function (k) { tr.appendChild(aggTd(tot, k.k, '#2a5ea9', 500)) }); ft.appendChild(tr); table.appendChild(ft)
   table.style.display = 'table'
-  table.style.minWidth = (parseInt(IS_TC ? '210' : '230') + GKEYS.length * parseInt(COL_W) + 20) + 'px'
+  table.style.minWidth = (parseInt(IS_TC ? '210' : '230') + COLS.length * parseInt(COL_W) + 20) + 'px'
   const objScroll = doc.createElement('div')
   objScroll.style.cssText = 'overflow-x:auto;-webkit-overflow-scrolling:touch;max-width:100%'
   objScroll.appendChild(table)
@@ -706,7 +729,7 @@ function renderVendeur(rootEl, doc) {
   if (!realOk) { const w = doc.createElement('span'); w.style.cssText = 'font-size:12px;font-weight:500;padding:3px 9px;border-radius:8px;background:#faeeda;color:#633806'; w.textContent = 'réalisé indisponible'; hero.appendChild(w) }
   rootEl.appendChild(hero)
   const grid = doc.createElement('div'); grid.className = 'obj-cards'; grid.style.cssText = 'display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:12px'
-  for (const kp of KPIS_SUIVI) {
+  for (const kp of colonnesPour(KPIS_SUIVI, rows)) {
     const obj = aggObjectif(kp.k), real = realOk ? realiseFor(realCur, myId, REAL_FIELDS[kp.k]) : 0, pct = obj > 0 ? Math.round(real / obj * 100) : 0, ps = paceStyle(real, obj, prorata), reste = Math.max(0, obj - real)
     let cad
     if (obj <= 0) cad = 'pas d\u2019objectif fixé'
