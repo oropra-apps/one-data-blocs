@@ -1,4 +1,9 @@
 // ============================================================================
+//  v33 (29/10/2026) : FILTRE MODÈLE PAR FAMILLE. Les libellés Planet VO² / DBS
+//    d'un même modèle (« Yaris », « YARIS », « YARIS HYBRIDE », « YARISHYBRIDE »)
+//    sont regroupés : v_liste_vo.MODELE_FAMILLE (table public.ref_modele_famille,
+//    fonction public.modele_famille). Les filtres Modèle et Version travaillent
+//    sur la famille ; repli sur MODELE_DMS si la vue ne l'a pas.
 //  v32 (29/10/2026) : STATUT PLANET VO². Le robot suit désormais plusieurs statuts
 //    Planet VO² (En stock, Prévision de rentrée, Immobilisé) ; v_liste_vo porte
 //    STATUT_VO. Boutons « Statut » au-dessus de la liste, EN STOCK seul par
@@ -218,7 +223,7 @@ OD.define('vo-liste', {
   var COLS_BASE = COLS;
   // v27 : colonnes Planet VO² (v_liste_vo du 27/10/2026) ; repli sans elles.
   var COLS_PVO = ',PVO_CANAUX,PVO_COMMENTAIRE,PVO_COMMENTAIRE_LE,PVO_EN_STOCK,PVO_VU_LE,PVO_ID,COULEUR_DMS';
-  COLS = COLS_BASE + ',NUMERO_POLICE' + COLS_PVO + ',STATUT_VO';   // v32 : STATUT_VO
+  COLS = COLS_BASE + ',NUMERO_POLICE' + COLS_PVO + ',STATUT_VO,MODELE_FAMILLE';   // v32 : STATUT_VO ; v33 : MODELE_FAMILLE
 
   // ─────────────────────────────────────────────────────────── bootstrap WeWeb
   // (garde 'wwLib pas prêt' retirée : le loader ne monte le module qu'une fois wwLib et le tenant résolus)
@@ -2173,7 +2178,7 @@ OD.define('vo-liste', {
     if (f.societe && r.SOCIETE !== f.societe) return false;
     if (f.pointVente && r.POINT_VENTE !== f.pointVente) return false;
     if (f.marque && r.MARQUE_DMS !== f.marque) return false;
-    if (f.modele && r.MODELE_DMS !== f.modele) return false;
+    if (f.modele && r.MODELE_FAMILLE !== f.modele) return false;
     if (f.version && r.VERSION_EUROTAX !== f.version) return false;
     if (f.label && r.LABEL_Codifie !== f.label) return false;
     if (f.stockage && r.LIEU_STOCKAGE_Codifie !== f.stockage) return false;
@@ -2662,7 +2667,7 @@ OD.define('vo-liste', {
     function siteBase() { return S.raw.filter(function (r) { return (!f.reseau || r.RESEAU === f.reseau) && (!f.affaire || r.AFFAIRE === f.affaire); }); }
     function pvBase() { return S.raw; }
     function modeleBase() { return f.marque ? S.raw.filter(function (r) { return r.MARQUE_DMS === f.marque; }) : S.raw; }
-    function versionBase() { return S.raw.filter(function (r) { return (!f.marque || r.MARQUE_DMS === f.marque) && (!f.modele || r.MODELE_DMS === f.modele); }); }
+    function versionBase() { return S.raw.filter(function (r) { return (!f.marque || r.MARQUE_DMS === f.marque) && (!f.modele || r.MODELE_FAMILLE === f.modele); }); }
     function triVal(b) { return b == null ? null : (b ? 'yes' : 'no'); }
     function rng(id, min, max) { return '<div class="vo-range"><input type="number" id="' + id + '_min" placeholder="' + min + '" value="' + (f[id + 'Min'] != null ? f[id + 'Min'] : '') + '"><span>→</span><input type="number" id="' + id + '_max" placeholder="' + max + '" value="' + (f[id + 'Max'] != null ? f[id + 'Max'] : '') + '"></div>'; }
 
@@ -2681,7 +2686,7 @@ OD.define('vo-liste', {
         + '<div><div class="vo-lab">Lieu</div><select class="vo-sel" id="f_stockage">' + selHtml('LIEU_STOCKAGE_Codifie', f.stockage, S.raw, 'Tous les lieux') + '</select></div>'
         + '<div class="vo-fsec o">Véhicule</div>'
         + '<div><div class="vo-lab">Marque</div><select class="vo-sel" id="f_marque">' + selHtml('MARQUE_DMS', f.marque, S.raw, 'Toutes les marques') + '</select></div>'
-        + '<div><div class="vo-lab">Modèle</div><select class="vo-sel" id="f_modele">' + selHtml('MODELE_DMS', f.modele, modeleBase(), 'Tous les modèles') + '</select></div>'
+        + '<div><div class="vo-lab">Modèle</div><select class="vo-sel" id="f_modele">' + selHtml('MODELE_FAMILLE', f.modele, modeleBase(), 'Tous les modèles') + '</select></div>'
         + '<div><div class="vo-lab">Version</div><select class="vo-sel" id="f_version">' + selHtml('VERSION_EUROTAX', f.version, versionBase(), 'Toutes les versions') + '</select></div>'
         + '</div>'
         + '<div class="vo-fcol">'
@@ -2933,6 +2938,8 @@ OD.define('vo-liste', {
     S.loading = true; S.error = null; renderContent();
     try { var role = num(connectedUser().ID_Role); S.showPA = role != null && PA_ROLES.indexOf(role) !== -1; } catch (e) { S.showPA = false; }
     S.raw = await loadAllOnce(force);
+    // v33 : famille du modèle (repli : libellé brut)
+    S.raw.forEach(function (x) { if (!notEmpty(x.MODELE_FAMILLE)) x.MODELE_FAMILLE = x.MODELE_DMS; });
     var d = await resolveDefaults();
     if (d) { if (S.f.reseau == null) S.f.reseau = d.reseau || null; if (S.f.affaire == null) S.f.affaire = d.affaire || null; if (S.f.site == null) S.f.site = d.site || null; }
     S.loading = false;
@@ -3293,6 +3300,12 @@ OD.define('vo-liste', {
     var page = function (from) { return c.from('v_liste_vo').select(cols).order('VIN').range(from, from + size - 1); };
     var duo = await Promise.all([page(0), page(size)]);
     // v21 : base sans NUMERO_POLICE (migration pas encore passee) -> on recharge sans.
+    // v33 : vue sans MODELE_FAMILLE -> sans elle (repli sur MODELE_DMS).
+    if (duo[0].error && /MODELE_FAMILLE/i.test(duo[0].error.message || '')) {
+      console.warn('[vo] MODELE_FAMILLE absent de v_liste_vo, chargement sans');
+      S.cols = cols = cols.replace(',MODELE_FAMILLE', '');
+      duo = await Promise.all([page(0), page(size)]);
+    }
     // v32 : vue sans STATUT_VO -> sans elle (filtre statut absent).
     if (duo[0].error && /STATUT_VO/i.test(duo[0].error.message || '')) {
       console.warn('[vo] STATUT_VO absent de v_liste_vo, chargement sans');
@@ -3359,7 +3372,7 @@ OD.define('vo-liste', {
     if (f.societe && r.SOCIETE !== f.societe) return false;
     if (f.pointVente && r.POINT_VENTE !== f.pointVente) return false;
     if (f.marque && r.MARQUE_DMS !== f.marque) return false;
-    if (f.modele && r.MODELE_DMS !== f.modele) return false;
+    if (f.modele && r.MODELE_FAMILLE !== f.modele) return false;
     if (f.version && r.VERSION_EUROTAX !== f.version) return false;
     if (f.label && r.LABEL_Codifie !== f.label) return false;
     if (f.stockage && r.LIEU_STOCKAGE_Codifie !== f.stockage) return false;
@@ -4059,7 +4072,7 @@ OD.define('vo-liste', {
     function siteBase() { return S.raw.filter(function (r) { return (!f.reseau || r.RESEAU === f.reseau) && (!f.affaire || r.AFFAIRE === f.affaire); }); }
     function pvBase() { return S.raw; }
     function modeleBase() { return f.marque ? S.raw.filter(function (r) { return r.MARQUE_DMS === f.marque; }) : S.raw; }
-    function versionBase() { return S.raw.filter(function (r) { return (!f.marque || r.MARQUE_DMS === f.marque) && (!f.modele || r.MODELE_DMS === f.modele); }); }
+    function versionBase() { return S.raw.filter(function (r) { return (!f.marque || r.MARQUE_DMS === f.marque) && (!f.modele || r.MODELE_FAMILLE === f.modele); }); }
     function triVal(b) { return b == null ? null : (b ? 'yes' : 'no'); }
     function rng(id, min, max) { return '<div class="vo-range"><input type="number" id="' + id + '_min" placeholder="' + min + '" value="' + (f[id + 'Min'] != null ? f[id + 'Min'] : '') + '"><span>→</span><input type="number" id="' + id + '_max" placeholder="' + max + '" value="' + (f[id + 'Max'] != null ? f[id + 'Max'] : '') + '"></div>'; }
 
@@ -4078,7 +4091,7 @@ OD.define('vo-liste', {
         + '<div><div class="vo-lab">Lieu</div><select class="vo-sel" id="f_stockage">' + selHtml('LIEU_STOCKAGE_Codifie', f.stockage, S.raw, 'Tous les lieux') + '</select></div>'
         + '<div class="vo-fsec o">Véhicule</div>'
         + '<div><div class="vo-lab">Marque</div><select class="vo-sel" id="f_marque">' + selHtml('MARQUE_DMS', f.marque, S.raw, 'Toutes les marques') + '</select></div>'
-        + '<div><div class="vo-lab">Modèle</div><select class="vo-sel" id="f_modele">' + selHtml('MODELE_DMS', f.modele, modeleBase(), 'Tous les modèles') + '</select></div>'
+        + '<div><div class="vo-lab">Modèle</div><select class="vo-sel" id="f_modele">' + selHtml('MODELE_FAMILLE', f.modele, modeleBase(), 'Tous les modèles') + '</select></div>'
         + '<div><div class="vo-lab">Version</div><select class="vo-sel" id="f_version">' + selHtml('VERSION_EUROTAX', f.version, versionBase(), 'Toutes les versions') + '</select></div>'
         + '</div>'
         + '<div class="vo-fcol">'
@@ -4357,6 +4370,8 @@ OD.define('vo-liste', {
     S.loading = true; S.error = null; renderContent();
     try { var role = num(connectedUser().ID_Role); S.showPA = role != null && PA_ROLES.indexOf(role) !== -1; } catch (e) { S.showPA = false; }
     S.raw = await loadAllOnce(force);
+    // v33 : famille du modèle (repli : libellé brut)
+    S.raw.forEach(function (x) { if (!notEmpty(x.MODELE_FAMILLE)) x.MODELE_FAMILLE = x.MODELE_DMS; });
     // v27 : filtre canal seulement si le tenant a des données Planet VO²
     S.pvoActif = S.raw.some(function (x) { return x.PVO_EN_STOCK === true; });
     suivrePvo();
