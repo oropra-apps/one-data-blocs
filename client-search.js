@@ -1,4 +1,8 @@
 // ============================================================================
+//  v22 (29/10/2026) : le champ « Véhicule » accepte aussi le numéro de
+//  commande BACS (P243119) ou la référence du bon (B-47523-3034609) : il
+//  renvoie le client de la commande (RPC client_recherche_vehicule). Sous le
+//  nom s'affiche « Commande P243119 · modèle · date ».
 //  v21 (28/10/2026) : « Plus de critères » supprimé (ville, code postal, dates
 //  de naissance, CSP). Restent les six critères en accès direct.
 //  v20 (28/10/2026) : critères en accès direct — Nom, Prénom, Téléphone,
@@ -244,7 +248,7 @@ OD.define('client-search', {
   async function resoudreVehicule(supabase, saisie) {
     const k = String(saisie || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
     if (!k) return null;
-    if (k.length < 5) throw new Error('Véhicule : saisissez une immatriculation complète ou au moins les 6 derniers caractères du VIN.');
+    if (k.length < 5) throw new Error('Véhicule : saisissez une immatriculation complète, au moins les 6 derniers caractères du VIN, ou un numéro de commande BACS (P243119).');
     const { data, error } = await supabase.rpc('client_recherche_vehicule', { p_q: k, p_limite: 200 });
     if (error) throw error;
     const m = {};
@@ -852,14 +856,14 @@ OD.define('client-search', {
       h += fieldHtml('Prénom', 'PRENOM');
       h += fieldHtml('Téléphone', 'tel');
       h += fieldHtml('Email', 'EMAIL');
-      h += fieldHtml('Véhicule', 'vehicule', 'text', 'Véhicule : immat. ou VIN');
+      h += fieldHtml('Véhicule', 'vehicule', 'text', 'Immat., VIN ou n° de commande');
       h += fieldHtml('ID Client', 'IDVu');
     } else {
       h += fieldHtml('SIRET', 'SIRET');
       h += fieldHtml('Raison sociale', 'NOM');
       h += fieldHtml('Téléphone', 'tel');
       h += fieldHtml('Email', 'EMAIL');
-      h += fieldHtml('Véhicule', 'vehicule', 'text', 'Véhicule : immat. ou VIN');
+      h += fieldHtml('Véhicule', 'vehicule', 'text', 'Immat., VIN ou n° de commande');
       h += fieldHtml('ID Client', 'IDVu');
     }
     h += '</div>';
@@ -913,7 +917,7 @@ OD.define('client-search', {
       if (r.TEl_MOB) telHtml += `<div class="crs-tel-row">${ICON_MOB} ${esc(r.TEl_MOB)}</div>`;
       if (r.TEL_FIXE) telHtml += `<div class="crs-tel-row">${ICON_FIXE} ${esc(r.TEL_FIXE)}</div>`;
       const vehs = state.vehMatch && state.vehMatch[String(r.IDVu)];
-      const vehHtml = vehs ? vehs.map(v => `<div class="crs-veh${v.actuel ? '' : ' ancien'}">${ICON_VEH}<span>${esc([v.immat, v.libelle].filter(Boolean).join(' · ') || v.vin)}</span><em>${v.actuel ? 'détenteur actuel' : 'ancien détenteur'}</em></div>`).join('') : '';
+      const vehHtml = vehs ? vehs.map(v => `<div class="crs-veh${v.actuel === false ? ' ancien' : ''}">${ICON_VEH}<span>${esc([v.immat, v.libelle].filter(Boolean).join(' · ') || v.vin)}</span><em>${v.actuel == null ? 'commande BACS' : (v.actuel ? 'détenteur actuel' : 'ancien détenteur')}</em></div>`).join('') : '';
       h += `<tr data-crs-action="select-row" data-idvu="${esc(r.IDVu)}"><td data-label="ID Client">${esc(r.IDVu)}</td><td class="crs-c-nom" data-label="Nom">${esc(fullName)}${vehHtml}</td><td data-label="Adresse">${adresseHtml}</td><td data-label="Email">${esc(r.EMAIL || '')}</td><td class="crs-cell-tel" data-label="Téléphone">${telHtml}</td><td class="crs-cell-action"><span class="crs-action-btn">${isSoc ? ICON_S : ICON_P}</span></td></tr>`;
     }
     h += '</tbody></table></div>';
