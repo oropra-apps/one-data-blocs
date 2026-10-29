@@ -14,6 +14,13 @@
 //    le détail (vn_bacs_fiche), avec un lien direct vers le véhicule dans BACS.
 //  * Le stock reste celui du DMS (v_liste_vn) : c'est lui qui dit ce qui est
 //    en stock, à quel prix et depuis quand ; BACS décrit la voiture.
+//  v14 (29/10/2026) : FILTRE MODÈLE PAR FAMILLE, APRÈS LA MARQUE (demande d'Antoine).
+//    Le filtre Modèle n'apparaît qu'une fois une marque choisie et ne propose
+//    que les modèles de cette marque, regroupés par famille commerciale
+//    (v_liste_vn.modele_famille, table public.ref_modele_famille : « C HR
+//    HYBRIDE », « C HR PHEV », « C HR+ » -> C-HR ; « NX 350H », « NX 450H+ »
+//    -> NX…). Changer de marque efface le modèle. Vue sans modele_famille :
+//    repli sur le libellé brut.
 //  v13 (29/10/2026) : croix de fermeture de la fiche centrée dans son rond.
 //  v12 (29/10/2026) : AMC selon DBS dès que le DMS fournit le code AMC (export
 //    Team Colin : code seul, sans date) ; la fiche BACS ne sert plus qu'à
@@ -282,7 +289,7 @@ OD.define('vn-liste', {
       if (f.affaire && r.affaire !== f.affaire) return false;
       if (f.site && r.site !== f.site) return false;
       if (f.marque && r.marque !== f.marque) return false;
-      if (f.modele && r.modele !== f.modele) return false;
+      if (f.modele && familleDe(r) !== f.modele) return false;   // v14
       if (f.energie && r.energie !== f.energie) return false;
       if (f.statut && r.statut !== f.statut) return false;
       if (f.lieu && r.lieu_stockage !== f.lieu) return false;
@@ -321,6 +328,21 @@ OD.define('vn-liste', {
     });
   }
 
+  // v14 : famille commerciale du modèle (repli : libellé brut)
+  function familleDe(r) { return notEmpty(r.modele_famille) ? r.modele_famille : (r.modele || null); }
+  function selModele() {
+    if (!S.f.marque) return '';
+    var vues = {};
+    S.raw.forEach(function (r) { if (r.marque === S.f.marque) { var m = familleDe(r); if (notEmpty(m)) vues[m] = 1; } });
+    var vals = Object.keys(vues).sort(function (a, b) { return a.localeCompare(b, 'fr'); });
+    if (!vals.length) return '';
+    return '<select class="vn-sel" data-f="modele">'
+      + '<option value="">Modèle</option>'
+      + vals.map(function (v) {
+          return '<option value="' + esc(v) + '"' + (S.f.modele === v ? ' selected' : '') + '>' + esc(v) + '</option>';
+        }).join('')
+      + '</select>';
+  }
   function valeursDe(cle) {
     var vues = {};
     S.raw.forEach(function (r) { if (notEmpty(r[cle])) vues[r[cle]] = 1; });
@@ -392,7 +414,7 @@ OD.define('vn-liste', {
     return '<div class="vn-filtres">'
       + '<input class="vn-rech" id="vn-q" placeholder="VIN, immatriculation, modèle, n° de commande…" value="' + esc(S.recherche) + '">'
       + sel('reseau', 'Réseau') + sel('affaire', 'Affaire') + sel('site', 'Site')
-      + sel('marque', 'Marque') + sel('modele', 'Modèle') + sel('energie', 'Énergie')
+      + sel('marque', 'Marque') + selModele() + sel('energie', 'Énergie')
       + selStatut() + sel('lieu', 'Lieu de stockage', 'lieu_stockage')
       + '<button class="vn-raz" id="vn-raz">Tout effacer</button>'
       + '</div>' + chips();
@@ -712,7 +734,7 @@ OD.define('vn-liste', {
       };
     });
     el.querySelectorAll('[data-f]').forEach(function (s) {
-      s.onchange = function () { S.f[s.dataset.f] = s.value || null; if (s.dataset.f === 'statut') S.statutAuto = false; S.page = 1; rendre(); };
+      s.onchange = function () { S.f[s.dataset.f] = s.value || null; if (s.dataset.f === 'statut') S.statutAuto = false; if (s.dataset.f === 'marque') S.f.modele = null; S.page = 1; rendre(); };
     });
     el.querySelectorAll('[data-chip]').forEach(function (b) {
       b.onclick = function () { S.f[b.dataset.chip] = b.dataset.val || null; S.page = 1; rendre(); };
