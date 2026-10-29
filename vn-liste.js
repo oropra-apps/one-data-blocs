@@ -14,6 +14,12 @@
 //    le détail (vn_bacs_fiche), avec un lien direct vers le véhicule dans BACS.
 //  * Le stock reste celui du DMS (v_liste_vn) : c'est lui qui dit ce qui est
 //    en stock, à quel prix et depuis quand ; BACS décrit la voiture.
+//  v15 (29/10/2026) : la liste s'ouvre filtrée sur le SITE CHOISI DANS LA BARRE DU
+//    HAUT (demande d'Antoine). Avant, le filtre n'était posé que si le site était
+//    déjà connu au premier affichage et présent dans le stock : la barre du haut
+//    répond parfois après le chargement, et la liste restait sur tout le groupe.
+//    Désormais : nouvelles tentatives pendant 10 s, site lu dans le référentiel
+//    SITE s'il n'a aucun véhicule (liste vide plutôt que tout le groupe).
 //  v14 (29/10/2026) : FILTRE MODÈLE PAR FAMILLE, APRÈS LA MARQUE (demande d'Antoine).
 //    Le filtre Modèle n'apparaît qu'une fois une marque choisie et ne propose
 //    que les modèles de cette marque, regroupés par famille commerciale
@@ -265,17 +271,34 @@ OD.define('vn-liste', {
   }
 
   // Le site selectionne dans la barre du haut donne le perimetre de depart.
-  function poserPerimetreParDefaut() {
+  async function poserPerimetreParDefaut() {
     if (S.__perimetrePose) return;
-    var api = siteApi(); if (!api || !api.getSiteId) return;
-    var id = api.getSiteId(); if (id == null) return;
-    var ligne = S.raw.find(function (r) { return String(r.id_site) === String(id); });
-    if (ligne) {
-      S.f.reseau = ligne.reseau || null;
-      S.f.affaire = ligne.affaire || null;
-      S.f.site = ligne.site || null;
+    var api = siteApi();
+    var id = api && api.getSiteId ? api.getSiteId() : null;
+    if (id == null) {
+      // v15 : la barre du haut n'a pas encore répondu -> nouvel essai (10 s au plus)
+      S.__essaisSite = (S.__essaisSite || 0) + 1;
+      if (S.__essaisSite <= 20) setTimeout(function () { if (!S.__perimetrePose) poserPerimetreParDefaut(); }, 500);
+      return;
     }
     S.__perimetrePose = true;
+    var ligne = S.raw.find(function (r) { return String(r.id_site) === String(id); });
+    var p = ligne ? { reseau: ligne.reseau, affaire: ligne.affaire, site: ligne.site } : null;
+    if (!p) {
+      // v15 : site sans véhicule -> référentiel SITE
+      try {
+        var r = await sb().from('SITE').select('SITE,AFFAIRE,RESEAU').eq('ID_SITE', id).limit(1);
+        var x = r && r.data && r.data[0];
+        if (x) p = { reseau: x.RESEAU, affaire: x.AFFAIRE, site: x.SITE };
+      } catch (e) { }
+    }
+    if (p) {
+      S.f.reseau = p.reseau || null;
+      S.f.affaire = p.affaire || null;
+      S.f.site = p.site || null;
+      S.page = 1;
+    }
+    rendre();
   }
 
   // ───────────────────────────────────────────────────────────── filtrage
@@ -917,13 +940,19 @@ OD.define('vn-liste', {
 
   // ───────────────────────────────────────────────────────────── boot
   function suivreSite() {
-    var api = siteApi(); if (!api) return;
+    var api = siteApi();
+    if (!api) {
+      // v15 : barre du haut pas encore prête -> on réessaie (10 s au plus)
+      S.__essaisAbo = (S.__essaisAbo || 0) + 1;
+      if (S.__essaisAbo <= 20) setTimeout(suivreSite, 500);
+      return;
+    }
     // Abonnements posés une fois, mais module remonté à chaque navigation : ils
     // appellent la fonction du montage COURANT (window.__vnSurSite). Avant v3, un
     // changement de site après navigation alimentait l'instance morte et la liste
     // restait sur l'ancien site (recette Team Colin 08/10/2026, même défaut que
     // vo-liste).
-    window.__vnSurSite = function () { S.__perimetrePose = false; poserPerimetreParDefaut(); rendre(); };
+    window.__vnSurSite = function () { S.__perimetrePose = false; S.__essaisSite = 0; poserPerimetreParDefaut(); rendre(); };
     var relai = function () { if (window.__vnSurSite) window.__vnSurSite(); };
     if (api.onChange && !window.__vnSiteSub) {
       window.__vnSiteSub = api.onChange(relai);
