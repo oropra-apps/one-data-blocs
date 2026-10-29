@@ -1,6 +1,11 @@
 // ============================================================================
 //  LEAD MANAGEMENT — module One Data (OD.define 'lead-mgmt')
-//  VERSION TEAM COLIN (v78) — déploiement CIBLÉ (publish-targets :
+//  VERSION TEAM COLIN (v79) — déploiement CIBLÉ (publish-targets :
+//  v79 (29/10/2026) : concessions Lexus sans plateau VROOM. Le bouton
+//  « Confier au plateau VROOM » n'apparaît plus sur leurs leads (la base le
+//  refuse aussi : poste_confier_plateau). Leur Pool reçoit tous les leads BACS
+//  qui ne sont pas au nom d'un vrai vendeur ; ceux d'un vendeur lui arrivent
+//  directement (bacs_lead_ingerer, lead_site_sans_plateau).
 //  v78 (28/10/2026) : sur la base de la v77 publiée (modèles de messages).
 //  * LEADS « DEMANDE CLIENT (1h) » (pénalité constructeur hors délai) : toujours
 //    en tête du Pool BACS, quels que soient les filtres, liseret rouge, compte
@@ -2922,7 +2927,7 @@
           else if (g.act === 'attribuer') a = '<select id="sel-' + l.id_lead + '" aria-label="Vendeur">' + optionsVendeurs(l.id_site) + '</select><button type="button" class="btn sm pri" data-a="attribuer" data-id="' + l.id_lead + '">Attribuer</button>';
           else if (g.act === 'liberer') a = '<button type="button" class="btn sm" data-a="rendre" data-id="' + l.id_lead + '">Rendre au Pool</button><select id="sel-' + l.id_lead + '" aria-label="Vendeur">' + optionsVendeurs(l.id_site, l.id_user_attribue) + '</select><button type="button" class="btn sm pri" data-a="attribuer" data-id="' + l.id_lead + '">Attribuer</button>';
           else if (g.act === 'renvoyer') a = '<select id="sit-' + l.id_lead + '" aria-label="Site">' + sitesRenvoi(l).map(function (s) { return '<option value="' + s.id_site + '">' + esc(siteNom(s.site)) + ' · ' + esc(propre(s.reseau || '')) + '</option>'; }).join('') + '</select><button type="button" class="btn sm pri" data-a="renvoyer" data-id="' + l.id_lead + '">Renvoyer</button>';
-          else if (g.act === 'injoignable') a = (l.sf_lead_id ? '<button type="button" class="btn sm vr" data-a="confier" data-id="' + l.id_lead + '">Confier au plateau VROOM</button>' : '') + '<button type="button" class="btn sm dang" data-a="clore-inj" data-id="' + l.id_lead + '">Clore</button>';
+          else if (g.act === 'injoignable') a = (l.sf_lead_id && !sansPlateau(l) ? '<button type="button" class="btn sm vr" data-a="confier" data-id="' + l.id_lead + '">Confier au plateau VROOM</button>' : '') + '<button type="button" class="btn sm dang" data-a="clore-inj" data-id="' + l.id_lead + '">Clore</button>';
           var tsv = g.act === 'liberer' ? tm(l.attribue_le, 20, 'pris par ' + prenom(l.vendeur_nom)) : tm(arrive(l), slaDe(l));
           h += '<div class="rel"><div>' + tsv + '</div><div><span class="lr-n lien-n" data-a="open" data-id="' + l.id_lead + '">' + esc(nomLead(l)) + '</span> <span class="lr-v">' + esc(demandeDe(l)) + '</span>'
             + (l.vendeur_nom && g.act !== 'liberer' ? '<p class="why">Chez ' + esc(propre(l.vendeur_nom)) + (l.dernier_essai ? ' · dernier essai ' + esc(quand(l.dernier_essai)) : '') + '</p>' : '') + '<div class="tags">' + tagsLead(l) + '</div></div><div class="rel-a">' + a + '</div></div>';
@@ -3114,7 +3119,7 @@
       h += '<div class="issues" role="radiogroup" aria-label="Geste">' + MODES.map(function (m) { return '<button type="button" role="radio" aria-checked="' + (m[0] === mode) + '" class="' + (m[0] === mode ? 'on' : '') + '" data-a="mode" data-id="' + m[0] + '">' + m[1] + '</button>'; }).join('') + '</div>';
       if (mode === 'attribuer') {
         h += '<div class="row"><select id="dr-vendeur" aria-label="Vendeur">' + optionsVendeurs(l.id_site, l.id_user_attribue) + '</select><button type="button" class="btn pri" data-a="attribuer" data-id="' + l.id_lead + '|dr">' + (l.id_user_attribue ? 'Réattribuer' : 'Attribuer') + '</button></div>'
-          + '<div class="row">' + (l.sf_lead_id ? '<button type="button" class="btn vr" data-a="confier" data-id="' + l.id_lead + '">Confier au plateau VROOM</button>' : '')
+          + '<div class="row">' + (l.sf_lead_id && !sansPlateau(l) ? '<button type="button" class="btn vr" data-a="confier" data-id="' + l.id_lead + '">Confier au plateau VROOM</button>' : '')
           + (l.id_user_attribue ? '<button type="button" class="btn" data-a="rendre" data-id="' + l.id_lead + '">Rendre au Pool</button>' : '') + '</div>';
       } else if (mode === 'resultat') {
         h += piedResultat(l, true);
@@ -3149,6 +3154,8 @@
       return h;
     }
     // ── v62 : modèles de messages adaptés au lead ─────────────────────────
+    // v79 : réseaux sans plateau VROOM (Lexus).
+    function sansPlateau(l) { return /^LEXUS$/i.test(String((l && l.reseau) || '').trim()); }
     function estVO(l) { return /\bVO\b|occasion/i.test(l.vehicule || '') || /centrale|leboncoin|lbc|autoscout|paru|spoticar|vo/i.test((l.source || '') + ' ' + (l.source_libelle || '')); }
     function vehCourt(l) { var v = String(l.vehicule || '').replace(/\s+/g, ' ').trim(); return v ? (v.length > 60 ? v.slice(0, 58) + '…' : v) : ''; }
     function salut(l) {
