@@ -10,6 +10,11 @@
 //  attribuer, résultat, autre site, clore). Délai de rappel en tête, « Lead
 //  suivant » pour enchaîner. Données : poste_lead_contexte (nouvelle).
 //  Le plateau s'appelle désormais « Vroom Team » dans tous les libellés.
+//  Vendeur rattaché à plusieurs sites : le Pool suit le site choisi dans le
+//  sélecteur de site (avant : Pool de tous ses sites, d'où les leads de
+//  Sceaux affichés à un vendeur connecté sur Arcueil). En base
+//  (poste_site_leads) : sur un site avec Vroom Team, une demande BACS non
+//  transmise et sans vendeur reste à la Vroom Team, jamais dans le Pool.
 //  v82 (30/10/2026) : PLATEAU VROOM « mode flux » (maquettes validées par
 //  Antoine). Le poste de l'opérateur et l'écran du superviseur viennent du
 //  module `plateau` (plateau.js v1, chargé par OD.manifest.plateau.cdn_url,
@@ -2354,7 +2359,10 @@
     function manager(id) { var s = siteInfo(id); return !!(s && s.manager); }
     function vendeursDu(id) { return ((S.stats && S.stats.vendeurs) || []).filter(function (v) { return Number(v.id_site) === Number(id); }); }
     function leadsDu(id) { return S.leads.filter(function (l) { return Number(l.id_site) === Number(id); }); }
-    function piscine(id) { return S.leads.filter(function (l) { return l.zone === 'piscine' && (id == null || Number(l.id_site) === Number(id)) && (!S.comme || S.comme.sites.indexOf(Number(l.id_site)) !== -1); }); }
+    // v83 : le vendeur rattaché à plusieurs sites ne voit que le Pool du site
+    // choisi dans le sélecteur de site (en haut à droite).
+    function poolVendeurSite() { return POSTE === 'vendeur' && S.site != null && sitesVendeur().length > 1 ? Number(S.site) : null; }
+    function piscine(id) { if (id == null) id = poolVendeurSite(); return S.leads.filter(function (l) { return l.zone === 'piscine' && (id == null || Number(l.id_site) === Number(id)) && (!S.comme || S.comme.sites.indexOf(Number(l.id_site)) !== -1); }); }
     // ── v67 : univers VN / VO, vue d'un vendeur, période ──────────────────
     function sitesVendeur() { return S.comme ? sitesStats().filter(function (x) { return S.comme.sites.indexOf(Number(x.id_site)) !== -1; }) : sitesStats(); }
     function univDe(v) { var t = String(v || '').toUpperCase(); return t === 'VN' ? 'VN' : t === 'VO' ? 'VO' : 'tous'; }
@@ -2579,7 +2587,12 @@
     function siteDuBus() { var b = busApi(); try { var v = b && b.getSiteId ? b.getSiteId() : null; return v == null ? null : Number(v); } catch (e) { return null; } }
     // Rend vrai si le périmètre a changé.
     function adopterSite(id) {
-      if (POSTE === 'vendeur') return false;
+      if (POSTE === 'vendeur') {
+        if (id == null || !sitesVendeur().some(function (s) { return Number(s.id_site) === Number(id); })) return false;
+        if (Number(S.site) === Number(id)) return false;
+        S.site = Number(id); S.cell = null; S.campagnes = null; S.suggKey = null;
+        return true;
+      }
       if (POSTE === 'chef') {
         if (id == null || !sitesStats().some(function (s) { return s.manager && Number(s.id_site) === Number(id); })) return false;
         if (Number(S.site) === Number(id)) return false;
@@ -2710,6 +2723,7 @@
     function aRappeler() { return mesLeads().filter(function (l) { return !l.tentatives; }); }
     function aRelancer() { return mesLeads().filter(function (l) { return l.tentatives > 0; }); }
     function poolNom(sid) {
+      if (sid == null) sid = poolVendeurSite();
       if (sid != null) return 'Pool ' + siteNom((siteInfo(sid) || {}).site);
       var ss = sitesVendeur();
       return ss.length === 1 ? 'Pool ' + siteNom(ss[0].site) : 'Pool de vos sites';
