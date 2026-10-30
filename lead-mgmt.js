@@ -1,6 +1,15 @@
 // ============================================================================
 //  LEAD MANAGEMENT — module One Data (OD.define 'lead-mgmt')
-//  VERSION TEAM COLIN (v82) — déploiement CIBLÉ (publish-targets :
+//  VERSION TEAM COLIN (v83) — déploiement CIBLÉ (publish-targets :
+//  v83 (30/10/2026) : FICHE DE TRAITEMENT DU VENDEUR ET DU CHEF DES VENTES,
+//  plein écran et aérée (maquette « Vendeur » validée par Antoine). Trois
+//  colonnes : la demande et ce que la Vroom Team a appris (avis Juste / À
+//  moitié / Fausse) ; l'appel (boutons aux couleurs de la fiche client),
+//  « Delco · ce qu'il faut savoir », ce que le groupe sait du client et le
+//  fil complet du client ; le résultat (gestes du vendeur, ou du chef :
+//  attribuer, résultat, autre site, clore). Délai de rappel en tête, « Lead
+//  suivant » pour enchaîner. Données : poste_lead_contexte (nouvelle).
+//  Le plateau s'appelle désormais « Vroom Team » dans tous les libellés.
 //  v82 (30/10/2026) : PLATEAU VROOM « mode flux » (maquettes validées par
 //  Antoine). Le poste de l'opérateur et l'écran du superviseur viennent du
 //  module `plateau` (plateau.js v1, chargé par OD.manifest.plateau.cdn_url,
@@ -629,7 +638,7 @@
       clearTimeout(toast._t); toast._t = setTimeout(function () { $toast.classList.remove('on'); }, err ? 5200 : 3200);
     }
 
-    root.innerHTML = '<section class="situ"><p class="situ-l"><span class="vr">Plateau VROOM</span></p><p class="situ-t">Chargement de le Pool BACS…</p></section>';
+    root.innerHTML = '<section class="situ"><p class="situ-l"><span class="vr">Vroom Team</span></p><p class="situ-t">Chargement de le Pool BACS…</p></section>';
 
     // ── Chargement ────────────────────────────────────────────────────────
     async function charger() {
@@ -820,10 +829,10 @@
       var b = S.bacs || {};
       var voyant = !b.ecrire_bacs ? '' : '<span class="voyant ' + (b.canal !== 'moi' || b.echecs ? 'crit' : b.en_attente ? 'warn' : 'ok') + '">'
         + (b.canal !== 'moi' ? 'BACS fermé' : b.echecs ? plural(b.echecs, 'échec BACS', 'échecs BACS') : b.en_attente ? b.en_attente + ' en attente BACS' : 'BACS connecté') + '</span>';
-      return '<section class="hello"><div class="hello-t"><p class="hello-l">Plateau VROOM' + (nom ? ' · ' + esc(nom) : '') + voyant
+      return '<section class="hello"><div class="hello-t"><p class="hello-l">Vroom Team' + (nom ? ' · ' + esc(nom) : '') + voyant
         + (opt.apercu ? ' · aperçu <button type="button" class="lien" data-a="quitter-apercu">revenir à la vue habituelle</button>' : '')
         + (aSupervision() ? ' · <button type="button" class="lien" data-a="supervision">supervision du plateau</button>' : '') + '</p>'
-        + '<h1>' + (nom ? 'Bonjour ' + esc(nom.split(' ')[0]) : 'Plateau VROOM') + '</h1><p class="hello-p">' + p + '</p></div>' + cta + '</section>';
+        + '<h1>' + (nom ? 'Bonjour ' + esc(nom.split(' ')[0]) : 'Vroom Team') + '</h1><p class="hello-p">' + p + '</p></div>' + cta + '</section>';
     }
 
     // ── Onglets ───────────────────────────────────────────────────────────
@@ -1029,7 +1038,7 @@
     function render() {
       if (!el.isConnected) return;
       if (!S.charge) {
-        root.innerHTML = '<section class="situ"><p class="situ-l"><span class="vr">Plateau VROOM</span></p><p class="situ-t">' + esc(S.erreur || 'Chargement…') + '</p>'
+        root.innerHTML = '<section class="situ"><p class="situ-l"><span class="vr">Vroom Team</span></p><p class="situ-t">' + esc(S.erreur || 'Chargement…') + '</p>'
           + (S.erreur ? '<div><button type="button" class="btn pri" data-a="reessayer">Réessayer</button></div>' : '') + '</section>';
         return;
       }
@@ -1925,7 +1934,7 @@
       var mes = (j.un_h_ok || 0) + (j.un_h_hors || 0), taux = pct(j.un_h_ok, mes), obj = cfg('objectif_1h', 90);
       var k = function (cls, lab, val, sm) { return '<div class="sv-k ' + cls + '"><span>' + lab + '</span><b>' + val + '</b><small>' + sm + '</small></div>'; };
       var nom = propre([user && user.prenom, user && user.nom].filter(Boolean).join(' '));
-      return '<section class="hello sv-hello"><div class="hello-t"><p class="hello-l">Plateau VROOM · supervision' + (d.chef_nom && d.chef_nom !== nom ? ' · équipe de ' + esc(propre(d.chef_nom)) : '')
+      return '<section class="hello sv-hello"><div class="hello-t"><p class="hello-l">Vroom Team · supervision' + (d.chef_nom && d.chef_nom !== nom ? ' · équipe de ' + esc(propre(d.chef_nom)) : '')
           + ' · ' + esc(new Date().toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long' })) + '</p>'
           + '<h1 class="sv-h1">' + titre + '</h1><p class="hello-p">' + sous + '</p></div>'
           + '<div class="sv-acts"><button type="button" class="btn" data-a="poste">Poste opérateur</button><button type="button" class="btn pri" data-a="maj">Actualiser</button></div></section>'
@@ -2065,7 +2074,7 @@
     function render() {
       if (!root.isConnected) return;
       if (!S.charge) {
-        root.innerHTML = '<section class="situ"><p class="situ-l"><span class="vr">Plateau VROOM · supervision</span></p><p class="situ-t">' + esc(S.erreur || 'Chargement…') + '</p>'
+        root.innerHTML = '<section class="situ"><p class="situ-l"><span class="vr">Vroom Team · supervision</span></p><p class="situ-t">' + esc(S.erreur || 'Chargement…') + '</p>'
           + (S.erreur ? '<div><button type="button" class="btn pri" data-a="maj">Réessayer</button> <button type="button" class="btn" data-a="poste">Poste opérateur</button></div>' : '') + '</section>';
         return;
       }
@@ -2453,7 +2462,7 @@
     function demandeDe(l) { return l.vehicule || (l.message ? String(l.message).replace(/^\[[^\]]*\]\s*/, '').slice(0, 90) : '') || l.source_libelle || 'Demande'; }
     function tagsLead(l) {
       var h = univTag(l) + '<span class="tag">' + esc(l.source_libelle || l.source || 'Lead') + '</span>';
-      if (l.par_plateau) h += '<span class="tag vr">Qualifié par VROOM</span>';
+      if (l.par_plateau) h += '<span class="tag vr">Qualifié par la Vroom Team</span>';
       if (l.campagne) h += '<span class="tag camp" title="' + esc(l.campagne) + '">' + esc(l.campagne.length > 40 ? l.campagne.slice(0, 38) + '…' : l.campagne) + '</span>';
       if (l.tentatives > 0) h += '<span class="tag warn">' + plural(l.tentatives, 'tentative') + '</span>';
       if (horsMarque(l)) h += '<span class="tag warn">Demande ' + esc(propre(l.marque_lead)) + '</span>';
@@ -2603,8 +2612,8 @@
       if (b && b.joignable !== undefined && !b.par_moi) out.push({ id: 'bacs-moi', niv: 'crit', k: 'BACS', titre: 'BACS n\'est pas ouvert sur votre poste', d: 'Rendez-vous, attributions, transferts et clôtures des leads BACS, ainsi que la création d\'un client, sont refusés tant que BACS n\'est pas ouvert dans un onglet de ce navigateur, avec l\'extension One Data.', a: [] });
       if (POSTE === 'vendeur') {
         piscine(null).filter(function (l) { return l.par_plateau && !verrouAutre(l); }).slice(0, 4).forEach(function (l) {
-          out.push({ id: 'vr-' + l.id_lead, niv: 'vr', k: 'Qualifié par VROOM', t: l.arrive_le, titre: nomLead(l) + ' · ' + demandeDe(l),
-            d: (l.qualification || 'Transmis par le plateau VROOM') + (l.transfere_par_nom ? ' (' + propre(l.transfere_par_nom) + ')' : ''), a: [['Prendre', 'prendre', l.id_lead]] });
+          out.push({ id: 'vr-' + l.id_lead, niv: 'vr', k: 'Qualifié par la Vroom Team', t: l.arrive_le, titre: nomLead(l) + ' · ' + demandeDe(l),
+            d: (l.qualification || 'Transmis par la Vroom Team') + (l.transfere_par_nom ? ' (' + propre(l.transfere_par_nom) + ')' : ''), a: [['Prendre', 'prendre', l.id_lead]] });
         });
         piscine(null).filter(function (l) { return !l.par_plateau && !verrouAutre(l) && mins(l.arrive_le) < 20; }).slice(0, 4).forEach(function (l) {
           out.push({ id: 'np-' + l.id_lead, niv: 'new', k: 'Nouveau dans le Pool', t: l.arrive_le, titre: nomLead(l) + ' · ' + (l.source_libelle || ''), d: demandeDe(l), a: [['Prendre', 'prendre', l.id_lead]] });
@@ -2628,7 +2637,7 @@
         var p = libres(sid);
         var gere = manager(sid);
         p.filter(function (l) { return mins(l.arrive_le) < 15; }).slice(0, 3).forEach(function (l) {
-          out.push({ id: 'cnew-' + l.id_lead, niv: l.par_plateau ? 'vr' : 'new', k: l.par_plateau ? 'Transféré par VROOM' : 'Nouveau lead', t: l.arrive_le, titre: nomLead(l) + ' · ' + (l.source_libelle || ''),
+          out.push({ id: 'cnew-' + l.id_lead, niv: l.par_plateau ? 'vr' : 'new', k: l.par_plateau ? 'Transféré par la Vroom Team' : 'Nouveau lead', t: l.arrive_le, titre: nomLead(l) + ' · ' + (l.source_libelle || ''),
             d: demandeDe(l) + '. Dans le Pool, personne ne l\'a encore pris.', a: gere ? [['Attribuer', 'open', l.id_lead]] : [['Ouvrir', 'open', l.id_lead]] });
         });
         var hd2 = p.filter(function (l) { return niveau(l) === 'crit'; }).sort(function (a, b2) { return ts(a.arrive_le) - ts(b2.arrive_le); });
@@ -2636,7 +2645,7 @@
           titre: plural(hd2.length, 'lead hors délai', 'leads hors délai') + ' dans le Pool', d: hd2.slice(0, 4).map(function (l) { return nomLead(l) + ' (' + duree(mins(l.arrive_le)) + ')'; }).join(', ') + '. Personne ne les a pris.',
           a: [['Attribuer', 'tab', 'relayer']] });
         var vrp = p.filter(function (l) { return l.par_plateau && mins(l.arrive_le) >= 120; });
-        if (vrp.length) out.push({ id: 'cvr-' + vrp.length, niv: 'vr', k: 'Transferts VROOM non pris', t: vrp[0].arrive_le, titre: plural(vrp.length, 'lead qualifié', 'leads qualifiés') + ' par le plateau attend' + (vrp.length > 1 ? 'ent' : '') + ' depuis plus de 2 h',
+        if (vrp.length) out.push({ id: 'cvr-' + vrp.length, niv: 'vr', k: 'Transferts Vroom Team non pris', t: vrp[0].arrive_le, titre: plural(vrp.length, 'lead qualifié', 'leads qualifiés') + ' par le plateau attend' + (vrp.length > 1 ? 'ent' : '') + ' depuis plus de 2 h',
           d: vrp.slice(0, 4).map(function (l) { return nomLead(l); }).join(', ') + '. Le plateau peut vous relancer.', a: [['Attribuer', 'tab', 'relayer']] });
         var rs = S.leads.filter(function (l) { return Number(l.id_site) === Number(sid) && prisSansAppel(l); });
         if (rs.length) {
@@ -2650,7 +2659,7 @@
           d: hs.slice(0, 4).map(function (l) { return nomLead(l) + ' → ' + propre(l.marque_lead); }).join(', ') + '.', a: [['Renvoyer', 'tab', 'relayer']] });
         var inj = leadsDu(sid).filter(function (l) { return l.zone === 'vendeur' && l.tentatives >= 3; });
         if (inj.length) out.push({ id: 'cinj-' + inj.length, niv: 'warn', k: 'Injoignables', t: inj[0].dernier_essai, titre: plural(inj.length, 'lead injoignable', 'leads injoignables') + ' après 3 tentatives',
-          d: 'Le plateau VROOM peut reprendre la relance, ou le lead peut être clos.', a: [['Voir', 'tab', 'relayer']] });
+          d: 'La Vroom Team peut reprendre la relance, ou le lead peut être clos.', a: [['Voir', 'tab', 'relayer']] });
         var vs = vendeursDu(sid).filter(function (v) { return v.contacts_jour > 0; }).sort(function (a, b2) { return b2.contacts_jour - a.contacts_jour; });
         if (vs.length) out.push({ id: 'cact-' + vs[0].id_user + '-' + vs[0].contacts_jour, niv: 'info', k: 'Activité', t: null, titre: propre(vs[0].nom) + ' : ' + plural(vs[0].contacts_jour, 'premier contact', 'premiers contacts') + ' aujourd\'hui',
           d: 'L\'équipe en est à ' + plural(vs.reduce(function (a, v) { return a + v.contacts_jour; }, 0), 'premier contact', 'premiers contacts') + ' sur la journée.', a: [['Voir le mur', 'tab', 'mur']] });
@@ -2671,7 +2680,7 @@
       var pl = S.leads.filter(function (l) { return l.zone === 'plateau'; });
       if (pl.length) {
         var old = pl.reduce(function (a, b) { return ts(a.recu_le) < ts(b.recu_le) ? a : b; });
-        out.push({ id: 'd-plateau-' + pl.length, niv: 'vr', k: 'Plateau VROOM', t: old.recu_le, titre: plural(pl.length, 'lead attend', 'leads attendent') + ' au plateau VROOM',
+        out.push({ id: 'd-plateau-' + pl.length, niv: 'vr', k: 'Vroom Team', t: old.recu_le, titre: plural(pl.length, 'lead attend', 'leads attendent') + ' à la Vroom Team',
           d: 'Le plus ancien depuis ' + duree(mins(old.recu_le)) + ' (' + siteNom(old.site) + ').', a: [['Voir le relais', 'tab', 'relais']] });
       }
       var parSite = {};
@@ -2827,7 +2836,7 @@
     function etatCourt(l) {
       if (l.tentatives) return 'pas joint ×' + l.tentatives + (l.dernier_essai ? ', ' + quand(l.dernier_essai) : '');
       var rt = retourDans(l); if (rt != null) return 'à traiter : retour au Pool dans ' + Math.ceil(rt) + ' min';
-      if (l.par_plateau) return 'qualifié par VROOM';
+      if (l.par_plateau) return 'qualifié par la Vroom Team';
       if (l.zone === 'piscine') return 'libre';
       return 'nouveau';
     }
@@ -3108,7 +3117,7 @@
       ls.forEach(function (l) {
         var verbe = __lmPeutAppeler() ? (l.tentatives ? 'Rappeler' : 'Appeler') : (l.tentatives ? 'Relancer' : 'Traiter');
         var sous = l.tentatives ? 'tentative ' + (l.tentatives + 1) + ' sur 3' : 'premier contact';
-        var why = l.par_plateau ? 'Qualifié par ' + (l.transfere_par_nom ? propre(l.transfere_par_nom) + ' (VROOM)' : 'le plateau VROOM') + (l.qualification ? ' : ' + l.qualification : '')
+        var why = l.par_plateau ? 'Qualifié par ' + (l.transfere_par_nom ? propre(l.transfere_par_nom) + ' (Vroom Team)' : 'la Vroom Team') + (l.qualification ? ' : ' + l.qualification : '')
           : l.attribue_par_nom ? 'Attribué par ' + propre(l.attribue_par_nom) + (l.attribue_le ? ' il y a ' + duree(mins(l.attribue_le)) : '')
           : l.tentatives ? 'Pas joint, dernier essai ' + quand(l.dernier_essai) : (l.message ? String(l.message).replace(/^\[[^\]]*\]\s*/, '').slice(0, 140) : (l.source_libelle || ''));
         var gauche = mins(arrive(l)) >= 1440 ? '<span class="tm crit"><b>' + duree(mins(arrive(l))) + '</b><small>arrivé le ' + jour(arrive(l)) + '</small></span>' : tm(arrive(l), slaDe(l), 'depuis l\'arrivée · SLA ' + slaTxt(slaDe(l)));
@@ -3192,9 +3201,9 @@
         if (S.autresVendeurs) autres.forEach(function (v) { h += ligneV(v); });
       }
       var pl = leadsDu(sid).filter(function (l) { return l.zone === 'plateau'; });
-      if (pl.length) h += '<tr class="vroom"><td class="who"><b>Au plateau VROOM</b><small>pas encore transmis au site</small></td><td colspan="4"><button type="button" class="cell vr" data-a="cell" data-id="plateau|tous">' + pl.length + '</button></td><td><span class="na">—</span></td></tr>';
+      if (pl.length) h += '<tr class="vroom"><td class="who"><b>À la Vroom Team</b><small>pas encore transmis au site</small></td><td colspan="4"><button type="button" class="cell vr" data-a="cell" data-id="plateau|tous">' + pl.length + '</button></td><td><span class="na">—</span></td></tr>';
       h += '</tbody></table></div>';
-      h += '<p class="foot">Chaque lead ouvert (pas encore contacté) est compté une fois, chez la personne qui l\'a en main. « À risque » : plus de 60 % du délai consommé. Délai : celui de la source pour un lead direct, 2 h pour un lead transmis par le plateau VROOM. « Ouverts + 24 h » : leads de moins de ' + ((S.stats && S.stats.arriere_jours) || 30) + ' jours ; les plus anciens sont comptés à part, en archives.</p>';
+      h += '<p class="foot">Chaque lead ouvert (pas encore contacté) est compté une fois, chez la personne qui l\'a en main. « À risque » : plus de 60 % du délai consommé. Délai : celui de la source pour un lead direct, 2 h pour un lead transmis par la Vroom Team. « Ouverts + 24 h » : leads de moins de ' + ((S.stats && S.stats.arriere_jours) || 30) + ' jours ; les plus anciens sont comptés à part, en archives.</p>';
       return h;
     }
     // La case cliquée du mur → ses leads (affichés dans le volet de droite).
@@ -3212,11 +3221,11 @@
         var lv = S.leads.find(function (x) { return String(x.id_user_attribue) === String(r) && x.vendeur_nom; });
         nom = propre((v && v.nom) || (lv && lv.vendeur_nom) || 'Vendeur');
       }
-      var qui = r === 'piscine' ? 'Pool · personne' : r === 'plateau' ? 'Au plateau VROOM' : nom;
+      var qui = r === 'piscine' ? 'Pool · personne' : r === 'plateau' ? 'À la Vroom Team' : nom;
       return { sid: sid, r: r, c: c, gere: manager(sid), qui: qui, lib: lib, leads: ls.slice().sort(function (a, b) { return ts(arrive(a)) - ts(arrive(b)); }) };
     }
     function renderVolet() {
-      $drawer.classList.remove('composing');
+      $drawer.classList.remove('composing'); $drawer.classList.remove('full');
       var z = listeCellule();
       if (!z) return fermerTout();
       var si = siteInfo(z.sid) || {};
@@ -3240,7 +3249,7 @@
         { k: 'hd', titre: 'Hors délai dans le Pool', why: 'Personne ne les a pris dans le temps prévu. Confiez-les à quelqu\'un.', items: mine.filter(function (l) { return l.zone === 'piscine' && !verrouAutre(l) && niveau(l) === 'crit'; }), act: 'attribuer' },
         { k: 'rs', titre: 'Pris sans appel depuis plus de 20 min', why: 'Un vendeur les a pris puis n\'a pas appelé. Rendez-les au Pool ou confiez-les à un autre.', items: mine.filter(prisSansAppel), act: 'liberer' },
         { k: 'hs', titre: 'Autre marque demandée', why: 'La demande vise une marque que le site ne vend pas. Renvoyez-les avant qu\'ils ne vieillissent ici.', items: mine.filter(horsMarque), act: 'renvoyer' },
-        { k: 'inj', titre: 'Injoignables après 3 tentatives', why: 'Le plateau VROOM peut reprendre la relance (leads BACS), ou le lead peut être clos.', items: mine.filter(function (l) { return l.zone === 'vendeur' && l.tentatives >= 3; }), act: 'injoignable' }
+        { k: 'inj', titre: 'Injoignables après 3 tentatives', why: 'La Vroom Team peut reprendre la relance (leads BACS), ou le lead peut être clos.', items: mine.filter(function (l) { return l.zone === 'vendeur' && l.tentatives >= 3; }), act: 'injoignable' }
       ];
     }
     function optionsVendeurs(sid, exclu, choisi) {
@@ -3269,7 +3278,7 @@
           else if (g.act === 'attribuer') a = '<select id="sel-' + l.id_lead + '" aria-label="Vendeur">' + optionsVendeurs(l.id_site) + '</select><button type="button" class="btn sm pri" data-a="attribuer" data-id="' + l.id_lead + '">Attribuer</button>';
           else if (g.act === 'liberer') a = '<button type="button" class="btn sm" data-a="rendre" data-id="' + l.id_lead + '">Rendre au Pool</button><select id="sel-' + l.id_lead + '" aria-label="Vendeur">' + optionsVendeurs(l.id_site, l.id_user_attribue) + '</select><button type="button" class="btn sm pri" data-a="attribuer" data-id="' + l.id_lead + '">Attribuer</button>';
           else if (g.act === 'renvoyer') a = '<select id="sit-' + l.id_lead + '" aria-label="Site">' + sitesRenvoi(l).map(function (s) { return '<option value="' + s.id_site + '">' + esc(siteNom(s.site)) + ' · ' + esc(propre(s.reseau || '')) + '</option>'; }).join('') + '</select><button type="button" class="btn sm pri" data-a="renvoyer" data-id="' + l.id_lead + '">Renvoyer</button>';
-          else if (g.act === 'injoignable') a = (l.sf_lead_id && !sansPlateau(l) ? '<button type="button" class="btn sm vr" data-a="confier" data-id="' + l.id_lead + '">Confier au plateau VROOM</button>' : '') + '<button type="button" class="btn sm dang" data-a="clore-inj" data-id="' + l.id_lead + '">Clore</button>';
+          else if (g.act === 'injoignable') a = (l.sf_lead_id && !sansPlateau(l) ? '<button type="button" class="btn sm vr" data-a="confier" data-id="' + l.id_lead + '">Confier à la Vroom Team</button>' : '') + '<button type="button" class="btn sm dang" data-a="clore-inj" data-id="' + l.id_lead + '">Clore</button>';
           var tsv = g.act === 'liberer' ? tm(l.attribue_le, 20, 'pris par ' + prenom(l.vendeur_nom)) : tm(arrive(l), slaDe(l));
           h += '<div class="rel"><div>' + tsv + '</div><div><span class="lr-n lien-n" data-a="open" data-id="' + l.id_lead + '">' + esc(nomLead(l)) + '</span> <span class="lr-v">' + esc(demandeDe(l)) + '</span>'
             + (l.vendeur_nom && g.act !== 'liberer' ? '<p class="why">Chez ' + esc(propre(l.vendeur_nom)) + (l.dernier_essai ? ' · dernier essai ' + esc(quand(l.dernier_essai)) : '') + '</p>' : '') + '<div class="tags">' + tagsLead(l) + '</div></div><div class="rel-a">' + a + '</div></div>';
@@ -3319,11 +3328,11 @@
       if (!S.relais) return h + '<div class="empty">Chargement du relais…</div>';
       var rows = S.relais.filter(function (r) { return r.att_bacs_min != null || r.att_site_min != null || r.vendeur_min != null; })
         .map(function (r) {
-          var seg = [['u', 'Attente dans le Pool BACS', r.att_bacs_min], ['v', 'Traitement VROOM', r.vroom_min], ['u', 'Attente sur le site', r.att_site_min], ['s', 'Vendeur, avant l\'appel', r.vendeur_min]]
+          var seg = [['u', 'Attente dans le Pool BACS', r.att_bacs_min], ['v', 'Traitement Vroom Team', r.vroom_min], ['u', 'Attente sur le site', r.att_site_min], ['s', 'Vendeur, avant l\'appel', r.vendeur_min]]
             .filter(function (x) { return x[2] != null; }).map(function (x) { return [x[0], x[1], Math.max(0, Number(x[2]))]; });
           return { r: r, seg: seg, tot: seg.reduce(function (a, s) { return a + s[2]; }, 0) };
         }).sort(function (a, b) { return b.tot - a.tot; });
-      h += '<div class="lg"><span><i class="u"></i>Attente, personne n\'a la main</span><span><i class="v"></i>Plateau VROOM</span><span><i class="s"></i>Vendeur</span></div><div class="rl">';
+      h += '<div class="lg"><span><i class="u"></i>Attente, personne n\'a la main</span><span><i class="v"></i>Vroom Team</span><span><i class="s"></i>Vendeur</span></div><div class="rl">';
       if (!rows.length) h += '<div class="empty">Pas encore assez de leads contactés sur 30 jours pour mesurer le relais.</div>';
       rows.forEach(function (x) {
         var tot = x.tot || 1;
@@ -3331,7 +3340,7 @@
           + x.seg.map(function (s) { return '<i class="' + s[0] + '" style="width:' + Math.max(1.5, 100 * s[2] / tot).toFixed(2) + '%" title="' + esc(s[1]) + ' : ' + dureeMes(s[2]) + '"></i>'; }).join('') + '</div><div class="rl-d">'
           + x.seg.map(function (s) { return '<span>' + esc(s[1]) + ' <b>' + dureeMes(s[2]) + '</b></span>'; }).join('') + '</div></div>';
       });
-      return h + '</div><p class="foot">Médianes calculées séparément pour chaque segment : leur somme donne un ordre de grandeur, pas un parcours réel. Pool BACS et traitement VROOM : historique BACS des comptes VROOM et gestes du plateau dans One Data. Site : de l\'arrivée sur le site à la prise par un vendeur, puis de la prise au premier contact.</p>';
+      return h + '</div><p class="foot">Médianes calculées séparément pour chaque segment : leur somme donne un ordre de grandeur, pas un parcours réel. Pool BACS et traitement Vroom Team : historique BACS des comptes Vroom Team et gestes de la Vroom Team dans One Data. Site : de l\'arrivée sur le site à la prise par un vendeur, puis de la prise au premier contact.</p>';
     }
 
     // ── Campagnes : chef et direction ─────────────────────────────────────
@@ -3389,42 +3398,139 @@
       setTimeout(function () { S.frais.clear(); }, 7000);
     }
 
-    // ── Panneau latéral : la fiche du lead ────────────────────────────────
+    // ── La fiche de traitement du lead (v83 : plein écran) ─────────────────
+    function leadSuivant() {
+      var D = S.dr; if (!D) return null;
+      var ls = mesLeads().filter(function (x) { return Number(x.id_lead) !== Number(D.id); });
+      if (!ls.length && POSTE !== 'vendeur' && D.l) ls = S.leads.filter(function (x) { return Number(x.id_lead) !== Number(D.id) && Number(x.id_site) === Number(D.l.id_site) && x.zone !== 'plateau' && manager(x.id_site); })
+        .sort(function (a, b) { return ts(arrive(a)) - ts(arrive(b)); });
+      return ls[0] || null;
+    }
+    function modeleAff(s) {
+      s = String(s || '').replace(/\s+/g, ' ').trim();
+      if (!s || s !== s.toUpperCase()) return s;
+      return s.split(' ').map(function (w) { return /\d|-/.test(w) || w.length <= 3 ? w : w.charAt(0) + w.slice(1).toLowerCase(); }).join(' ');
+    }
+    function delaiTete(l) {
+      if (l.zone === 'plateau') return '<div class="fx-del neutre"><b>À la Vroom Team</b><small>reçu ' + esc(quand(l.recu_le)) + '</small></div>';
+      var dep = arrive(l); if (!dep) return '';
+      var sla = slaDe(l), fin = ts(dep) + sla * 60000, rest = (fin - Date.now()) / 60000;
+      if (l.tentatives > 0) return '<div class="fx-del ok"><b>' + plural(l.tentatives, 'tentative') + '</b><small>arrivé ' + esc(quand(dep)) + '</small></div>';
+      var part = Math.max(0, Math.min(1, 1 - rest / sla)), cl = rest <= 0 ? 'crit' : part > 0.6 ? 'warn' : 'ok';
+      var coul = cl === 'crit' ? '#e24b4a' : cl === 'warn' ? '#fac055' : '#53bda7', fond = cl === 'crit' ? '#f3d6d6' : cl === 'warn' ? '#f6e6bd' : '#dcefe9';
+      var txt = rest > 0 ? (rest < 60 ? Math.ceil(rest) + "'" : Math.floor(rest / 60) + 'h' + String(Math.floor(rest % 60)).padStart(2, '0')) : '!';
+      return '<div class="fx-del ' + cl + '"><i style="background:conic-gradient(' + coul + ' 0 ' + Math.round(part * 100) + '%,' + fond + ' ' + Math.round(part * 100) + '% 100%)"><em>' + txt + '</em></i>'
+        + '<span><b>' + (rest > 0 ? 'À rappeler avant ' + hh(fin) : -rest < 1 ? 'Délai dépassé' : 'Délai dépassé de ' + duree(-rest)) + '</b><small>délai de rappel du site : ' + slaTxt(sla) + (POSTE === 'vendeur' ? ' · ensuite votre chef est prévenu' : '') + '</small></span></div>';
+    }
+    var QLIB = { projet: 'Projet', echeance: 'Échéance', reprise: 'Reprise', financement: 'Financement', modele: 'Modèle' };
+    function carteVroom(l, cx) {
+      var v = cx && cx.vroom;
+      if (!v && !l.par_plateau && !l.qualification) return '';
+      var q = (v && v.qualif) || {}, rows = Object.keys(QLIB).filter(function (k) { return q[k]; }).map(function (k) { return [QLIB[k], k === 'modele' ? modeleAff(q[k]) : q[k]]; });
+      if (v && v.rdv_debut) rows.push(['RDV', quand(v.rdv_debut) + (v.rdv_vendeur ? ' avec ' + propre(v.rdv_vendeur) : '') + (v.rdv_ok === false ? ' (non posé)' : '')]);
+      var note = (v && v.note) || (!rows.length ? l.qualification : '');
+      var qui = v ? propre(v.agent || '') + ' · ' + quand(v.le) : (l.transfere_par_nom ? propre(l.transfere_par_nom) + ' · ' + quand(l.transfere_le) : '');
+      return '<div class="fx-card vr"><div class="fx-lab vr">' + (l.par_plateau || v ? 'Ce que la Vroom Team a appris' : 'Qualification') + '</div>'
+        + rows.map(function (r) { return '<div class="fx-row"><span>' + esc(r[0]) + '</span><b>' + esc(r[1]) + '</b></div>'; }).join('')
+        + (note ? '<p class="fx-note">« ' + esc(note) + ' »</p>' : '')
+        + (qui ? '<p class="fx-qui">' + esc(qui) + '</p>' : '')
+        + avisPlateau(l) + '</div>';
+    }
+    function pointsDelco(l, cx) {
+      var out = [], stock = cx.stock || [], ici = stock.filter(function (s) { return Number(s.idsite) === Number(l.id_site); })[0];
+      if (ici) out.push(['Stock', 'v', ici.n + ' ' + modeleAff(ici.modele) + ' disponible' + (ici.n > 1 ? 's' : '') + ' à ' + siteNom(ici.site) + ' : il peut repartir avec une date de livraison.']);
+      var ail = stock.filter(function (s) { return s !== ici; }).slice(0, 2);
+      if (ail.length) out.push(['Stock groupe', 'b', (ici ? 'Aussi ' : 'Disponible ') + ail.map(function (s) { return s.n + ' à ' + siteNom(s.site); }).join(', ') + ' (' + modeleAff(ail[0].modele) + ').']);
+      var p = (cx.parc || [])[0];
+      if (p) out.push(['Reprise', 'b', 'Il roule en ' + [propre(p.marque), modeleAff(p.modele)].filter(Boolean).join(' ') + (p.mec ? ' de ' + String(p.mec).slice(0, 4) : '') + (p.age != null ? ' (' + p.age + ' an' + (p.age > 1 ? 's' : '') + ')' : '') + ' : la reprise est un argument.']);
+      var aff = (cx.affaires || [])[0];
+      if (aff) out.push(['Attention', 'o', 'Affaire ' + String(aff.statut || 'en cours').toLowerCase() + (aff.vendeur ? ' avec ' + propre(aff.vendeur) : '') + (aff.le ? ' (' + jour(aff.le) + ')' : '') + ' : ne pas le surprendre.']);
+      var autres = cx.autres_demandes || [];
+      if (autres.length) out.push(['Attention', 'o', plural(autres.length, 'autre demande', 'autres demandes') + ' en 18 mois, dont ' + (autres[0].vehicule ? modeleAff(autres[0].vehicule) + ' ' : '') + (autres[0].site ? 'à ' + siteNom(autres[0].site) + ' ' : '') + 'le ' + jour(autres[0].le) + '.']);
+      var at = cx.atelier || {};
+      if (at.n) out.push(['Angle', 'b', 'Client atelier' + (at.depuis ? ' depuis ' + String(at.depuis).slice(0, 4) : '') + ' (' + plural(at.n, 'passage') + ') : jouer la continuité, même concession, même atelier.']);
+      if (!out.length) out.push(['Angle', 'b', cx.id_client ? 'Client connu, sans véhicule ni passage atelier enregistré : qualifier le projet.' : 'Inconnu du groupe : premier contact, qualifier le projet.']);
+      return out.slice(0, 4);
+    }
+    function carteConnu(cx) {
+      var p = (cx.parc || [])[0], at = cx.atelier || {}, aff = (cx.affaires || [])[0];
+      var T = [
+        ['Véhicule', p ? [propre(p.marque), modeleAff(p.modele)].filter(Boolean).join(' ') + (p.mec ? ' ' + String(p.mec).slice(0, 4) : '') : '—', p ? (p.immat || (p.depuis ? 'détenu depuis ' + String(p.depuis).slice(0, 4) : '')) : 'aucun véhicule connu'],
+        ['Atelier', at.n ? plural(at.n, 'passage') : '—', at.dernier ? 'dernier : ' + (at.dernier.libelle || 'passage') + ' · ' + jour(at.dernier.le) : 'aucun passage connu'],
+        ['Achats', cx.achats ? plural(cx.achats, 'achat') : '—', aff ? 'en cours : ' + (aff.statut || '') + (aff.vendeur ? ' · ' + propre(aff.vendeur) : '') : 'aucune affaire en cours']
+      ];
+      return '<div class="fx-card"><h3 class="fx-t">Ce que le groupe sait de lui</h3><div class="fx-tiles">' + T.map(function (t) {
+        return '<div><span>' + t[0] + '</span><b>' + esc(t[1]) + '</b><small>' + esc(t[2]) + '</small></div>'; }).join('') + '</div></div>';
+    }
+    var FIL_K = { bacs: '#acc5e4', vroom: '#2a5ea9', od: '#7a98c5', appel: '#53bda7', msg: '#e6a817', rdv: '#2a5ea9', atelier: '#fac055', affaire: '#2c7a68' };
+    var ODLIB = { attribue: 'attribué', contacte: 'contacté', perdu: 'perdu', converti: 'vendu', rejete: 'écarté' };
+    function filClient(cx) {
+      var f = (cx.fil || []).filter(function (e) {
+        if (e.k !== 'od') return true;
+        var m = /One Data : (\S+) → (\S+)(?: · (.*))?$/.exec(e.quoi || ''); if (!m) return true;
+        if (m[1] === m[2] || !ODLIB[m[2]] || m[3] === 'bacs' || m[3] === 'hors_perimetre' || m[3] === 'plateau') return false;
+        e.quoi = 'Lead ' + ODLIB[m[2]] + (m[3] && !/^(joint|prise)$/.test(m[3]) ? ' · ' + m[3].replace(/_/g, ' ') : '');
+        return true;
+      });
+      return '<div class="fx-card"><div class="fx-th"><h3 class="fx-t">Fil du client</h3><small>BACS, One Data, Vroom Team, appels, messages, RDV, atelier</small></div>'
+        + (f.length ? f.slice(0, 12).map(function (e) {
+            return '<div class="fx-fil"><span class="q">' + esc(quand(e.le)) + '</span><i style="background:' + (FIL_K[e.k] || '#acc5e4') + '"></i><span class="t">' + esc(e.quoi) + (e.par ? '<small>' + esc(propre(e.par)) + '</small>' : '') + '</span></div>'; }).join('')
+          : '<p class="hint">' + (cx.fil ? 'Rien d\'autre que cette demande.' : 'Chargement…') + '</p>') + '</div>';
+    }
     function renderDrawer() {
       var D = S.dr; if (!D) return;
       var l = D.l;
       var x = '<button type="button" class="x" data-a="close" aria-label="Fermer"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg></button>';
+      $drawer.classList.add('full');
       if (!l) { $drawer.innerHTML = '<header class="dr-h"><div><h2>Chargement…</h2></div>' + x + '</header>'; return; }
       var gere = manager(l.id_site);
       var mien = estMien(l);
-      var retour = S.cell ? '<button type="button" class="retour" data-a="retour-liste"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 6l-6 6 6 6"/></svg>Retour à la liste</button>' : '';
+      var cx = D.cx || {};
+      var retour = S.cell ? '<button type="button" class="fx-ret" data-a="retour-liste"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 6l-6 6 6 6"/></svg>Retour à la liste</button>'
+        : '<button type="button" class="fx-ret" data-a="close"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 6l-6 6 6 6"/></svg>' + (POSTE === 'vendeur' ? 'Mes leads' : 'Les leads') + '</button>';
       var canaux = [['Appeler', 'appel', 'call', IC.phone], ['SMS', 'sms', 'sms', IC.sms], ['WhatsApp', 'wa', 'wa', IC.wa], ['E-mail', 'mail', 'mail', IC.mail]]
         .filter(function (c) { return c[1] !== 'appel' || __lmPeutAppeler(); }).map(function (c) {
           return '<button type="button" class="fs-btn ' + c[2] + (D.canal === c[1] ? ' on' : '') + '" data-a="canal" data-id="' + c[1] + '"' + ((c[1] === 'mail' ? !l.email : !l.telephone) ? ' disabled' : '') + '>' + svgIc(c[3]) + c[0] + '</button>'; }).join('');
-      var h = '<header class="dr-h"><div class="dr-ht">' + retour + '<h2>' + esc(nomLead(l)) + '</h2><p class="dr-s">' + esc([demandeDe(l), l.source_libelle, siteNom(l.site)].filter(Boolean).join(' · '))
-        + (l.vendeur_nom ? ' · chez ' + esc(propre(l.vendeur_nom)) : l.zone === 'piscine' ? ' · dans le Pool' : l.zone === 'plateau' ? ' · au plateau VROOM' : '') + '</p>'
-        + '<p class="dr-tel">' + (l.telephone ? '<b>' + esc(telAff(l.telephone)) + '</b>' : 'Aucun numéro') + (l.email ? ' · ' + esc(l.email) : '') + '</p>'
-        + demandeHaut(l)
-        + '<div class="canaux">' + canaux + '</div>'
-        + (l.id_client ? '<button type="button" class="lien fiche-l" data-a="fiche" data-id="' + l.id_client + '">Ouvrir la fiche client ›</button>' : '')
-        + '</div>' + x + '</header><div class="dr-b">' + composeHtml(l);
-      // Délais
-      h += '<section><h3>Délai</h3><div class="delais">';
-      if (l.zone === 'plateau') h += '<div><span>Au plateau VROOM</span><span class="tm neutre"><b>' + duree(mins(l.recu_le)) + '</b><small>reçu le ' + esc(quand(l.recu_le)) + '</small></span></div>';
-      else {
-        if (l.transfere_le) h += '<div><span>Plateau VROOM</span><span class="tm ok"><b>transmis en ' + duree((ts(l.transfere_le) - ts(l.recu_le)) / 60000) + '</b><small>après réception</small></span></div>';
-        h += '<div><span>Sur le site</span>' + (mins(l.arrive_le) >= 1440 ? '<span class="tm crit"><b>' + duree(mins(l.arrive_le)) + '</b><small>arrivé le ' + esc(quand(l.arrive_le)) + '</small></span>' : tm(l.arrive_le, l.sla_site || 60, 'sans contact · SLA ' + slaTxt(l.sla_site || 60))) + '</div>';
-        if (l.zone === 'vendeur' && l.attribue_le) h += '<div><span>Chez ' + esc(prenom(l.vendeur_nom)) + ' depuis</span>' + tm(l.attribue_le, 30, l.tentatives ? plural(l.tentatives, 'tentative') : 'sans appel') + '</div>';
+      var ml = mesLeads(), pos = ml.findIndex(function (z) { return Number(z.id_lead) === Number(l.id_lead); });
+      var sv = leadSuivant();
+      var chez = l.vendeur_nom ? 'chez ' + propre(l.vendeur_nom) : l.zone === 'piscine' ? 'dans le Pool' : l.zone === 'plateau' ? 'à la Vroom Team' : '';
+      var h = '<header class="fx-h">' + retour
+        + '<div class="fx-id"><p class="fx-sup">' + esc([pos !== -1 ? 'Lead ' + (pos + 1) + ' sur ' + ml.length + ' à traiter' : null, siteNom(l.site), chez].filter(Boolean).join(' · ')) + '</p>'
+        + '<h2>' + esc(nomLead(l)) + (l.par_plateau ? ' <span class="fx-pill">Qualifié par la Vroom Team</span>' : '') + '</h2></div>'
+        + delaiTete(l)
+        + (sv ? '<button type="button" class="fx-ret" data-a="suivant">Lead suivant<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg></button>' : '')
+        + x + '</header>';
+      // colonne 1 : la demande
+      var c1 = '<div class="fx-card"><div class="fx-lab">La demande</div>' + demandeHaut(l)
+        + '<dl class="dl">' + [['Source', l.source_libelle], ['Campagne', l.campagne], ['Reçu le', quand(l.recu_le)], ['Statut BACS', l.statut_bacs]]
+          .filter(function (y) { return y[1]; }).map(function (y) { return '<dt>' + y[0] + '</dt><dd>' + esc(y[1]) + '</dd>'; }).join('') + '</dl></div>'
+        + carteVroom(l, cx)
+        + '<div class="fx-card"><div class="fx-lab">Coordonnées</div><p class="fx-tel">' + (l.telephone ? esc(telAff(l.telephone)) : 'Aucun numéro') + '</p>'
+        + (l.email ? '<p class="hint" style="word-break:break-word">' + esc(l.email) + '</p>' : '')
+        + (cx.consentement ? '<p class="fx-ok">' + (cx.consentement.valide ? 'Consentements recueillis ✓' : 'Consentements à recueillir') + '</p>' : '')
+        + (l.id_client ? '<button type="button" class="lien fiche-l" data-a="fiche" data-id="' + l.id_client + '">Ouvrir la fiche client ›</button>' : '') + '</div>'
+        + (D.envois && D.envois.length ? '<div class="fx-card">' + sectionBacs() + '</div>' : '');
+      // colonne 2 : l'appel et le contexte
+      var prochain = POSTE === 'vendeur' || mien ? (l.tentatives ? 'Rappeler ' + prenom(nomLead(l)) : 'Appeler ' + prenom(nomLead(l))) : 'Contacter ' + prenom(nomLead(l));
+      var v = cx.vroom, sous = v && v.rdv_debut && v.rdv_ok !== false ? 'RDV déjà posé par la Vroom Team : ' + quand(v.rdv_debut) + (v.rdv_vendeur ? ' avec ' + propre(v.rdv_vendeur) : '') + ' · à confirmer'
+        : (l.telephone ? telAff(l.telephone) : 'Aucun numéro dans la demande');
+      var c2 = '<div class="fx-call"><div class="t"><b>' + esc(prochain) + '</b><small>' + esc(sous) + '</small></div><div class="canaux">' + canaux + '</div></div>'
+        + composeHtml(l)
+        + '<div class="fx-card"><div class="fx-th"><h3 class="fx-t"><span class="fx-d">D</span>Delco · ce qu\'il faut savoir avant d\'appeler</h3></div>'
+        + (D.cx ? '<div class="fx-delco">' + pointsDelco(l, cx).map(function (p) { return '<div><b class="' + p[1] + '">' + esc(p[0]) + '</b><p>' + esc(p[2]) + '</p></div>'; }).join('') + '</div>' : '<p class="hint">Delco lit le dossier du client…</p>') + '</div>'
+        + (D.cx ? carteConnu(cx) : '') + filClient(cx);
+      // colonne 3 : délais et gestes
+      var del = '';
+      if (l.zone !== 'plateau') {
+        if (l.transfere_le) del += '<div><span>Vroom Team</span><span class="tm ok"><b>transmis en ' + duree((ts(l.transfere_le) - ts(l.recu_le)) / 60000) + '</b><small>après réception</small></span></div>';
+        del += '<div><span>Sur le site</span>' + (mins(l.arrive_le) >= 1440 ? '<span class="tm crit"><b>' + duree(mins(l.arrive_le)) + '</b><small>arrivé le ' + esc(quand(l.arrive_le)) + '</small></span>' : tm(l.arrive_le, l.sla_site || 60, 'sans contact · SLA ' + slaTxt(l.sla_site || 60))) + '</div>';
+        if (l.zone === 'vendeur' && l.attribue_le) del += '<div><span>Chez ' + esc(prenom(l.vendeur_nom)) + ' depuis</span>' + tm(l.attribue_le, 30, l.tentatives ? plural(l.tentatives, 'tentative') : 'sans appel') + '</div>';
       }
-      h += '</div></section>';
-      // Demande
-      h += '<section><h3>Demande</h3><dl class="dl">' + [['Source', l.source_libelle], ['Campagne', l.campagne], ['Reçu le', quand(l.recu_le)], ['Statut BACS', l.statut_bacs]]
-          .filter(function (y) { return y[1]; }).map(function (y) { return '<dt>' + y[0] + '</dt><dd>' + esc(y[1]) + '</dd>'; }).join('') + '</dl>'
-        + '</section>';
-      if (l.qualification) h += '<section><h3>' + (l.par_plateau ? 'Qualification du plateau VROOM' : 'Qualification') + '</h3><p class="qualif">' + esc(l.qualification) + '</p>' + (l.transfere_par_nom ? '<p class="hint">Par ' + esc(propre(l.transfere_par_nom)) + ', le ' + esc(quand(l.transfere_le)) + '.</p>' : '') + avisPlateau(l) + '</section>';
-      h += sectionBacs();
-      h += '</div><footer class="dr-f">' + piedDrawer(l, gere, mien) + '</footer>';
-      if (D.demo) h = h.replace('<div class="dr-b">', '<p class="demo">Fiche d\'exemple de la visite guidée : rien n\'est enregistré.</p><div class="dr-b">');
+      var c3 = '<div class="fx-card"><h3 class="fx-t">' + (POSTE === 'vendeur' || (mien && !gere) ? 'Résultat de l\'appel' : 'Que faire de ce lead ?') + '</h3>'
+        + '<div class="dr-f fx-act">' + piedDrawer(l, gere, mien) + '</div></div>'
+        + (del ? '<div class="fx-card"><div class="fx-lab">Délais</div><div class="delais">' + del + '</div></div>' : '');
+      h += '<div class="dr-b fx-g"><aside class="fx-c1">' + c1 + '</aside><section class="fx-c2">' + c2 + '</section><aside class="fx-c3">' + c3 + '</aside></div>';
+      if (D.demo) h = h.replace('<div class="dr-b fx-g">', '<p class="demo">Fiche d\'exemple de la visite guidée : rien n\'est enregistré.</p><div class="dr-b fx-g">');
       var top = $drawer.scrollTop;
       $drawer.innerHTML = h;
       $drawer.classList.toggle('composing', !!(D.canal && D.canal !== 'appel'));
@@ -3445,7 +3551,7 @@
     }
     function piedDrawer(l, gere, mien) {
       var D = S.dr, h = '';
-      if (l.zone === 'plateau') return '<p class="hint">Ce lead est encore au plateau VROOM : il arrivera sur le site une fois qualifié.</p>';
+      if (l.zone === 'plateau') return '<p class="hint">Ce lead est encore à la Vroom Team : il arrivera sur le site une fois qualifié.</p>';
       var libre = l.zone === 'piscine' && !verrouAutre(l);
       if (POSTE === 'vendeur' || (mien && !gere)) {
         if (l.zone === 'piscine') {
@@ -3462,7 +3568,7 @@
       h += '<div class="issues" role="radiogroup" aria-label="Geste">' + MODES.map(function (m) { return '<button type="button" role="radio" aria-checked="' + (m[0] === mode) + '" class="' + (m[0] === mode ? 'on' : '') + '" data-a="mode" data-id="' + m[0] + '">' + m[1] + '</button>'; }).join('') + '</div>';
       if (mode === 'attribuer') {
         h += '<div class="row"><select id="dr-vendeur" aria-label="Vendeur">' + optionsVendeurs(l.id_site, l.id_user_attribue) + '</select><button type="button" class="btn pri" data-a="attribuer" data-id="' + l.id_lead + '|dr">' + (l.id_user_attribue ? 'Réattribuer' : 'Attribuer') + '</button></div>'
-          + '<div class="row">' + (l.sf_lead_id && !sansPlateau(l) ? '<button type="button" class="btn vr" data-a="confier" data-id="' + l.id_lead + '">Confier au plateau VROOM</button>' : '')
+          + '<div class="row">' + (l.sf_lead_id && !sansPlateau(l) ? '<button type="button" class="btn vr" data-a="confier" data-id="' + l.id_lead + '">Confier à la Vroom Team</button>' : '')
           + (l.id_user_attribue ? '<button type="button" class="btn" data-a="rendre" data-id="' + l.id_lead + '">Rendre au Pool</button>' : '')
           + (!l.id_user_attribue && libre && chefVend(l.id_site) ? '<button type="button" class="btn vr" data-a="prendre" data-id="' + l.id_lead + '">Je le prends</button>' : '') + '</div>';
       } else if (mode === 'resultat') {
@@ -3799,17 +3905,24 @@
     async function ouvrir(id) {
       var l = S.leads.find(function (x) { return Number(x.id_lead) === Number(id); });
       if (!l) { toast('Ce lead n\'est plus ouvert.', true); return; }
-      S.dr = { id: l.id_lead, l: l, envois: null, mode: null, res: null, cands: null };
+      S.dr = { id: l.id_lead, l: l, envois: null, mode: null, res: null, cands: null, cx: null };
       $scrim.hidden = false; $drawer.hidden = false;
       renderDrawer();
-      try { S.dr.envois = await rpc('poste_bacs_envois', { p_id_lead: Number(id) }) || []; } catch (e) { if (S.dr) S.dr.envois = []; }
-      if (S.dr && Number(S.dr.id) === Number(id)) renderDrawerPreserve();
+      try { $drawer.scrollTop = 0; } catch (e) {}
+      var D0 = S.dr;
+      var rs = await Promise.all([
+        rpc('poste_bacs_envois', { p_id_lead: Number(id) }).catch(function () { return []; }),
+        rpc('poste_lead_contexte', { p_id_lead: Number(id) }).catch(function () { return {}; })
+      ]);
+      if (S.dr !== D0) return;
+      D0.envois = rs[0] || []; D0.cx = rs[1] || {};
+      renderDrawerPreserve();
     }
     // Fiche ouverte depuis le volet : on revient à la liste ; sinon on ferme tout.
     function fermerDrawer() { if (S.cell) { S.dr = null; renderVolet(); return; } fermerTout(); }
     function fermerTout() {
       var avait = !!S.cell;
-      S.dr = null; S.cell = null; $scrim.hidden = !S.modal; $drawer.hidden = true; $drawer.innerHTML = '';
+      S.dr = null; S.cell = null; $scrim.hidden = !S.modal; $drawer.hidden = true; $drawer.innerHTML = ''; $drawer.classList.remove('full');
       if (avait) render();
     }
 
@@ -3830,7 +3943,7 @@
       catch (e) { fermerModal(); toast(messageErreur(e), true); return; }
       var n = est.leads || 0, nb = est.leads_bacs || 0;
       ouvrirModal('<div class="mb-h"><div><h2>Solder le stock · ' + esc(siteNom(si.site)) + '</h2><p>' + plural(n, 'lead ouvert', 'leads ouverts') + ' depuis plus de 24 h, dont ' + nb + ' venant de BACS. Choisissez ce qu\'ils deviennent, en une fois.</p></div><button type="button" class="x" data-a="modal-close" aria-label="Fermer">' + X_SVG + '</button></div><div class="mb-b">'
-        + '<label class="opt"><input type="radio" name="sold" value="vroom"' + (nb ? ' checked' : ' disabled') + '><span><b>Confier les ' + nb + ' leads BACS au plateau VROOM</b><small>Le plateau rappelle et requalifie ; ceux qui ont encore un projet reviennent sur le site. Les autres leads restent ouverts.</small></span></label>'
+        + '<label class="opt"><input type="radio" name="sold" value="vroom"' + (nb ? ' checked' : ' disabled') + '><span><b>Confier les ' + nb + ' leads BACS à la Vroom Team</b><small>Le plateau rappelle et requalifie ; ceux qui ont encore un projet reviennent sur le site. Les autres leads restent ouverts.</small></span></label>'
         + '<label class="opt"><input type="radio" name="sold" value="equipe"' + (nb ? '' : ' checked') + '><span><b>Les répartir sur l\'équipe</b><small>Selon la règle du site, le moins chargé d\'abord.</small></span></label>'
         + '<label class="opt"><input type="radio" name="sold" value="clore"><span><b>Les clore « sans suite, stock avant déploiement »</b><small>Ils sortent des délais. Rien n\'est effacé, le motif est conservé. BACS n\'est pas modifié.</small></span></label>'
         + '</div><div class="mb-f"><button type="button" class="btn ghost" data-a="modal-close">Annuler</button><button type="button" class="btn pri" data-a="solder-ok" data-id="' + sid + '"' + (n ? '' : ' disabled') + '>Appliquer</button></div>');
@@ -3990,7 +4103,7 @@
       return geste(async function () {
         var r = await rpc('poste_confier_plateau', { p_id_lead: Number(id), p_note: null });
         if (r && r.ok === false) { toast(r.motif || 'Impossible de confier ce lead au plateau.', true); return; }
-        apres(nomLead(l) + ' confié au plateau VROOM : rappel dans 30 min' + (r && r.vers_bacs ? ', BACS mis à jour.' : '.'));
+        apres(nomLead(l) + ' confié à la Vroom Team : rappel dans 30 min' + (r && r.vers_bacs ? ', BACS mis à jour.' : '.'));
       });
     }
     function renvoyer(v) {
@@ -4162,6 +4275,7 @@
         case 'cell': { var p = id.split('|'); S.cell = { r: p[0], c: p[1] }; S.dr = null; render(); renderVolet(); return; }
         case 'cell-close': return fermerTout();
         case 'retour-liste': S.dr = null; return renderVolet();
+        case 'suivant': { var sv = leadSuivant(); if (sv) return ouvrir(sv.id_lead); toast('Plus aucun lead à traiter après celui-ci.'); return; }
         case 'autres-vendeurs': S.autresVendeurs = !S.autresVendeurs; render(); return;
         case 'autres-sites': S.autresSites = !S.autresSites; render(); return;
         case 'camp-ouvrir':
@@ -4964,6 +5078,51 @@
 .lmtc .b1h-n{font-weight:800;color:var(--ink);min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .lmtc .b1h-n small{font-weight:600;color:var(--ink-2);margin-left:8px}
 .lmtc .b1h .lien{justify-self:start;font-size:12.5px}
+
+/* v83 : fiche de traitement plein écran (vendeur, chef des ventes) */
+.lmtc-ov .drawer.full{left:0;width:auto;border-radius:0;background:#eef3fa;box-shadow:none}
+.lmtc-ov .drawer.full .fx-h{position:sticky;top:0;z-index:2;display:flex;flex-wrap:wrap;align-items:center;gap:12px 20px;padding:14px 28px;background:#fff;border-bottom:1px solid #dce6f3}
+.lmtc-ov .fx-ret{display:inline-flex;align-items:center;gap:6px;font:inherit;font-size:13px;font-weight:800;padding:9px 14px;border-radius:10px;border:1.5px solid #c9daf1;background:#fff;color:var(--bleu-dk);min-height:40px;cursor:pointer}
+.lmtc-ov .fx-ret:hover{background:var(--sel)}.lmtc-ov .fx-ret svg{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:2.2;stroke-linecap:round;stroke-linejoin:round}
+.lmtc-ov .fx-id{flex:1 1 260px;min-width:0}.lmtc-ov .fx-sup{font-size:12px;font-weight:800;color:#4b5563;margin:0}
+.lmtc-ov .fx-id h2{font-size:21px;font-weight:900;color:var(--bleu-dk);margin:2px 0 0;line-height:1.25}
+.lmtc-ov .fx-pill{display:inline-block;vertical-align:middle;font-size:12.5px;font-weight:800;padding:3px 10px;border-radius:999px;background:var(--sel);color:var(--bleu);margin-left:6px}
+.lmtc-ov .fx-del{display:flex;align-items:center;gap:12px;padding:8px 14px;border-radius:12px;font-size:12.5px}
+.lmtc-ov .fx-del.ok{background:#eaf7f4;color:#2c7a68}.lmtc-ov .fx-del.warn{background:#fff6e0;color:#8a5a00}.lmtc-ov .fx-del.crit{background:#fdeeee;color:#b23433}.lmtc-ov .fx-del.neutre{background:var(--sel);color:var(--bleu-dk)}
+.lmtc-ov .fx-del i{width:44px;height:44px;border-radius:50%;display:flex;align-items:center;justify-content:center;flex:0 0 auto}
+.lmtc-ov .fx-del i em{width:34px;height:34px;border-radius:50%;background:#fff;display:flex;align-items:center;justify-content:center;font-style:normal;font-size:11px;font-weight:900}
+.lmtc-ov .fx-del b{display:block;font-size:14px}.lmtc-ov .fx-del small{font-size:12px}
+.lmtc-ov .drawer.full .dr-b.fx-g{display:grid;grid-template-columns:minmax(0,330px) minmax(0,1fr) minmax(0,400px);grid-template-areas:"c1 c2 c3";gap:24px;padding:24px 28px 48px;align-items:start;max-width:1560px;margin:0 auto;width:100%;box-sizing:border-box}
+.lmtc-ov .fx-c1{grid-area:c1}.lmtc-ov .fx-c2{grid-area:c2}.lmtc-ov .fx-c3{grid-area:c3;position:sticky;top:92px}
+.lmtc-ov .fx-c1,.lmtc-ov .fx-c2,.lmtc-ov .fx-c3{display:flex;flex-direction:column;gap:18px;min-width:0}
+@media (max-width:1280px){.lmtc-ov .drawer.full .dr-b.fx-g{grid-template-columns:minmax(0,1fr) minmax(0,380px);grid-template-areas:"c2 c3" "c1 c3"}.lmtc-ov .fx-c1{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));align-items:start}}
+@media (max-width:860px){.lmtc-ov .drawer.full .dr-b.fx-g{grid-template-columns:minmax(0,1fr);grid-template-areas:"c2" "c3" "c1";padding:16px}.lmtc-ov .fx-c1{display:flex}.lmtc-ov .fx-c3{position:static}.lmtc-ov .drawer.full .fx-h{padding:12px 16px;position:static}}
+.lmtc-ov .fx-card{background:#fff;border:1px solid #dce6f3;border-radius:18px;padding:20px 22px;display:grid;gap:10px;align-content:start}
+.lmtc-ov .fx-card.vr{border:2px solid var(--bleu)}
+.lmtc-ov .fx-lab{font-size:11px;font-weight:900;letter-spacing:.07em;text-transform:uppercase;color:#4b5563}.lmtc-ov .fx-lab.vr{color:var(--bleu)}
+.lmtc-ov .drawer.full h3.fx-t,.lmtc-ov .fx-t{font-size:16px;font-weight:900;color:var(--bleu-dk);margin:0;display:flex;align-items:center;gap:10px;letter-spacing:0;text-transform:none}
+.lmtc-ov .fx-th{display:flex;justify-content:space-between;align-items:baseline;gap:10px;flex-wrap:wrap}.lmtc-ov .fx-th small{font-size:12px;color:#4b5563}
+.lmtc-ov .fx-d{width:26px;height:26px;border-radius:8px;background:var(--bleu);color:#fff;font-size:12px;font-weight:900;display:inline-flex;align-items:center;justify-content:center}
+.lmtc-ov .fx-row{display:flex;justify-content:space-between;gap:12px;padding:7px 0;border-bottom:1px solid #eef2f8;font-size:13px}.lmtc-ov .fx-row span{color:#4b5563}.lmtc-ov .fx-row b{text-align:right}
+.lmtc-ov .fx-note{font-size:13.5px;line-height:1.55;margin:4px 0 0}.lmtc-ov .fx-qui{font-size:12px;color:#4b5563;margin:0}
+.lmtc-ov .fx-tel{font-size:16px;font-weight:900;color:var(--bleu-dk);margin:0;font-variant-numeric:tabular-nums;user-select:all}
+.lmtc-ov .fx-ok{font-size:12.5px;font-weight:800;color:#2c7a68;margin:0}
+.lmtc-ov .fx-call{background:var(--bleu-dk);color:#fff;border-radius:18px;padding:18px 22px;display:flex;flex-wrap:wrap;align-items:center;gap:14px}
+.lmtc-ov .fx-call .t{flex:1 1 240px;min-width:0}.lmtc-ov .fx-call .t b{display:block;font-size:19px;font-weight:900}.lmtc-ov .fx-call .t small{font-size:12.5px;color:#c9daf1}
+.lmtc-ov .fx-call .canaux{display:flex;flex-wrap:wrap;gap:8px}.lmtc-ov .fx-call .fs-btn{min-height:44px;padding:10px 14px}
+.lmtc-ov .fx-delco{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}
+.lmtc-ov .fx-delco>div{background:#f6f9fd;border-radius:14px;padding:14px 16px}.lmtc-ov .fx-delco b{display:block;font-size:12px;font-weight:900;margin-bottom:4px}
+.lmtc-ov .fx-delco b.v{color:#2c7a68}.lmtc-ov .fx-delco b.b{color:var(--bleu)}.lmtc-ov .fx-delco b.o{color:#8a5a00}.lmtc-ov .fx-delco p{margin:0;font-size:13.5px;line-height:1.55;color:#1c2b45}
+.lmtc-ov .fx-tiles{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}
+.lmtc-ov .fx-tiles>div{border:1px solid #e6eef8;border-radius:14px;padding:14px 16px;display:grid;gap:3px}.lmtc-ov .fx-tiles span{font-size:11px;font-weight:900;letter-spacing:.06em;text-transform:uppercase;color:#4b5563}
+.lmtc-ov .fx-tiles b{font-size:14.5px;font-weight:900;color:#1c2b45}.lmtc-ov .fx-tiles small{font-size:12.5px;color:#4b5563}
+@media (max-width:620px){.lmtc-ov .fx-delco,.lmtc-ov .fx-tiles{grid-template-columns:minmax(0,1fr)}}
+.lmtc-ov .fx-fil{display:flex;gap:12px;padding:8px 0;border-bottom:1px solid #f0f4fa;font-size:13px;align-items:flex-start}.lmtc-ov .fx-fil:last-child{border-bottom:0}
+.lmtc-ov .fx-fil .q{flex:0 0 92px;color:#4b5563;font-weight:700}.lmtc-ov .fx-fil i{flex:0 0 auto;width:8px;height:8px;border-radius:50%;margin-top:6px}
+.lmtc-ov .fx-fil .t{flex:1;min-width:0}.lmtc-ov .fx-fil small{display:block;font-size:12px;color:#4b5563}
+.lmtc-ov .drawer.full .dr-f.fx-act{border:0;padding:0;background:transparent;border-radius:0;max-height:none;overflow:visible}
+.lmtc-ov .drawer.full .dem-h{margin:0}
+.lmtc-ov .drawer.full .compose{background:#fff;border:1px solid #dce6f3;border-radius:18px;padding:18px 20px}
 @media (prefers-reduced-motion:reduce){.lmtc *{animation:none!important;transition:none!important}}
 `;
     (doc.head || doc.documentElement).appendChild(st);
