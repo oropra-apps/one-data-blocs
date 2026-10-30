@@ -1,5 +1,8 @@
 // ============================================================================
-//  VROOM TEAM (plateau) — module One Data (OD.define 'plateau')  v2
+//  VROOM TEAM (plateau) — module One Data (OD.define 'plateau')  v3
+//  v3 (30/10/2026) : bouton « Nouveau lead » dans l'en-tête et l'écran
+//  d'attente du poste (opt.creer) : l'opératrice crée une demande et choisit
+//  le vendeur ; il la reçoit « Qualifiée par la Vroom Team ». Touche N.
 //  v2 (30/10/2026) : « Vroom Team » partout (nom du plateau) ; boutons SMS et
 //  Appeler aux couleurs de la fiche client.
 //  v1 (30/10/2026) — Team Colin. Les maquettes « Plateau Vroom – interface
@@ -400,6 +403,7 @@
         + '<div class="sp"></div>'
         + '<div class="kp"><div><b>' + nf(st.traites || 0) + '</b>traités</div><div><b>' + nf(st.rdv || 0) + '</b>RDV posés</div>'
         + '<div><b>' + nf(st.qualifies || 0) + '</b>qualifiés</div><div><b>' + dureeS(st.prise_1h_s) + '</b>prise en charge 1 h</div><div><b>' + dureeS(st.dmt_s) + '</b>durée moyenne</div></div>'
+        + (typeof opt.creer === 'function' ? '<button type="button" class="hbtn w" data-a="creer" title="Créer une demande et l\'envoyer à un vendeur (touche N)">+ Nouveau lead</button>' : '')
         + '<button type="button" class="hbtn" data-a="liste" title="Liste des leads, nouveau lead, mes actions">' + svg(IC.liste, 16) + 'Vue liste</button>'
         + '<div class="who"><i>' + esc(initiales(user.nomComplet || ((user.prenom || '') + ' ' + (user.nom || '')))) + '</i><div><b>' + esc(propre(user.prenom || user.nomComplet || 'Moi')) + '</b>'
         + (b.ecrire_bacs ? (b.canal === 'moi' ? '<small>BACS ✓</small>' : '<small class="ko">BACS fermé</small>') : '<small>BACS non requis</small>') + '</div></div></header>';
@@ -439,6 +443,7 @@
         + '<div class="tile o"><b>' + nf(c.n48h || 0) + '</b>relances 48 h</div><div class="tile"><b>' + nf(c.npool || 0) + '</b>leads au Pool</div></div>'
         + (S.pause ? '<button type="button" class="bigbtn" data-a="reprendre">Reprendre</button>'
           : '<button type="button" class="bigbtn" data-a="servir"' + (bacsBloque() || S.vue === 'charge' ? ' disabled' : '') + '>' + (S.vue === 'charge' ? 'Un instant…' : 'Lead suivant <kbd>Entrée</kbd>') + '</button>')
+        + (typeof opt.creer === 'function' ? '<p class="small muted" style="margin-top:14px">Un client appelle ou se présente sans demande ? <button type="button" class="lnk" data-a="creer">Créer un lead et l\'envoyer à un vendeur</button> <kbd>N</kbd></p>' : '')
         + (S.passes.length ? '<p class="small muted" style="margin-top:16px">' + plural(S.passes.length, 'lead passé', 'leads passés') + ' pendant cette session. <button type="button" class="lnk" data-a="oublier-passes">Les remettre dans la file</button></p>' : '')
         + '</div>';
     }
@@ -762,6 +767,10 @@
           if (!S.pause) return; S.pause = false; render(); return;
         case 'oublier-passes': S.passes = []; chargerEntour().then(render); return;
         case 'liste': if (typeof opt.liste === 'function') { detruire(); opt.liste(); } return;
+        case 'creer':
+          if (typeof opt.creer !== 'function') return;
+          if (S.vue === 'lead') { toast(doc, 'Terminez d\'abord le lead en cours (ou passez-le).', true); return; }
+          detruire(); opt.creer(); return;
         case 'etape': S.etape = Number(id); render(); return;
         case 'q': { var k = t.getAttribute('data-k'); S.q[k] = S.q[k] === id ? null : id; if (S.etape === 0) S.etape = 1; render(); return; }
         case 'issue': return choisirIssue(id);
@@ -791,6 +800,9 @@
         if (S.vue === 'lead') { if (peutValider()) { ev.preventDefault(); valider(); } }
         else if (!S.pause && S.vue !== 'charge') { ev.preventDefault(); servir(); }
         return;
+      }
+      if (!saisie && !ev.ctrlKey && !ev.metaKey && !ev.altKey && S.vue !== 'lead' && String(ev.key || '').toUpperCase() === 'N' && typeof opt.creer === 'function') {
+        ev.preventDefault(); detruire(); opt.creer(); return;
       }
       if (saisie || ev.ctrlKey || ev.metaKey || ev.altKey || S.vue !== 'lead') return;
       var k = String(ev.key || '').toUpperCase(), m = ISSUES.filter(function (x) { return x[2] === k; })[0];
@@ -1111,7 +1123,7 @@
   }
 
   // ── Publication ──────────────────────────────────────────────────────────
-  var API = { version: 'v2', poste: poste, superviser: superviser, rapport: rapport };
+  var API = { version: 'v3', poste: poste, superviser: superviser, rapport: rapport };
   W.__OD_PLATEAU__ = API;
   try { var FW0 = frontWindow(); if (FW0 && FW0 !== W) FW0.__OD_PLATEAU__ = API; } catch (e) {}
 
