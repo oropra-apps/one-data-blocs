@@ -1,5 +1,7 @@
 // ============================================================================
-//  PLATEAU VROOM — module One Data (OD.define 'plateau')  v1
+//  VROOM TEAM (plateau) — module One Data (OD.define 'plateau')  v2
+//  v2 (30/10/2026) : « Vroom Team » partout (nom du plateau) ; boutons SMS et
+//  Appeler aux couleurs de la fiche client.
 //  v1 (30/10/2026) — Team Colin. Les maquettes « Plateau Vroom – interface
 //  idéale », branchées sur les vraies données.
 //  * API partagée window.__OD_PLATEAU__, posée dès le chargement :
@@ -168,7 +170,11 @@
       '.odpl .call .dot{width:12px;height:12px;border-radius:50%;background:var(--ve);box-shadow:0 0 0 6px rgba(83,189,167,.25)}',
       '.odpl .call .t{flex:1 1 240px;min-width:0}.odpl .call .bt{display:flex;gap:8px;flex-wrap:wrap;flex:0 0 auto}.odpl .call .t b{display:block;font-size:19px;font-weight:900}.odpl .call .t small{font-size:12.5px;color:#c9daf1}',
       '.odpl .cbtn{font-size:13px;font-weight:800;padding:10px 16px;border-radius:11px;border:1px solid rgba(255,255,255,.35);background:transparent;color:#fff;min-height:44px;display:inline-flex;align-items:center;gap:8px}',
-      '.odpl .cbtn:hover{background:rgba(255,255,255,.1)}.odpl .cbtn.vert{background:var(--ve);border-color:var(--ve);color:#0f3d33;font-weight:900}',
+      '.odpl .cbtn:hover{background:rgba(255,255,255,.1)}',
+      // boutons de canal : mêmes couleurs que la fiche client
+      '.odpl .fsb{display:inline-flex;align-items:center;gap:8px;border:1.5px solid #e8eef7;background:#fff;border-radius:11px;padding:10px 16px;font-size:13.5px;font-weight:800;min-height:44px;color:var(--bl2)}',
+      '.odpl .fsb.call{color:#2a5ea9;border-color:#c9d9ee}.odpl .fsb.call:hover{background:#eef4fc}.odpl .fsb.sms{color:#e6a817;border-color:#f0dca6}.odpl .fsb.sms:hover{background:#fdf7e8}',
+      '.odpl .fsb.wa{color:#1f9d63;border-color:#bfe6cf}.odpl .fsb.wa:hover{background:#eafaf1}.odpl .fsb.mail{color:#1f4a85;border-color:#d7dfe9}.odpl .fsb.mail:hover{background:#f2f5f9}',
       // guide
       '.odpl .steps{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;margin:4px 0 14px}',
       '.odpl .steps button{padding:10px 12px;border-radius:11px;border:0;background:#f2f6fc;color:var(--tx2);font-size:12.5px;font-weight:800;text-align:left;min-height:42px}',
@@ -388,7 +394,7 @@
     function enTete() {
       var st = S.stats || {}, b = S.bacs || {};
       var etat = S.pause ? 'Pause' : (S.vue === 'lead' ? 'Sur un lead <span data-tick="sur">' + chrono((Date.now() - S.debut) / 1000) + '</span>' : 'Disponible');
-      return '<header class="hd"><div class="logo"><i>OD</i><div><b>Plateau Vroom</b><small>Poste agent · leads servis automatiquement</small></div></div>'
+      return '<header class="hd"><div class="logo"><i>OD</i><div><b>Vroom Team</b><small>Poste agent · leads servis automatiquement</small></div></div>'
         + '<div class="seg" role="group" aria-label="Mon état"><button type="button" class="' + (!S.pause ? 'on' : '') + '" data-a="dispo">● ' + etat + '</button>'
         + '<button type="button" class="pause' + (S.pause ? ' on' : '') + '" data-a="pause">Pause</button></div>'
         + '<div class="sp"></div>'
@@ -529,8 +535,8 @@
       var f = S.fiche || {};
       var tel = telAff(f.telephone);
       return '<section class="col c-app" aria-label="Appel">'
-        + '<div class="call"><div class="dot"></div><div class="t"><b>' + esc(propre(f.nom) || 'Sans nom') + (tel ? ' · ' + esc(tel) : '') + '</b><small>Appel par la téléphonie du plateau : « Appeler » ouvre votre logiciel téléphonique, ou copiez le numéro.</small></div>'
-        + (tel ? '<div class="bt"><button type="button" class="cbtn" data-a="copier">' + svg(IC.copie, 16) + 'Copier</button><button type="button" class="cbtn" data-a="sms">' + svg(IC.sms, 16) + 'SMS</button><button type="button" class="cbtn vert" data-a="appeler">' + svg(IC.tel, 16) + 'Appeler</button></div>' : '<span class="small" style="color:#ffd28a">Pas de numéro dans BACS</span>')
+        + '<div class="call"><div class="dot"></div><div class="t"><b>' + esc(propre(f.nom) || 'Sans nom') + (tel ? ' · ' + esc(tel) : '') + '</b><small>Appel par la téléphonie de la Vroom Team : « Appeler » ouvre votre logiciel téléphonique, ou copiez le numéro.</small></div>'
+        + (tel ? '<div class="bt"><button type="button" class="cbtn" data-a="copier">' + svg(IC.copie, 16) + 'Copier</button><button type="button" class="fsb sms" data-a="sms">' + svg(IC.sms, 16) + 'SMS</button><button type="button" class="fsb call" data-a="appeler">' + svg(IC.tel, 16) + 'Appeler</button></div>' : '<span class="small" style="color:#ffd28a">Pas de numéro dans BACS</span>')
         + '</div>' + guide() + '<div class="duo">' + arguments_() + notes() + '</div></section>';
     }
 
@@ -847,7 +853,7 @@
     }
     function enTete() {
       var maint = new Date(), l = S.liens || {};
-      return '<header class="hd"><div class="logo"><i>OD</i><div><b>Tour de contrôle · Plateau Vroom</b><small>' + esc(maint.toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long' })) + ' · <span data-tick="h">' + hh(maint) + '</span> · en direct</small></div></div>'
+      return '<header class="hd"><div class="logo"><i>OD</i><div><b>Tour de contrôle · Vroom Team</b><small>' + esc(maint.toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long' })) + ' · <span data-tick="h">' + hh(maint) + '</span> · en direct</small></div></div>'
         + '<div class="seg" role="tablist"><button type="button" role="tab" data-a="onglet" data-id="tour" class="' + (S.onglet === 'tour' ? 'on' : '') + '">Tour de contrôle</button><button type="button" role="tab" data-a="onglet" data-id="rapport" class="' + (S.onglet === 'rapport' ? 'on' : '') + '">Rapport client</button></div>'
         + '<div class="sp"></div>'
         + (l.telephonie ? '<a class="hbtn" href="' + esc(l.telephonie) + '" target="_blank" rel="noopener">Supervision téléphonie ' + svg(IC.ext, 15) + '</a>' : '')
@@ -910,7 +916,7 @@
       var nb = function (f) { return eq.filter(f).length; };
       return '<section class="col"><div style="display:flex;justify-content:space-between;align-items:baseline;gap:10px;flex-wrap:wrap"><h2 style="font-size:16px">L\'équipe maintenant</h2>'
         + '<span class="small muted">d\'après One Data · ' + nb(function (e) { return e.sur_fiche; }) + ' sur un lead · l\'écoute et les appels restent dans la console téléphonie</span></div>'
-        + '<div class="team">' + (cartes || '<div class="vide">Personne dans l\'équipe du plateau.</div>') + '</div></section>';
+        + '<div class="team">' + (cartes || '<div class="vide">Personne dans la Vroom Team.</div>') + '</div></section>';
     }
     function charge() {
       var pj = S.prevJ, pd = S.prevD;
@@ -1064,18 +1070,18 @@
       var sel = '<select data-x="mois" aria-label="Mois" style="min-width:170px;background:transparent;color:#fff;border-color:rgba(255,255,255,.4)">' + moisListe().map(function (m) { return '<option value="' + m + '"' + (m === S.mois ? ' selected' : '') + ' style="color:#1c2b45">' + esc(nomMois(m)) + '</option>'; }).join('') + '</select>';
       var actions = '<div class="noprint" style="display:flex;gap:8px;flex-wrap:wrap">' + sel + '<button type="button" class="hbtn w" data-a="imprimer">' + svg(IC.print, 15) + 'Imprimer / PDF</button></div>';
       if (!d) {
-        root.innerHTML = '<header class="rph"><div class="in"><div style="flex:1;min-width:280px"><div class="k">Plateau Vroom · rapport à la direction Team Colin</div><h1>' + esc(nomMois(S.mois)) + '</h1><div class="s">' + (S.err ? esc(messageErreur(S.err)) : 'Calcul du rapport…') + '</div></div>' + actions + '</div></header>';
+        root.innerHTML = '<header class="rph"><div class="in"><div style="flex:1;min-width:280px"><div class="k">Vroom Team · rapport à la direction Team Colin</div><h1>' + esc(nomMois(S.mois)) + '</h1><div class="s">' + (S.err ? esc(messageErreur(S.err)) : 'Calcul du rapport…') + '</div></div>' + actions + '</div></header>';
         return;
       }
       var p1h = pct(d.un_h_ok, d.un_h);
       var titre = d.ventes ? nomMois(S.mois) + ' : ' + plural(d.ventes, 'vente née', 'ventes nées') + ' d\'une demande BACS' : nomMois(S.mois) + ' : ' + nf(d.recues) + ' demandes BACS';
-      var h = '<header class="rph"><div class="in"><div style="flex:1;min-width:280px"><div class="k">Plateau Vroom · rapport à la direction Team Colin</div><h1>' + esc(titre) + '</h1>'
+      var h = '<header class="rph"><div class="in"><div style="flex:1;min-width:280px"><div class="k">Vroom Team · rapport à la direction Team Colin</div><h1>' + esc(titre) + '</h1>'
         + '<div class="s">' + nf(d.traitees) + ' demandes traitées sur ' + nf(d.recues) + ' reçues · ' + (d.concessions || []).length + ' concessions' + (p1h != null ? ' · ' + p1h + ' % des demandes « 1 h » dans le délai constructeur' : '') + '</div></div>' + actions + '</div></header>';
       h += '<main class="rpm">';
       var tiles = [
         ['Demandes « 1 h » dans le délai', p1h == null ? '—' : p1h + ' %', d.un_h ? nf(d.un_h_ok) + ' sur ' + nf(d.un_h) + ' · ' + nf(d.un_h - d.un_h_ok) + ' hors délai' : 'aucune ce mois'],
         ['Qualifiées et transmises', nf(d.qualifiees), pct(d.qualifiees, d.jointes) != null ? pct(d.qualifiees, d.jointes) + ' % des clients joints' : ''],
-        ['RDV en concession', nf(d.rdv), 'posés par le plateau ou pris dans les 30 jours'],
+        ['RDV en concession', nf(d.rdv), 'posés par la Vroom Team ou pris dans les 30 jours'],
         ['Ventes', nf(d.ventes), 'VN ' + nf(d.ventes_vn) + ' · VO ' + nf(d.ventes_vo) + ' · bon de commande sous 120 jours']
       ];
       h += '<div class="rpt">' + tiles.map(function (t) { return '<div><div class="l">' + esc(t[0]) + '</div><div class="v">' + esc(t[1]) + '</div><div class="c">' + esc(t[2]) + '</div></div>'; }).join('') + '</div>';
@@ -1089,7 +1095,7 @@
       var conc = (d.concessions || []).map(function (s) {
         return '<tr><td style="font-weight:800">' + esc(siteNom(s.site)) + '</td><td>' + nf(s.transmis) + '</td><td>' + (s.rappel_2h_pct == null ? '<span class="muted">—</span>' : '<span style="' + pill(s.rappel_2h_pct >= 85) + '">' + s.rappel_2h_pct + ' %</span>') + '</td><td>' + nf(s.rdv) + '</td><td style="font-weight:900;color:#2c7a68">' + nf(s.ventes) + '</td><td>' + (s.sans_suite ? '<span style="' + pill(false) + '">' + s.sans_suite + '</span>' : '<span class="muted">0</span>') + '</td></tr>'; }).join('');
       var origs = (d.origines || []).filter(function (o) { return o.recues >= 3; }), mo = Math.max.apply(null, origs.map(function (o) { return o.taux_qualif || 0; }).concat([1]));
-      h += '<div class="g3" style="grid-template-columns:minmax(0,1fr) minmax(0,400px)"><section class="sec" style="padding:0;overflow-x:auto"><div class="sech" style="padding:20px 22px 4px"><h2>Ce que les concessions ont fait des leads transmis</h2><span class="small muted">le plateau qualifie, la concession transforme</span></div>'
+      h += '<div class="g3" style="grid-template-columns:minmax(0,1fr) minmax(0,400px)"><section class="sec" style="padding:0;overflow-x:auto"><div class="sech" style="padding:20px 22px 4px"><h2>Ce que les concessions ont fait des leads transmis</h2><span class="small muted">la Vroom Team qualifie, la concession transforme</span></div>'
         + '<table class="t"><thead><tr><th>Concession</th><th>Transmis</th><th>Rappel vendeur &lt; 2 h</th><th>RDV</th><th>Ventes</th><th>Sans suite &gt; 48 h</th></tr></thead><tbody>' + (conc || '<tr><td colspan="6" class="muted">Aucun lead transmis ce mois.</td></tr>') + '</tbody></table></section>'
         + '<aside class="col"><div class="sec"><h2 style="font-size:18px;margin-bottom:12px">Par origine</h2>' + (origs.length ? origs.slice(0, 8).map(function (o) {
             return '<div class="og"><span style="font-weight:800">' + esc(o.origine) + ' <span class="muted" style="font-weight:600">· ' + nf(o.recues) + '</span></span><div class="bar"><i style="width:' + Math.round(100 * (o.taux_qualif || 0) / mo) + '%"></i></div><span style="text-align:right;font-weight:800;color:#1f4a85">' + String(o.taux_qualif || 0).replace('.', ',') + ' %</span></div>'; }).join('')
@@ -1105,7 +1111,7 @@
   }
 
   // ── Publication ──────────────────────────────────────────────────────────
-  var API = { version: 'v1', poste: poste, superviser: superviser, rapport: rapport };
+  var API = { version: 'v2', poste: poste, superviser: superviser, rapport: rapport };
   W.__OD_PLATEAU__ = API;
   try { var FW0 = frontWindow(); if (FW0 && FW0 !== W) FW0.__OD_PLATEAU__ = API; } catch (e) {}
 
