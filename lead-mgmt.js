@@ -1,6 +1,10 @@
 // ============================================================================
 //  LEAD MANAGEMENT — module One Data (OD.define 'lead-mgmt')
-//  VERSION TEAM COLIN (v84) — déploiement CIBLÉ (publish-targets :
+//  VERSION TEAM COLIN (v85) — déploiement CIBLÉ (publish-targets :
+//  v85 (30/10/2026) : les fenêtres SMS et WhatsApp (niveau 9990) s'ouvraient
+//  DERRIÈRE la fiche plein écran du lead (9991). La fiche, son voile et ses
+//  fenêtres passent sous elles (9980-9982), toujours au-dessus de la barre de
+//  navigation (1200). E-mail (10001), modèles et 3CX étaient déjà devant.
 //  v84 (30/10/2026) : PAGES D'ACCUEIL du vendeur (« ma journée ») et du chef
 //  des ventes (« mon site »), maquettes 6 et 7, onglet « Accueil » ouvert par
 //  défaut. Le Pool y tient la place centrale : à partir du 31/10, les
@@ -4754,8 +4758,8 @@
 .lmtc .filtre-actif .btn{margin-left:auto}
 
 /* Panneau latéral */
-.lmtc-ov .scrim{position:fixed;inset:0;background:rgba(42,94,169,.18);z-index:9990}
-.lmtc-ov .drawer{position:fixed;top:0;right:0;bottom:0;width:min(540px,100%);background:#fff;z-index:9991;box-shadow:0 16px 50px rgba(42,94,169,.22);display:flex;flex-direction:column;border-radius:16px 0 0 16px;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+.lmtc-ov .scrim{position:fixed;inset:0;background:rgba(42,94,169,.18);z-index:9980}
+.lmtc-ov .drawer{position:fixed;top:0;right:0;bottom:0;width:min(540px,100%);background:#fff;z-index:9981;box-shadow:0 16px 50px rgba(42,94,169,.22);display:flex;flex-direction:column;border-radius:16px 0 0 16px;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
 .lmtc-ov .dr-h{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;padding:16px 18px 12px;border-bottom:1.5px solid #eef2f8}
 .lmtc-ov .dr-h h2{font-size:20px;font-weight:800;letter-spacing:-.01em;color:var(--bleu-dk)}
 .lmtc-ov .dr-s{font-size:12.5px;color:var(--mut);font-weight:600;margin-top:2px}
@@ -4915,7 +4919,7 @@
 .lmtc-ov .issues button.on.clore{background:var(--m-rouge)}
 .lmtc-ov .issues button.on.rdv{background:var(--vert)}
 /* Fenêtres */
-.lmtc-ov .modal{position:fixed;inset:0;z-index:9992;display:grid;place-items:center;padding:16px;pointer-events:none}
+.lmtc-ov .modal{position:fixed;inset:0;z-index:9982;display:grid;place-items:center;padding:16px;pointer-events:none}
 .lmtc-ov .modal[hidden]{display:none}
 .lmtc-ov .mb{pointer-events:auto;background:#fff;border-radius:16px;box-shadow:0 16px 50px rgba(42,94,169,.22);width:min(660px,100%);max-height:calc(100vh - 32px);display:flex;flex-direction:column}
 .lmtc-ov .mb-h{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;padding:16px 18px 12px;border-bottom:1.5px solid #eef2f8}
