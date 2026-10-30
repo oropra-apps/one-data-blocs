@@ -83,3 +83,11 @@ activite      = teamcolin
 # client_recherche_vehicule), vérifiés sur la seule base de Team Colin. Le
 # reste de la flotte reste sur la v18 (tag client-search-v18).
 client-search = teamcolin
+
+# Modèles de messages (28/10/2026) : module `modeles` (API window.__OD_MODELES__
+# + écran Administration › Modèles de messages). Il appelle modele_rendus,
+# modele_admin_lister, modele_enregistrer… livrées sur la seule base de Team
+# Colin. Admin, SMS et e-mail restent publiables pour toute la flotte : sans
+# `modeles` dans le manifeste du locataire, leur onglet / bouton n'apparaît pas.
+modeles       = teamcolin
+plateau       = teamcolin
