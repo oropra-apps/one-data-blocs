@@ -1,6 +1,10 @@
 // ============================================================================
 //  LEAD MANAGEMENT — module One Data (OD.define 'lead-mgmt')
-//  VERSION TEAM COLIN (v85) — déploiement CIBLÉ (publish-targets :
+//  VERSION TEAM COLIN (v86) — déploiement CIBLÉ (publish-targets :
+//  v86 (30/10/2026) : la Vroom Team crée un lead depuis le mode flux
+//  (« + Nouveau lead », touche N, plateau v3) et l'envoie au vendeur choisi ;
+//  il le reçoit « Qualifié par la Vroom Team » dans ses leads à rappeler
+//  (rattachement côté base : _plateau_cree_lier). Sans vendeur : tour de rôle.
 //  v85 (30/10/2026) : les fenêtres SMS et WhatsApp (niveau 9990) s'ouvraient
 //  DERRIÈRE la fiche plein écran du lead (9991). La fiche, son voile et ses
 //  fenêtres passent sous elles (9980-9982), toujours au-dessus de la barre de
@@ -384,10 +388,17 @@
   async function lancerPosteFlux(el, ctx, u, opt) {
     var api = /plateau-liste/i.test(hashCourant()) ? null : await plateauApi();
     if (!api) return posteVroom(el, ctx, u, opt);
-    return api.poste(el, ctx, { user: u, liste: async function () {
-      await posteVroom(el, ctx, u, opt);
-      boutonRetour(el, 'Mode flux', function () { lancerPosteFlux(el, ctx, u, opt); });
-    } });
+    var retour = function () { lancerPosteFlux(el, ctx, u, opt); };
+    return api.poste(el, ctx, { user: u,
+      liste: async function () {
+        await posteVroom(el, ctx, u, opt);
+        boutonRetour(el, 'Mode flux', retour);
+      },
+      // v86 : créer un lead et l'envoyer à un vendeur, puis revenir au flux.
+      creer: async function () {
+        await posteVroom(el, ctx, u, Object.assign({}, opt, { creer: true, retourFlux: retour }));
+        boutonRetour(el, 'Mode flux', retour);
+      } });
   }
   async function lancerSupervision(el, ctx, u, opt) {
     var api = /supervision-detail/i.test(hashCourant()) ? null : await plateauApi();
@@ -1268,12 +1279,14 @@
           + lig(e.pris_le ? true : (st === 'echec' ? false : null), 'Prise par votre onglet BACS', e.pris_le ? quand(e.pris_le) : 'BACS doit être ouvert dans ce navigateur')
           + lig(st === 'fait' ? true : (st === 'echec' || st === 'abandonne') ? false : null, st === 'fait' ? 'Créée dans BACS' : (st === 'echec' || st === 'abandonne') ? 'BACS a refusé la création' : 'Création dans BACS', st === 'fait' ? quand(e.fait_le) : (e.erreur || ''))
           + '</ol>'
-          + (st === 'fait' ? '<p class="hint">La demande apparaîtra dans le Pool et dans « Mes actions » d\'ici deux minutes (collecte BACS).</p>' : '')
+          + (st === 'fait' ? '<p class="hint">' + (D.vendeurNom ? esc(propre(D.vendeurNom)) + ' la recevra' : 'La concession la recevra (tour de rôle des vendeurs)')
+              + ' « Qualifiée par la Vroom Team », avec votre commentaire, d\'ici deux minutes (collecte BACS). Elle apparaît aussi dans « Mes actions ».</p>' : '')
           + ((st === 'echec' || st === 'abandonne') ? '<p class="hint">Corrigez la saisie puis recommencez : rien n\'a été créé dans BACS.</p>' : '')
           + (st === 'en_attente' && e.tentatives > 1 ? '<p class="hint">Nouvel essai en cours (' + e.tentatives + ').</p>' : '')
           + '</section></div><footer class="dr-f"><div class="row">'
           + ((st === 'echec' || st === 'abandonne') ? '<button type="button" class="btn pri" data-a="creer-retour">Reprendre la saisie</button>' : '')
-          + '<button type="button" class="btn" data-a="close">Fermer</button><button type="button" class="btn ghost" data-a="nouveau">Créer un autre lead</button></div></footer>';
+          + (opt && typeof opt.retourFlux === 'function' ? '<button type="button" class="btn' + (st === 'fait' ? ' pri' : '') + '" data-a="retour-flux">Revenir au flux</button>' : '<button type="button" class="btn" data-a="close">Fermer</button>')
+          + '<button type="button" class="btn ghost" data-a="nouveau">Créer un autre lead</button></div></footer>';
         $drawer.innerHTML = h; return;
       }
       h += '<section><h3>Client</h3><div class="qf">'
@@ -1286,7 +1299,7 @@
         + '<div class="q2"><label class="q"><span>Origine *</span>' + fSel('c-orig', ORIGINES_LOCALES, f.origine) + '</label><label class="q"><span>Nature *</span>' + fSel('c-nat', ['VN', 'VO', 'Entreprise'], f.nature) + '</label></div>'
         + '<div class="q2"><label class="q"><span>Type de demande *</span>' + fSel('c-type', ['Essai', 'Info', 'Offre'], f.type_demande) + '</label><label class="q"><span>Marque *</span>' + fSel('c-marque', ['Toyota', 'Lexus'], f.marque) + '</label></div>'
         + '<div class="q2"><label class="q"><span>Modèle souhaité *</span>' + fInp('c-modele', f.modele, 'Yaris Cross, NX…') + '</label><label class="q"><span>Rappel</span>' + fInp('c-rappel', f.rappel, '', 'datetime-local') + '</label></div>'
-        + '<label class="q"><span>Commentaire</span><textarea id="c-com" rows="3" placeholder="Ce que le client a demandé, ses disponibilités">' + esc(f.commentaire || '') + '</textarea></label>'
+        + '<label class="q"><span>Qualification pour le vendeur</span><textarea id="c-com" rows="3" placeholder="Projet, échéance, reprise, financement, disponibilités du client">' + esc(f.commentaire || '') + '</textarea></label>'
         + '<label class="q"><span>Statut de départ</span>' + fSel('c-statut', [['Qualifié', 'Qualifié : projet confirmé au téléphone'], ['Nouveau', 'Nouveau : à traiter par la concession']], f.statut) + '</label></div></section>';
       h += '<section><h3>Concession *</h3>';
       var ss = (S.sitesCreation || []).filter(function (s) { return String(s.marque || '').toUpperCase() === String(f.marque || '').toUpperCase(); });
@@ -1296,7 +1309,7 @@
         h += '<div class="sites">' + ss.map(function (s) {
           return '<label class="site-o"><input type="radio" name="c-site" value="' + s.id_site + '"' + (String(f.id_site) === String(s.id_site) ? ' checked' : '') + '><span><b>' + esc(siteNom(s.site)) + '</b><small>' + plural(Number(s.vendeurs) || 0, 'vendeur', 'vendeurs') + (s.file_bacs ? '' : ' · file BACS inconnue : choisir un vendeur') + '</small></span><em>' + plural(Number(s.en_attente) || 0, 'lead', 'leads') + ' en attente</em></label>';
         }).join('') + '</div>';
-        if (f.id_site) h += '<label class="q vend"><span>Vendeur</span><select id="c-vend"><option value="">File de la concession (le chef des ventes répartit)</option>'
+        if (f.id_site) h += '<label class="q vend"><span>Vendeur</span><select id="c-vend"><option value="">Tour de rôle de la concession</option>'
           + (D.vendeurs || []).map(function (v) { return '<option value="' + v.id_user + '"' + (String(f.id_vendeur) === String(v.id_user) ? ' selected' : '') + '>' + esc(propre(v.nom)) + (Number(v.en_attente) ? ' · ' + v.en_attente + ' en attente' : '') + '</option>'; }).join('') + '</select></label>';
       }
       h += '</section>';
@@ -1308,7 +1321,7 @@
       }
       h += '</div><footer class="dr-f"><div class="row">'
         + (D.doublons && D.doublons.length ? '<button type="button" class="btn pri" data-a="creer-forcer"' + dis() + '>Créer quand même</button>'
-          : '<button type="button" class="btn pri" data-a="creer-envoyer"' + dis() + '>Créer dans BACS et affecter</button>')
+          : '<button type="button" class="btn pri" data-a="creer-envoyer"' + dis() + '>Créer et envoyer au vendeur</button>')
         + '<button type="button" class="btn" data-a="close">Annuler</button></div>'
         + '<div class="row pied"><span class="hint">' + (bloque() ? 'Bloqué : ouvrez BACS dans un onglet de ce navigateur.' : 'Votre onglet BACS passe sur la concession le temps de la création, puis revient.') + '</span></div></footer>';
       var top = $drawer.scrollTop; $drawer.innerHTML = h; $drawer.scrollTop = top;
@@ -1339,6 +1352,7 @@
         var r = await rpc('plateau_lead_creer', { p: p, p_forcer: !!forcer });
         if (r && r.ok === false && r.doublons) { D.doublons = r.doublons; renderCreer(); toast('Ce client a déjà une demande ouverte.', true); return; }
         D.etape = 'suivi'; D.idSortant = r.id_sortant; D.siteNom = r.site; D.etat = { statut: 'en_attente' };
+        D.vendeurNom = p.id_vendeur ? ((D.vendeurs || []).filter(function (v) { return Number(v.id_user) === p.id_vendeur; })[0] || {}).nom : null;
         renderCreer(); reveillerBacs(); suivreCreation();
         S.actions = null; if (S.tab === 'actions') chargerActions();
       });
@@ -1656,6 +1670,7 @@
         case 'nouveau': return ouvrirCreer();
         case 'creer-envoyer': return envoyerCreer(false);
         case 'creer-forcer': return envoyerCreer(true);
+        case 'retour-flux': if (opt && typeof opt.retourFlux === 'function') { clearInterval(suiviCreation); fermerDrawer(true); opt.retourFlux(); } return;
         case 'creer-retour': if (S.dr) { S.dr.etape = null; S.dr.doublons = null; renderCreer(); } return;
         case 'corriger': return ouvrirCorriger(id);
         case 'corr-envoyer': return envoyerCorriger();
@@ -1787,6 +1802,7 @@
     }, 1000);
 
     await rafraichir();
+    if (opt && opt.creer) ouvrirCreer();
   }
 
   // Met à jour les comptes à rebours d'un écran (data-ech = échéance ISO).
