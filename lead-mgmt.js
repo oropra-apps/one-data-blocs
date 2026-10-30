@@ -1,6 +1,34 @@
 // ============================================================================
 //  LEAD MANAGEMENT — module One Data (OD.define 'lead-mgmt')
-//  VERSION TEAM COLIN (v80) — déploiement CIBLÉ (publish-targets :
+//  VERSION TEAM COLIN (v82) — déploiement CIBLÉ (publish-targets :
+//  v82 (30/10/2026) : PLATEAU VROOM « mode flux » (maquettes validées par
+//  Antoine). Le poste de l'opérateur et l'écran du superviseur viennent du
+//  module `plateau` (plateau.js v1, chargé par OD.manifest.plateau.cdn_url,
+//  API window.__OD_PLATEAU__) :
+//  * opérateur : le lead suivant est servi et réservé automatiquement, avec
+//    contexte client, guide d'appel, issue au clavier ; « Vue liste » ramène
+//    l'écran v81 (nouveau lead, mes actions, Pool), « Mode flux » y revient ;
+//  * superviseur : tour de contrôle (file en direct, équipe, charge prévue,
+//    contrôle qualité, corrections) et rapport mensuel au client ; « Écran
+//    détaillé » ramène la supervision v81.
+//  Si le module n'est pas publié ou ne se charge pas, les écrans v81 restent.
+//  #plateau-liste et #supervision-detail forcent les écrans v81.
+//  * Vendeur et chef des ventes : sur un lead qualifié par le plateau, « La
+//    qualification était… Juste / À moitié / Fausse » (lead_avis_qualif) ;
+//    l'avis remonte au contrôle qualité du superviseur.
+//  v81 (30/10/2026) : PLATEAU VROOM, demandes de Magali Castets.
+//  * « + Nouveau lead » : l'opérateur crée une demande de contact (champs du
+//    formulaire BACS « Nouveau Contact Local »), choisit la concession (et le
+//    vendeur, ou la file du site) ; One Data signale les doublons, puis la
+//    demande est créée dans BACS par l'extension de l'opérateur (geste
+//    lead_creer, édition utilisateurs v3.3.0) ; l'écran suit la création.
+//  * Onglet « Mes actions » : ce que l'opérateur a fait (dans One Data et
+//    directement dans BACS, d'après l'historique collecté) ; « Corriger »
+//    reporte la correction dans BACS. Si un vendeur a déjà la main sur le
+//    lead, la correction attend la validation du superviseur, qui la valide
+//    ou la refuse depuis son écran de supervision (« Corrections à valider »).
+//  * Compte à rebours des leads 1h / 48h sur l'échéance calculée par BACS
+//    (heures ouvrées) quand BACS la fournit (plateau_file2).
 //  v80 (29/10/2026) : CHEF DES VENTES QUI VEND AUSSI (Elio Bailleul, Lexus
 //  Sceaux). Sur un site Lexus — ou dès qu'un lead est à son nom — le chef :
 //  * prend un lead du Pool lui-même (« Je le prends », sur la carte du Pool
@@ -296,6 +324,52 @@
   // v59 : téléphonie incluse dans les licences Connect et Full (socle v29).
   function __lmPeutAppeler() { return (typeof OD === 'undefined' || typeof OD.peut !== 'function' || OD.peut('appel')); }
 
+  // v82 : module « plateau » (mode flux, tour de contrôle, rapport client).
+  var __plateauP = null;
+  function plateauApi() {
+    var FW = frontWindow();
+    var api = (FW && FW.__OD_PLATEAU__) || window.__OD_PLATEAU__;
+    if (api) return Promise.resolve(api);
+    if (__plateauP) return __plateauP;
+    var o = null; try { o = FW.OD || window.OD; } catch (e) { o = window.OD; }
+    var e = o && o.manifest && o.manifest.plateau;
+    if (!e || !e.cdn_url) return Promise.resolve(null);
+    __plateauP = new Promise(function (res) {
+      var fini = false, sc = document.createElement('script');
+      var fin = function (v) { if (fini) return; fini = true; if (!v) __plateauP = null; res(v); };
+      sc.src = e.cdn_url; sc.async = true;
+      sc.onload = function () { fin(window.__OD_PLATEAU__ || (FW && FW.__OD_PLATEAU__) || null); };
+      sc.onerror = function () { fin(null); };
+      setTimeout(function () { fin(null); }, 10000);
+      document.head.appendChild(sc);
+    });
+    return __plateauP;
+  }
+  function hashCourant() { try { return frontWindow().location.hash || ''; } catch (e) { return ''; } }
+  // Bouton discret posé au-dessus d'un écran v81 pour revenir au mode flux.
+  function boutonRetour(el, libelle, fn) {
+    var doc = el.ownerDocument || document;
+    var b = doc.createElement('button'); b.type = 'button'; b.textContent = '← ' + libelle;
+    b.style.cssText = 'font:800 13px "Nunito Sans",system-ui,sans-serif;margin:10px 16px 0;padding:8px 14px;border-radius:10px;border:1.5px solid #c9daf1;background:#fff;color:#1f4a85;cursor:pointer;min-height:38px';
+    b.addEventListener('click', fn);
+    el.insertBefore(b, el.firstChild);
+  }
+  async function lancerPosteFlux(el, ctx, u, opt) {
+    var api = /plateau-liste/i.test(hashCourant()) ? null : await plateauApi();
+    if (!api) return posteVroom(el, ctx, u, opt);
+    return api.poste(el, ctx, { user: u, liste: async function () {
+      await posteVroom(el, ctx, u, opt);
+      boutonRetour(el, 'Mode flux', function () { lancerPosteFlux(el, ctx, u, opt); });
+    } });
+  }
+  async function lancerSupervision(el, ctx, u, opt) {
+    var api = /supervision-detail/i.test(hashCourant()) ? null : await plateauApi();
+    if (!api) return posteSupervision(el, ctx, u, opt);
+    return api.superviser(el, ctx, { user: u,
+      ancien: async function () { await posteSupervision(el, ctx, u, opt); boutonRetour(el, 'Tour de contrôle', function () { lancerSupervision(el, ctx, u, opt); }); },
+      poste: function () { return lancerPosteFlux(el, ctx, u, { apercu: false, role: opt.role }); } });
+  }
+
   OD.define('lead-mgmt', {
     async mount(el, ctx) {
       var u = await utilisateur(ctx);
@@ -311,11 +385,11 @@
         if (veutSup) {
           var estSup = false;
           try { var rs = await ctx.supabase.rpc('plateau_superviseur'); estSup = !rs.error && rs.data === true; } catch (e) {}
-          if (estSup) return posteSupervision(el, ctx, u, { role: role });
+          if (estSup) return lancerSupervision(el, ctx, u, { role: role });
         }
       }
       if (ROLES_PLATEAU.indexOf(role) !== -1 || apercu) {
-        return posteVroom(el, ctx, u, { apercu: apercu, role: role });
+        return lancerPosteFlux(el, ctx, u, { apercu: apercu, role: role });
       }
       var poste = POSTE_DU_ROLE[role];
       if (poste) return posteSite(el, ctx, u, { poste: poste, role: role });
@@ -411,6 +485,7 @@
     // ── État ──────────────────────────────────────────────────────────────
     var S = {
       tab: 'piscine', stock: false, age: 'frais', demoMode: false, univ: 'tous', per: periodeDefaut(), sources: null, campagne: null, miens: false,
+      actions: null, actJours: 1, sitesCreation: null,   // v81
       kpis: null, piscine: [], rappels: [], transferts: [], campagnes: null, stockListe: null,
       ack: new Set(), vus: new Set(), frais: new Set(), premier: true,
       bacs: null,
@@ -761,10 +836,11 @@
       return [['piscine', 'Pool BACS', fr.length, hd, 'v'],
               ['rappels', 'Rappels dus', nbDus(), nbDus() > 0, 'r'],
               ['transferts', 'Transferts', tr.length, false, 'b'],
-              ['campagnes', 'Campagnes', null, false, 'b']];
+              ['campagnes', 'Campagnes', null, false, 'b'],
+              ['actions', 'Mes actions', null, false, 'b']];
     }
     function outilsVroom() {
-      return '<div class="outils"><div class="seg-u" role="group" aria-label="Univers">' + [['tous', 'VN + VO'], ['VN', 'VN'], ['VO', 'VO']].map(function (o) {
+      return '<div class="outils"><button type="button" class="btn sm pri" data-a="nouveau">+ Nouveau lead</button><div class="seg-u" role="group" aria-label="Univers">' + [['tous', 'VN + VO'], ['VN', 'VN'], ['VO', 'VO']].map(function (o) {
         return '<button type="button" class="' + (S.univ === o[0] ? 'on' : '') + '" data-a="univ" data-id="' + o[0] + '" aria-pressed="' + (S.univ === o[0]) + '">' + (o[0] !== 'tous' ? '<i class="pt vt-' + o[0].toLowerCase() + '"></i>' : '') + o[1] + '</button>'; }).join('') + '</div>'
         + boutonPeriode(S.per) + '</div>';
     }
@@ -912,10 +988,41 @@
       });
       return h + '</tbody></table></div><p class="foot">Un lead est compté dans la colonne de son statut actuel : statut BACS, ou celui du dernier geste One Data s\'il est plus récent que la copie BACS. « Filtrer » restreint le Pool, les rappels et les transferts à la campagne ; les signaux restent ceux de tout le plateau.</p>';
     }
+    // v81 : ce que l'opérateur a fait, dans One Data et directement dans BACS.
+    function vueActions() {
+      var h = '<div class="barre"><span class="lbl-s">Vos gestes, dans One Data et directement dans BACS. Une erreur : « Corriger » la reporte dans BACS.</span><div class="ph-r"><div class="seg">'
+        + [[1, 'Aujourd\'hui'], [2, 'Depuis hier'], [7, '7 jours']].map(function (o) {
+            return '<button type="button" class="' + (S.actJours === o[0] ? 'on' : '') + '" data-a="act-jours" data-id="' + o[0] + '">' + o[1] + '</button>'; }).join('')
+        + '</div></div></div><div class="list">';
+      if (!S.actions) return h + '<div class="empty">Chargement de vos actions…</div></div>';
+      if (!S.actions.length) return h + '<div class="empty">Aucune action sur la période.</div></div>';
+      S.actions.forEach(function (a) {
+        var et = a.correction_attente ? '<span class="tag warn">Correction en attente du superviseur</span>'
+          : a.etat_bacs === 'fait' ? '<span class="tag ok">Reporté dans BACS</span>'
+          : a.etat_bacs === 'echec' ? '<span class="tag crit" title="' + esc(a.erreur_bacs || '') + '">Refusé par BACS</span>'
+          : a.etat_bacs === 'abandonne' ? '<span class="tag">Non reporté</span>'
+          : a.etat_bacs ? '<span class="tag warn">En route vers BACS</span>'
+          : a.origine === 'BACS' ? '<span class="tag">Fait dans BACS</span>' : '';
+        h += '<div class="lr"><div><span class="tm neutre"><b>' + esc(hh(a.le)) + '</b><small>' + esc(jour(a.le)) + '</small></span></div>'
+          + '<div><span class="lr-n">' + esc(propre(a.nom) || 'Client') + '</span> <span class="lr-v">' + esc(a.site ? siteNom(a.site) : '') + '</span>'
+          + '<p class="lr-d">' + esc(a.libelle || '') + '</p><div class="tags">' + et
+          + (a.statut_actuel ? '<span class="tag">BACS : ' + esc(libStatut(a.statut_actuel)) + '</span>' : '')
+          + (a.etat_bacs === 'echec' && a.erreur_bacs ? '<span class="tag crit">' + esc(String(a.erreur_bacs).slice(0, 120)) + '</span>' : '') + '</div></div>'
+          + '<div class="lr-a">' + (a.corrigeable && !a.correction_attente ? '<button type="button" class="btn" data-a="corriger" data-id="' + esc(a.sf_lead_id) + '"' + dis() + '>Corriger</button>' : '') + '</div></div>';
+      });
+      return h + '</div><p class="foot">Les gestes faits directement dans BACS apparaissent quelques minutes après (collecte de l\'historique BACS).</p>';
+    }
+    async function chargerActions() {
+      try { S.actions = await rpc('plateau_mes_actions', { p_jours: S.actJours }) || []; }
+      catch (e) { S.actions = S.actions || []; toast(messageErreur(e), true); }
+      render();
+    }
+
     function renderPanel() {
       if (S.tab === 'rappels') return vueRappels();
       if (S.tab === 'transferts') return vueTransferts();
       if (S.tab === 'campagnes') return vueCampagnes();
+      if (S.tab === 'actions') return vueActions();
       return vuePiscine();
     }
 
@@ -984,6 +1091,8 @@
     }
     function renderDrawer() {
       var D = S.dr; if (!D) return;
+      if (D.mode === 'creer') return renderCreer();     // v81
+      if (D.mode === 'corriger') return renderCorriger(); // v81
       var f = D.fiche;
       if (!f) { $drawer.innerHTML = '<header class="dr-h"><div><h2>Chargement…</h2></div><button type="button" class="x" data-a="close" aria-label="Fermer"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg></button></header>'; return; }
       var it = itemConnu(D.sf) || {};
@@ -1093,6 +1202,187 @@
       $drawer.scrollTop = top;
     }
 
+    // ── v81 : CRÉER UN LEAD ───────────────────────────────────────────────
+    var ORIGINES_LOCALES = ['Prospection', 'Showroom', 'Evénement', 'Trafic atelier', 'Restart', 'TRS-i', 'Réparateur Agréé'];
+    var XICON = '<button type="button" class="x" data-a="close" aria-label="Fermer"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg></button>';
+    function fSel(id, opts, val) {
+      return '<select id="' + id + '">' + opts.map(function (o) {
+        var v = Array.isArray(o) ? o[0] : o, t = Array.isArray(o) ? o[1] : o;
+        return '<option value="' + esc(v) + '"' + (String(val == null ? '' : val) === String(v) ? ' selected' : '') + '>' + esc(t) + '</option>'; }).join('') + '</select>';
+    }
+    function fInp(id, val, ph, type) { return '<input type="' + (type || 'text') + '" id="' + id + '" value="' + esc(val == null ? '' : val) + '"' + (ph ? ' placeholder="' + esc(ph) + '"' : '') + '>'; }
+    function lireCreer() {
+      var g = function (id) { var x = $drawer.querySelector('#' + id); return x ? x.value : null; };
+      var r = $drawer.querySelector('input[name="c-site"]:checked');
+      var f = S.dr && S.dr.form || {};
+      return { civilite: g('c-civ') || f.civilite, prenom: g('c-prenom'), nom: g('c-nom'), entreprise: g('c-ent'),
+               mobile: g('c-tel'), email: g('c-mail'), origine: g('c-orig'), nature: g('c-nat'), type_demande: g('c-type'),
+               marque: g('c-marque') || f.marque, modele: g('c-modele'), rappel: g('c-rappel'), commentaire: g('c-com'),
+               statut: g('c-statut'), id_site: r ? r.value : (f.id_site || null), id_vendeur: g('c-vend') };
+    }
+    async function ouvrirCreer() {
+      fermerDrawer(true);
+      S.dr = { mode: 'creer', form: { civilite: 'M.', origine: 'Prospection', nature: 'VN', type_demande: 'Essai', marque: 'Toyota', statut: 'Qualifié' }, vendeurs: [] };
+      $scrim.hidden = false; $drawer.hidden = false;
+      renderDrawer();
+      if (!S.sitesCreation) {
+        try { S.sitesCreation = await rpc('plateau_sites_creation') || []; } catch (e) { S.sitesCreation = []; toast(messageErreur(e), true); }
+        if (S.dr && S.dr.mode === 'creer') renderCreer();
+      }
+    }
+    function renderCreer() {
+      var D = S.dr, f = D.form || {};
+      var h = '<header class="dr-h"><div><h2>Nouveau lead</h2><p class="dr-s">Créé dans BACS sur la concession choisie, par votre onglet BACS.</p></div>' + XICON + '</header><div class="dr-b">';
+      if (D.etape === 'suivi') {
+        var e = D.etat || {}, st = e.statut || 'en_attente';
+        var lig = function (ok, txt, sous) { return '<li class="' + (ok === true ? 'v' : '') + '"><b>' + (ok === true ? '✓' : ok === false ? '✕' : '…') + '</b><span>' + esc(txt) + (sous ? ' · ' + esc(sous) : '') + '</span></li>'; };
+        h += '<section><h3>Suivi de la création</h3><ol class="tl">'
+          + lig(true, 'Demande enregistrée dans One Data', D.siteNom ? 'concession ' + siteNom(D.siteNom) : '')
+          + lig(e.pris_le ? true : (st === 'echec' ? false : null), 'Prise par votre onglet BACS', e.pris_le ? quand(e.pris_le) : 'BACS doit être ouvert dans ce navigateur')
+          + lig(st === 'fait' ? true : (st === 'echec' || st === 'abandonne') ? false : null, st === 'fait' ? 'Créée dans BACS' : (st === 'echec' || st === 'abandonne') ? 'BACS a refusé la création' : 'Création dans BACS', st === 'fait' ? quand(e.fait_le) : (e.erreur || ''))
+          + '</ol>'
+          + (st === 'fait' ? '<p class="hint">La demande apparaîtra dans le Pool et dans « Mes actions » d\'ici deux minutes (collecte BACS).</p>' : '')
+          + ((st === 'echec' || st === 'abandonne') ? '<p class="hint">Corrigez la saisie puis recommencez : rien n\'a été créé dans BACS.</p>' : '')
+          + (st === 'en_attente' && e.tentatives > 1 ? '<p class="hint">Nouvel essai en cours (' + e.tentatives + ').</p>' : '')
+          + '</section></div><footer class="dr-f"><div class="row">'
+          + ((st === 'echec' || st === 'abandonne') ? '<button type="button" class="btn pri" data-a="creer-retour">Reprendre la saisie</button>' : '')
+          + '<button type="button" class="btn" data-a="close">Fermer</button><button type="button" class="btn ghost" data-a="nouveau">Créer un autre lead</button></div></footer>';
+        $drawer.innerHTML = h; return;
+      }
+      h += '<section><h3>Client</h3><div class="qf">'
+        + '<div class="q2"><label class="q"><span>Civilité *</span>' + fSel('c-civ', [['M.', 'M.'], ['MME.', 'Mme']], f.civilite) + '</label>'
+        + '<label class="q"><span>Entreprise</span>' + fInp('c-ent', f.entreprise) + '</label></div>'
+        + '<div class="q2"><label class="q"><span>Prénom *</span>' + fInp('c-prenom', f.prenom) + '</label><label class="q"><span>Nom *</span>' + fInp('c-nom', f.nom) + '</label></div>'
+        + '<div class="q2"><label class="q"><span>Portable</span>' + fInp('c-tel', f.mobile, '06 12 34 56 78') + '</label><label class="q"><span>E-mail</span>' + fInp('c-mail', f.email, 'nom@exemple.fr') + '</label></div>'
+        + '<p class="hint">Au moins l\'un des deux : portable ou e-mail (règle BACS).</p></div></section>';
+      h += '<section><h3>Demande</h3><div class="qf">'
+        + '<div class="q2"><label class="q"><span>Origine *</span>' + fSel('c-orig', ORIGINES_LOCALES, f.origine) + '</label><label class="q"><span>Nature *</span>' + fSel('c-nat', ['VN', 'VO', 'Entreprise'], f.nature) + '</label></div>'
+        + '<div class="q2"><label class="q"><span>Type de demande *</span>' + fSel('c-type', ['Essai', 'Info', 'Offre'], f.type_demande) + '</label><label class="q"><span>Marque *</span>' + fSel('c-marque', ['Toyota', 'Lexus'], f.marque) + '</label></div>'
+        + '<div class="q2"><label class="q"><span>Modèle souhaité *</span>' + fInp('c-modele', f.modele, 'Yaris Cross, NX…') + '</label><label class="q"><span>Rappel</span>' + fInp('c-rappel', f.rappel, '', 'datetime-local') + '</label></div>'
+        + '<label class="q"><span>Commentaire</span><textarea id="c-com" rows="3" placeholder="Ce que le client a demandé, ses disponibilités">' + esc(f.commentaire || '') + '</textarea></label>'
+        + '<label class="q"><span>Statut de départ</span>' + fSel('c-statut', [['Qualifié', 'Qualifié : projet confirmé au téléphone'], ['Nouveau', 'Nouveau : à traiter par la concession']], f.statut) + '</label></div></section>';
+      h += '<section><h3>Concession *</h3>';
+      var ss = (S.sitesCreation || []).filter(function (s) { return String(s.marque || '').toUpperCase() === String(f.marque || '').toUpperCase(); });
+      if (!S.sitesCreation) h += '<p class="hint">Chargement des concessions…</p>';
+      else if (!ss.length) h += '<p class="hint">Aucune concession ' + esc(f.marque || '') + ' trouvée.</p>';
+      else {
+        h += '<div class="sites">' + ss.map(function (s) {
+          return '<label class="site-o"><input type="radio" name="c-site" value="' + s.id_site + '"' + (String(f.id_site) === String(s.id_site) ? ' checked' : '') + '><span><b>' + esc(siteNom(s.site)) + '</b><small>' + plural(Number(s.vendeurs) || 0, 'vendeur', 'vendeurs') + (s.file_bacs ? '' : ' · file BACS inconnue : choisir un vendeur') + '</small></span><em>' + plural(Number(s.en_attente) || 0, 'lead', 'leads') + ' en attente</em></label>';
+        }).join('') + '</div>';
+        if (f.id_site) h += '<label class="q vend"><span>Vendeur</span><select id="c-vend"><option value="">File de la concession (le chef des ventes répartit)</option>'
+          + (D.vendeurs || []).map(function (v) { return '<option value="' + v.id_user + '"' + (String(f.id_vendeur) === String(v.id_user) ? ' selected' : '') + '>' + esc(propre(v.nom)) + (Number(v.en_attente) ? ' · ' + v.en_attente + ' en attente' : '') + '</option>'; }).join('') + '</select></label>';
+      }
+      h += '</section>';
+      if (D.doublons && D.doublons.length) {
+        h += '<section class="dbl"><h3>Ce client a déjà une demande ouverte</h3><ul class="env">' + D.doublons.map(function (d) {
+          return '<li><div><b>' + esc(propre(d.nom) || 'Client') + '</b><small>' + esc([d.source, d.site ? siteNom(d.site) : null, d.cree_le ? 'reçue le ' + jour(d.cree_le) : null].filter(Boolean).join(' · ')) + '</small></div>'
+            + '<span class="tag">' + esc(libStatut(d.statut)) + '</span><button type="button" class="btn sm" data-a="open" data-id="' + esc(d.sf_lead_id) + '">Ouvrir</button></li>'; }).join('') + '</ul>'
+          + '<p class="hint">Traitez plutôt la demande existante. Si c\'est bien une nouvelle demande, créez-la quand même.</p></section>';
+      }
+      h += '</div><footer class="dr-f"><div class="row">'
+        + (D.doublons && D.doublons.length ? '<button type="button" class="btn pri" data-a="creer-forcer"' + dis() + '>Créer quand même</button>'
+          : '<button type="button" class="btn pri" data-a="creer-envoyer"' + dis() + '>Créer dans BACS et affecter</button>')
+        + '<button type="button" class="btn" data-a="close">Annuler</button></div>'
+        + '<div class="row pied"><span class="hint">' + (bloque() ? 'Bloqué : ouvrez BACS dans un onglet de ce navigateur.' : 'Votre onglet BACS passe sur la concession le temps de la création, puis revient.') + '</span></div></footer>';
+      var top = $drawer.scrollTop; $drawer.innerHTML = h; $drawer.scrollTop = top;
+    }
+    function memoCreer() { if (S.dr && S.dr.mode === 'creer' && S.dr.etape !== 'suivi') S.dr.form = lireCreer(); }
+    async function chargerVendeursCreer() {
+      var D = S.dr; if (!D || D.mode !== 'creer' || !D.form.id_site) return;
+      var site = D.form.id_site;
+      try { var v = await rpc('plateau_vendeurs', { p_id_site: Number(site) }); if (S.dr && S.dr.form && S.dr.form.id_site === site) S.dr.vendeurs = v || []; }
+      catch (e) { if (S.dr) S.dr.vendeurs = []; }
+      if (S.dr && S.dr.mode === 'creer') renderCreer();
+    }
+    function envoyerCreer(forcer) {
+      memoCreer();
+      if (S.demoMode) { toast('Démonstration : en situation réelle, la demande serait créée dans BACS sur la concession choisie.'); return; }
+      var D = S.dr, f = D.form;
+      if (!f.prenom || !f.nom) { toast('Prénom et nom obligatoires.', true); return; }
+      if (!f.mobile && !f.email) { toast('Renseignez le portable ou l\'e-mail.', true); return; }
+      if (!f.modele) { toast('Le modèle souhaité est obligatoire dans BACS.', true); return; }
+      if (!f.id_site) { toast('Choisissez la concession.', true); return; }
+      var rappel = f.rappel ? new Date(f.rappel) : null;
+      if (rappel && (isNaN(rappel.getTime()) || rappel.getTime() < Date.now() - 60000)) { toast('La date de rappel doit être dans le futur.', true); return; }
+      var p = { civilite: f.civilite, prenom: f.prenom, nom: f.nom, entreprise: f.entreprise, mobile: f.mobile, email: f.email,
+                origine: f.origine, nature: f.nature, type_demande: f.type_demande, marque: f.marque, modele: f.modele,
+                rappel_le: rappel ? rappel.toISOString() : null, commentaire: f.commentaire, statut: f.statut,
+                id_site: Number(f.id_site), id_vendeur: f.id_vendeur ? Number(f.id_vendeur) : null };
+      return geste(async function () {
+        var r = await rpc('plateau_lead_creer', { p: p, p_forcer: !!forcer });
+        if (r && r.ok === false && r.doublons) { D.doublons = r.doublons; renderCreer(); toast('Ce client a déjà une demande ouverte.', true); return; }
+        D.etape = 'suivi'; D.idSortant = r.id_sortant; D.siteNom = r.site; D.etat = { statut: 'en_attente' };
+        renderCreer(); reveillerBacs(); suivreCreation();
+        S.actions = null; if (S.tab === 'actions') chargerActions();
+      });
+    }
+    var suiviCreation = null;
+    function suivreCreation() {
+      clearInterval(suiviCreation);
+      var debut = Date.now();
+      suiviCreation = setInterval(async function () {
+        var D = S.dr;
+        if (!D || D.mode !== 'creer' || D.etape !== 'suivi' || Date.now() - debut > 5 * 60000) { clearInterval(suiviCreation); return; }
+        try { var e = await rpc('plateau_creation_etat', { p_id_sortant: D.idSortant }); if (e && S.dr === D) { D.etat = e; renderCreer(); } } catch (er) {}
+        if (D.etat && ['fait', 'echec', 'abandonne'].indexOf(D.etat.statut) !== -1) {
+          clearInterval(suiviCreation);
+          toast(D.etat.statut === 'fait' ? 'Lead créé dans BACS' : 'BACS a refusé la création', D.etat.statut !== 'fait');
+          if (S.tab === 'actions') chargerActions();
+        }
+      }, 3000);
+    }
+
+    // ── v81 : CORRIGER UNE ACTION ─────────────────────────────────────────
+    var STATUTS_CORR = [['Qualifié', 'Qualifié : transférer à une concession'], ['Injoignable temporairement', 'Injoignable : programmer un rappel'],
+                        ['Projet Long Terme', 'Projet long terme : rappel à date'], ['Accepté', 'Remettre à traiter'], ['Abandonned', 'Abandonner']];
+    async function ouvrirCorriger(sf) {
+      var it = (S.actions || []).find(function (a) { return a.sf_lead_id === sf; }) || {};
+      fermerDrawer(true);
+      S.dr = { mode: 'corriger', sf: sf, item: it, form: { statut: 'Qualifié', motif: MOTIFS_ABANDON[0] } };
+      $scrim.hidden = false; $drawer.hidden = false;
+      renderDrawer();
+      if (!S.sitesCreation) { try { S.sitesCreation = await rpc('plateau_sites_creation') || []; } catch (e) { S.sitesCreation = []; } if (S.dr && S.dr.mode === 'corriger') renderCorriger(); }
+    }
+    function lireCorriger() {
+      var g = function (id) { var x = $drawer.querySelector('#' + id); return x ? x.value : null; };
+      var f = S.dr.form || {};
+      return { statut: g('k-statut') || f.statut, motif: g('k-motif') || f.motif, id_site: g('k-site'), rappel: g('k-rappel'), raison: g('k-raison') };
+    }
+    function renderCorriger() {
+      var D = S.dr, f = D.form || {}, it = D.item || {};
+      var h = '<header class="dr-h"><div><h2>Corriger · ' + esc(propre(it.nom) || 'Client') + '</h2><p class="dr-s">' + esc([it.libelle, it.site ? siteNom(it.site) : null].filter(Boolean).join(' · ')) + '</p></div>' + XICON + '</header><div class="dr-b">'
+        + '<section><h3>Ce qui doit être</h3><div class="qf">'
+        + '<label class="q"><span>Nouveau statut</span>' + fSel('k-statut', STATUTS_CORR, f.statut) + '</label>';
+      if (f.statut === 'Abandonned') h += '<label class="q"><span>Motif d\'abandon (BACS)</span>' + fSel('k-motif', MOTIFS_ABANDON, f.motif) + '</label>';
+      if (f.statut === 'Injoignable temporairement' || f.statut === 'Projet Long Terme')
+        h += '<label class="q"><span>Rappel</span>' + fInp('k-rappel', f.rappel || dateLocale(f.statut === 'Projet Long Terme' ? demainA(9, 30) : new Date(Date.now() + 2 * 3600000)), '', 'datetime-local') + '</label>';
+      h += '<label class="q"><span>Concession</span><select id="k-site"><option value="">' + (f.statut === 'Qualifié' ? 'Celle du lead' : 'Inchangée') + '</option>'
+        + (S.sitesCreation || []).map(function (s) { return '<option value="' + s.id_site + '"' + (String(f.id_site) === String(s.id_site) ? ' selected' : '') + '>' + esc(siteNom(s.site)) + ' · ' + esc(s.marque || '') + '</option>'; }).join('') + '</select></label>'
+        + '<label class="q"><span>Raison de la correction *</span><input type="text" id="k-raison" value="' + esc(f.raison || '') + '" placeholder="Le client a rappelé, erreur de saisie…"></label></div></section>'
+        + '<section><h3>Dans BACS</h3><p class="hint">La correction part dans BACS par votre onglet, tracée à votre nom avec sa raison. Si un vendeur a déjà la main sur ce lead, elle attend la validation du superviseur du plateau.</p></section></div>'
+        + '<footer class="dr-f"><div class="row"><button type="button" class="btn pri" data-a="corr-envoyer"' + dis() + '>Appliquer la correction</button><button type="button" class="btn" data-a="close">Annuler</button></div></footer>';
+      $drawer.innerHTML = h;
+    }
+    function envoyerCorriger() {
+      var D = S.dr; if (!D || D.mode !== 'corriger') return;
+      var f = lireCorriger(); D.form = f;
+      if (S.demoMode) { toast('Démonstration : en situation réelle, la correction serait reportée dans BACS.'); return; }
+      if (!f.raison || !f.raison.trim()) { toast('Indiquez la raison de la correction.', true); return; }
+      var dem = { statut: f.statut };
+      if (f.statut === 'Abandonned') dem.motif = f.motif;
+      if (f.id_site) dem.id_site = Number(f.id_site);
+      if (f.rappel && (f.statut === 'Injoignable temporairement' || f.statut === 'Projet Long Terme')) {
+        var d = new Date(f.rappel); if (isNaN(d.getTime()) || d.getTime() < Date.now() - 60000) { toast('La date de rappel doit être dans le futur.', true); return; }
+        dem.rappel_le = d.toISOString();
+      }
+      return geste(async function () {
+        var r = await rpc('plateau_corriger', { p_sf_lead_id: D.sf, p_demande: dem, p_raison: f.raison.trim() });
+        reveillerBacs();
+        toast(r && r.attente ? 'Correction envoyée au superviseur : ' + (r.motif || 'un vendeur a la main') : 'Correction appliquée, reportée dans BACS');
+        fermerDrawer(true); chargerActions(); rafraichir(true);
+      });
+    }
+
     // Ce que One Data a envoyé à BACS pour ce lead, et ce qu'il en est advenu.
     function sectionBacs() {
       var D = S.dr; if (!D || !D.envois || !D.envois.length) return '';
@@ -1193,7 +1483,7 @@
       var sel = $drawer.querySelector('#q-vendeur'); if (sel && vend) sel.value = vend;
     }
     async function fermerDrawer(silencieux) {
-      clearInterval(renouvellement);
+      clearInterval(renouvellement); clearInterval(suiviCreation);
       var D = S.dr; S.dr = null;
       $scrim.hidden = true; $drawer.hidden = true; $drawer.innerHTML = '';
       // Fermer sans geste rend le lead aux collègues tout de suite.
@@ -1335,8 +1625,17 @@
             reveillerBacs(); toast(plural((r && r.relances) || 0, 'envoi relancé', 'envois relancés'));
             await chargerEnvois(); renderDrawerPreserve(); rafraichirBacs().then(render);
           });
+        // v81
+        case 'nouveau': return ouvrirCreer();
+        case 'creer-envoyer': return envoyerCreer(false);
+        case 'creer-forcer': return envoyerCreer(true);
+        case 'creer-retour': if (S.dr) { S.dr.etape = null; S.dr.doublons = null; renderCreer(); } return;
+        case 'corriger': return ouvrirCorriger(id);
+        case 'corr-envoyer': return envoyerCorriger();
+        case 'act-jours': S.actJours = Number(id) || 1; S.actions = null; render(); return chargerActions();
         case 'tab':
           S.tab = id;
+          if (id === 'actions') { render(); return chargerActions(); }
           if (id === 'campagnes' && !S.campagnes) { render(); try { S.campagnes = await rpc('plateau_campagnes', { p_jours: 90 }); } catch (e) { toast(messageErreur(e), true); S.campagnes = []; } }
           render(); return;
         case 'ack': S.ack.add(id); memoAck(); render(); return;
@@ -1409,6 +1708,15 @@
         await chargerVendeurs(); renderDrawerPreserve();
       } else if (t.id === 'r-quand') {
         var d = $drawer.querySelector('#r-date'); if (d) d.hidden = t.value !== 'autre';
+      } else if (S.dr && S.dr.mode === 'creer' && (t.name === 'c-site' || t.id === 'c-marque')) {   // v81
+        memoCreer();
+        if (t.id === 'c-marque') { S.dr.form.id_site = null; S.dr.form.id_vendeur = null; }
+        S.dr.vendeurs = []; S.dr.doublons = null; renderCreer();
+        if (t.name === 'c-site') await chargerVendeursCreer();
+      } else if (S.dr && S.dr.mode === 'creer' && /^c-(tel|mail|prenom|nom)$/.test(t.id)) {
+        memoCreer(); if (S.dr.doublons) { S.dr.doublons = null; renderCreer(); }
+      } else if (S.dr && S.dr.mode === 'corriger' && t.id === 'k-statut') {
+        S.dr.form = lireCorriger(); S.dr.form.rappel = null; renderCorriger();
       }
     });
     function surTouche(ev) { if (ev.key === 'Escape' && S.dr) fermerDrawer(); }
@@ -1669,6 +1977,21 @@
       });
       return h + '</div></div>';
     }
+    // v81 : corrections demandées par les opératrices sur un lead qu'un vendeur a déjà en main.
+    function renderCorrections() {
+      var cs = S.corr || [];
+      if (!cs.length) return '';
+      var LIB = { 'Qualifié': 'Qualifié', 'Abandonned': 'Abandon', 'Injoignable temporairement': 'Injoignable', 'Projet Long Terme': 'Projet long terme', 'Accepté': 'Remis à traiter' };
+      var h = '<div class="sv-pan"><div class="sv-ph"><h2>Corrections à valider <span class="cnt c">' + cs.length + '</span></h2><small>un vendeur a déjà la main sur ces leads</small></div><div class="sv-feed">';
+      cs.forEach(function (c) {
+        var d = c.demande || {}, av = c.avant || {};
+        h += '<div class="sv-al o"><i></i><div><b>' + esc(propre(c.nom) || 'Client') + ' · ' + esc(LIB[av.statut] || av.statut || '?') + ' → ' + esc(LIB[d.statut] || d.statut) + (d.motif ? ' (' + esc(d.motif) + ')' : '') + '</b>'
+          + '<span>' + esc(propre(c.demande_par) || 'Opératrice') + ' : « ' + esc(c.raison) + ' »' + (av.vendeur ? ' · lead chez ' + esc(propre(av.vendeur)) : '') + (c.site ? ' · ' + esc(siteNom(c.site)) : '') + '</span>'
+          + '<small>demandée ' + esc(quand(c.demande_le)) + '</small>'
+          + '<div class="sv-aa"><button type="button" class="btn sm pri" data-a="corr-ok" data-id="' + c.id + '">Valider</button><button type="button" class="btn sm" data-a="corr-ko" data-id="' + c.id + '">Refuser</button></div></div></div>';
+      });
+      return h + '</div></div>';
+    }
     function spark(v) {
       v = v || []; if (v.length < 2) v = [0].concat(v.length ? v : [0]);
       var w = 96, ht = 22, mx = Math.max(2, Math.max.apply(null, v));
@@ -1750,6 +2073,7 @@
       root.innerHTML = renderHaut()
         + (S.erreur ? '<p class="alerte">' + esc(S.erreur) + ' Les données affichées datent du dernier chargement réussi.</p>' : '')
         + '<div class="sv-g2">' + renderChrono() + renderAlertes() + '</div>'
+        + renderCorrections()
         + renderEquipe()
         + '<div class="sv-g3">' + renderFlux() + renderSites() + renderMotifs() + '</div>' + renderNote();
       try { if (FW.scrollY !== y) FW.scrollTo(0, y); } catch (e) {}
@@ -1795,6 +2119,14 @@
         case 'ack': S.ack.add(id); try { FW.localStorage.setItem('lmsv-ack', JSON.stringify(Array.from(S.ack).slice(-300))); } catch (e) {} render(); return;
         case 'confier': return popConfier(id);
         case 'prevenir': return popPrevenir(id);
+        case 'corr-ok': case 'corr-ko':   // v81
+          if (occupe) return; occupe = true;
+          try {
+            await rpc('plateau_correction_decider', { p_id: Number(id), p_valider: a === 'corr-ok', p_note: null });
+            toast(a === 'corr-ok' ? 'Correction validée, reportée dans BACS' : 'Correction refusée');
+            await charger(true);
+          } catch (er) { toast(msgErr(er), true); } finally { occupe = false; }
+          return;
         case 'fermer': return fermerPop();
         case 'prop': { var t = $pop.querySelector('#sv-msg'); if (t) t.value = id; return; }
         case 'confier-a':
@@ -1831,6 +2163,7 @@
     async function charger(silencieux) {
       try { S.d = await rpc('plateau_supervision'); S.charge = true; S.erreur = null; }
       catch (e) { S.erreur = msgErr(e); if (!silencieux && S.charge) toast(S.erreur, true); }
+      try { S.corr = await rpc('plateau_corrections_attente') || []; } catch (e) { S.corr = S.corr || []; }   // v81
       if (!S.pop) render();
     }
     var minuteur = null, trotteuse = null;
@@ -3088,7 +3421,7 @@
       h += '<section><h3>Demande</h3><dl class="dl">' + [['Source', l.source_libelle], ['Campagne', l.campagne], ['Reçu le', quand(l.recu_le)], ['Statut BACS', l.statut_bacs]]
           .filter(function (y) { return y[1]; }).map(function (y) { return '<dt>' + y[0] + '</dt><dd>' + esc(y[1]) + '</dd>'; }).join('') + '</dl>'
         + '</section>';
-      if (l.qualification) h += '<section><h3>' + (l.par_plateau ? 'Qualification du plateau VROOM' : 'Qualification') + '</h3><p class="qualif">' + esc(l.qualification) + '</p>' + (l.transfere_par_nom ? '<p class="hint">Par ' + esc(propre(l.transfere_par_nom)) + ', le ' + esc(quand(l.transfere_le)) + '.</p>' : '') + '</section>';
+      if (l.qualification) h += '<section><h3>' + (l.par_plateau ? 'Qualification du plateau VROOM' : 'Qualification') + '</h3><p class="qualif">' + esc(l.qualification) + '</p>' + (l.transfere_par_nom ? '<p class="hint">Par ' + esc(propre(l.transfere_par_nom)) + ', le ' + esc(quand(l.transfere_le)) + '.</p>' : '') + avisPlateau(l) + '</section>';
       h += sectionBacs();
       h += '</div><footer class="dr-f">' + piedDrawer(l, gere, mien) + '</footer>';
       if (D.demo) h = h.replace('<div class="dr-b">', '<p class="demo">Fiche d\'exemple de la visite guidée : rien n\'est enregistré.</p><div class="dr-b">');
@@ -3411,6 +3744,27 @@
       var D = S.dr; if (!D || !D.canal) return;
       var a = $drawer.querySelector('#cp-txt'), b = $drawer.querySelector('#cp-subj');
       if (a) D.txt = a.value; if (b) D.subj = b.value;
+    }
+    // v82 : l'avis du vendeur sur la qualification du plateau.
+    var AVIS = [['juste', 'Juste', '#eaf7f4', '#2c7a68'], ['moitie', 'À moitié', '#fff6e0', '#8a5a00'], ['fausse', 'Fausse', '#fdeeee', '#b23433']];
+    function avisPlateau(l) {
+      var D = S.dr; if (!l.par_plateau || !D || D.demo) return '';
+      var fait = D.avisFait, choix = D.avisChoix;
+      var h = '<div style="margin-top:12px;padding-top:10px;border-top:1px solid #e6eef8"><p class="hint" style="font-weight:800;margin:0 0 6px">La qualification était…</p><div style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:6px">'
+        + AVIS.map(function (a) { var on = fait === a[0] || choix === a[0];
+            return '<button type="button" data-a="avis" data-id="' + a[0] + '" aria-pressed="' + on + '" style="font:inherit;font-size:12.5px;font-weight:800;padding:8px 6px;border-radius:9px;min-height:40px;cursor:pointer;border:' + (on ? '2px solid ' + a[3] : '0') + ';background:' + a[2] + ';color:' + a[3] + '">' + a[1] + '</button>'; }).join('') + '</div>';
+      if (choix && choix !== 'juste') h += '<textarea id="avis-com" rows="2" placeholder="Ce qui était faux (en une phrase)" style="margin-top:8px;width:100%;box-sizing:border-box"></textarea><div class="row" style="margin-top:6px"><button type="button" class="btn sm pri" data-a="avis-envoyer">Envoyer l\'avis</button></div>';
+      return h + '<p class="hint" style="margin:6px 0 0">' + (fait ? 'Merci : votre avis est parti au plateau.' : 'Votre avis revient à l\'opératrice et à sa superviseuse.') + '</p></div>';
+    }
+    function envoyerAvis(a) {
+      var D = S.dr; if (!D || !D.l) return;
+      var com = (($drawer.querySelector('#avis-com') || {}).value || '').trim() || null;
+      return geste(async function () {
+        await rpc('lead_avis_qualif', { p_id_lead: Number(D.l.id_lead), p_avis: a, p_commentaire: com });
+        D.avisFait = a; D.avisChoix = null;
+        toast('Merci : votre avis est parti au plateau.');
+        renderDrawerPreserve();
+      });
     }
     function renderDrawerPreserve() {
       var v = lireForm();
@@ -3843,6 +4197,8 @@
         case 'canal': return choisirCanal(id);
         case 'tpl': if (S.dr) { S.dr.tpl = Number(id); S.dr.txt = null; S.dr.subj = null; lireRdvF(); renderDrawer(); } return;
         case 'canal-ouvrir': return ouvrirCanalModele();
+        case 'avis': if (!S.dr) return; if (id === 'juste') return envoyerAvis('juste'); S.dr.avisChoix = S.dr.avisChoix === id ? null : id; renderDrawerPreserve(); return;
+        case 'avis-envoyer': if (S.dr && S.dr.avisChoix) return envoyerAvis(S.dr.avisChoix); return;
         case 'canal-fermer': if (S.dr) { S.dr.canal = null; renderDrawerPreserve(); } return;
         case 'rdv-objet': if (S.dr && S.dr.rdvF) { lireRdvF(); S.dr.rdvF.objet = id; renderDrawerPreserve(); } return;
         case 'rdv-quand': if (S.dr && S.dr.rdvF) { lireRdvF(); S.dr.rdvF.date = id; renderDrawerPreserve(); } return;
@@ -4203,6 +4559,10 @@
 .lmtc-ov .issues button.on{background:var(--bleu);color:#fff}
 @media (max-width:420px){.lmtc-ov .issues{grid-template-columns:repeat(2,minmax(0,1fr))}}
 .lmtc-ov .qf{display:grid;gap:11px}
+.lmtc-ov .q2{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
+@media (max-width:480px){.lmtc-ov .q2{grid-template-columns:minmax(0,1fr)}}
+.lmtc-ov .q input,.lmtc-ov .q select,.lmtc-ov .q textarea{width:100%;box-sizing:border-box}
+.lmtc-ov .dbl{background:#fff6e0;border:1.5px solid #fac055;border-radius:12px;padding:12px}
 .lmtc-ov .q{display:grid;gap:6px}
 .lmtc-ov .q > span{font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:.05em;color:var(--lbl)}
 .lmtc-ov .vend{margin-top:6px}
