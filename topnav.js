@@ -1,5 +1,9 @@
 // ============================================================================
-//  TOP NAV — module One Data (OD.define)  v36 — SÉLECTEUR DE PÉRIMÈTRE
+//  TOP NAV — module One Data (OD.define)  v37 — SÉLECTEUR DE PÉRIMÈTRE
+//  v37 (30/10/2026) : la pastille « Leads » compte le Pool du SITE CHOISI
+//  dans le sélecteur de site (lead_pool_compte(p_id_site)), et se met à jour
+//  au changement de site. Avant : le Pool de tous les sites de l'utilisateur
+//  (un vendeur d'Arcueil rattaché aussi à Sceaux voyait « 99+ »).
 //  v36 (28/10/2026) : plus d'« Import VN » dans le menu Véhicules (Team Colin),
 //  et jamais de Delco pour les opérateurs VROOM (rôle 10), quel que soit le
 //  socle chargé.
@@ -793,13 +797,18 @@ OD.define('topnav', {
   }
   async function refreshLeads(depuisCache) {
     peindreLeads();
-    if (depuisCache && __leadsCompte) return;
+    if (depuisCache && __leadsCompte) {
+      var sidC = null; try { var a0 = getSiteApi(); sidC = a0 && a0.getSiteId ? a0.getSiteId() : null; } catch (e) {}
+      if (sidC == null || Number(__leadsCompte.id_site) === Number(sidC)) return;
+    }
     if (__leadsEnCours || !(root() && root().querySelector('.od-leads-pill'))) return;
     var sb = null; try { sb = (ctx && ctx.supabase) || arbSb(); } catch (e) {}
     if (!sb) return;
     __leadsEnCours = true;
     try {
-      var r = await sb.rpc('lead_pool_compte');
+      var sid = null;
+      try { var api = getSiteApi(); var v = api && api.getSiteId ? api.getSiteId() : null; sid = v == null || v === '' ? null : Number(v); } catch (e) {}
+      var r = sid != null && !isNaN(sid) ? await sb.rpc('lead_pool_compte', { p_id_site: sid }) : await sb.rpc('lead_pool_compte');
       if (!r.error && r.data) { __leadsCompte = r.data; window.__odLeadsCompte = r.data; }
     } catch (e) {}
     __leadsEnCours = false;
@@ -1067,7 +1076,7 @@ OD.define('topnav', {
     if (window.__navSiteApi === api) return; // déjà abonné à CETTE instance
     try { if (typeof window.__navSiteUnsub === 'function') window.__navSiteUnsub(); } catch (e) {}
     try {
-      const h = api.onChange(function () { renderSiteState(); });
+      const h = api.onChange(function () { renderSiteState(); try { refreshLeads(false); } catch (e) {} });
       window.__navSiteUnsub = (typeof h === 'function') ? h : null;
     } catch (e) {}
     window.__navSiteApi = api;
