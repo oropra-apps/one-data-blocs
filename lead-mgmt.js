@@ -1,6 +1,15 @@
 // ============================================================================
 //  LEAD MANAGEMENT — module One Data (OD.define 'lead-mgmt')
-//  VERSION TEAM COLIN (v83) — déploiement CIBLÉ (publish-targets :
+//  VERSION TEAM COLIN (v84) — déploiement CIBLÉ (publish-targets :
+//  v84 (30/10/2026) : PAGES D'ACCUEIL du vendeur (« ma journée ») et du chef
+//  des ventes (« mon site »), maquettes 6 et 7, onglet « Accueil » ouvert par
+//  défaut. Le Pool y tient la place centrale : à partir du 31/10, les
+//  demandes Leboncoin, La Centrale et teamcolin.fr y arrivent (fin
+//  d'UpYourLeads) ; les demandes BACS des sites Toyota arrivent par la Vroom
+//  Team. Vendeur : le prochain lead à appeler, À rappeler, le Pool du site,
+//  « aussi à faire ». Chef : indicateurs, « à traiter maintenant », le Pool
+//  avec le vendeur suggéré (Attribuer en un clic), l'équipe, la Vroom Team.
+//  Les autres onglets restent (Pool, À rappeler, Relances, Campagnes…).
 //  v83 (30/10/2026) : FICHE DE TRAITEMENT DU VENDEUR ET DU CHEF DES VENTES,
 //  plein écran et aérée (maquette « Vendeur » validée par Antoine). Trois
 //  colonnes : la demande et ce que la Vroom Team a appris (avis Juste / À
@@ -2328,7 +2337,7 @@
     var COLS = [['ok', 'Dans les temps'], ['warn', 'À risque'], ['crit', 'Hors délai'], ['stock', 'Ouverts + 24 h']];
 
     var S = {
-      tab: 'pool',
+      tab: (POSTE === 'vendeur' || POSTE === 'chef') ? 'accueil' : 'pool',
       sugg: {}, suggKey: null, regle: {}, perimOuvert: false, invitables: {},
       leads: [], stats: null, bacs: null, charge: false, erreur: null,
       site: null,              // site affiché (chef, direction après « Ouvrir »)
@@ -2809,13 +2818,14 @@
     // ── Filtres-pastilles ─────────────────────────────────────────────────
     function onglets() {
       if (POSTE === 'vendeur') {
-        return [['pool', poolNom(), libres(null).length, false, 'v'],
+        return [['accueil', 'Accueil', null, false, 'b'], ['pool', poolNom(), libres(null).length, false, 'v'],
                 ['arappeler', 'À rappeler', aRappeler().length, aRappeler().some(function (l) { return niveau(l) === 'crit'; }), 'r'],
                 ['relances', 'Relances', aRelancer().length, false, 'b'],
                 ['campagnes', 'Campagnes', S.mesSollis ? S.mesSollis.length : null, false, 'b']].filter(function (o) { return !(S.comme && o[0] === 'campagnes'); });
       }
       var sid = sitePoste(), pool = libres(sid);
       var t = [['pool', sid == null ? 'Pool' : poolNom(sid), pool.length, pool.some(function (l) { return niveau(l) === 'crit'; }), 'v']];
+      if (POSTE === 'chef' && sid != null) t.unshift(['accueil', 'Accueil', null, false, 'b']);
       if (chefVend(sid)) { var mes = mesLeadsDu(sid); t.push(['mes', 'Mes leads', mes.length, mes.some(function (l) { return niveau(l) === 'crit'; }), 'r']); }
       return t.concat([['bloques', 'En souffrance', bloques(sid).length, bloques(sid).length > 0, 'r'],
               ['campagnes', 'Campagnes', null, false, 'b']]);
@@ -3387,6 +3397,9 @@
     }
 
     function renderPanel() {
+      if (S.tab === 'accueil' && POSTE === 'vendeur') return accueilVendeur();
+      if (S.tab === 'accueil' && POSTE === 'chef' && sitePoste() != null) return accueilChef();
+      if (S.tab === 'accueil') S.tab = 'pool';
       if (POSTE === 'vendeur') return S.tab === 'pool' ? vuePiscineVendeur() : S.tab === 'campagnes' ? vueCampagnesVendeur() : vueListeVendeur();
       if (S.tab === 'mes') return vueMesLeadsChef();
       if (S.tab === 'bloques') return vueBloques();
@@ -3404,7 +3417,8 @@
         return;
       }
       var y = (FW.scrollY || 0);
-      root.innerHTML = bandeauComme() + renderSituation() + bandeauBacsSite()
+      var acc = S.tab === 'accueil' && (POSTE === 'vendeur' || (POSTE === 'chef' && sitePoste() != null));
+      root.innerHTML = bandeauComme() + (acc ? enteteAccueil() : renderSituation()) + bandeauBacsSite()
         + (S.erreur ? '<p class="alerte">' + esc(S.erreur) + ' Les données affichées datent du dernier chargement réussi.</p>' : '')
         + '<div class="barre-o">' + renderTabs() + outils() + '</div>'
         + '<section class="act" aria-label="Leads"><div class="panel">' + renderPanel() + '</div></section>';
@@ -3412,6 +3426,120 @@
       setTimeout(function () { S.frais.clear(); }, 7000);
     }
 
+    // ── v84 : pages d'accueil (vendeur « ma journée », chef « mon site ») ──
+    function sansPlateauSite(sid) { var si = siteInfo(sid); return !!si && /^LEXUS$/i.test(String(si.reseau || '').trim()); }
+    function dureeC(m) { return m < 1 ? '1 min' : duree(m); }
+    function pastille(l) {
+      var m = mins(arrive(l)), r = slaDe(l) - m, cl, t;
+      if (m >= 1440) { cl = 'crit'; t = dureeC(m); }
+      else if (r <= 0) { cl = 'crit'; t = '+' + dureeC(-r); }
+      else { cl = r <= slaDe(l) * 0.4 ? 'warn' : 'ok'; t = dureeC(r); }
+      return '<span class="ac-p ' + cl + '">' + esc(t) + '</span>';
+    }
+    function acLigne(l, bouton, avant) {
+      return '<div class="ac-l" data-a="open" data-id="' + l.id_lead + '" tabindex="0">' + pastille(l)
+        + '<div class="ac-x"><b>' + esc(nomLead(l)) + '</b><span>' + esc([avant, demandeDe(l), l.source_libelle].filter(Boolean).join(' · ')) + '</span>'
+        + (l.par_plateau ? '<em class="vr">Qualifié par la Vroom Team</em>' : l.tentatives ? '<em>' + esc(etatCourt(l)) + '</em>' : '') + '</div>'
+        + (bouton || '') + '</div>';
+    }
+    function kpiTuile(v, l, cl) { return '<div class="ac-k"><b class="' + (cl || '') + '">' + esc(String(v)) + '</b><span>' + esc(l) + '</span></div>'; }
+    function enteteAccueil() {
+      var nom = S.comme ? propre(S.comme.nom) : propre((S.stats && S.stats.nom) || [user && user.prenom, user && user.nom].filter(Boolean).join(' '));
+      var auj = new Date().toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long' });
+      if (POSTE === 'vendeur') {
+        var ml = mesLeads(), crit = ml.filter(function (x) { return niveau(x) === 'crit'; }).length, pool = libres(null);
+        var vr = ml.filter(function (x) { return x.par_plateau; }).length;
+        var sid = poolVendeurSite() != null ? poolVendeurSite() : (sitesVendeur()[0] || {}).id_site;
+        return '<section class="ac-h"><div class="ac-ht"><p class="ac-sup">' + esc((sid != null ? siteNom((siteInfo(sid) || {}).site) + ' · ' : '') + auj) + '</p>'
+          + '<h1>Bonjour ' + esc(prenom(nom) || '') + '</h1><p class="ac-sub">' + plural(ml.length, 'client à rappeler', 'clients à rappeler') + (crit ? ', dont ' + crit + ' en retard' : '') + ' · ' + plural(pool.length, 'lead libre', 'leads libres') + ' dans le ' + esc(poolNom()) + '</p></div>'
+          + '<div class="ac-ks">' + kpiTuile(ml.length, 'à rappeler') + kpiTuile(crit, 'en retard', crit ? 'r' : '') + kpiTuile(pool.length, 'dans le Pool', pool.length ? 'v' : '') + kpiTuile(vr, 'de la Vroom Team') + '</div></section>';
+      }
+      var s = sitePoste(), si = siteInfo(s) || {}, p = libres(s), hd = p.filter(function (x) { return niveau(x) === 'crit'; }).length;
+      var ouv = S.leads.filter(function (l) { return l.zone === 'vendeur' && Number(l.id_site) === Number(s); }), bl = bloques(s).length;
+      var vr2 = S.leads.filter(function (l) { return l.par_plateau && Number(l.id_site) === Number(s); }).length;
+      var pct = si.n30 ? Math.round(100 * (si.dans_sla30 || 0) / si.n30) : null;
+      return '<section class="ac-h"><div class="ac-ht">' + perimetreHtml() + '<p class="ac-sup">Chef des ventes · ' + esc(auj) + '</p>'
+        + '<h1>' + esc(siteNom(si.site)) + ' · aujourd\'hui</h1><p class="ac-sub">' + (p.length ? plural(p.length, 'lead attend', 'leads attendent') + ' un vendeur dans le Pool' : 'Le Pool est vide') + (bl ? ' · ' + plural(bl, 'lead demande', 'leads demandent') + ' votre intervention' : '') + '</p></div>'
+        + '<div class="ac-ks">' + kpiTuile(p.length, 'dans le Pool' + (hd ? ' · ' + hd + ' hors délai' : ''), hd ? 'r' : '') + kpiTuile(ouv.length, 'chez les vendeurs') + kpiTuile(bl, 'en souffrance', bl ? 'r' : '')
+        + (sansPlateauSite(s) ? '' : kpiTuile(vr2, 'de la Vroom Team')) + kpiTuile(pct == null ? '—' : pct + ' %', 'dans le délai · 30 j', pct == null ? '' : pct >= 80 ? 'v' : 'o') + '</div></section>';
+    }
+    function accueilVendeur() {
+      var ml = mesLeads(), s = ml[0], pool = libres(null).slice().sort(function (a, b) { return reste(a) - reste(b); });
+      var h = '';
+      var cible = s || pool.filter(function (l) { return !verrouAutre(l); })[0];
+      if (cible) {
+        var rs = reste(cible), libre = cible.zone === 'piscine';
+        h += '<section class="ac-next"><div class="ac-nt"><p>' + (libre ? 'À prendre dans le Pool' : 'À appeler maintenant') + '</p><h2>' + esc(nomLead(cible)) + '</h2>'
+          + '<span>' + esc([demandeDe(cible), cible.par_plateau ? 'qualifié par la Vroom Team' : cible.source_libelle, rs < 0 ? 'en retard de ' + dureeC(-rs) : 'délai dans ' + dureeC(rs)].filter(Boolean).join(' · ')) + '</span></div>'
+          + '<div class="ac-nb">' + (libre ? '<button type="button" class="ac-go" data-a="prendre" data-id="' + cible.id_lead + '">Prendre</button>'
+            : ((__lmPeutAppeler() && cible.telephone ? '<button type="button" class="fs-btn call" data-a="appeler" data-id="' + cible.id_lead + '">' + svgIc(IC.phone) + 'Appeler</button>' : '')
+              + '<button type="button" class="ac-go" data-a="open" data-id="' + cible.id_lead + '">Ouvrir la fiche</button>')) + '</div></section>';
+      }
+      h += '<div class="ac-g v">';
+      h += '<section class="ac-c"><div class="ac-ch"><b>À rappeler · ' + ml.length + '</b><span>le plus urgent en haut</span></div>'
+        + (ml.length ? ml.slice(0, 8).map(function (l) { return acLigne(l); }).join('') + (ml.length > 8 ? '<button type="button" class="ac-plus" data-a="tab" data-id="arappeler">Voir les ' + ml.length + ' leads</button>' : '')
+          : '<p class="ac-vide">Rien à rappeler pour l\'instant.</p>') + '</section>';
+      var sidP = poolVendeurSite() != null ? poolVendeurSite() : (sitesVendeur().length === 1 ? sitesVendeur()[0].id_site : null);
+      h += '<section class="ac-c pool"><div class="ac-ch"><b>' + esc(poolNom()) + ' · ' + pool.length + '</b><span>premier arrivé, premier servi · les plus urgents en haut</span></div>'
+        + (pool.length ? pool.slice(0, 12).map(function (l) {
+            return acLigne(l, verrouAutre(l) ? '<span class="resa-l">Réservé par ' + esc(propre(l.verrou_nom || 'un collègue')) + '</span>' : '<button type="button" class="btn pri" data-a="prendre" data-id="' + l.id_lead + '">Prendre</button>'); }).join('')
+          + (pool.length > 12 ? '<button type="button" class="ac-plus" data-a="tab" data-id="pool">Voir les ' + pool.length + ' leads du Pool</button>' : '')
+          : '<p class="ac-vide">Le Pool est vide.</p>')
+        + '<p class="ac-pied">' + (sidP != null && !sansPlateauSite(sidP) ? 'Les demandes BACS de ce site vous arrivent par la Vroom Team ; le Pool reçoit le site web, Leboncoin, La Centrale et les e-mails. ' : '') + texteRetour() + '</p></section>';
+      var rel = aRelancer().length, camp = S.mesSollis ? S.mesSollis.length : null, avis = ml.filter(function (l) { return l.par_plateau; }).length;
+      h += '<aside class="ac-side"><section class="ac-c"><div class="ac-ch"><b>Aussi à faire</b></div>'
+        + '<button type="button" class="ac-r" data-a="tab" data-id="relances"><span>Relances (déjà essayé)</span><b>' + rel + '</b></button>'
+        + (S.comme ? '' : '<button type="button" class="ac-r" data-a="tab" data-id="campagnes"><span>Campagnes</span><b>' + (camp == null ? '›' : camp) + '</b></button>')
+        + (avis ? '<div class="ac-r"><span>Leads de la Vroom Team : donnez votre avis sur la qualification dans la fiche</span><b class="o">' + avis + '</b></div>' : '')
+        + '</section></aside>';
+      return h + '</div>';
+    }
+    function accueilChef() {
+      var sid = sitePoste(), gere = manager(sid);
+      var pool = libres(sid).slice().sort(function (a, b) { return reste(a) - reste(b); });
+      var urg = bloques(sid).slice().sort(function (a, b) { return reste(a) - reste(b); });
+      var filtre = S.acFiltre || 'tous';
+      var estU = function (l, u) { return String(l.univers || '').toUpperCase().indexOf(u) !== -1; };
+      var vis = pool.filter(function (l) { return filtre === 'tous' || (filtre === 'hd' ? niveau(l) === 'crit' : filtre === 'vn' ? estU(l, 'VN') : estU(l, 'VO')); });
+      var n = function (f) { return pool.filter(f).length; };
+      var h = '<div class="ac-g c">';
+      h += '<section class="ac-c urg"><div class="ac-ch"><b>À traiter maintenant · ' + urg.length + '</b></div>'
+        + (urg.length ? urg.slice(0, 8).map(function (l) { return acLigne(l, '<button type="button" class="btn sm pri" data-a="open" data-id="' + l.id_lead + '">Agir</button>', l.vendeur_nom ? 'chez ' + propre(l.vendeur_nom) : ''); }).join('')
+            + (urg.length > 8 ? '<button type="button" class="ac-plus" data-a="tab" data-id="bloques">Voir les ' + urg.length + ' leads</button>' : '')
+          : '<p class="ac-vide">Aucun lead en souffrance chez vos vendeurs.</p>') + '</section>';
+      var aAttr = pool.filter(function (l) { var g = suggestion(l); return gere && g && g.id_user; }).length;
+      h += '<section class="ac-c pool"><div class="ac-ch wrap"><div><b>' + esc(poolNom(sid)) + ' · ' + pool.length + '</b><span>' + (sansPlateauSite(sid) ? 'site sans Vroom Team : toutes les demandes BACS arrivent ici' : 'site web, Leboncoin, La Centrale, e-mails · les demandes BACS passent par la Vroom Team') + '</span></div>'
+        + '<div class="ac-f">' + [['tous', 'Tous', pool.length], ['hd', 'Hors délai', n(function (l) { return niveau(l) === 'crit'; })], ['vn', 'VN', n(function (l) { return estU(l, 'VN'); })], ['vo', 'VO', n(function (l) { return estU(l, 'VO'); })]]
+            .map(function (x) { return '<button type="button" class="' + (filtre === x[0] ? 'on' : '') + (x[0] === 'hd' && x[2] ? ' r' : '') + '" data-a="ac-filtre" data-id="' + x[0] + '">' + x[1] + ' · ' + x[2] + '</button>'; }).join('') + '</div>'
+        + (aAttr > 1 ? '<button type="button" class="ac-go" data-a="tout-attribuer">Tout attribuer au vendeur suggéré</button>' : '') + '</div>'
+        + (vis.length ? vis.slice(0, 15).map(function (l) {
+            var g = suggestion(l), act;
+            if (!gere) act = '';
+            else if (verrouAutre(l)) act = '<span class="resa-l">Réservé par ' + esc(propre(l.verrou_nom || 'un collègue')) + '</span>';
+            else if (g && g.id_user) act = '<span class="ac-sg">suggéré : <b>' + esc(prenom(g.nom)) + '</b></span><button type="button" class="btn sm pri" data-a="attribuer-sugg" data-id="' + l.id_lead + '">Attribuer</button><button type="button" class="btn sm" data-a="open" data-id="' + l.id_lead + '">Autre…</button>';
+            else act = '<button type="button" class="btn sm pri" data-a="open" data-id="' + l.id_lead + '">Attribuer</button>';
+            return acLigne(l, '<div class="ac-act">' + act + '</div>'); }).join('')
+          + (vis.length > 15 ? '<button type="button" class="ac-plus" data-a="tab" data-id="pool">Voir les ' + vis.length + ' leads</button>' : '')
+          : '<p class="ac-vide">' + (pool.length ? 'Aucun lead pour ce filtre.' : 'Le Pool est vide : chaque lead a son vendeur.') + '</p>') + '</section>';
+      var vs = vendeursDu(sid).filter(function (v) { return !v.exclu; }).map(function (v) {
+        var mesL = S.leads.filter(function (l) { return l.zone === 'vendeur' && Number(l.id_user_attribue) === Number(v.id_user) && Number(l.id_site) === Number(sid); });
+        return { v: v, o: mesL.length, r: mesL.filter(function (l) { return niveau(l) === 'crit'; }).length };
+      }).sort(function (a, b) { return b.r - a.r || b.o - a.o; });
+      var vrs = S.leads.filter(function (l) { return l.par_plateau && Number(l.id_site) === Number(sid); });
+      var st = stockDu(sid), r = S.regle[sid] || {}, MODES = { libre: 'libre-service', manuel: 'par le chef', auto: 'automatique' };
+      h += '<aside class="ac-side"><section class="ac-c"><div class="ac-ch"><b>Mon équipe</b><span>ouverts · en retard</span></div>'
+        + (vs.length ? vs.map(function (x) { return '<div class="ac-v"><i>' + esc(String(propre(x.v.nom) || '?').split(' ').map(function (w) { return w.charAt(0); }).slice(0, 2).join('')) + '</i><span>' + esc(propre(x.v.nom)) + '</span><b>' + x.o + '</b><b class="' + (x.r ? 'r' : 'z') + '">' + x.r + '</b></div>'; }).join('')
+          : '<p class="ac-vide">Aucun vendeur rattaché à ce site.</p>') + '</section>'
+        + (!sansPlateauSite(sid) ? '<section class="ac-c"><div class="ac-ch"><b>La Vroom Team et vous</b></div>'
+            + '<div class="ac-r"><span>Transmis par la Vroom Team</span><b>' + vrs.length + '</b></div>'
+            + '<div class="ac-r"><span>dont pas encore rappelés</span><b class="' + (vrs.filter(function (l) { return !l.tentatives; }).length ? 'o' : '') + '">' + vrs.filter(function (l) { return !l.tentatives; }).length + '</b></div></section>' : '')
+        + '<section class="ac-c"><div class="ac-ch"><b>Pilotage</b></div>'
+        + '<div class="ac-r"><span>Règle d\'attribution</span><b>' + esc(MODES[r.mode] || MODES[(siteInfo(sid) || {}).mode] || '—') + '</b></div>'
+        + '<button type="button" class="ac-r" data-a="tab" data-id="campagnes"><span>Campagnes</span><b>›</b></button>'
+        + (st && gere ? '<button type="button" class="ac-r" data-a="solder" data-id="' + sid + '"><span>Ouverts depuis plus de 24 h</span><b class="o">' + st + ' · solder</b></button>' : '')
+        + '</section></aside>';
+      return h + '</div>';
+    }
     // ── La fiche de traitement du lead (v83 : plein écran) ─────────────────
     function leadSuivant() {
       var D = S.dr; if (!D) return null;
@@ -4264,6 +4392,7 @@
         case 'appeler': await ouvrir(id); if (S.dr && Number(S.dr.id) === Number(id)) canal('appel'); return;
         case 'prendre': return prendre(id);
         case 'tout-attribuer': return toutAttribuer();
+        case 'ac-filtre': S.acFiltre = id; render(); return;
         case 'univ': S.univ = id || 'tous'; S.leads = filtrerUniv(S.tous); S.suggKey = null; render(); if (POSTE !== 'vendeur') chargerAide(); return;
         case 'comme-off': S.commeMenu = false; S.commeQ = ''; if (S.comme) return sortirComme(); render(); return;
         case 'comme-menu': S.commeMenu = !S.commeMenu; S.commeQ = ''; render(); if (S.commeMenu) { var qi = root.querySelector('.k-vsearch'); if (qi) try { qi.focus(); } catch (e) {} } return;
@@ -5093,6 +5222,48 @@
 .lmtc .b1h-n small{font-weight:600;color:var(--ink-2);margin-left:8px}
 .lmtc .b1h .lien{justify-self:start;font-size:12.5px}
 
+/* v84 : pages d'accueil vendeur / chef */
+.lmtc .ac-h{display:flex;flex-wrap:wrap;align-items:flex-end;gap:16px 24px;margin:6px 0 18px}
+.lmtc .ac-ht{flex:1 1 320px;min-width:0}.lmtc .ac-sup{font-size:12px;font-weight:900;letter-spacing:.07em;text-transform:uppercase;color:#4b5563;margin:0}
+.lmtc .ac-h h1{font-size:30px;font-weight:900;color:var(--bleu-dk);margin:4px 0 2px;letter-spacing:-.01em}.lmtc .ac-sub{font-size:15px;color:#4b5563;margin:0}
+.lmtc .ac-ks{display:flex;gap:12px;flex-wrap:wrap}.lmtc .ac-k{background:#fff;border:1px solid #dce6f3;border-radius:16px;padding:12px 18px;min-width:118px}
+.lmtc .ac-k b{display:block;font-size:24px;font-weight:900;color:var(--bleu-dk);line-height:1.2}.lmtc .ac-k b.r{color:#b23433}.lmtc .ac-k b.v{color:#2c7a68}.lmtc .ac-k b.o{color:#8a5a00}
+.lmtc .ac-k span{font-size:12px;font-weight:800;color:#4b5563}
+.lmtc .ac-next{background:var(--bleu-dk);color:#fff;border-radius:20px;padding:20px 24px;display:flex;flex-wrap:wrap;align-items:center;gap:16px 24px;margin-bottom:22px}
+.lmtc .ac-nt{flex:1 1 300px;min-width:0}.lmtc .ac-nt p{font-size:12px;font-weight:900;letter-spacing:.07em;text-transform:uppercase;color:#c9daf1;margin:0}
+.lmtc .ac-nt h2{font-size:22px;font-weight:900;color:#fff;margin:2px 0}.lmtc .ac-nt span{font-size:13.5px;color:#dce8f7}
+.lmtc .ac-nb{display:flex;gap:8px;flex-wrap:wrap}.lmtc .ac-nb .fs-btn{display:inline-flex;align-items:center;gap:8px;border:1.5px solid #c9d9ee;background:#fff;color:var(--bleu);border-radius:11px;padding:10px 16px;font:inherit;font-size:13.5px;font-weight:800;min-height:46px;cursor:pointer}
+.lmtc .ac-nb .fs-btn svg{width:17px;height:17px}
+.lmtc .ac-go{font:inherit;font-size:14px;font-weight:900;padding:10px 20px;border-radius:11px;border:0;background:#53bda7;color:#0f3d33;min-height:44px;cursor:pointer}
+.lmtc .ac-go:hover{background:#46a892}
+.lmtc .ac-g{display:grid;gap:22px;align-items:start}
+.lmtc .ac-g.v{grid-template-columns:minmax(0,.85fr) minmax(0,1.35fr) minmax(0,300px)}
+.lmtc .ac-g.c{grid-template-columns:minmax(0,330px) minmax(0,1fr) minmax(0,310px)}
+@media (max-width:1240px){.lmtc .ac-g.v,.lmtc .ac-g.c{grid-template-columns:minmax(0,1fr) minmax(0,1fr)}.lmtc .ac-g .pool{grid-column:1/-1;order:-1}}
+@media (max-width:760px){.lmtc .ac-g.v,.lmtc .ac-g.c{grid-template-columns:minmax(0,1fr)}.lmtc .ac-h h1{font-size:24px}.lmtc .ac-l{flex-wrap:wrap}.lmtc .ac-act{width:100%}}
+.lmtc .ac-c{background:#fff;border:1px solid #dce6f3;border-radius:18px;overflow:hidden}
+.lmtc .ac-c.urg{border:2px solid #e24b4a}.lmtc .ac-c.urg .ac-ch{background:#fdeeee}.lmtc .ac-c.urg .ac-ch b{color:#b23433}
+.lmtc .ac-side{display:flex;flex-direction:column;gap:18px;min-width:0}
+.lmtc .ac-ch{padding:15px 20px;border-bottom:1px solid #eef2f8;display:flex;justify-content:space-between;align-items:baseline;gap:10px}
+.lmtc .ac-ch.wrap{flex-wrap:wrap;align-items:center}.lmtc .ac-ch.wrap>div:first-child{flex:1 1 240px}
+.lmtc .ac-ch b{font-size:16px;font-weight:900;color:var(--bleu-dk)}.lmtc .ac-c.pool .ac-ch b{font-size:18px}.lmtc .ac-ch span{display:block;font-size:12px;color:#4b5563}
+.lmtc .ac-f{display:flex;gap:6px;flex-wrap:wrap}.lmtc .ac-f button{font:inherit;font-size:12.5px;font-weight:800;padding:6px 12px;border-radius:999px;border:0;background:var(--sel);color:var(--bleu-dk);cursor:pointer}
+.lmtc .ac-f button.on{background:var(--bleu);color:#fff}.lmtc .ac-f button.r:not(.on){background:#fdeeee;color:#b23433}
+.lmtc .ac-l{display:flex;gap:14px;align-items:center;padding:12px 20px;border-bottom:1px solid #f0f4fa;cursor:pointer}.lmtc .ac-l:hover{background:#f6f9fd}
+.lmtc .ac-p{flex:0 0 72px;text-align:center;padding:6px;border-radius:10px;font-weight:900;font-size:12.5px;font-variant-numeric:tabular-nums}
+.lmtc .ac-p.ok{background:#eaf7f4;color:#2c7a68}.lmtc .ac-p.warn{background:#fff6e0;color:#8a5a00}.lmtc .ac-p.crit{background:#fdeeee;color:#b23433}
+.lmtc .ac-x{flex:1;min-width:0}.lmtc .ac-x b{display:block;font-size:14.5px;font-weight:900;color:#1c2b45;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.lmtc .ac-x span{display:block;font-size:12.5px;color:#4b5563;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.lmtc .ac-x em{display:inline-block;margin-top:4px;font-style:normal;font-size:11.5px;font-weight:800;padding:2px 8px;border-radius:999px;background:#f2f6fc;color:#4b5563}.lmtc .ac-x em.vr{background:var(--sel);color:var(--bleu)}
+.lmtc .ac-act{display:flex;gap:6px;align-items:center;flex-wrap:wrap;justify-content:flex-end}.lmtc .ac-sg{font-size:12px;color:#4b5563}.lmtc .ac-sg b{color:var(--bleu-dk)}
+.lmtc .ac-plus{display:block;width:100%;font:inherit;font-size:13px;font-weight:800;padding:12px;border:0;background:#f6f9fd;color:var(--bleu);cursor:pointer}
+.lmtc .ac-vide{padding:18px 20px;margin:0;font-size:13px;color:#4b5563;font-style:italic}
+.lmtc .ac-pied{padding:12px 20px;margin:0;font-size:12.5px;color:#4b5563;background:#f6f9fd}
+.lmtc .ac-r{display:flex;justify-content:space-between;gap:12px;align-items:center;width:100%;box-sizing:border-box;padding:11px 20px;border:0;border-bottom:1px solid #f0f4fa;background:#fff;font:inherit;font-size:13.5px;color:#1c2b45;text-align:left}
+.lmtc button.ac-r{cursor:pointer}.lmtc button.ac-r:hover{background:#f6f9fd}.lmtc .ac-r b{font-weight:900;color:var(--bleu-dk);white-space:nowrap}.lmtc .ac-r b.o{color:#8a5a00}
+.lmtc .ac-v{display:flex;align-items:center;gap:10px;padding:9px 20px;border-bottom:1px solid #f0f4fa;font-size:13.5px}
+.lmtc .ac-v i{width:30px;height:30px;border-radius:50%;background:var(--sel);color:var(--bleu-dk);font-style:normal;font-weight:900;font-size:11px;display:flex;align-items:center;justify-content:center;flex:0 0 auto}
+.lmtc .ac-v span{flex:1;min-width:0}.lmtc .ac-v b{min-width:24px;text-align:right;color:var(--bleu-dk)}.lmtc .ac-v b.r{color:#b23433}.lmtc .ac-v b.z{color:#acc5e4}
 /* v83 : fiche de traitement plein écran (vendeur, chef des ventes) */
 .lmtc-ov .drawer.full{left:0;width:auto;border-radius:0;background:#eef3fa;box-shadow:none}
 .lmtc-ov .drawer.full .fx-h{position:sticky;top:0;z-index:2;display:flex;flex-wrap:wrap;align-items:center;gap:12px 20px;padding:14px 28px;background:#fff;border-bottom:1px solid #dce6f3}
