@@ -1,6 +1,9 @@
 // ============================================================================
 //  LEAD MANAGEMENT — module One Data (OD.define 'lead-mgmt')
-//  VERSION TEAM COLIN (v86) — déploiement CIBLÉ (publish-targets :
+//  VERSION TEAM COLIN (v87) — déploiement CIBLÉ (publish-targets :
+//  v87 (31/10/2026) : sur téléphone, la liste « Vendeur » s'ouvrait hors de
+//  l'écran (ancrée à droite d'un bouton placé à gauche) : elle s'ancre à
+//  gauche et tient dans la largeur de l'écran.
 //  v86 (30/10/2026) : la Vroom Team crée un lead depuis le mode flux
 //  (« + Nouveau lead », touche N, plateau v3) et l'envoie au vendeur choisi ;
 //  il le reçoit « Qualifié par la Vroom Team » dans ses leads à rappeler
@@ -5140,6 +5143,7 @@
 :is(.lmtc,.lmtc-ov) .k-vend-btn{background:#fff;border:1px solid #ece9e1;border-radius:10px;padding:5px 12px;cursor:pointer;text-align:left;font-family:inherit}
 :is(.lmtc,.lmtc-ov) .k-vend-btn:hover{border-color:#2a5ea9}
 :is(.lmtc,.lmtc-ov) .k-vpanel{position:absolute;top:calc(100% + 6px);right:0;z-index:30;width:300px;max-height:380px;overflow-y:auto;background:#fff;border:1px solid #ece9e1;border-radius:12px;box-shadow:0 12px 32px rgba(42,94,169,.16);padding:8px;text-align:left}
+@media (max-width:760px){:is(.lmtc,.lmtc-ov) .k-vend-sel .k-vpanel{left:0;right:auto;width:min(300px,calc(100vw - 32px))}}
 :is(.lmtc,.lmtc-ov) .k-vsearch{width:100%;border:1px solid #ece9e1;border-radius:8px;padding:8px 11px;font-family:inherit;font-size:13px;color:#1c2b45;box-sizing:border-box;margin-bottom:6px}
 :is(.lmtc,.lmtc-ov) .k-vsearch:focus{outline:none;border-color:#2a5ea9}
 :is(.lmtc,.lmtc-ov) .k-vgroup{font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:.04em;color:#888780;padding:8px 8px 4px}
