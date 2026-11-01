@@ -1,4 +1,20 @@
 // ============================================================================
+//  v35 (02/11/2026) : L'AGENDA DU SITE SUIT LE SITE.
+//  - Le site choisi dans la barre du haut s'applique à l'agenda du site
+//    (personnes et événements), et le choix fait dans l'agenda du site met à
+//    jour la barre du haut : un seul site courant.
+//  - Seuls les événements DE CE SITE s'affichent : une personne rattachée à
+//    deux sites (secrétaire, chef des ventes) n'apporte plus à L'Haÿ ses
+//    livraisons d'Arcueil. Les absences la suivent sur ses deux sites.
+//  - Les personnes désactivées dans One Data qui tiennent encore un agenda
+//    BACS sur le site (metteur en main) en font partie (agenda_site_membres).
+//  - Fenêtre de saisie refondue : la nature d'abord (pastilles de couleur :
+//    RDV client, livraison, préparation, réception / restitution, pas de
+//    livraison, absence, autre créneau, bilatérale), puis « Dans l'agenda
+//    de » et « Quand » côte à côte ; client, origine (menu) et physique /
+//    téléphone seulement pour un RDV client. Deux colonnes sur ordinateur,
+//    plein écran sur téléphone, plus de défilement.
+// ============================================================================
 //  v34 (02/11/2026) : AGENDA PERSONNEL + AGENDA DU SITE (maquette validée par
 //  Antoine le 01/11/2026).
 //  - Deux vues : « Mon agenda » (inchangé : couleur par nature) et « Agenda du
@@ -816,6 +832,27 @@ OD.define('agenda', {
   // Le site dont on parle : celui de l'agenda du site, sinon celui de la barre du haut.
   function siteCourant() { return vueSite() && siteAg.id != null ? Number(siteAg.id) : siteParDefaut(); }
 
+  // Un seul site courant : la barre du haut pilote l'agenda du site, et le
+  // choix fait dans l'agenda du site remonte dans la barre du haut.
+  function suivreSiteHaut() {
+    const t = siteIds(); const sig = JSON.stringify(t);
+    if (siteAg.topSig === sig) return false;
+    siteAg.topSig = sig;
+    if (t && t.length === 1 && Number(t[0]) !== Number(siteAg.id)) {
+      siteAg.id = Number(t[0]); siteAg.masques = new Set();
+      setTimeout(renderSiteBar, 0);
+      return true;
+    }
+    return false;
+  }
+  function poserSiteHaut(id) {
+    try {
+      const brut = siteValRaw();
+      const v = Array.isArray(brut) ? [Number(id)] : Number(id);
+      siteAg.topSig = JSON.stringify([Number(id)]);
+      wwLib().wwVariable.updateValue(CFG.siteVar, v);
+    } catch (e) {}
+  }
   async function chargerMesSites() {
     if (siteAg.sites) return siteAg.sites;
     try { const r = await sb().rpc('agenda_mes_sites'); siteAg.sites = (!r.error && Array.isArray(r.data)) ? r.data : []; }
@@ -873,7 +910,7 @@ OD.define('agenda', {
     if (v === vue) return;
     vue = v;
     try { frontWin().sessionStorage.setItem(VUE_CLE, v); } catch (e) {}
-    if (vueSite() && siteAg.id == null) siteAg.id = siteParDefaut();
+    if (vueSite()) { const t = siteIds(); if (t && t.length === 1) siteAg.id = Number(t[0]); else if (siteAg.id == null) siteAg.id = siteParDefaut(); siteAg.topSig = JSON.stringify(t); }
     try {
       calendar.setOption('slotEventOverlap', !vueSite());
       calendar.setOption('allDaySlot', vueSite());
@@ -938,7 +975,7 @@ OD.define('agenda', {
     h += '</div>';
     host.innerHTML = h;
     const se = host.querySelector('#ags-site');
-    if (se) se.addEventListener('change', () => { siteAg.id = Number(se.value); siteAg.masques = new Set(); renderSiteBar(); chargerMembresPour(siteAg.id).then(() => { renderSiteBar(); refetch(); }); });
+    if (se) se.addEventListener('change', () => { siteAg.id = Number(se.value); siteAg.masques = new Set(); poserSiteHaut(siteAg.id); renderSiteBar(); chargerMembresPour(siteAg.id).then(() => { renderSiteBar(); refetch(); }); });
     host.querySelectorAll('[data-p]').forEach(b => b.addEventListener('click', () => {
       const id = Number(b.getAttribute('data-p'));
       if (siteAg.masques.has(id)) siteAg.masques.delete(id); else siteAg.masques.add(id);
@@ -954,7 +991,10 @@ OD.define('agenda', {
     const client = sb(); if (!client) return failure(new Error('no supabase'));
     try {
       if (siteAg.id == null) { await chargerMesSites(); siteAg.id = siteParDefaut(); }
-      const ms = await chargerMembresPour(siteAg.id);
+      suivreSiteHaut();
+      const idSite = Number(siteAg.id);
+      const ms = await chargerMembresPour(idSite);
+      if (Number(siteAg.id) !== idSite) return success([]);   // site changé pendant le chargement
       const ids = ms.map(m => m.id_user).filter(id => !siteAg.masques.has(id));
       if (!ids.length) { retirerProvisoires(); return success([]); }
       const { data, error } = await client.rpc('get_calendar_events', {
@@ -966,7 +1006,9 @@ OD.define('agenda', {
       // l'agenda d'un collègue d'un autre site).
       const garde = new Set(ms.map(m => m.id_user));
       // Les rapports vendeur (relances à faire) restent dans l'agenda personnel.
-      const rows = (data || []).filter(r => (r.source_type === 'rdv' && garde.has(Number(r.id_user))) || r.source_type === 'bilat');
+      // Événements DE CE SITE seulement (une absence suit la personne partout).
+      const duSite = (r) => r.id_site == null || Number(r.id_site) === idSite || familleEvt(r) === 'absence';
+      const rows = (data || []).filter(r => ((r.source_type === 'rdv' && garde.has(Number(r.id_user))) || r.source_type === 'bilat') && duSite(r));
       retirerProvisoires();
       success(buildEvents(rows));
     } catch (err) { console.error('[agenda] agenda du site', err); failure(err); }
@@ -1003,6 +1045,7 @@ OD.define('agenda', {
       if (error) throw error;
       const garde = new Set(ids);
       const rows = (data || []).filter(r => r.source_type === 'rdv' && garde.has(Number(r.id_user))
+        && (r.id_site == null || Number(r.id_site) === Number(idSite))
         && NATURES_PLANNING.some(n => n.cle === familleEvt(r)))
         .sort((a, b) => String(a.event_start_time).localeCompare(String(b.event_start_time)));
       const html = kind === 'semaine' ? planningSemaineHtml(rows, debut, nomSite) : planningJourHtml(rows, debut, nomSite);
@@ -1346,7 +1389,25 @@ OD.define('agenda', {
 #agenda-ov .agm-deplace button{background:none;border:none;color:#2a5ea9;font-family:inherit;font-size:11.5px;font-weight:700;text-decoration:underline;cursor:pointer;padding:0}
 #agenda-ov .agm-done{display:flex;gap:10px;align-items:flex-start;background:#e4f4f0;border:1.5px solid #9ed8c9;border-radius:11px;padding:11px 13px;font-size:13px;color:#0b6b57;font-weight:700;line-height:1.4}
 #agenda-ov .agm-foot{padding:14px 18px;border-top:1.5px solid #eef2f8}
-#agenda-ov #agm-bacs-info{margin:0 18px 10px;padding:9px 12px;border-radius:10px;background:#fff6e6;border:1.5px solid #f3d9a4;color:#8a5d08;font-size:12.5px;font-weight:700;line-height:1.4}
+#agenda-ov #agm-bacs-info{margin:0;padding:8px 18px;border-top:1.5px solid #f3d9a4;background:#fff6e6;color:#8a5d08;font-size:12px;font-weight:700;line-height:1.4}
+#agenda-ov .agm.agm-saisie{max-width:720px}
+#agenda-ov .agm-nat{display:flex;flex-wrap:wrap;gap:6px}
+#agenda-ov .agm-nat button{display:inline-flex;align-items:center;gap:6px;border:1.5px solid #e2eaf5;background:#fff;color:#1F4A85;font:700 12px "Nunito Sans",system-ui,sans-serif;padding:6px 11px;border-radius:999px;cursor:pointer;transition:border-color .12s,background .12s}
+#agenda-ov .agm-nat button:hover{border-color:var(--c,#2a5ea9)}
+#agenda-ov .agm-nat button i{width:8px;height:8px;border-radius:50%;flex:0 0 auto}
+#agenda-ov .agm-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px 16px;align-items:start}
+#agenda-ov .agm-cell{min-width:0}
+#agenda-ov .agm-w{width:100%}
+#agenda-ov .agm-quand{flex-wrap:nowrap}
+#agenda-ov .agm-quand #agm-date{flex:1;min-width:0}
+#agenda-ov .agm-quand #agm-time{width:116px;flex:0 0 auto}
+#agenda-ov .agm-quand #agm-dur{flex:0 0 auto}
+#agenda-ov .agm-pf{display:inline-flex;border:1.5px solid #e2eaf5;border-radius:9px;overflow:hidden;flex:0 0 auto}
+#agenda-ov .agm-pf button{border:0;background:#fff;color:#7a98c5;font:700 12px "Nunito Sans",system-ui,sans-serif;padding:8px 11px;cursor:pointer}
+#agenda-ov .agm-pf button.on{background:#2a5ea9;color:#fff}
+#agenda-ov .agm-saisie .agm-ta{min-height:52px;box-sizing:border-box;display:block}
+#agenda-ov .agm-saisie .agm-inp,#agenda-ov .agm-saisie .agm-sel{box-sizing:border-box}
+@media(max-width:640px){#agenda-ov .agm-grid{grid-template-columns:1fr}#agenda-ov .agm.agm-saisie{width:100%;max-width:none;max-height:100%;height:100%;border-radius:0}#agenda-ov .agm-quand{flex-wrap:wrap}}
 #agenda-root .fc .ag-bacs-att{display:inline-block;margin-right:4px;padding:0 4px;border-radius:4px;background:#fac055;color:#5a3d05;font:800 9px/13px "Nunito Sans",system-ui,sans-serif;letter-spacing:.02em;vertical-align:0}
 #agenda-ov .agm-save{width:100%;border:none;border-radius:10px;padding:12px;background:#53bda7;color:#fff;font-family:inherit;font-weight:800;font-size:14px;cursor:pointer;transition:background .15s}
 #agenda-ov .agm-save:hover{background:#46a892}
@@ -2940,81 +3001,119 @@ OD.define('agenda', {
 
   const TITLES = { rdv: 'Nouveau RDV Client', creneau: 'Nouveau Cr\u00e9neau', bilat: 'Nouvelle Bilat\u00e9rale' };
   const TITLES_EDIT = { rdv: 'Modifier le RDV', creneau: 'Modifier le cr\u00e9neau', bilat: 'Modifier la bilat\u00e9rale' };
-  function popTitle() { return (cs.editing ? TITLES_EDIT : TITLES)[cs.mode]; }
+  function popTitle() {
+    if (cs.mode === 'bilat') return (cs.editing ? TITLES_EDIT : TITLES).bilat;
+    const n = NATURES_SAISIE.find(x => x.cle === natureDe(cs));
+    if (!cs.editing) return 'Nouvel événement';
+    return 'Modifier \u00b7 ' + (n ? n.label : 'événement');
+  }
+  // v35 : fenêtre de saisie refondue. On choisit d'abord QUOI (la nature, en
+  // pastilles de couleur), puis POUR QUI et QUAND, côte à côte ; le client et
+  // l'origine n'apparaissent que pour un RDV client. Plus de défilement sur
+  // ordinateur : deux colonnes, l'origine en menu au lieu de six boutons.
+  const NATURES_SAISIE = [
+    { cle: 'rdv',       label: 'RDV client',       mode: 'rdv' },
+    { cle: 'livraison', label: 'Livraison',        mode: 'creneau', type: 4 },
+    { cle: 'prepa',     label: 'Préparation',      mode: 'creneau', type: 12 },
+    { cle: 'recep',     label: 'Réception / restit.', mode: 'creneau', type: 13 },
+    { cle: 'bloque',    label: 'Pas de livraison', mode: 'creneau', type: 14 },
+    { cle: 'absence',   label: 'Absence',          mode: 'creneau', type: 15 },
+    { cle: 'creneau',   label: 'Autre créneau',    mode: 'creneau' },
+    { cle: 'bilat',     label: 'Bilatérale',       mode: 'bilat' },
+  ];
+  const TYPES_NATURE = { 4: 'livraison', 12: 'prepa', 13: 'recep', 14: 'bloque', 15: 'absence' };
+  function natureDe(c) {
+    if (c.mode === 'bilat') return 'bilat';
+    if (c.mode === 'rdv') return (c.editing && TYPES_NATURE[Number(c.rdvType)]) || 'rdv';
+    return TYPES_NATURE[Number(c.creneauType)] || 'creneau';
+  }
+  function choisirNature(cle) {
+    const n = NATURES_SAISIE.find(x => x.cle === cle); if (!n) return;
+    cs.mode = n.mode; cs.err = '';
+    if (n.mode === 'creneau') cs.creneauType = n.type != null ? n.type : (TYPES_NATURE[Number(cs.creneauType)] ? null : cs.creneauType);
+  }
+  function couleurNature(cle) { return cle === 'rdv' ? CFG.colors.client : (CFG.colors[cle] || CFG.colors.creneau); }
   function bodyHtml() {
     const ed = cs.editing;
-    const dateRow = '<div class="agm-row">'
-      + '<input type="date" class="agm-inp" id="agm-date" min="' + esc(agToday()) + '" value="' + esc(cs.date) + '" style="flex:1;min-width:130px">'
-      + '<input type="time" class="agm-inp" id="agm-time" value="' + esc(cs.time) + '" step="900" style="width:104px">'
+    const nat = natureDe(cs);
+    // Nature : en création, toutes ; en modification, on peut changer de
+    // nature de créneau, pas passer d'un créneau à un RDV client ou l'inverse.
+    const offertes = !ed ? NATURES_SAISIE : (cs.mode === 'creneau' ? NATURES_SAISIE.filter(n => n.mode === 'creneau') : []);
+    const chips = offertes.length ? '<div class="agm-nat">' + offertes.map(n => {
+      const c = couleurNature(n.cle), on = n.cle === nat;
+      return '<button type="button" data-nat="' + n.cle + '" class="' + (on ? 'on' : '') + '" style="' + (on ? 'background:' + c + ';border-color:' + c + ';color:#fff' : '--c:' + c) + '"><i style="background:' + (on ? '#fff' : c) + '"></i>' + esc(n.label) + '</button>';
+    }).join('') + '</div>' : '';
+
+    const quand = '<div class="agm-cell"><div class="agm-lbl">Quand</div><div class="agm-row agm-quand">'
+      + '<input type="date" class="agm-inp" id="agm-date" min="' + esc(agToday()) + '" value="' + esc(cs.date) + '">'
+      + '<input type="time" class="agm-inp" id="agm-time" value="' + esc(cs.time) + '" step="900">'
       + '<select class="agm-sel" id="agm-dur" title="Durée">' + optionsDuree(cs.dur) + '</select>'
-      + '</div>';
-    let mid = '';
-    if (cs.mode === 'rdv') {
-      if (!ed) mid += '<div><div class="agm-lbl">Origine</div><div class="agm-grid2">' + ORIGINES.map((o, i) => '<label class="agm-radio"><input type="radio" name="agm-ori" value="' + i + '"' + (o === cs.origine ? ' checked' : '') + '>' + esc(o) + '</label>').join('') + '</div></div>';
-      if (ed) {
-        mid += '<div><div class="agm-lbl">Client</div><div class="agm-cli-ro">' + esc(cs.clientLabel || ('Client ' + (cs.idClient != null ? cs.idClient : ''))) + '</div></div>';
-      } else if (cs.idClient != null) {
-        mid += '<div><div class="agm-lbl">Client</div><div class="agm-cli-sel" id="agm-cli-box"><span class="agm-cli-name">' + esc(cs.clientLabel || ('Client ' + cs.idClient)) + '</span><button type="button" class="agm-cli-change" id="agm-cli-change">Changer</button></div></div>';
-      } else {
-        mid += '<div><div class="agm-lbl">Client</div><button type="button" class="agm-cli-pick" id="agm-cli-pick"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg><span>Rechercher / choisir un client</span></button></div>';
-      }
-      if (ed) {
-        const types = rdvTypesCache || [];
-        mid += '<div><div class="agm-lbl">Type de RDV</div><select class="agm-sel" id="agm-rtype" style="width:100%"><option value="">\u2014 choisir \u2014</option>' + types.map(t => '<option value="' + t.id + '"' + (String(t.id) === String(cs.rdvType) ? ' selected' : '') + '>' + esc(t.label) + '</option>').join('') + '</select></div>';
-      } else {
-        mid += '<div class="agm-tg' + (cs.physique ? ' on' : '') + '" id="agm-phys"><span class="sw"></span><span>' + (cs.physique ? 'RDV Physique' : 'RDV T\u00e9l\u00e9phonique') + '</span></div>';
-      }
-    } else if (cs.mode === 'creneau') {
-      const types = creneauTypes();
-      mid += '<div><div class="agm-lbl">Type de cr\u00e9neau</div><select class="agm-sel" id="agm-ctype" style="width:100%"><option value="">\u2014 choisir \u2014</option>' + types.map(t => '<option value="' + t.id + '"' + (String(t.id) === String(cs.creneauType) ? ' selected' : '') + '>' + esc(t.label) + '</option>').join('') + '</select></div>';
-    } else {
+      + '</div></div>';
+
+    let qui = '';
+    if (cs.mode === 'bilat') {
       const grp = bilatVendeurGroups();
       const res = resumeBilat;
       const tri = (a, b) => urgenceBilat(b.id) - urgenceBilat(a.id) || String(a.nom).localeCompare(String(b.nom), 'fr');
-      mid += '<div><div class="agm-lbl">Vendeur \u00e9valu\u00e9</div><select class="agm-sel" id="agm-bvend" style="width:100%"><option value="">\u2014 choisir \u2014</option>'
+      qui = '<div class="agm-cell"><div class="agm-lbl">Vendeur évalué</div><select class="agm-sel agm-w" id="agm-bvend"><option value="">— choisir —</option>'
         + grp.map(g => '<optgroup label="' + esc(g.label) + '">' + g.items.slice().sort(res ? tri : () => 0).map(v => '<option value="' + v.id + '"' + (String(v.id) === String(cs.bilatUser) ? ' selected' : '') + '>' + esc(libelleVendeurBilat(v)) + '</option>').join('') + '</optgroup>').join('')
-        + '</select>'
-        + (res ? '<div class="agm-hint">\u26a0 = bilat\u00e9rale en retard \u00b7 les vendeurs \u00e0 recevoir en priorit\u00e9 sont en t\u00eate de chaque groupe.</div>' : '')
-        + '</div>';
+        + '</select>' + (res ? '<div class="agm-hint">⚠ = bilatérale en retard ; les vendeurs à recevoir sont en tête.</div>' : '') + '</div>';
+    } else if (cs.owner != null) {
+      const aide = cs.editing && Number(cs.owner) !== Number(cs.ownerInit) ? 'Passera dans l’agenda de cette personne, ici et dans BACS.'
+        : (!ed && nat === 'livraison') ? 'Le metteur en main ; vous y serez invité.'
+        : (!ed && nat === 'prepa') ? 'Le préparateur.'
+        : '';
+      qui = '<div class="agm-cell"><div class="agm-lbl">Dans l’agenda de</div><select class="agm-sel agm-w" id="agm-owner">' + optionsProprietaire(cs.owner, cs.ownerNom) + '</select>'
+        + (aide ? '<div class="agm-hint">' + esc(aide) + '</div>' : '') + '</div>';
     }
-    const seg = ed ? '' : ('<div class="agm-seg">'
-      + '<button data-mode="rdv" class="' + (cs.mode === 'rdv' ? 'on' : '') + '">RDV CLIENT</button>'
-      + '<button data-mode="creneau" class="' + (cs.mode === 'creneau' ? 'on' : '') + '">CR\u00c9NEAU</button>'
-      + '<button data-mode="bilat" class="' + (cs.mode === 'bilat' ? 'on' : '') + '">BILAT\u00c9RALE</button></div>');
-    // v34 : dans quel agenda va l'événement (tout le monde du site).
-    let proprio = '';
-    if (cs.mode !== 'bilat' && cs.owner != null) {
-      const ms = optionsProprietaire(cs.owner, cs.ownerNom);
-      proprio = '<div><div class="agm-lbl">Dans l\u2019agenda de</div><select class="agm-sel" id="agm-owner" style="width:100%">' + ms + '</select>'
-        + (cs.editing && Number(cs.owner) !== Number(cs.ownerInit) ? '<div class="agm-hint">L\u2019événement passera dans l\u2019agenda de cette personne, ici et dans BACS.</div>' : '')
-        + (!cs.editing && cs.mode === 'creneau' && String(cs.creneauType) === '4' ? '<div class="agm-hint">Livraison : choisissez le metteur en main ; vous y serez invité.</div>' : '')
-        + (!cs.editing && cs.mode === 'creneau' && String(cs.creneauType) === '12' ? '<div class="agm-hint">Préparation : choisissez le préparateur.</div>' : '')
-        + '</div>';
+
+    let quoi = '';
+    if (cs.mode === 'rdv') {
+      let cli;
+      if (ed) cli = '<div class="agm-cli-ro">' + esc(cs.clientLabel || ('Client ' + (cs.idClient != null ? cs.idClient : ''))) + '</div>';
+      else if (cs.idClient != null) cli = '<div class="agm-cli-sel" id="agm-cli-box"><span class="agm-cli-name">' + esc(cs.clientLabel || ('Client ' + cs.idClient)) + '</span><button type="button" class="agm-cli-change" id="agm-cli-change">Changer</button></div>';
+      else cli = '<button type="button" class="agm-cli-pick" id="agm-cli-pick"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg><span>Choisir un client</span></button>';
+      quoi += '<div class="agm-cell"><div class="agm-lbl">Client</div>' + cli + '</div>';
+      if (ed) {
+        const types = rdvTypesCache || [];
+        quoi += '<div class="agm-cell"><div class="agm-lbl">Type de RDV</div><select class="agm-sel agm-w" id="agm-rtype"><option value="">— choisir —</option>' + types.map(t => '<option value="' + t.id + '"' + (String(t.id) === String(cs.rdvType) ? ' selected' : '') + '>' + esc(t.label) + '</option>').join('') + '</select></div>';
+      } else {
+        quoi += '<div class="agm-cell"><div class="agm-lbl">Origine et forme</div><div class="agm-row">'
+          + '<select class="agm-sel" id="agm-ori" style="flex:1;min-width:150px">' + ORIGINES.map((o, i) => '<option value="' + i + '"' + (o === cs.origine ? ' selected' : '') + '>' + esc(o) + '</option>').join('') + '</select>'
+          + '<div class="agm-pf" id="agm-phys"><button type="button" data-phys="1" class="' + (cs.physique ? 'on' : '') + '">Physique</button><button type="button" data-phys="0" class="' + (cs.physique ? '' : 'on') + '">Téléphone</button></div>'
+          + '</div></div>';
+      }
+    } else if (cs.mode === 'creneau' && nat === 'creneau') {
+      const types = creneauTypes().filter(t => !TYPES_NATURE[Number(t.id)]);
+      quoi += '<div class="agm-cell"><div class="agm-lbl">Type de créneau</div><select class="agm-sel agm-w" id="agm-ctype"><option value="">— choisir —</option>' + types.map(t => '<option value="' + t.id + '"' + (String(t.id) === String(cs.creneauType) ? ' selected' : '') + '>' + esc(t.label) + '</option>').join('') + '</select></div>';
     }
-    const comment = '<div><div class="agm-lbl">Commentaire</div><textarea class="agm-ta" id="agm-comment" placeholder="Commentaire\u2026">' + esc(cs.comment) + '</textarea></div>';
-    // v28 : invités, comme dans BACS (BACS leur envoie son invitation).
+
     let invites = '';
     if (cs.mode !== 'bilat') {
       const pris = (cs.invites || []).map(Number);
       const moi = Number(cs.owner != null ? cs.owner : (currentCollabId() || CACHED_UID));
       const dispo = (invitablesCache || []).filter(u => pris.indexOf(Number(u.id_user)) < 0 && Number(u.id_user) !== moi);
-      invites = '<div><div class="agm-lbl">Invités</div><div class="agm-inv">'
-        + pris.map(id => '<span class="agm-inv-chip' + (bacsInvite(id) ? '' : ' nb') + '"' + (bacsInvite(id) ? '' : ' title="Sans compte BACS : invité dans One Data seulement"') + '>' + esc(nomInvite(id)) + '<button type="button" data-inv-del="' + id + '" aria-label="Retirer">\u00d7</button></span>').join('')
-        + '<select class="agm-sel" id="agm-inv-add" style="flex:1;min-width:170px"><option value="">+ Inviter un collègue\u2026</option>'
-        + dispo.map(u => '<option value="' + u.id_user + '">' + esc(u.nom) + (u.fonction ? ' \u00b7 ' + esc(u.fonction) : '') + '</option>').join('')
+      invites = '<div class="agm-cell"><div class="agm-lbl">Invités</div><div class="agm-inv">'
+        + pris.map(id => '<span class="agm-inv-chip' + (bacsInvite(id) ? '' : ' nb') + '"' + (bacsInvite(id) ? '' : ' title="Sans compte BACS : invité dans One Data seulement"') + '>' + esc(nomInvite(id)) + '<button type="button" data-inv-del="' + id + '" aria-label="Retirer">×</button></span>').join('')
+        + '<select class="agm-sel" id="agm-inv-add" style="flex:1;min-width:150px"><option value="">+ Inviter…</option>'
+        + dispo.map(u => '<option value="' + u.id_user + '">' + esc(u.nom) + (u.fonction ? ' · ' + esc(u.fonction) : '') + '</option>').join('')
         + '</select></div>'
-        + (pris.length && agendaBacsPf && agendaBacsPf.actif ? '<div class="agm-hint">BACS envoie lui-même l\u2019invitation par e-mail \u00e0 chaque invité.</div>' : '')
+        + (pris.length && agendaBacsPf && agendaBacsPf.actif ? '<div class="agm-hint">BACS envoie l’invitation par e-mail.</div>' : '')
         + '</div>';
     }
+    const comment = cs.mode !== 'bilat' ? '<div class="agm-cell"><div class="agm-lbl">Commentaire</div><textarea class="agm-ta" id="agm-comment" rows="2" placeholder="Véhicule, VIN, consignes…">' + esc(cs.comment) + '</textarea></div>' : '';
+
     let sync = '';
     if (cs.editing && cs.mode !== 'bilat' && cs.sync) {
       const e = cs.sync.etat;
-      sync = e === 'synchro' ? '<div class="agm-sync ok"><span class="pt"></span>Synchronisé avec l\u2019agenda BACS</div>'
-           : e === 'en_attente' ? '<div class="agm-sync att"><span class="pt"></span>En cours d\u2019envoi vers BACS</div>'
+      sync = e === 'synchro' ? '<div class="agm-sync ok"><span class="pt"></span>Synchronisé avec l’agenda BACS</div>'
+           : e === 'en_attente' ? '<div class="agm-sync att"><span class="pt"></span>En cours d’envoi vers BACS</div>'
            : e === 'echec' ? '<div class="agm-sync ko"><span class="pt"></span>BACS a refusé : ' + esc(cs.sync.erreur || 'raison inconnue') + '</div>'
            : '';
     }
-    return seg + dateRow + mid + proprio + invites + (cs.mode !== 'bilat' ? comment : '') + sync + (cs.err ? '<div class="agm-err">' + esc(cs.err) + '</div>' : '');
+    return chips
+      + '<div class="agm-grid">' + qui + quand + quoi + invites + '</div>'
+      + comment + sync + (cs.err ? '<div class="agm-err">' + esc(cs.err) + '</div>' : '');
   }
   function renderCreate() {
     const d = frontDoc(); let ov = d.getElementById('agenda-ov');
@@ -3038,7 +3137,7 @@ OD.define('agenda', {
     } else {
       foot = '<button class="agm-save" id="agm-save"' + (cs.saving ? ' disabled' : '') + '>' + saveLbl + '</button>';
     }
-    ov.innerHTML = '<div class="agm"><div class="agm-head"><span class="agm-title">' + esc(popTitle()) + '</span><button class="agm-x" id="agm-x">\u00d7</button></div>'
+    ov.innerHTML = '<div class="agm agm-saisie"><div class="agm-head"><span class="agm-title">' + esc(popTitle()) + '</span><button class="agm-x" id="agm-x">\u00d7</button></div>'
       + '<div class="agm-body">' + bodyHtml() + '</div>'
       + '<div class="agm-foot' + (cs.editing && cs.mode !== 'bilat' ? ' agm-foot-edit' : '') + '">' + foot + '</div></div>';
     wireCreate();
@@ -3053,14 +3152,15 @@ OD.define('agenda', {
     if (g('agm-ctype')) cs.creneauType = g('agm-ctype').value || null;
     if (g('agm-rtype')) cs.rdvType = g('agm-rtype').value || null;
     if (g('agm-bvend')) cs.bilatUser = g('agm-bvend').value || null;
+    if (g('agm-ori')) cs.origine = ORIGINES[Number(g('agm-ori').value)] || cs.origine;
     if (g('agm-owner') && g('agm-owner').value) cs.owner = Number(g('agm-owner').value);
   }
   function wireCreate() {
     const d = frontDoc(); const g = (id) => d.getElementById(id);
     g('agm-x').addEventListener('click', closeCreate);
     d.querySelectorAll('#agenda-ov .agm-seg button').forEach(b => b.addEventListener('click', () => { syncInputs(); cs.mode = b.getAttribute('data-mode'); cs.err = ''; renderCreate(); }));
-    if (g('agm-phys')) g('agm-phys').addEventListener('click', () => { syncInputs(); cs.physique = !cs.physique; renderCreate(); });
-    d.querySelectorAll('#agenda-ov input[name="agm-ori"]').forEach(r => r.addEventListener('change', () => { cs.origine = ORIGINES[Number(r.value)]; }));
+    d.querySelectorAll('#agenda-ov [data-phys]').forEach(b => b.addEventListener('click', () => { syncInputs(); cs.physique = b.getAttribute('data-phys') === '1'; renderCreate(); }));
+    d.querySelectorAll('#agenda-ov [data-nat]').forEach(b => b.addEventListener('click', () => { syncInputs(); choisirNature(b.getAttribute('data-nat')); renderCreate(); }));
     const openPicker = (e) => {
       if (e) e.stopPropagation();
       syncInputs();
@@ -3130,7 +3230,7 @@ OD.define('agenda', {
         s.saving = true; renderCreate();
         res = await c.rpc('create_rdv_client', { p_id_user: Number(uid), p_id_client: Number(s.idClient), p_id_site: site != null ? Number(site) : null, p_start: startStr, p_end: endStr, p_duree: dur, p_id_rdv_type: s.physique ? 5 : 10, p_origine: s.origine, p_commentaire: s.comment || null });
       } else if (s.mode === 'creneau') {
-        if (!s.creneauType) { s.err = 'S\u00e9lectionne un type de cr\u00e9neau.'; return renderCreate(); }
+        if (!s.creneauType) { s.err = 'Choisis la nature de l\u2019événement (ou le type de créneau).'; return renderCreate(); }
         s.saving = true; renderCreate();
         res = await c.rpc('create_creneau', { p_id_user: Number(uid), p_id_site: site != null ? Number(site) : null, p_start: startStr, p_end: endStr, p_duree: dur, p_id_rdv_type: Number(s.creneauType), p_commentaire: s.comment || null });
       } else {
@@ -3152,8 +3252,9 @@ OD.define('agenda', {
       const quandTxt = libQuand(startStr);
       if (!s.editing) {
         const titre = s.mode === 'bilat' ? ('Bilat ' + nomVendeurBilat(s.bilatUser))
-                    : s.mode === 'rdv' ? (s.clientLabel || 'RDV client') : 'Cr\u00e9neau';
-        poserProvisoire({ famille: s.mode === 'bilat' ? 'bilat' : (s.mode === 'rdv' ? 'client' : 'creneau'), titre, start: startStr, end: endStr });
+                    : s.mode === 'rdv' ? (s.clientLabel || 'RDV client') : ((NATURES_SAISIE.find(x => x.cle === natureDe(s)) || {}).label || 'Cr\u00e9neau');
+        const natP = natureDe(s);
+        poserProvisoire({ famille: natP === 'rdv' ? 'client' : natP, titre, start: startStr, end: endStr });
       }
       const msg = s.mode === 'bilat'
         ? (s.editing ? 'Bilat\u00e9rale d\u00e9plac\u00e9e au ' : 'Bilat\u00e9rale planifi\u00e9e avec ' + nomVendeurBilat(s.bilatUser) + ' \u00b7 ') + quandTxt
