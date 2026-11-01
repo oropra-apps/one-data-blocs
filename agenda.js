@@ -1,4 +1,29 @@
 // ============================================================================
+//  v34 (02/11/2026) : AGENDA PERSONNEL + AGENDA DU SITE (maquette validée par
+//  Antoine le 01/11/2026).
+//  - Deux vues : « Mon agenda » (inchangé : couleur par nature) et « Agenda du
+//    site », la SOMME des agendas personnels du site, façon Google Agenda :
+//    une couleur par personne, les événements simultanés côte à côte, une
+//    pastille par personne pour la masquer ou l'afficher. Un événement posé
+//    dans l'une des vues est le même RDV que dans l'autre : rien à recopier.
+//  - Tout le monde peut poser un créneau dans l'agenda de n'importe qui de son
+//    site (la hiérarchie dans son périmètre, la VROOM team partout) : champ
+//    « Dans l'agenda de » à la création ET en modification (changer de
+//    personne déplace le RDV dans BACS : nouveau propriétaire).
+//    Livraison : dans l'agenda du metteur en main, le vendeur qui la pose y
+//    est invité d'office. Préparation : dans l'agenda du préparateur.
+//  - Réceptions / restitutions, préparations, « pas de livraison » et
+//    absences ont leur couleur et leur pastille : la rubrique grise
+//    « Autres (BACS) » disparaît. L'ancien bouton « Planning livraisons »
+//    est remplacé par l'agenda du site.
+//  - Planning imprimable (A4 paysage) du responsable livraisons et des
+//    préparateurs : JOUR et SEMAINE (livraisons, préparations, réceptions /
+//    restitutions, créneaux bloqués), avec VIN et case à cocher.
+//  - L'infobulle dit qui a posé l'événement quand ce n'est pas son
+//    propriétaire (extra.pose_par).
+//  Prérequis SQL : agendas_natures_bacs, agendas_auteur_controle,
+//  agendas_site_droits (02/11/2026).
+// ============================================================================
 //  v33 (27/10/2026) : durées au format 1h30, 2h30 (au lieu de 1,5 h, 2,5 h).
 //  v32 (27/10/2026) : BACS FERMÉ NE BLOQUE PLUS L'AGENDA.
 //  Le RDV, le créneau ou la bilatérale s'enregistre toujours ; son envoi vers
@@ -163,8 +188,15 @@ OD.define('agenda', {
       bilat:     '#1F4A85',   // bilatérales : bleu foncé (charte One Data, v25 — le violet n'en fait pas partie)
       livraison: '#53bda7',   // livraisons : vert
       creneau:   '#2a5ea9',   // créneaux : bleu
-      bacs:      '#aab2bd',   // v29 : RDV BACS neutres (réception, restitution, planning) : gris clair
+      bacs:      '#aab2bd',   // v29 : RDV BACS neutres (il n'y en a plus depuis le 02/11/2026)
+      prepa:     '#b45f1a',   // v34 : préparation VN (agenda du préparateur)
+      recep:     '#6a55b8',   // v34 : réception / restitution
+      bloque:    '#c2554d',   // v34 : « pas de livraison » (créneau bloqué)
+      absence:   '#8793a6',   // v34 : congés, repos, indisponibilité
     },
+    // v34 : une couleur par personne dans l'agenda du site (aucun noir).
+    personnes: ['#2a5ea9', '#1f7f6d', '#b45f1a', '#6a55b8', '#5c7a14', '#8a3f2b', '#1b7fa6', '#a8326e',
+                '#7a6a12', '#3d5a99', '#2c8a4b', '#b0412e', '#5a6b8c', '#8b5fbf', '#0f6e73', '#9c6b1f'],
   };
 
   // --- accès WeWeb / Supabase -------------------------------------------------
@@ -266,7 +298,11 @@ OD.define('agenda', {
     return e.title || '';
   }
 
+  // v34 : pictogramme de nature, utile dans l'agenda du site où la couleur
+  // désigne la personne et non plus la nature.
+  const PICTO = { livraison: '🚚', prepa: '🔧', recep: '🔑', bloque: '⛔', absence: '🌴', bilat: '👥', relance: '📞', client: '', creneau: '' };
   function mapEvent(e) {
+    if (vueSite()) return mapEventSite(e);
     const c = strongColor(e);
     return {
       id: e.uid, title: composeTitle(e),
@@ -274,6 +310,24 @@ OD.define('agenda', {
       backgroundColor: tint(c, estNeutre(e) ? 0.18 : 0.14), borderColor: tint(c, estNeutre(e) ? 0.45 : 0.14),
       textColor: estNeutre(e) ? '#5B6475' : '#1F4A85',
       editable: (!estNeutre(e) && !!e.can_edit && (e.source_type === 'rdv' || e.source_type === 'bilat') && !isPastSlot(e.event_start_time)),
+      extendedProps: Object.assign({ _accent: c }, e),
+    };
+  }
+  function mapEventSite(e) {
+    const c = couleurPersonne(e.id_user);
+    const f = familleEvt(e);
+    const pic = PICTO[f] ? PICTO[f] + ' ' : '';
+    // Une absence de plus de 4 h (congés, repos) passe dans le bandeau « journée » :
+    // en colonne, elle écrasait les rendez-vous des autres sur toute la hauteur.
+    const dureeH = (new Date(toFc(e.event_end_time) || 0) - new Date(toFc(e.event_start_time) || 0)) / 3600000;
+    const journee = !!e.is_event_all_day || (f === 'absence' && dureeH >= 4);
+    const nomP = (e.extra && e.extra.proprietaire) ? String(e.extra.proprietaire).split(/\s+/)[0] : '';
+    return {
+      id: e.uid, title: pic + (journee && nomP ? nomP + ' · ' : '') + composeTitle(e),
+      start: journee ? String(e.event_start_time || '').slice(0, 10) : toFc(e.event_start_time),
+      end: journee ? null : toFc(e.event_end_time), allDay: journee,
+      backgroundColor: tint(c, 0.16), borderColor: tint(c, 0.16), textColor: '#1F4A85',
+      editable: (!!e.can_edit && (e.source_type === 'rdv' || e.source_type === 'bilat') && !isPastSlot(e.event_start_time)),
       extendedProps: Object.assign({ _accent: c }, e),
     };
   }
@@ -286,9 +340,12 @@ OD.define('agenda', {
       // Filtre des chips. Appliqué ICI et non dans la RPC : on ne recharge
       // pas le réseau pour masquer une catégorie, et recocher est instantané.
       if (typesActifs.indexOf(familleEvt(e)) < 0) continue;
+      if (vueSite() && e.id_user != null && siteAg.masques.has(Number(e.id_user))) continue;
       out.push(mapEvent(e));
     }
-    return grouperLivraisons(out);
+    // Agenda du site : chaque livraison reste visible avec la couleur de sa
+    // personne, côte à côte ; le regroupement ne vaut que pour l'agenda perso.
+    return vueSite() ? out : grouperLivraisons(out);
   }
 
   // Livraisons empilées : au-delà de SEUIL_GROUPE livraisons qui commencent au
@@ -352,7 +409,7 @@ OD.define('agenda', {
   async function fetchEvents(info, success, failure) {
     // Mode planning : même calendrier, autre source. C'est ce qui garantit un
     // design identique sans dupliquer une ligne de rendu.
-    if (planningOuvert) return fetchLivraisons(info, success, failure);
+    if (vueSite()) return fetchSite(info, success, failure);
     const client = sb(); if (!client) return failure(new Error('no supabase'));
     try {
       const p_start = info.startStr.slice(0, 19).replace('T', ' ');
@@ -457,7 +514,7 @@ OD.define('agenda', {
   function collabSignature() {
     const r = dashRows();
     const p = perimRows();   // le mode chef dépend désormais du périmètre
-    return JSON.stringify([viewerRole(), siteValRaw(), r ? r.length : -1, p ? p.length : -1, currentCollabId()]);
+    return JSON.stringify([viewerRole(), siteValRaw(), r ? r.length : -1, p ? p.length : -1, currentCollabId(), vue]);
   }
 
   // ---- Cascade directeur : Réseau → Affaire → Site → Vendeur ----------------
@@ -655,8 +712,11 @@ OD.define('agenda', {
     { cle: 'relance',   label: 'Relances'    },
     { cle: 'bilat',     label: 'Bilatérales' },
     { cle: 'livraison', label: 'Livraisons'  },
+    { cle: 'prepa',     label: 'Préparations' },
+    { cle: 'recep',     label: 'Réceptions / restitutions' },
+    { cle: 'bloque',    label: 'Pas de livraison' },
+    { cle: 'absence',   label: 'Absences'    },
     { cle: 'creneau',   label: 'Créneaux'    },
-    { cle: 'bacs',      label: 'Autres (BACS)' },
   ];
   // Tout est affiché par défaut : un filtre qui masque à l'insu de
   // l'utilisateur est pire que pas de filtre du tout.
@@ -674,10 +734,13 @@ OD.define('agenda', {
     return null;
   }
   function familleEvt(e) {
-    if (estNeutre(e)) return 'bacs';
     if (e.source_type === 'bilat') return 'bilat';
     const t = String(e.id_rdv_type ?? e.extra?.ID_Rdv_Type ?? '');
     if (t === '4') return 'livraison';
+    if (t === '12') return 'prepa';
+    if (t === '13') return 'recep';
+    if (t === '14') return 'bloque';
+    if (t === '15') return 'absence';
     if (t === '6') return 'relance';
     if (t === '5' || t === '10') return 'client';
     if (e.source_type === 'rpv') return 'creneau';
@@ -727,75 +790,299 @@ OD.define('agenda', {
     }));
   }
 
-  /* ===== PLANNING DES LIVRAISONS =========================================
-     Ce n'est PAS un écran séparé : c'est une bascule qui change la SOURCE
-     du calendrier, pas son rendu. L'agenda et le planning ont donc
-     rigoureusement le même design — une première version en liste maison
-     jurait avec le reste (25/08/2026).
-
-     Différence de fond avec le filtre « Livraisons » ci-dessus : le chip
-     filtre MON agenda, le planning montre les livraisons de TOUT LE SITE,
-     tous vendeurs confondus. Deux besoins distincts, deux sources.
+  /* ===== v34 : MON AGENDA / AGENDA DU SITE ===============================
+     L'agenda du site n'est pas un agenda de plus : c'est la SOMME des agendas
+     personnels des personnes du site (chefs des ventes, vendeurs, secrétaires
+     commerciales), lus par la même RPC get_calendar_events. Un RDV posé dans
+     l'une des vues est donc, par construction, dans l'autre — et dans BACS,
+     dans l'agenda de son propriétaire.
+     Couleur : par PERSONNE (façon Google Agenda), stable dans la session
+     (rang alphabétique dans le site). La nature se lit au pictogramme.
   ======================================================================== */
-  let planningOuvert = false;
+  const VUE_CLE = 'od_agenda_vue';
+  let vue = (function () { try { return frontWin().sessionStorage.getItem(VUE_CLE) === 'site' ? 'site' : 'perso'; } catch (e) { return 'perso'; } })();
+  function vueSite() { return vue === 'site'; }
+  const siteAg = { id: null, sites: null, masques: new Set() };
+  const membresCache = {};          // id_site -> [{id_user, nom, id_role, role_nom, bacs, couleur}]
+  const membresEnCours = {};
 
-  function peutVoirPlanning() {
-    const r = Number(viewerRole());
-    return r === 9 || r === 3 || r === 2 || r === 6 || r === 7 || r === 8 || r === 1;
+  function siteParDefaut() {
+    const t = siteIds();
+    if (t && t.length === 1) return Number(t[0]);
+    const u = userRow(); if (u.ID_SITE != null) return Number(u.ID_SITE);
+    if (siteAg.sites && siteAg.sites.length) return Number(siteAg.sites[0].id_site);
+    return null;
   }
+  // Le site dont on parle : celui de l'agenda du site, sinon celui de la barre du haut.
+  function siteCourant() { return vueSite() && siteAg.id != null ? Number(siteAg.id) : siteParDefaut(); }
 
-  function renderBasculePlanning() {
-    const host = document.getElementById('agenda-livr');
-    if (!host) return;
-    if (!peutVoirPlanning()) { host.style.display = 'none'; host.innerHTML = ''; return; }
-    host.style.display = '';
-    host.innerHTML = '<button type="button" class="agl-btn' + (planningOuvert ? ' is-on' : '') +
-      '" id="agl-toggle">🚚 ' + (planningOuvert ? 'Mon agenda' : 'Planning livraisons') + '</button>';
-    const b = document.getElementById('agl-toggle');
-    if (b) b.addEventListener('click', () => {
-      planningOuvert = !planningOuvert;
-      renderBasculePlanning();
-      // Les chips filtrent l'agenda personnel ; en mode planning, tout est
-      // livraison, ils n'ont plus d'objet.
-      const ch = document.getElementById('agenda-chips');
-      if (ch) ch.style.display = planningOuvert ? 'none' : '';
-      const cl = document.getElementById('agenda-collab');
-      if (cl) cl.style.display = planningOuvert ? 'none' : '';
-      try { window.__agendaRefetch && window.__agendaRefetch(); } catch (e) {}
+  async function chargerMesSites() {
+    if (siteAg.sites) return siteAg.sites;
+    try { const r = await sb().rpc('agenda_mes_sites'); siteAg.sites = (!r.error && Array.isArray(r.data)) ? r.data : []; }
+    catch (e) { siteAg.sites = []; }
+    return siteAg.sites;
+  }
+  async function chargerMembresPour(idSite) {
+    if (idSite == null) return [];
+    const k = String(idSite);
+    if (membresCache[k]) return membresCache[k];
+    if (membresEnCours[k]) return membresEnCours[k];
+    membresEnCours[k] = (async () => {
+      let rows = [];
+      try { const r = await sb().rpc('agenda_site_membres', { p_id_site: Number(idSite) }); rows = (!r.error && Array.isArray(r.data)) ? r.data : []; }
+      catch (e) { rows = []; }
+      rows = rows.map(x => ({ id_user: Number(x.id_user), nom: x.nom || ('Utilisateur ' + x.id_user), id_role: Number(x.id_role), role_nom: x.role_nom || '', bacs: !!x.bacs }))
+                 .sort((a, b) => String(a.nom).localeCompare(String(b.nom), 'fr'));
+      rows.forEach((m, i) => { m.couleur = CFG.personnes[i % CFG.personnes.length]; });
+      membresCache[k] = rows; delete membresEnCours[k];
+      return rows;
+    })();
+    return membresEnCours[k];
+  }
+  function membresSite() { return membresCache[String(siteCourant())] || []; }
+  function couleurPersonne(id) {
+    const m = membresSite().find(x => Number(x.id_user) === Number(id));
+    if (m) return m.couleur;
+    const n = Math.abs(Number(id) || 0);
+    return CFG.personnes[n % CFG.personnes.length];
+  }
+  function nomPersonne(id) {
+    for (const k in membresCache) { const m = membresCache[k].find(x => Number(x.id_user) === Number(id)); if (m) return m.nom; }
+    const i = (invitablesCache || []).find(x => Number(x.id_user) === Number(id));
+    if (i) return i.nom;
+    if (Number(id) === Number(CACHED_UID)) return viewerName() || 'moi';
+    return 'Utilisateur ' + id;
+  }
+  // Menu « Dans l'agenda de » : moi d'abord, puis le site par fonction.
+  function optionsProprietaire(cur, curNom) {
+    const moi = Number(CACHED_UID);
+    const ms = membresSite().filter(m => m.id_user !== moi);
+    let h = '<option value="' + moi + '"' + (Number(cur) === moi ? ' selected' : '') + '>Moi (' + esc(viewerName() || 'mon agenda') + ')</option>';
+    const vus = { [moi]: 1 };
+    const grp = {};
+    ms.forEach(m => { const g = m.role_nom || 'Équipe'; (grp[g] = grp[g] || []).push(m); });
+    const ordre = (g) => /chef/i.test(g) ? 1 : /vendeur/i.test(g) ? 2 : 3;
+    Object.keys(grp).sort((a, b) => ordre(a) - ordre(b) || a.localeCompare(b, 'fr')).forEach(g => {
+      h += '<optgroup label="' + esc(g) + '">' + grp[g].map(m => { vus[m.id_user] = 1; return '<option value="' + m.id_user + '"' + (Number(cur) === m.id_user ? ' selected' : '') + '>' + esc(m.nom) + '</option>'; }).join('') + '</optgroup>';
     });
+    if (cur != null && !vus[Number(cur)]) h = '<option value="' + Number(cur) + '" selected>' + esc(curNom || nomPersonne(cur)) + '</option>' + h;
+    return h;
   }
 
-  // Alimente le MÊME calendrier depuis get_planning_livraisons, en
-  // reconstruisant des lignes au format attendu par mapEvent.
-  async function fetchLivraisons(info, success, failure) {
+  function changerVue(v) {
+    if (v === vue) return;
+    vue = v;
+    try { frontWin().sessionStorage.setItem(VUE_CLE, v); } catch (e) {}
+    if (vueSite() && siteAg.id == null) siteAg.id = siteParDefaut();
+    try {
+      calendar.setOption('slotEventOverlap', !vueSite());
+      calendar.setOption('allDaySlot', vueSite());
+      if (isMobile()) calendar.changeView(vueSite() ? 'timeGridDay' : 'timeGrid3');
+    } catch (e) {}
+    collabSig = null;
+    renderCollab(true);
+    if (vueSite()) chargerMembresPour(siteAg.id).then(() => { renderSiteBar(); refetch(); });
+    else { const sb0 = document.getElementById('agenda-site'); if (sb0) { sb0.style.display = 'none'; sb0.innerHTML = ''; } refetch(); }
+  }
+
+  let printMenuOuvert = false;
+  function renderVues() {
+    const host = document.getElementById('agenda-vues');
+    if (!host) return;
+    host.innerHTML = '<div class="agv-seg">'
+      + '<button type="button" data-vue="perso" class="' + (vueSite() ? '' : 'is-on') + '">Mon agenda</button>'
+      + '<button type="button" data-vue="site" class="' + (vueSite() ? 'is-on' : '') + '">Agenda du site</button></div>'
+      + '<div class="agv-print"><button type="button" class="agl-btn" id="agv-print">🖨 Planning</button>'
+      + '<div class="agv-print-menu" id="agv-print-menu"' + (printMenuOuvert ? '' : ' style="display:none"') + '>'
+      + '<button type="button" data-print="jour">Planning du jour<small>Livraisons, préparations, réceptions — jour affiché</small></button>'
+      + '<button type="button" data-print="semaine">Planning de la semaine<small>Du lundi au samedi de la semaine affichée</small></button>'
+      + '</div></div>';
+    host.querySelectorAll('[data-vue]').forEach(b => b.addEventListener('click', () => changerVue(b.getAttribute('data-vue'))));
+    const pb = host.querySelector('#agv-print'), pm = host.querySelector('#agv-print-menu');
+    if (pb) pb.addEventListener('click', (e) => { e.stopPropagation(); printMenuOuvert = !printMenuOuvert; pm.style.display = printMenuOuvert ? '' : 'none'; });
+    host.querySelectorAll('[data-print]').forEach(b => b.addEventListener('click', (e) => {
+      e.stopPropagation(); printMenuOuvert = false; pm.style.display = 'none'; imprimerPlanning(b.getAttribute('data-print'));
+    }));
+    if (!window.__agendaPrintOutside) {
+      window.__agendaPrintOutside = (e) => { const m = document.getElementById('agv-print-menu'); const h = document.getElementById('agenda-vues'); if (printMenuOuvert && m && h && !h.contains(e.target)) { printMenuOuvert = false; m.style.display = 'none'; } };
+      try { frontDoc().addEventListener('mousedown', window.__agendaPrintOutside, true); } catch (e) {}
+    }
+  }
+
+  // Barre de l'agenda du site : choix du site (si plusieurs) et une pastille
+  // par personne (cliquer masque / affiche son agenda).
+  function renderSiteBar() {
+    const host = document.getElementById('agenda-site');
+    if (!host) return;
+    if (!vueSite()) { host.style.display = 'none'; host.innerHTML = ''; return; }
+    host.style.display = '';
+    if (siteAg.id == null) siteAg.id = siteParDefaut();
+    if (!siteAg.sites) { chargerMesSites().then(() => { if (siteAg.id == null) siteAg.id = siteParDefaut(); renderSiteBar(); refetch(); }); }
+    const ms = membresCache[String(siteAg.id)];
+    if (!ms && siteAg.id != null) { chargerMembresPour(siteAg.id).then(() => { renderSiteBar(); refetch(); }); }
+    const sites = siteAg.sites || [];
+    let h = '<div class="ags-bar">';
+    if (sites.length > 1) {
+      h += '<select class="ags-sel" id="ags-site">' + sites.map(x => '<option value="' + x.id_site + '"' + (Number(x.id_site) === Number(siteAg.id) ? ' selected' : '') + '>' + esc(x.nom) + '</option>').join('') + '</select>';
+    }
+    if (!ms) h += '<span class="ags-vide">Chargement de l’équipe…</span>';
+    else if (!ms.length) h += '<span class="ags-vide">Personne n’est rattaché à ce site.</span>';
+    else {
+      h += ms.map(m => {
+        const on = !siteAg.masques.has(m.id_user);
+        return '<button type="button" class="ags-p' + (on ? ' is-on' : '') + '" data-p="' + m.id_user + '" title="' + esc(m.nom + (m.role_nom ? ' · ' + m.role_nom : '')) + '">'
+          + '<span class="av" style="background:' + m.couleur + '">' + esc(initials(m.nom)) + '</span>' + esc(m.nom.split(/\s+/)[0]) + '</button>';
+      }).join('');
+      h += '<button type="button" class="ags-act" data-pall="1">Tous</button><button type="button" class="ags-act" data-pall="0">Aucun</button>';
+    }
+    h += '</div>';
+    host.innerHTML = h;
+    const se = host.querySelector('#ags-site');
+    if (se) se.addEventListener('change', () => { siteAg.id = Number(se.value); siteAg.masques = new Set(); renderSiteBar(); chargerMembresPour(siteAg.id).then(() => { renderSiteBar(); refetch(); }); });
+    host.querySelectorAll('[data-p]').forEach(b => b.addEventListener('click', () => {
+      const id = Number(b.getAttribute('data-p'));
+      if (siteAg.masques.has(id)) siteAg.masques.delete(id); else siteAg.masques.add(id);
+      renderSiteBar(); refetch();
+    }));
+    host.querySelectorAll('[data-pall]').forEach(b => b.addEventListener('click', () => {
+      siteAg.masques = b.getAttribute('data-pall') === '1' ? new Set() : new Set((ms || []).map(m => m.id_user));
+      renderSiteBar(); refetch();
+    }));
+  }
+
+  async function fetchSite(info, success, failure) {
     const client = sb(); if (!client) return failure(new Error('no supabase'));
     try {
-      const sites = siteIds();
-      const { data, error } = await client.rpc('get_planning_livraisons', {
-        p_date_from: info.startStr.slice(0, 10),
-        p_date_to: info.endStr.slice(0, 10),
-        p_id_site: (sites && sites.length === 1) ? Number(sites[0]) : null
-      });
+      if (siteAg.id == null) { await chargerMesSites(); siteAg.id = siteParDefaut(); }
+      const ms = await chargerMembresPour(siteAg.id);
+      const ids = ms.map(m => m.id_user).filter(id => !siteAg.masques.has(id));
+      if (!ids.length) { retirerProvisoires(); return success([]); }
+      const { data, error } = await client.rpc('get_calendar_events', {
+        p_start: info.startStr.slice(0, 19).replace('T', ' '), p_end: info.endStr.slice(0, 19).replace('T', ' '),
+        p_user_ids: ids, p_site_ids: null });
       if (error) throw error;
-      const rows = (data || []).map(r => ({
-        uid: 'livr-' + r.id_rdv,
-        source_type: 'rdv',
-        id_rdv_type: 4,
-        // Le titre porte le VENDEUR : c'est l'information qui manque à qui
-        // organise, puisque le planning agrège toute l'équipe.
-        title: (r.nom_client || '') + ' — ' + (r.nom_vendeur || ''),
-        event_start_time: r.date_debut,
-        event_end_time: r.date_fin,
-        is_event_all_day: false,
-        can_edit: false,          // on organise depuis l'agenda du vendeur
-        vin: r.vin, nom_site: r.nom_site, nom_vendeur: r.nom_vendeur,
-        origin_id: r.id_rdv
-      }));
-      success(grouperLivraisons(rows.map(mapEvent)));
-    } catch (err) {
-      console.error('[agenda] planning livraisons', err);
-      failure(err);
+      // Un RDV où une personne du site n'est qu'invitée remonte aussi : on ne
+      // garde que ceux dont le propriétaire est du site (les autres sont dans
+      // l'agenda d'un collègue d'un autre site).
+      const garde = new Set(ms.map(m => m.id_user));
+      // Les rapports vendeur (relances à faire) restent dans l'agenda personnel.
+      const rows = (data || []).filter(r => (r.source_type === 'rdv' && garde.has(Number(r.id_user))) || r.source_type === 'bilat');
+      retirerProvisoires();
+      success(buildEvents(rows));
+    } catch (err) { console.error('[agenda] agenda du site', err); failure(err); }
+  }
+
+  /* ===== PLANNING IMPRIMABLE (responsable livraisons, préparateurs) ======
+     A4 paysage. Jour : un tableau par nature, trié par heure, avec la
+     personne, le client, le VIN, le commentaire et une case à cocher.
+     Semaine : six colonnes (lundi → samedi, + dimanche s'il y a quelque
+     chose), une carte par événement. Toujours le site entier.
+  ======================================================================== */
+  const NATURES_PLANNING = [
+    { cle: 'livraison', type: 4,  titre: 'Livraisons',                qui: 'Metteur en main' },
+    { cle: 'prepa',     type: 12, titre: 'Préparations',              qui: 'Préparateur' },
+    { cle: 'recep',     type: 13, titre: 'Réceptions / restitutions', qui: 'Accueil' },
+    { cle: 'bloque',    type: 14, titre: 'Créneaux « pas de livraison »', qui: 'Agenda', court: 'Pas de livraison' },
+  ];
+  function ymd(d) { return d.getFullYear() + '-' + pad2(d.getMonth() + 1) + '-' + pad2(d.getDate()); }
+  async function imprimerPlanning(kind) {
+    const idSite = siteCourant();
+    if (idSite == null) { showAgError('Planning', 'Choisissez un site dans la barre du haut.'); return; }
+    toast('Préparation du planning…', 'ok');
+    try {
+      const ms = await chargerMembresPour(idSite);
+      await Promise.all([chargerMesSites(), chargerInvitables()]);
+      const nomSite = ((siteAg.sites || []).find(x => Number(x.id_site) === Number(idSite)) || {}).nom || ('Site ' + idSite);
+      let d0 = calendar ? new Date(calendar.getDate()) : new Date();
+      d0 = new Date(d0.getFullYear(), d0.getMonth(), d0.getDate());
+      let debut = d0, fin;
+      if (kind === 'semaine') { const dw = (d0.getDay() + 6) % 7; debut = new Date(d0); debut.setDate(d0.getDate() - dw); }
+      fin = new Date(debut); fin.setDate(debut.getDate() + (kind === 'semaine' ? 7 : 1));
+      const ids = ms.map(m => m.id_user);
+      const { data, error } = await sb().rpc('get_calendar_events', { p_start: ymd(debut) + ' 00:00:00', p_end: ymd(fin) + ' 00:00:00', p_user_ids: ids.length ? ids : [-1], p_site_ids: null });
+      if (error) throw error;
+      const garde = new Set(ids);
+      const rows = (data || []).filter(r => r.source_type === 'rdv' && garde.has(Number(r.id_user))
+        && NATURES_PLANNING.some(n => n.cle === familleEvt(r)))
+        .sort((a, b) => String(a.event_start_time).localeCompare(String(b.event_start_time)));
+      const html = kind === 'semaine' ? planningSemaineHtml(rows, debut, nomSite) : planningJourHtml(rows, debut, nomSite);
+      ouvrirImpression(html);
+    } catch (e) { console.error('[agenda] planning', e); toast('Planning impossible : ' + ((e && e.message) || e)); }
+  }
+  function lignePlanning(r) {
+    const x = r.extra || {};
+    const hd = String(r.event_start_time || '').slice(11, 16).replace(':', 'h');
+    const hf = String(r.event_end_time || '').slice(11, 16).replace(':', 'h');
+    const invites = (Array.isArray(x.invites) ? x.invites : []).map(nomPersonne).filter(n => !/^Utilisateur \d/.test(n)).join(', ');
+    return { hd, hf, client: clientName(r) || '', vin: x.vin || '', comm: String(r.description || '').trim(),
+             qui: x.proprietaire || nomPersonne(r.id_user), invites, couleur: couleurPersonne(r.id_user) };
+  }
+  const CSS_PRINT = '@page{size:A4 landscape;margin:10mm}*{box-sizing:border-box}body{font-family:"Nunito Sans",Arial,sans-serif;color:#1F4A85;margin:0;font-size:11px}'
+    + '.ent{display:flex;justify-content:space-between;align-items:flex-end;border-bottom:2px solid #1F4A85;padding-bottom:6px;margin-bottom:10px}'
+    + '.ent h1{font-size:18px;margin:0}.ent .s{color:#5a6b8c;font-size:11px;text-align:right}'
+    + 'h2{font-size:13px;margin:12px 0 4px;display:flex;align-items:center;gap:8px}h2 i{width:10px;height:10px;border-radius:3px;display:inline-block}'
+    + 'h2 em{font-style:normal;font-weight:600;color:#5a6b8c;font-size:11px}'
+    + 'table{width:100%;border-collapse:collapse;page-break-inside:auto}tr{page-break-inside:avoid}'
+    + 'th{text-align:left;font-size:9.5px;text-transform:uppercase;letter-spacing:.04em;color:#5a6b8c;border-bottom:1px solid #c9d9ee;padding:4px 5px}'
+    + 'td{border-bottom:1px solid #e8eef7;padding:5px;vertical-align:top}td.h{white-space:nowrap;font-weight:800;width:70px}td.ck{width:26px}td.ck span{display:inline-block;width:13px;height:13px;border:1.5px solid #1F4A85;border-radius:3px}'
+    + '.p{display:inline-flex;align-items:center;gap:5px;font-weight:700}.p i{width:8px;height:8px;border-radius:50%;display:inline-block}'
+    + '.vin{font-family:monospace;font-size:10.5px}.c{color:#3d4f6b}.vide{color:#7d93b2;font-style:italic;padding:6px 0}'
+    + '.sem{display:grid;gap:6px}.col{border:1px solid #c9d9ee;border-radius:6px;min-height:150mm;overflow:hidden}.col h3{margin:0;padding:5px 6px;font-size:11.5px;background:#eef3fa;border-bottom:1px solid #c9d9ee}'
+    + '.ev{margin:4px;padding:4px 5px;border-radius:4px;border-left:3px solid;background:#f7f9fc;page-break-inside:avoid}.ev b{display:block;font-size:10.5px}.ev span{display:block;font-size:9.5px;color:#3d4f6b}'
+    + '.lg{display:flex;flex-wrap:wrap;gap:10px;margin-top:8px;font-size:10px;color:#5a6b8c}'
+    + '@media screen{body{padding:16px;background:#f2f6fc}.feuille{background:#fff;padding:14px;max-width:290mm;margin:auto;box-shadow:0 4px 18px rgba(31,74,133,.12)}}';
+  function planningJourHtml(rows, jour, nomSite) {
+    const titreJour = jour.toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
+    let b = '<div class="ent"><h1>Planning du ' + esc(titreJour) + '</h1><div class="s">' + esc(nomSite) + '<br>Imprimé le ' + esc(new Date().toLocaleString('fr-FR', { dateStyle: 'short', timeStyle: 'short' })) + '</div></div>';
+    NATURES_PLANNING.forEach(n => {
+      const lot = rows.filter(r => familleEvt(r) === n.cle);
+      if (n.cle === 'bloque' && !lot.length) return;
+      b += '<h2><i style="background:' + CFG.colors[n.cle] + '"></i>' + esc(n.titre) + ' <em>' + lot.length + '</em></h2>';
+      if (!lot.length) { b += '<div class="vide">Rien de prévu.</div>'; return; }
+      b += '<table><thead><tr><th>Heure</th><th>' + esc(n.qui) + '</th><th>Client</th><th>VIN</th><th>Vendeur / invités</th><th>Commentaire</th><th>Fait</th></tr></thead><tbody>'
+        + lot.map(r => { const l = lignePlanning(r); return '<tr><td class="h">' + esc(l.hd) + (l.hf ? '<br><span class="c">→ ' + esc(l.hf) + '</span>' : '') + '</td>'
+          + '<td><span class="p"><i style="background:' + l.couleur + '"></i>' + esc(l.qui) + '</span></td>'
+          + '<td>' + esc(l.client) + '</td><td class="vin">' + esc(l.vin) + '</td><td>' + esc(l.invites) + '</td>'
+          + '<td class="c">' + esc(l.comm) + '</td><td class="ck"><span></span></td></tr>'; }).join('')
+        + '</tbody></table>';
+    });
+    return b;
+  }
+  function planningSemaineHtml(rows, lundi, nomSite) {
+    const jours = [];
+    for (let i = 0; i < 7; i++) { const d = new Date(lundi); d.setDate(lundi.getDate() + i); jours.push(d); }
+    const parJour = jours.map(d => rows.filter(r => String(r.event_start_time || '').slice(0, 10) === ymd(d)));
+    const cols = parJour[6].length ? 7 : 6;
+    const dim = jours[cols - 1];
+    let b = '<div class="ent"><h1>Planning de la semaine du ' + esc(lundi.toLocaleDateString('fr-FR', { day: 'numeric', month: 'long' })) + ' au ' + esc(dim.toLocaleDateString('fr-FR', { day: 'numeric', month: 'long', year: 'numeric' })) + '</h1>'
+      + '<div class="s">' + esc(nomSite) + ' · ' + rows.length + ' événement' + (rows.length > 1 ? 's' : '') + '<br>Imprimé le ' + esc(new Date().toLocaleString('fr-FR', { dateStyle: 'short', timeStyle: 'short' })) + '</div></div>';
+    b += '<div class="sem" style="grid-template-columns:repeat(' + cols + ',1fr)">';
+    for (let i = 0; i < cols; i++) {
+      b += '<div class="col"><h3>' + esc(jours[i].toLocaleDateString('fr-FR', { weekday: 'long', day: '2-digit', month: '2-digit' })) + '</h3>'
+        + (parJour[i].length ? parJour[i].map(r => { const l = lignePlanning(r); const f = familleEvt(r);
+            return '<div class="ev" style="border-color:' + CFG.colors[f] + '"><b>' + esc(l.hd) + ' · ' + esc((PICTO[f] || '') + ' ' + (l.client || ((NATURES_PLANNING.find(n => n.cle === f) || {}).court) || (NATURES_PLANNING.find(n => n.cle === f) || {}).titre || '')) + '</b>'
+              + '<span><span class="p" style="display:inline-flex"><i style="background:' + l.couleur + '"></i>' + esc(l.qui) + '</span></span>'
+              + (l.vin ? '<span class="vin">' + esc(l.vin) + '</span>' : '')
+              + (l.invites ? '<span>avec ' + esc(l.invites) + '</span>' : '')
+              + (l.comm ? '<span>' + esc(l.comm.slice(0, 90)) + '</span>' : '') + '</div>'; }).join('')
+          : '<div class="vide" style="padding:6px">—</div>')
+        + '</div>';
     }
+    b += '</div><div class="lg">' + NATURES_PLANNING.map(n => '<span><i style="display:inline-block;width:9px;height:9px;border-radius:2px;background:' + CFG.colors[n.cle] + '"></i> ' + esc(n.titre) + '</span>').join('') + '</div>';
+    return b;
+  }
+  function ouvrirImpression(corps) {
+    const doc = '<!doctype html><html lang="fr"><head><meta charset="utf-8"><title>Planning</title>'
+      + '<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Nunito+Sans:wght@400;600;700;800&display=swap">'
+      + '<style>' + CSS_PRINT + '</style></head><body><div class="feuille">' + corps + '</div>'
+      + '<script>window.onload=function(){setTimeout(function(){window.print();},350);};<\/script></body></html>';
+    const w = frontWin().open('', '_blank');
+    if (w) { w.document.open(); w.document.write(doc); w.document.close(); return; }
+    // Fenêtres bloquées : impression par un cadre invisible.
+    const d = frontDoc(); const f = d.createElement('iframe');
+    f.style.cssText = 'position:fixed;right:0;bottom:0;width:0;height:0;border:0';
+    (d.body || d.documentElement).appendChild(f);
+    f.contentDocument.open(); f.contentDocument.write(doc.replace('window.print()', 'window.print();setTimeout(function(){parent.document.body.removeChild(frameElement)},1500)')); f.contentDocument.close();
   }
 
   function renderCollab(force) {
@@ -812,8 +1099,9 @@ OD.define('agenda', {
     // menu.style.display directement.
     if (!force && sig === collabSig) return;
     collabSig = sig;
-    renderBasculePlanning();   // même cycle de rendu que le sélecteur
+    renderVues();              // même cycle de rendu que le sélecteur
     renderChips();
+    if (vueSite()) { host.style.display = 'none'; renderSiteBar(); return; }
     const model = buildCollaborators();
     if (!model) { return; }                              // pas prêt : on retentera au poll
     if (model.mode === 'cascade') { renderCascade(host, model); return; }
@@ -864,7 +1152,24 @@ OD.define('agenda', {
 #agenda-root .agenda-top{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:14px}
 #agenda-root .agenda-title{font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:.06em;color:#9bb3d1}
 #agenda-root #agenda-collab{position:relative}
-#agenda-root #agenda-livr{margin-right:10px}
+#agenda-root #agenda-vues{display:flex;gap:8px;align-items:center;margin-left:auto;margin-right:10px}
+#agenda-root .agv-seg{display:inline-flex;border:1.5px solid #e8eef7;border-radius:10px;overflow:hidden;background:#fff}
+#agenda-root .agv-seg button{border:0;background:transparent;color:#2a5ea9;font-weight:800;font-size:12.5px;padding:7px 13px;cursor:pointer;font-family:inherit;white-space:nowrap}
+#agenda-root .agv-seg button.is-on{background:#2a5ea9;color:#fff}
+#agenda-root .agv-print{position:relative}
+#agenda-root .agv-print-menu{position:absolute;right:0;top:calc(100% + 6px);z-index:60;background:#fff;border:1.5px solid #e8eef7;border-radius:12px;box-shadow:0 10px 30px rgba(31,74,133,.14);padding:6px;min-width:220px}
+#agenda-root .agv-print-menu button{display:block;width:100%;text-align:left;border:0;background:transparent;padding:9px 11px;border-radius:8px;font:700 13px "Nunito Sans",system-ui,sans-serif;color:#1F4A85;cursor:pointer}
+#agenda-root .agv-print-menu button:hover{background:#f2f6fc}
+#agenda-root .agv-print-menu small{display:block;font-weight:600;color:#7d93b2;font-size:11.5px}
+#agenda-root #agenda-site{margin:-4px 0 12px}
+#agenda-root .ags-bar{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+#agenda-root .ags-sel{border:1.5px solid #e8eef7;border-radius:10px;padding:6px 10px;font:700 13px "Nunito Sans",system-ui,sans-serif;color:#1F4A85;background:#fff;max-width:260px}
+#agenda-root .ags-p{display:inline-flex;align-items:center;gap:6px;border:1.5px solid #e8eef7;background:#fff;color:#9bb3d1;font-weight:700;font-size:12px;padding:4px 10px 4px 4px;border-radius:20px;cursor:pointer;font-family:inherit}
+#agenda-root .ags-p .av{width:20px;height:20px;border-radius:50%;color:#fff;font-size:9.5px;font-weight:800;display:inline-flex;align-items:center;justify-content:center;opacity:.35}
+#agenda-root .ags-p.is-on .av{opacity:1}
+#agenda-root .ags-p.is-on{color:#1F4A85}
+#agenda-root .ags-act{border:0;background:transparent;color:#2a5ea9;font:800 12px "Nunito Sans",system-ui,sans-serif;cursor:pointer;padding:4px 6px}
+#agenda-root .ags-vide{font-size:12.5px;color:#7d93b2}
 #agenda-root .agl-btn{border:1.5px solid #e8eef7;background:#fff;color:#2a5ea9;font-weight:800;font-size:12.5px;padding:7px 13px;border-radius:10px;cursor:pointer;font-family:inherit;white-space:nowrap}
 #agenda-root .agl-btn:hover{border-color:#2a5ea9}
 #agenda-root .agl-btn.is-on{background:#2a5ea9;color:#fff;border-color:#2a5ea9}
@@ -1103,7 +1408,11 @@ OD.define('agenda', {
 @media(max-width:640px){
   #agenda-root .agenda-card{padding:12px 10px;border-radius:12px}
   #agenda-root .agenda-top{margin-bottom:8px;gap:8px}
-  #agenda-root #agenda-livr{margin-right:0}
+  #agenda-root #agenda-vues{margin:0;width:100%;justify-content:space-between}
+  #agenda-root .agv-seg button{padding:7px 10px;font-size:12px}
+  #agenda-root .agl-btn{padding:7px 10px;font-size:12px}
+  #agenda-root .ags-bar{flex-wrap:nowrap;overflow-x:auto;padding-bottom:4px;-webkit-overflow-scrolling:touch}
+  #agenda-root .ags-bar>*{flex-shrink:0}
   #agenda-root .agc-name{max-width:140px}
   #agenda-root .agc-menu{max-width:calc(100vw - 32px);min-width:220px}
   #agenda-root .agc-cascade{width:100%}
@@ -1152,8 +1461,13 @@ OD.define('agenda', {
     const range = startTxt + (endTxt ? ' – ' + endTxt : '');
     const desc = p.description || p.commentaire || p.Commentaire || '';
     const accent = p._accent || '#2a5ea9';
+    const xx = p.extra || {};
+    const qui = (p.source_type === 'rdv' && xx.proprietaire) ? ('Agenda de ' + xx.proprietaire) : '';
+    const pose = xx.pose_par ? ('Posé par ' + xx.pose_par) : '';
     t.innerHTML = '<div class="agt-card"><div class="agt-title"><span class="agt-dot" style="background:' + accent + '"></span><span>' + esc(main) + '</span></div>'
       + (sub ? '<div class="agt-type">' + esc(sub) + '</div>' : '')
+      + (qui || pose ? '<div class="agt-type">' + esc([qui, pose].filter(Boolean).join(' · ')) + '</div>' : '')
+      + (xx.vin ? '<div class="agt-type">VIN ' + esc(xx.vin) + '</div>' : '')
       + '<div class="agt-time">' + esc(range) + '</div>'
       + (desc ? '<div class="agt-desc">' + esc(desc) + '</div>' : '') + '</div>';
     t.style.display = 'block';
@@ -1239,7 +1553,7 @@ OD.define('agenda', {
     calendar.batchRendering(() => {
       Object.keys(o).forEach(k => calendar.setOption(k, o[k]));
       const v = calendar.view && calendar.view.type;
-      if (m && v === 'timeGridWeek') calendar.changeView('timeGrid3');
+      if (m && v === 'timeGridWeek') calendar.changeView(vueSite() ? 'timeGridDay' : 'timeGrid3');
       else if (!m && v === 'timeGrid3') calendar.changeView('timeGridWeek');
     });
     updateSundayBtn();
@@ -1259,7 +1573,7 @@ OD.define('agenda', {
     if (!root) { console.warn('[agenda] #' + CFG.rootId + ' absent'); return; }
     if (!window.FullCalendar) { console.error('[agenda] FullCalendar non chargé'); return; }
     injectCss();
-    root.innerHTML = '<div class="agenda-card"><div class="agenda-top"><span class="agenda-title">Agenda</span><div id="agenda-livr" style="display:none"></div><div id="agenda-collab" style="display:none"></div></div><div id="agenda-chips"></div><div id="agenda-fc"></div></div>';
+    root.innerHTML = '<div class="agenda-card"><div class="agenda-top"><span class="agenda-title">Agenda</span><div id="agenda-vues"></div><div id="agenda-collab" style="display:none"></div></div><div id="agenda-site" style="display:none"></div><div id="agenda-chips"></div><div id="agenda-fc"></div></div>';
     const mount = root.querySelector('#agenda-fc');
 
     const mobile0 = isMobile();
@@ -1267,7 +1581,10 @@ OD.define('agenda', {
     lastMobile = mobile0;
     const touch = isTouch();
     calendar = new window.FullCalendar.Calendar(mount, {
-      timeZone: CFG.timeZone, locale: 'fr', initialView: mobile0 ? 'timeGrid3' : CFG.initialView, height: 'auto', firstDay: 1,
+      timeZone: CFG.timeZone, locale: 'fr', initialView: mobile0 ? (vueSite() ? 'timeGridDay' : 'timeGrid3') : CFG.initialView, height: 'auto', firstDay: 1,
+      // v34 : agenda du site — les événements simultanés se rangent côte à côte.
+      slotEventOverlap: !vueSite(),
+      allDaySlot: vueSite(), allDayText: 'Journée',
       nowIndicator: true, allDaySlot: false, slotMinTime: '07:00:00', slotMaxTime: '20:00:00',
       slotDuration: '00:30:00', slotLabelInterval: '01:00', expandRows: true,
       hiddenDays: showSunday ? [] : [0],                // 0 = dimanche
@@ -2537,8 +2854,10 @@ OD.define('agenda', {
     // Un clic sélectionne une case de 30 min : durée par défaut 1 h. Une
     // plage tirée à la souris (plus d'une case) garde sa longueur.
     let dur = DUREE_DEFAUT; if (sel.end && sel.start) { const d = Math.round((sel.end - sel.start) / 60000); if (d > 30) dur = d; }
-    cs = { editing: false, editId: null, idRpv: null, mode: 'rdv', date, time, dur, idClient: null, clientLabel: '', client: null, origine: ORIGINES[0], physique: true, rdvType: null, creneauType: null, bilatUser: null, bilatNom: '', comment: '', saving: false, err: '', invites: [], invitesInit: [] };
+    const proprio0 = vueSite() ? Number(CACHED_UID) : Number(currentCollabId());
+    cs = { editing: false, editId: null, idRpv: null, mode: 'rdv', date, time, dur, idClient: null, clientLabel: '', client: null, origine: ORIGINES[0], physique: true, rdvType: null, creneauType: null, bilatUser: null, bilatNom: '', comment: '', saving: false, err: '', invites: [], invitesInit: [], owner: proprio0, ownerInit: proprio0 };
     chargerInvitables().then(() => { if (cs) renderCreate(); });
+    chargerMembresPour(siteCourant()).then(() => { if (cs) renderCreate(); });
     chargerAgendaBacs().then(() => { if (cs) { renderCreate(); suivreBacs(); } });
     const navCli = wwVal(CFG.selectedClientVar);
     if (navCli && typeof navCli === 'object' && navCli.IDVu != null) { cs.idClient = Number(navCli.IDVu); cs.clientLabel = clientLabel(navCli); cs.client = navCli; }
@@ -2590,9 +2909,13 @@ OD.define('agenda', {
       comment: (st === 'bilat' ? '' : (p.description || '')), saving: false, err: '',
       invites: ((p.extra && Array.isArray(p.extra.invites)) ? p.extra.invites : []).map(Number),
       invitesInit: ((p.extra && Array.isArray(p.extra.invites)) ? p.extra.invites : []).map(Number),
-      idBacs: (p.extra && p.extra.id_bacs) || null, sync: null
+      idBacs: (p.extra && p.extra.id_bacs) || null, sync: null,
+      owner: (st === 'rdv' && p.id_user != null) ? Number(p.id_user) : null,
+      ownerInit: (st === 'rdv' && p.id_user != null) ? Number(p.id_user) : null,
+      ownerNom: (p.extra && p.extra.proprietaire) || ''
     };
     chargerInvitables().then(() => { if (cs) renderCreate(); });
+    if (st === 'rdv') chargerMembresPour(p.id_site != null ? Number(p.id_site) : siteCourant()).then(() => { if (cs) renderCreate(); });
     chargerAgendaBacs().then(() => { if (!cs) return; renderCreate(); suivreBacs(); if (st === 'rdv') chargerEtatSync(p.origin_id); });
     if (st === 'bilat') chargerResumeBilat();
     loadRdvTypes().then(renderCreate);
@@ -2658,12 +2981,22 @@ OD.define('agenda', {
       + '<button data-mode="rdv" class="' + (cs.mode === 'rdv' ? 'on' : '') + '">RDV CLIENT</button>'
       + '<button data-mode="creneau" class="' + (cs.mode === 'creneau' ? 'on' : '') + '">CR\u00c9NEAU</button>'
       + '<button data-mode="bilat" class="' + (cs.mode === 'bilat' ? 'on' : '') + '">BILAT\u00c9RALE</button></div>');
+    // v34 : dans quel agenda va l'événement (tout le monde du site).
+    let proprio = '';
+    if (cs.mode !== 'bilat' && cs.owner != null) {
+      const ms = optionsProprietaire(cs.owner, cs.ownerNom);
+      proprio = '<div><div class="agm-lbl">Dans l\u2019agenda de</div><select class="agm-sel" id="agm-owner" style="width:100%">' + ms + '</select>'
+        + (cs.editing && Number(cs.owner) !== Number(cs.ownerInit) ? '<div class="agm-hint">L\u2019événement passera dans l\u2019agenda de cette personne, ici et dans BACS.</div>' : '')
+        + (!cs.editing && cs.mode === 'creneau' && String(cs.creneauType) === '4' ? '<div class="agm-hint">Livraison : choisissez le metteur en main ; vous y serez invité.</div>' : '')
+        + (!cs.editing && cs.mode === 'creneau' && String(cs.creneauType) === '12' ? '<div class="agm-hint">Préparation : choisissez le préparateur.</div>' : '')
+        + '</div>';
+    }
     const comment = '<div><div class="agm-lbl">Commentaire</div><textarea class="agm-ta" id="agm-comment" placeholder="Commentaire\u2026">' + esc(cs.comment) + '</textarea></div>';
     // v28 : invités, comme dans BACS (BACS leur envoie son invitation).
     let invites = '';
     if (cs.mode !== 'bilat') {
       const pris = (cs.invites || []).map(Number);
-      const moi = Number(currentCollabId() || CACHED_UID);
+      const moi = Number(cs.owner != null ? cs.owner : (currentCollabId() || CACHED_UID));
       const dispo = (invitablesCache || []).filter(u => pris.indexOf(Number(u.id_user)) < 0 && Number(u.id_user) !== moi);
       invites = '<div><div class="agm-lbl">Invités</div><div class="agm-inv">'
         + pris.map(id => '<span class="agm-inv-chip' + (bacsInvite(id) ? '' : ' nb') + '"' + (bacsInvite(id) ? '' : ' title="Sans compte BACS : invité dans One Data seulement"') + '>' + esc(nomInvite(id)) + '<button type="button" data-inv-del="' + id + '" aria-label="Retirer">\u00d7</button></span>').join('')
@@ -2681,7 +3014,7 @@ OD.define('agenda', {
            : e === 'echec' ? '<div class="agm-sync ko"><span class="pt"></span>BACS a refusé : ' + esc(cs.sync.erreur || 'raison inconnue') + '</div>'
            : '';
     }
-    return seg + dateRow + mid + invites + (cs.mode !== 'bilat' ? comment : '') + sync + (cs.err ? '<div class="agm-err">' + esc(cs.err) + '</div>' : '');
+    return seg + dateRow + mid + proprio + invites + (cs.mode !== 'bilat' ? comment : '') + sync + (cs.err ? '<div class="agm-err">' + esc(cs.err) + '</div>' : '');
   }
   function renderCreate() {
     const d = frontDoc(); let ov = d.getElementById('agenda-ov');
@@ -2720,6 +3053,7 @@ OD.define('agenda', {
     if (g('agm-ctype')) cs.creneauType = g('agm-ctype').value || null;
     if (g('agm-rtype')) cs.rdvType = g('agm-rtype').value || null;
     if (g('agm-bvend')) cs.bilatUser = g('agm-bvend').value || null;
+    if (g('agm-owner') && g('agm-owner').value) cs.owner = Number(g('agm-owner').value);
   }
   function wireCreate() {
     const d = frontDoc(); const g = (id) => d.getElementById(id);
@@ -2745,6 +3079,8 @@ OD.define('agenda', {
     if (g('agm-real-now')) g('agm-real-now').addEventListener('click', () => { if (cs && cs.editId != null) goBilaterale(cs.editId, true); });
     if (g('agm-start-now')) g('agm-start-now').addEventListener('click', demarrerBilatMaintenant);
     if (g('agm-bvend')) g('agm-bvend').addEventListener('change', () => { syncInputs(); });
+    if (g('agm-owner')) g('agm-owner').addEventListener('change', () => { syncInputs(); cs.invites = (cs.invites || []).filter(x => Number(x) !== Number(cs.owner)); renderCreate(); });
+    if (g('agm-ctype')) g('agm-ctype').addEventListener('change', () => { syncInputs(); renderCreate(); });
     if (g('agm-inv-add')) g('agm-inv-add').addEventListener('change', (e) => {
       const v = Number(e.target.value); if (!v) return;
       syncInputs(); cs.invites = (cs.invites || []).concat([v]); renderCreate();
@@ -2759,7 +3095,15 @@ OD.define('agenda', {
     const s = cs; s.err = '';
     if (verrouille()) { s.err = 'BACS n\u2019est pas ouvert sur votre poste : ouvrez BACS dans un onglet de ce navigateur, connectez-vous, puis recommencez.'; return renderCreate(); }
     if (!s.date || !s.time) { s.err = 'Date et heure requises.'; return renderCreate(); }
-    const site = siteValRaw(); const uid = currentCollabId();
+    const siteBrut = vueSite() ? siteAg.id : siteValRaw();
+    const site = Array.isArray(siteBrut) ? (siteBrut.length === 1 ? siteBrut[0] : siteCourant()) : siteBrut;
+    const uid = (s.owner != null) ? s.owner : currentCollabId();
+    // v34 : une livraison posée dans l'agenda du metteur en main invite d'office
+    // celui qui la pose (le vendeur), comme dans BACS.
+    if (!s.editing && s.mode === 'creneau' && String(s.creneauType) === '4' && Number(uid) !== Number(CACHED_UID)
+        && (s.invites || []).map(Number).indexOf(Number(CACHED_UID)) < 0) {
+      s.invites = (s.invites || []).concat([Number(CACHED_UID)]);
+    }
     const startStr = s.date + ' ' + s.time + ':00';
     if (isPastSlot(startStr)) { s.err = 'Date dans le pass\u00e9 : choisis un cr\u00e9neau \u00e0 partir de maintenant.'; return renderCreate(); }
     const endStr = endStrFrom(s.date, s.time, s.dur);
@@ -2775,6 +3119,10 @@ OD.define('agenda', {
           const type = s.mode === 'creneau' ? s.creneauType : s.rdvType;
           if (!type) { s.err = 'S\u00e9lectionne le type.'; return renderCreate(); }
           s.saving = true; renderCreate();
+          if (s.owner != null && Number(s.owner) !== Number(s.ownerInit)) {
+            const rc = await c.rpc('rdv_changer_personne', { p_id_rdv: Number(s.editId), p_id_user: Number(s.owner) });
+            if (rc && rc.error) throw rc.error;
+          }
           res = await c.rpc('update_rdv_client', { p_id_rdv: s.editId, p_start: startStr, p_end: endStr, p_duree: dur, p_id_rdv_type: Number(type), p_commentaire: s.comment || null });
         }
       } else if (s.mode === 'rdv') {
@@ -2809,7 +3157,7 @@ OD.define('agenda', {
       }
       const msg = s.mode === 'bilat'
         ? (s.editing ? 'Bilat\u00e9rale d\u00e9plac\u00e9e au ' : 'Bilat\u00e9rale planifi\u00e9e avec ' + nomVendeurBilat(s.bilatUser) + ' \u00b7 ') + quandTxt
-        : (s.editing ? 'Modification enregistr\u00e9e \u00b7 ' : 'Enregistr\u00e9 dans l\u2019agenda \u00b7 ') + quandTxt
+        : (s.editing ? 'Modification enregistr\u00e9e \u00b7 ' : 'Enregistr\u00e9 dans l\u2019agenda' + (Number(uid) !== Number(CACHED_UID) ? ' de ' + nomPersonne(uid) : '') + ' \u00b7 ') + quandTxt
           + (bacsFermeIci() ? ' \u00b7 partira vers BACS \u00e0 sa r\u00e9ouverture' : '');
       closeCreate();
       toast(msg, 'ok');
