@@ -1844,12 +1844,29 @@ OD.define('agenda', {
     });
   }
   let bacsOuvert = null;           // dernier état connu du poste
+  let bacsErreur = null;           // v35 : pourquoi BACS est vu fermé
+  // v35 : le bandeau dit la vraie cause et quoi faire, au lieu de « fermé ».
+  function texteBacsFerme() {
+    switch (bacsErreur) {
+      case 'extension_absente':
+      case 'extension_indisponible':
+        return 'L\u2019extension BACS ne répond pas sur cette page (elle a sans doute été rechargée) : appuyez sur F5 pour recharger One Data. L\u2019enregistrement se fait quand même et partira vers BACS.';
+      case 'bacs_non_pret':
+      case 'contexte_absent':
+        return 'BACS est ouvert mais pas prêt : rechargez l\u2019onglet BACS (F5) et cliquez une fois dans BACS. L\u2019enregistrement se fait quand même et partira vers BACS.';
+      case 'delai_depasse':
+        return 'BACS ne répond pas pour l\u2019instant. L\u2019enregistrement se fait ici et partira vers BACS dès qu\u2019il répondra.';
+      default:
+        return 'BACS est fermé sur ce poste : l\u2019enregistrement se fait ici et partira vers BACS dès sa réouverture.';
+    }
+  }
   let bacsSuiviT = null;
   function suivreBacs() {
     clearTimeout(bacsSuiviT);
     if (!cs || !bacsExige()) return;
     bacsDemander('ping', {}, 6000).then(function (p) {
       const ouvert = !!(p && p.ok && p.contexte !== false);
+      bacsErreur = ouvert ? null : ((p && p.erreur) || (p && p.ok && p.contexte === false ? 'contexte_absent' : 'bacs_non_ouvert'));
       const change = ouvert !== bacsOuvert;
       bacsOuvert = ouvert;
       if (change && cs && !cs.saving) appliquerVerrou();
@@ -1866,7 +1883,7 @@ OD.define('agenda', {
       let info = d.getElementById('agm-bacs-info');
       if (foot && bacsFermeIci()) {
         if (!info) { info = d.createElement('div'); info.id = 'agm-bacs-info'; foot.parentNode.insertBefore(info, foot); }
-        info.textContent = 'BACS est fermé sur ce poste : l\u2019enregistrement se fait ici et partira vers BACS dès sa réouverture.';
+        info.textContent = texteBacsFerme();
       } else if (info) { info.remove(); }
     } catch (e) {}
     ['agm-save', 'agm-start-now', 'agm-del', 'agm-del-yes', 'agm-real-now'].forEach(function (id) {
