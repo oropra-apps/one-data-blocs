@@ -1,4 +1,8 @@
 // ============================================================================
+//  v26 (02/11/2026) : tuiles au design One Data (fond bleu très pâle, sans
+//    bordure ni ombre, coins 8 px, chiffres en bleu, aucun rouge ni beige).
+//    Liseré bleu à gauche au survol, seulement sur une tuile cliquable ;
+//    la tuile choisie garde son liseré en bleu foncé.
 //  v25 (29/10/2026) : sélecteur de dates identique à celui de la gestion des
 //  ventes (bouton « 📅 du → au », calendrier d'un mois, deux clics). Les
 //  raccourcis Cette semaine / Ce mois / 3 mois / Année restent, à côté du
@@ -3409,7 +3413,7 @@ const R_STYLE = '<style>'+
 '#real-ov .kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(115px,1fr));gap:10px;margin-bottom:16px}'+
 '#real-ov .kpi{background:rgba(172,197,228,.12);border-radius:10px;padding:10px 12px;border:2px solid transparent;transition:.12s}'+
 '#real-ov .kpi.clik{cursor:pointer}#real-ov .kpi.clik:hover{background:rgba(172,197,228,.22)}'+
-'#real-ov .kpi.on{border-color:#2a5ea9;background:#fff}#real-ov .kpi.mute{cursor:default}'+
+'#real-ov .kpi.on{border-color:#2a5ea9;background:#fff}#real-ov .kpi{background:#f5f8fc;border:0;border-radius:8px;box-shadow:none;transition:box-shadow .15s ease}#real-ov .kpi.clik:hover{background:#f5f8fc;box-shadow:inset 3px 0 0 0 #2a5ea9}#real-ov .kpi.on,#real-ov .kpi.on:hover{background:#f5f8fc;box-shadow:inset 3px 0 0 0 #1F4A85}#real-ov .kpi.mute:hover{box-shadow:none}#real-ov .kpi.mute{cursor:default}'+
 '#real-ov .kpi.kvn.on{border-color:#53bda7}'+
 '#real-ov .kpi.kvo.on{border-color:#d2941f}'+
 '#real-ov .kpi .k-l{font-size:11px;color:#8b99b0;font-weight:600}'+
