@@ -4,6 +4,8 @@
 //    le fil sur ce type d'événement (commandes, simulations, opportunités,
 //    leads, RDV), un second clic retire le filtre ; « en attente dans le Pool »
 //    ouvre la page Leads management. Plus de liseré d'alerte sur la tuile Pool.
+//    Survol d'une tuile : un liseré bleu à gauche (il suit la souris de tuile
+//    en tuile) ; la tuile du filtre actif garde son liseré.
 //    Plus aucun pavé beige ou orange pâle (encart Lecture,
 //    tuile en alerte, pastilles, zones des graphiques) : fond bleu très pâle et
 //    touche orange en liseré. Parcours : pas de rail derrière les barres (la
@@ -496,9 +498,9 @@ OD.define('activite', {
 #act-root .band h2{font-size:17px;font-weight:600;color:var(--bleu-fonce)}
 #act-root .pouls .n{color:var(--bleu)}
 #act-root .tuile{background:#f5f8fc;border-radius:8px}
-#act-root .tuile.clic{cursor:pointer;box-shadow:inset 0 0 0 1px transparent;transition:box-shadow .12s,background .12s}
-#act-root .tuile.clic:hover{background:#eef4fc;box-shadow:inset 0 0 0 1px var(--bleu-clair)}
-#act-root .tuile.on{background:#fff;box-shadow:inset 0 0 0 2px var(--bleu)}
+#act-root .tuile.clic{cursor:pointer;box-shadow:inset 0 0 0 0 var(--bleu);transition:box-shadow .15s ease}
+#act-root .tuile.clic:hover,#act-root .tuile.clic:focus-visible{box-shadow:inset 3px 0 0 0 var(--bleu);outline:none}
+#act-root .tuile.on,#act-root .tuile.on:hover{box-shadow:inset 3px 0 0 0 var(--bleu-fonce)}
 #act-root .lecture{background:#f5f8fc;border-radius:8px;box-shadow:inset 3px 0 0 var(--bleu-clair);color:var(--bleu-fonce)}
 #act-root .lecture .t{color:var(--ink-3)}
 #act-root .erreur{background:#f5f8fc;border-radius:8px;box-shadow:inset 3px 0 0 var(--orange);color:var(--bleu-fonce)}
