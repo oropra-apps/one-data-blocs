@@ -1,4 +1,19 @@
 // ============================================================================
+//  v37 (02/11/2026) : fenêtre de saisie — le commentaire prend la hauteur de
+//  son texte (il était coupé à 2 lignes) ; les invités qui n'ont que BACS
+//  s'affichent par leur nom (agenda_invitables).
+// ============================================================================
+//  v36 (02/11/2026) : FILTRE « AUCUN » ET PLANNING PRÉPARATEUR.
+//  - « Aucun » à côté de « Tout » : on décoche tout puis on coche les natures
+//    voulues ; un agenda sans nature cochée le dit en clair.
+//  - Planning imprimable « Préparateur » (jour / semaine) : les seules
+//    préparations du site, commentaire complet (clé, châssis, accessoires),
+//    pour le préparateur sans poste. La préparation reste dans l'agenda de
+//    celui qui la demande, comme dans BACS.
+
+//  - Bandeau BACS : la vraie cause (extension à recharger, onglet BACS pas
+//    prêt…) au lieu d'un « BACS fermé » systématique.
+// ============================================================================
 //  v35 (02/11/2026) : L'AGENDA DU SITE SUIT LE SITE.
 //  - Le site choisi dans la barre du haut s'applique à l'agenda du site
 //    (personnes et événements), et le choix fait dans l'agenda du site met à
@@ -1415,7 +1430,7 @@ OD.define('agenda', {
 #agenda-ov .agm-pf{display:inline-flex;border:1.5px solid #e2eaf5;border-radius:9px;overflow:hidden;flex:0 0 auto}
 #agenda-ov .agm-pf button{border:0;background:#fff;color:#7a98c5;font:700 12px "Nunito Sans",system-ui,sans-serif;padding:8px 11px;cursor:pointer}
 #agenda-ov .agm-pf button.on{background:#2a5ea9;color:#fff}
-#agenda-ov .agm-saisie .agm-ta{min-height:52px;box-sizing:border-box;display:block}
+#agenda-ov .agm-saisie .agm-ta{min-height:52px;max-height:260px;box-sizing:border-box;display:block;resize:vertical;overflow-y:auto}
 #agenda-ov .agm-saisie .agm-inp,#agenda-ov .agm-saisie .agm-sel{box-sizing:border-box}
 @media(max-width:640px){#agenda-ov .agm-grid{grid-template-columns:1fr}#agenda-ov .agm.agm-saisie{width:100%;max-width:none;max-height:100%;height:100%;border-radius:0}#agenda-ov .agm-quand{flex-wrap:wrap}}
 #agenda-root .fc .ag-bacs-att{display:inline-block;margin-right:4px;padding:0 4px;border-radius:4px;background:#fac055;color:#5a3d05;font:800 9px/13px "Nunito Sans",system-ui,sans-serif;letter-spacing:.02em;vertical-align:0}
@@ -1926,7 +1941,7 @@ OD.define('agenda', {
     catch (e) { invitablesCache = []; }
     return invitablesCache;
   }
-  function nomInvite(id) { const u = (invitablesCache || []).find(x => Number(x.id_user) === Number(id)); return u ? u.nom : ('Utilisateur ' + id); }
+  function nomInvite(id) { const u = (invitablesCache || []).find(x => Number(x.id_user) === Number(id)); return u ? u.nom : nomPersonne(id); }
   function bacsInvite(id) { const u = (invitablesCache || []).find(x => Number(x.id_user) === Number(id)); return !u || !!u.bacs; }
   function memesInvites(a, b) { const x = (a || []).map(Number).sort().join(','), y = (b || []).map(Number).sort().join(','); return x === y; }
   // État de la synchronisation d'un RDV existant, affiché dans la fenêtre.
@@ -3128,7 +3143,7 @@ OD.define('agenda', {
         + (pris.length && agendaBacsPf && agendaBacsPf.actif ? '<div class="agm-hint">BACS envoie l’invitation par e-mail.</div>' : '')
         + '</div>';
     }
-    const comment = cs.mode !== 'bilat' ? '<div class="agm-cell"><div class="agm-lbl">Commentaire</div><textarea class="agm-ta" id="agm-comment" rows="2" placeholder="Véhicule, VIN, consignes…">' + esc(cs.comment) + '</textarea></div>' : '';
+    const comment = cs.mode !== 'bilat' ? '<div class="agm-cell"><div class="agm-lbl">Commentaire</div><textarea class="agm-ta" id="agm-comment" rows="' + Math.min(10, Math.max(2, String(cs.comment || '').split('\n').length + 1)) + '" placeholder="Véhicule, VIN, consignes…">' + esc(cs.comment) + '</textarea></div>' : '';
 
     let sync = '';
     if (cs.editing && cs.mode !== 'bilat' && cs.sync) {
@@ -3206,6 +3221,9 @@ OD.define('agenda', {
     if (g('agm-real-now')) g('agm-real-now').addEventListener('click', () => { if (cs && cs.editId != null) goBilaterale(cs.editId, true); });
     if (g('agm-start-now')) g('agm-start-now').addEventListener('click', demarrerBilatMaintenant);
     if (g('agm-bvend')) g('agm-bvend').addEventListener('change', () => { syncInputs(); });
+    // v36 : le commentaire s'agrandit avec son texte (il était coupé à 2 lignes).
+    const ta = g('agm-comment');
+    if (ta) { const ajuster = () => { ta.style.height = 'auto'; ta.style.height = Math.min(260, ta.scrollHeight + 4) + 'px'; }; ajuster(); ta.addEventListener('input', ajuster); }
     if (g('agm-owner')) g('agm-owner').addEventListener('change', () => { syncInputs(); cs.invites = (cs.invites || []).filter(x => Number(x) !== Number(cs.owner)); renderCreate(); });
     if (g('agm-ctype')) g('agm-ctype').addEventListener('change', () => { syncInputs(); renderCreate(); });
     if (g('agm-inv-add')) g('agm-inv-add').addEventListener('change', (e) => {
