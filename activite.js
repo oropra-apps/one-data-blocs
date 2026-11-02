@@ -3,8 +3,10 @@
 //  v12 (02/11/2026) : « En direct » prend le sélecteur de dates de One Data
 //    (le même bouton « 📅 du → au » que partout ailleurs ; le calendrier natif
 //    du navigateur ne s'ouvrait pas) : un jour ou une période (act_direct
-//    p_au), comparée à la même durée juste avant. Onglet « Site » : chaque
-//    graphique et chaque tableau a sa lecture.
+//    p_au), comparée à la même durée juste avant. Onglet « Site » : l'anneau
+//    suit désormais la période choisie (act_site lisait toujours le mois entier
+//    de la date de fin, d'où des chiffres différents des vendeurs et de
+//    « Anatomie d'une vente ») ; objectif au prorata des jours ouvrés.
 //  v11 (02/11/2026) : « En direct » reçoit un sélecteur de jour (Aujourd'hui,
 //    Hier, ou un jour passé au calendrier) ; un jour passé est montré en entier
 //    et comparé à la journée entière d'il y a 7 jours, sans Pool ni rafraîchissement.
@@ -805,7 +807,7 @@ OD.define('activite', {
       const tr = pct(t.gagnees, t.affaires);
       const fuite = (t.affaires - t.devis) >= (t.devis - t.gagnees) ? 'avant la simulation' : 'entre la simulation et la commande';
       setTimeout(() => {
-        const a = __anchor.querySelector('[data-g="anneau"]'); if (a) a.__d = { fait: Number(m.cdes) || 0, cible: Number(m.objectif) || 0, proj: pj, sous: 'commandes · ' + MOIS[new Date(b.fin).getMonth()], label: m.cdes + ' commandes' };
+        const a = __anchor.querySelector('[data-g="anneau"]'); if (a) a.__d = { fait: Number(m.cdes) || 0, cible: Number(m.objectif) || 0, proj: pj, sous: 'commandes · ' + (estMois(b) ? MOIS[new Date(b.fin).getMonth()] : b.lib.toLowerCase()), label: m.cdes + ' commandes' };
         const f = __anchor.querySelector('[data-g="flux"]'); if (f) f.__d = { etapes: [['Opportunités', t.affaires], ['Simulations', t.devis], ['Commandes issues', t.gagnees]], pertes: ['sans simulation', 'simulations non signées'] };
       });
       const h2 = enCours && m.objectif > 0
@@ -817,7 +819,15 @@ OD.define('activite', {
       const motifs = motifs0.filter(x => x.motif !== 'Autre' && x.n / totM >= .025).concat(autreN ? [{ motif: 'Autre ou non précisé', n: autreN }] : []);
       const precis = totM ? Math.round((totM - (motifs0.find(x => x.motif === 'Autre') || { n: 0 }).n) / totM * 100) : 0;
       const sources = (d.sources || []).slice(0, 6);
-      const ev = (e.par_vendeur || []).filter(x => x.affaires >= 3);
+      // v12 : tout vendeur qui a signé une commande figure au tableau (avant : seuls
+      // ceux qui avaient ouvert au moins 3 opportunités, d'où un total inférieur à l'anneau).
+      const cdesV0 = {}; (d.vendeurs || []).forEach(x => { cdesV0[x.id] = x; });
+      const ev = (e.par_vendeur || []).filter(x => x.affaires >= 3 || (cdesV0[x.id_user] && cdesV0[x.id_user].cdes > 0));
+      (d.vendeurs || []).filter(x => x.cdes > 0 && !ev.some(y => Number(y.id_user) === Number(x.id)))
+        .forEach(x => ev.push({ id_user: x.id, nom: x.nom, affaires: 0, devis: 0, gagnees: 0 }));
+      ev.sort((a, b) => ((cdesV0[b.id_user] || {}).cdes || 0) - ((cdesV0[a.id_user] || {}).cdes || 0) || b.affaires - a.affaires);
+      const sommeV = ev.reduce((a, x) => a + (Number((cdesV0[x.id_user] || {}).cdes) || 0), 0);
+      const sansVendeur = Math.max(0, (Number(d.cdes) || 0) - sommeV);
       const cdesV = {}; (d.vendeurs || []).forEach(x => { cdesV[x.id] = x.cdes; });
       return rail +
         '<div class="band"><div><div class="q">' + esc(b.lib) + '</div><h2>' + h2 + '</h2><div class="pouls">' +
@@ -826,11 +836,8 @@ OD.define('activite', {
         '<div><div class="n">' + pctTxt(d.fi, d.cdes) + '</div><div class="l">ventes financées par nos soins</div></div>' +
         '<div><div class="n">' + (L.delai_cde != null ? L.delai_cde + ' j' : '—') + '</div><div class="l">délai lead → commande</div></div>' +
         '</div></div>' + graph('anneau', 'anneau') + '</div>' +
-        lecture('<b>L\'anneau</b> : les commandes signées sur la période, tous canaux confondus, rapportées à l\'objectif du mois ; la partie claire est la projection de fin de mois si le rythme actuel se maintient. '
-          + '<b>Opportunités transformées</b> : commandes issues des opportunités créées sur la période, divisées par ces opportunités. <b>Ventes financées</b> : part des commandes avec un financement du groupe. '
-          + '<b>Délai lead → commande</b> : durée médiane entre la réception du lead et la commande, pour les leads devenus commandes.') +
         '<div class="card"><div class="ch"><h3>Le parcours des ' + plur(t.affaires, 'opportunité créée', 'opportunités créées') + '</h3><span>Ce qui avance, ce qui tombe à chaque étape</span></div>' +
-        (t.affaires ? graph('flux') + lecture('On suit les opportunités <b>créées sur la période</b>, de gauche à droite : combien ont reçu une simulation, puis combien sont devenues une commande. L\'épaisseur d\'une bande = le nombre d\'opportunités ; ce qui s\'en détache à chaque étape, ce sont les pertes : opportunités jamais simulées, puis simulations jamais signées. La plus grosse perte dit où agir.') : '<div class="vide">Aucune opportunité créée sur la période.</div>') +
+        (t.affaires ? graph('flux') : '<div class="vide">Aucune opportunité créée sur la période.</div>') +
         // v11 : l'anneau compte TOUTES les commandes de la période, le parcours
         // seulement celles issues des opportunités créées sur la période. Les
         // deux chiffres différaient sans explication.
@@ -839,15 +846,16 @@ OD.define('activite', {
             + nf(Math.max(0, (Number(d.cdes) || 0) - (Number(t.gagnees) || 0))) + ' autres viennent d\'opportunités plus anciennes.</div>' : '') + '</div>' +
         '<div class="cols eq"><div class="card"><div class="ch"><h3>Pourquoi on perd</h3><span>Opportunités abandonnées · 90 jours</span></div>' +
         (totM ? '<div class="mosaic">' + motifs.slice(0, 6).map(x => { const c = MOSAIQUE[x.motif] || ['var(--calme-bg)', 'var(--ink-2)']; return '<div style="flex:' + x.n + ' 1 0;background:' + c[0] + ';color:' + c[1] + '"><b>' + Math.round(x.n / totM * 100) + ' %</b><span>' + esc(x.motif) + '</span></div>'; }).join('') + '</div>' +
-          lecture('Chaque bloc est un motif d\'abandon ; sa largeur est sa part des opportunités abandonnées ces 90 derniers jours. Les petits motifs (moins de 2,5 %) et « Autre » sont regroupés.') +
           '<div class="note">Motif d\'abandon saisi dans BACS sur ' + plur(totM, 'opportunité') + ' (doublons exclus). Seules ' + precis + ' % portent un motif précis : un levier de qualité de saisie.</div>' : '<div class="vide">Aucun motif d\'abandon saisi sur 90 jours.</div>') + '</div>' +
         '<div class="card"><div class="ch"><h3>Leads web : ce que donne chaque source</h3><span>1 point = 2 % des leads · part obtenant un RDV</span></div>' +
-        (sources.length ? lecture('Une ligne par source de leads web. Chaque ligne compte 50 points : un point vaut 2 % des leads de cette source, et les points pleins montrent la part de ces leads qui ont obtenu un rendez-vous. Le pourcentage à droite le dit en chiffre.') + '<div class="dots">' + sources.map(s => { const p2 = pct(s.rdv, s.n) || 0; let g = ''; for (let i = 0; i < 50; i++) g += '<i' + (i < Math.round(p2 / 2) ? ' class="f"' : '') + '></i>'; return '<div class="dotrow"><span>' + esc(s.source) + '<small>' + plur(s.n, 'lead') + '</small></span><div class="g">' + g + '</div><b>' + p2 + ' %</b></div>'; }).join('') + '</div>' : '<div class="vide">Pas assez de leads sur la période.</div>') +
+        (sources.length ? '<div class="dots">' + sources.map(s => { const p2 = pct(s.rdv, s.n) || 0; let g = ''; for (let i = 0; i < 50; i++) g += '<i' + (i < Math.round(p2 / 2) ? ' class="f"' : '') + '></i>'; return '<div class="dotrow"><span>' + esc(s.source) + '<small>' + plur(s.n, 'lead') + '</small></span><div class="g">' + g + '</div><b>' + p2 + ' %</b></div>'; }).join('') + '</div>' : '<div class="vide">Pas assez de leads sur la période.</div>') +
         '<div class="note">' + nf(L.recus) + ' leads reçus, ' + pctTxt(L.contactes, L.recus) + ' joints' + (P.recus ? ' (période précédente : ' + nf(P.recus) + ' reçus)' : '') + '.' + (U() === 'PRO' ? ' Un lead n\'indique pas s\'il vient d\'un professionnel : tous les leads sont comptés.' : '') + '</div></div></div>' +
         '<div class="cols"><div class="card"><div class="ch"><h3>Les vendeurs côte à côte</h3><span>' + esc(b.lib) + '</span></div>' +
         (ev.length ? '<div class="scroll"><table><thead><tr><th>Vendeur</th><th>Opportunités</th><th>Simulations</th><th title="Commandes issues des opportunités créées sur la période">Cdes issues</th><th>Transformation</th><th title="Toutes les commandes de la période, quelle que soit la date de l\'opportunité">Total cdes</th></tr></thead><tbody>' +
-          ev.map(x => { const p3 = pct(x.gagnees, x.affaires) || 0; return '<tr><td><b>' + esc(x.nom) + '</b></td><td>' + nf(x.affaires) + '</td><td>' + nf(x.devis) + '</td><td>' + nf(x.gagnees) + '</td><td><b>' + p3 + ' %</b><span class="mini"><i style="width:' + Math.min(100, p3 * 2) + '%"></i></span></td><td>' + nf(cdesV[x.id_user] != null ? cdesV[x.id_user] : x.gagnees) + '</td></tr>'; }).join('') +
-          '</tbody></table></div>' + lecture('<b>Opportunités</b> : créées sur la période par le vendeur. <b>Simulations</b> : faites sur ces opportunités. <b>Cdes issues</b> : celles de ces opportunités devenues commandes. <b>Transformation</b> : Cdes issues ÷ Opportunités, avec sa barre. <b>Total cdes</b> : toutes ses commandes signées sur la période, y compris sur des opportunités plus anciennes.') + '<div class="note">« Cdes issues » : commandes nées des opportunités créées sur la période (le parcours). « Total cdes » : toutes les commandes signées sur la période (l\'anneau). Vendeurs avec au moins 3 opportunités.</div>' : '<div class="vide">Pas d\'activité vendeur sur la période.</div>') + '</div>' +
+          ev.map(x => { const p3 = pct(x.gagnees, x.affaires) || 0; return '<tr><td><b>' + esc(x.nom) + '</b></td><td>' + nf(x.affaires) + '</td><td>' + nf(x.devis) + '</td><td>' + nf(x.gagnees) + '</td><td><b>' + p3 + ' %</b><span class="mini"><i style="width:' + Math.min(100, p3 * 2) + '%"></i></span></td><td>' + nf(cdesV[x.id_user] != null ? cdesV[x.id_user] : 0) + '</td></tr>'; }).join('') +
+          (sansVendeur ? '<tr><td><b>Sans vendeur rattaché</b></td><td></td><td></td><td></td><td></td><td>' + nf(sansVendeur) + '</td></tr>' : '') +
+          '<tr><td><b>Total du site</b></td><td>' + nf(t.affaires) + '</td><td>' + nf(t.devis) + '</td><td>' + nf(t.gagnees) + '</td><td><b>' + (pct(t.gagnees, t.affaires) || 0) + ' %</b></td><td><b>' + nf(d.cdes) + '</b></td></tr>' +
+          '</tbody></table></div><div class="note">« Total cdes » : toutes les commandes signées sur la période, le même chiffre que l\'anneau et qu\'« Anatomie d\'une vente ». « Cdes issues » : seulement celles nées d\'opportunités créées sur la période. Vendeurs ayant signé une commande ou ouvert au moins 3 opportunités.</div>' : '<div class="vide">Pas d\'activité vendeur sur la période.</div>') + '</div>' +
         '<div class="card"><div class="ch"><h3>Anatomie d\'une vente</h3><span class="pill attente">À brancher · ventes DMS</span></div>' +
         '<div class="vide">La marge par vente (véhicule, financement, services, remise) s\'affichera ici dès que le flux des ventes du DMS sera validé.</div>' +
         '<div class="kpis"><div><div class="n">' + nf(d.cdes) + '</div><div class="l">commandes sur la période</div></div><div><div class="n">' + nf(d.fi) + '</div><div class="l">avec financement</div></div></div></div></div>';
