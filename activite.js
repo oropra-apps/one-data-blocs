@@ -1,5 +1,12 @@
 // ============================================================================
 //  SUIVI D'ACTIVITÉ v4 (28/10/2026) — un écran par rôle, une question par écran
+//  v11 (02/11/2026) : « En direct » reçoit un sélecteur de jour (Aujourd'hui,
+//    Hier, ou un jour passé au calendrier) ; un jour passé est montré en entier
+//    et comparé à la journée entière d'il y a 7 jours, sans Pool ni rafraîchissement.
+//    act_direct(site, jour) — migration 20261102190000_act_direct_jour.
+//    Écran Site : l'anneau (toutes les commandes de la période) et le parcours
+//    (commandes issues des opportunités de la période) sont désormais nommés et
+//    leur écart expliqué ; colonne « Cdes issues » dans le tableau des vendeurs.
 //  v10 (02/11/2026) : écran « En direct » (demande de Julien Faugeras) — la
 //    journée en cours d'une concession, pensée pour le téléphone : totaux du
 //    jour comparés à la même heure il y a 7 jours (commandes VN transmises TFR,
@@ -403,6 +410,7 @@ OD.define('activite', {
 @keyframes act-tourne{to{transform:rotate(360deg)}}
 #act-root .erreur{background:var(--chaud-bg);color:var(--m-rouge);border-radius:11px;padding:12px 14px;font-weight:700}
 #act-root :focus-visible{outline:2px solid var(--bleu);outline-offset:2px}
+#act-root .djour{font:inherit;font-size:12.5px;font-weight:700;color:var(--bleu);border:none;box-shadow:inset 0 0 0 1px var(--line-2);border-radius:9px;padding:6px 9px;background:var(--card)}
 #act-root .live{display:inline-flex;align-items:center;gap:6px;font-size:11.5px;font-weight:700;color:var(--ink-3)}
 #act-root .live i{width:8px;height:8px;border-radius:50%;background:var(--vert);box-shadow:0 0 0 3px var(--ok-bg)}
 #act-root .live.vieux i{background:var(--orange);box-shadow:0 0 0 3px var(--alerte-bg)}
@@ -785,7 +793,7 @@ OD.define('activite', {
       const fuite = (t.affaires - t.devis) >= (t.devis - t.gagnees) ? 'avant la simulation' : 'entre la simulation et la commande';
       setTimeout(() => {
         const a = __anchor.querySelector('[data-g="anneau"]'); if (a) a.__d = { fait: Number(m.cdes) || 0, cible: Number(m.objectif) || 0, proj: pj, sous: 'commandes · ' + MOIS[new Date(b.fin).getMonth()], label: m.cdes + ' commandes' };
-        const f = __anchor.querySelector('[data-g="flux"]'); if (f) f.__d = { etapes: [['Opportunités', t.affaires], ['Simulations', t.devis], ['Commandes', t.gagnees]], pertes: ['sans simulation', 'simulations non signées'] };
+        const f = __anchor.querySelector('[data-g="flux"]'); if (f) f.__d = { etapes: [['Opportunités', t.affaires], ['Simulations', t.devis], ['Commandes issues', t.gagnees]], pertes: ['sans simulation', 'simulations non signées'] };
       });
       const h2 = enCours && m.objectif > 0
         ? 'Le mois finira à <b>' + plur(pj, 'commande') + ' sur ' + nf(m.objectif) + '</b> si le rythme se maintient. Les opportunités se perdent surtout <b>' + fuite + '</b>.'
@@ -806,7 +814,13 @@ OD.define('activite', {
         '<div><div class="n">' + (L.delai_cde != null ? L.delai_cde + ' j' : '—') + '</div><div class="l">délai lead → commande</div></div>' +
         '</div></div>' + graph('anneau', 'anneau') + '</div>' +
         '<div class="card"><div class="ch"><h3>Le parcours des ' + plur(t.affaires, 'opportunité créée', 'opportunités créées') + '</h3><span>Ce qui avance, ce qui tombe à chaque étape</span></div>' +
-        (t.affaires ? graph('flux') : '<div class="vide">Aucune opportunité créée sur la période.</div>') + '</div>' +
+        (t.affaires ? graph('flux') : '<div class="vide">Aucune opportunité créée sur la période.</div>') +
+        // v11 : l'anneau compte TOUTES les commandes de la période, le parcours
+        // seulement celles issues des opportunités créées sur la période. Les
+        // deux chiffres différaient sans explication.
+        ((Number(d.cdes) || 0) !== (Number(t.gagnees) || 0)
+          ? '<div class="note">' + plur(Number(d.cdes) || 0, 'commande signée', 'commandes signées') + ' sur la période (anneau ci-dessus), dont <b>' + nf(t.gagnees) + '</b> issues des opportunités créées sur la période. Les '
+            + nf(Math.max(0, (Number(d.cdes) || 0) - (Number(t.gagnees) || 0))) + ' autres viennent d\'opportunités plus anciennes.</div>' : '') + '</div>' +
         '<div class="cols eq"><div class="card"><div class="ch"><h3>Pourquoi on perd</h3><span>Opportunités abandonnées · 90 jours</span></div>' +
         (totM ? '<div class="mosaic">' + motifs.slice(0, 6).map(x => { const c = MOSAIQUE[x.motif] || ['var(--calme-bg)', 'var(--ink-2)']; return '<div style="flex:' + x.n + ' 1 0;background:' + c[0] + ';color:' + c[1] + '"><b>' + Math.round(x.n / totM * 100) + ' %</b><span>' + esc(x.motif) + '</span></div>'; }).join('') + '</div>' +
           '<div class="note">Motif d\'abandon saisi dans BACS sur ' + plur(totM, 'opportunité') + ' (doublons exclus). Seules ' + precis + ' % portent un motif précis : un levier de qualité de saisie.</div>' : '<div class="vide">Aucun motif d\'abandon saisi sur 90 jours.</div>') + '</div>' +
@@ -814,9 +828,9 @@ OD.define('activite', {
         (sources.length ? '<div class="dots">' + sources.map(s => { const p2 = pct(s.rdv, s.n) || 0; let g = ''; for (let i = 0; i < 50; i++) g += '<i' + (i < Math.round(p2 / 2) ? ' class="f"' : '') + '></i>'; return '<div class="dotrow"><span>' + esc(s.source) + '<small>' + plur(s.n, 'lead') + '</small></span><div class="g">' + g + '</div><b>' + p2 + ' %</b></div>'; }).join('') + '</div>' : '<div class="vide">Pas assez de leads sur la période.</div>') +
         '<div class="note">' + nf(L.recus) + ' leads reçus, ' + pctTxt(L.contactes, L.recus) + ' joints' + (P.recus ? ' (période précédente : ' + nf(P.recus) + ' reçus)' : '') + '.' + (U() === 'PRO' ? ' Un lead n\'indique pas s\'il vient d\'un professionnel : tous les leads sont comptés.' : '') + '</div></div></div>' +
         '<div class="cols"><div class="card"><div class="ch"><h3>Les vendeurs côte à côte</h3><span>' + esc(b.lib) + '</span></div>' +
-        (ev.length ? '<div class="scroll"><table><thead><tr><th>Vendeur</th><th>Opportunités</th><th>Simulations</th><th>Commandes</th><th>Transformation</th><th title="Toutes les commandes de la période, quelle que soit la date de l\'opportunité">Total cdes</th></tr></thead><tbody>' +
+        (ev.length ? '<div class="scroll"><table><thead><tr><th>Vendeur</th><th>Opportunités</th><th>Simulations</th><th title="Commandes issues des opportunités créées sur la période">Cdes issues</th><th>Transformation</th><th title="Toutes les commandes de la période, quelle que soit la date de l\'opportunité">Total cdes</th></tr></thead><tbody>' +
           ev.map(x => { const p3 = pct(x.gagnees, x.affaires) || 0; return '<tr><td><b>' + esc(x.nom) + '</b></td><td>' + nf(x.affaires) + '</td><td>' + nf(x.devis) + '</td><td>' + nf(x.gagnees) + '</td><td><b>' + p3 + ' %</b><span class="mini"><i style="width:' + Math.min(100, p3 * 2) + '%"></i></span></td><td>' + nf(cdesV[x.id_user] != null ? cdesV[x.id_user] : x.gagnees) + '</td></tr>'; }).join('') +
-          '</tbody></table></div>' : '<div class="vide">Pas d\'activité vendeur sur la période.</div>') + '</div>' +
+          '</tbody></table></div><div class="note">« Cdes issues » : commandes nées des opportunités créées sur la période (le parcours). « Total cdes » : toutes les commandes signées sur la période (l\'anneau). Vendeurs avec au moins 3 opportunités.</div>' : '<div class="vide">Pas d\'activité vendeur sur la période.</div>') + '</div>' +
         '<div class="card"><div class="ch"><h3>Anatomie d\'une vente</h3><span class="pill attente">À brancher · ventes DMS</span></div>' +
         '<div class="vide">La marge par vente (véhicule, financement, services, remise) s\'affichera ici dès que le flux des ventes du DMS sera validé.</div>' +
         '<div class="kpis"><div><div class="n">' + nf(d.cdes) + '</div><div class="l">commandes sur la période</div></div><div><div class="n">' + nf(d.fi) + '</div><div class="l">avec financement</div></div></div></div></div>';
@@ -900,12 +914,20 @@ OD.define('activite', {
       rdv: ['bleu', 'RDV'], livraison: ['vert', 'Livraison'] };
     const hm = iso => { const d = new Date(iso); return isNaN(d) ? '' : d.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Paris' }); };
     const ilYa = iso => { const m = Math.round((Date.now() - new Date(iso).getTime()) / 60000); return isNaN(m) ? '' : m < 1 ? 'à l\'instant' : m < 60 ? 'il y a ' + m + ' min' : m < 1440 ? 'il y a ' + Math.floor(m / 60) + ' h ' + String(m % 60).padStart(2, '0') : 'le ' + new Date(iso).toLocaleDateString('fr-FR', { day: 'numeric', month: 'short' }) + ' à ' + hm(iso); };
-    function cleDirect() { const site = siteUnique(); return site == null ? null : 'd:' + site; }
+    // v11 : un jour choisi (S.directJour, AAAA-MM-JJ) ; vide = aujourd'hui, en direct.
+    function jourParis(dt) { return new Date(dt || Date.now()).toLocaleDateString('sv-SE', { timeZone: 'Europe/Paris' }); }
+    function dateLongue(iso) { const p = String(iso || '').split('-').map(Number); if (p.length < 3) return ''; const x = new Date(p[0], p[1] - 1, p[2]); return JOURS[x.getDay()] + ' ' + x.getDate() + ' ' + MOIS[x.getMonth()]; }
+    function directLive() { return !S.directJour || S.directJour >= jourParis(); }
+    function cleDirect() { const site = siteUnique(); return site == null ? null : 'd:' + site + ':' + (directLive() ? '' : S.directJour); }
     async function rafraichirDirect(force) {
       const cle = cleDirect(); if (!cle || S.charge[cle]) return;
       if (!force && S.data[cle] !== undefined && S.data[cle].__le && Date.now() - S.data[cle].__le < 50000) return;
       S.charge[cle] = true;
-      try { const r = await rpc('act_direct', { p_id_site: Number(cle.slice(2)) }); if (r) r.__le = Date.now(); S.data[cle] = r; }
+      try {
+        const site = Number(cle.split(':')[1]), jour = cle.split(':')[2] || null;
+        const r = await rpc('act_direct', jour ? { p_id_site: site, p_jour: jour } : { p_id_site: site });
+        if (r) r.__le = Date.now(); S.data[cle] = r;
+      }
       catch (e) { console.error('[activite] direct', e); if (S.data[cle] === undefined) S.data[cle] = { __err: e.message || String(e) }; }
       S.charge[cle] = false;
       if (S.ecran === 'direct') rendre();
@@ -915,7 +937,7 @@ OD.define('activite', {
       window.__act4Direct = setInterval(() => {
         const st = window.__act4; let cache = false;
         try { cache = FW().document.hidden; } catch (e) { }
-        if (st && st.ecran === 'direct' && !cache && window.__act4RafDirect) window.__act4RafDirect();
+        if (st && st.ecran === 'direct' && !cache && window.__act4RafDirect && window.__act4DirectLive && window.__act4DirectLive()) window.__act4RafDirect();
       }, 60000);
     }
     function tuile(n, lib, avant, alerte) {
@@ -929,28 +951,36 @@ OD.define('activite', {
     function ecranDirect() {
       const site = siteUnique();
       if (site == null) return '<div class="vide">Aucun site dans votre périmètre.</div>';
-      const cle = 'd:' + site, d = S.data[cle];
-      const bacsVieux = d && d.bacs_a_jour && (Date.now() - new Date(d.bacs_a_jour).getTime()) > 30 * 60000;
-      const rail = '<div class="rail"><h1>En direct</h1><span class="badge">' + esc(nomSite(site)) + '</span><div class="droite">'
-        + (d && d.__le ? '<span class="live' + (bacsVieux ? ' vieux' : '') + '"><i></i>Mis à jour à ' + hm(d.__le) + '</span>' : '')
-        + '<button class="btn sec" data-direct-maj="1">Actualiser</button></div></div>';
+      const live = directLive(), cle = cleDirect(), d = S.data[cle];
+      const bacsVieux = live && d && d.bacs_a_jour && (Date.now() - new Date(d.bacs_a_jour).getTime()) > 30 * 60000;
+      const auj = jourParis(), choisi = live ? auj : S.directJour;
+      const hier = jourParis(Date.now() - 86400000);
+      // v11 : sélecteur de jour — aujourd'hui (en direct), hier, ou n'importe quel jour passé.
+      const selJour = '<div class="seg"><button data-direct-jour="" aria-pressed="' + live + '">Aujourd\'hui</button>'
+        + '<button data-direct-jour="' + hier + '" aria-pressed="' + (choisi === hier) + '">Hier</button></div>'
+        + '<input type="date" class="djour" data-direct-date="1" max="' + auj + '" value="' + esc(choisi) + '" aria-label="Choisir un jour">';
+      const rail = '<div class="rail"><h1>' + (live ? 'En direct' : 'Journée du ' + esc(dateLongue(choisi))) + '</h1><span class="badge">' + esc(nomSite(site)) + '</span><div class="droite">'
+        + selJour
+        + (live && d && d.__le ? '<span class="live' + (bacsVieux ? ' vieux' : '') + '"><i></i>Mis à jour à ' + hm(d.__le) + '</span>' : '')
+        + (live ? '<button class="btn sec" data-direct-maj="1">Actualiser</button>' : '') + '</div></div>';
       if (d === undefined) { rafraichirDirect(true); return rail + charge('La journée se charge…'); }
       if (d && d.__err) return rail + erreur(d);
       if (!d) return rail + '<div class="vide">Aucune donnée.</div>';
       const t = d.totaux || {}, w = d.semaine_passee || {}, now = new Date();
-      const jour = JOURS[now.getDay()] + ' ' + now.getDate() + ' ' + MOIS[now.getMonth()] + ', ' + hm(now);
+      const jour = live ? JOURS[now.getDay()] + ' ' + now.getDate() + ' ' + MOIS[now.getMonth()] + ', ' + hm(now)
+                        : dateLongue(choisi) + ', journée complète';
       let titre = '<b>' + plur(t.commandes || 0, 'commande') + '</b>';
       if (t.commandes) titre += ' (' + [t.commandes_vn ? t.commandes_vn + ' VN' : '', t.commandes_vo ? t.commandes_vo + ' VO' : ''].filter(Boolean).join(', ') + ')';
-      titre += ', <b>' + plur(t.devis || 0, 'simulation') + '</b> et <b>' + plur(t.leads || 0, 'lead') + '</b> depuis ce matin.';
-      if (t.pool) titre += ' <b>' + plur(t.pool, 'lead attend', 'leads attendent') + '</b> dans le Pool.';
+      titre += ', <b>' + plur(t.devis || 0, 'simulation') + '</b> et <b>' + plur(t.leads || 0, 'lead') + '</b>' + (live ? ' depuis ce matin.' : ' ce jour-là.');
+      if (live && t.pool) titre += ' <b>' + plur(t.pool, 'lead attend', 'leads attendent') + '</b> dans le Pool.';
       const band = '<div class="band" style="grid-template-columns:minmax(0,1fr)"><div><div class="q">' + esc(jour) + '</div><h2>' + titre + '</h2>'
         + '<div class="tuiles">'
         + tuile(t.commandes, 'commandes<br><small style="font-weight:600;color:var(--ink-3)">VN transmises · VO validées</small>', w.commandes)
         + tuile(t.devis, 'simulations', w.devis)
         + tuile(t.affaires, 'opportunités ouvertes', w.affaires)
         + tuile(t.leads, 'leads reçus · ' + nf(t.leads_pris) + ' pris · ' + nf(t.leads_contactes) + ' joints', w.leads)
-        + tuile(t.pool, 'en attente dans le Pool', null, t.pool > 0)
-        + tuile(t.rdv_faits, 'RDV passés · ' + nf(t.rdv_a_venir) + ' à venir' + (t.livraisons ? ' · ' + plur(t.livraisons, 'livraison') : ''), null)
+        + (live ? tuile(t.pool, 'en attente dans le Pool', null, t.pool > 0) : '')
+        + tuile(t.rdv_faits, (live ? 'RDV passés · ' + nf(t.rdv_a_venir) + ' à venir' : 'RDV') + (t.livraisons ? ' · ' + plur(t.livraisons, 'livraison') : ''), null)
         + tuile(t.appels_sortants, 'appels sortants · ' + nf(t.appels_entrants) + ' entrants', w.appels_sortants)
         + '</div></div></div>';
       const avert = bacsVieux ? lecture('Les commandes et simulations viennent de BACS : la dernière remontée date <b>' + esc(ilYa(d.bacs_a_jour)) + '</b>. Tant que la récolte BACS ne tourne pas, ces chiffres ne bougent pas.') : '';
@@ -967,23 +997,26 @@ OD.define('activite', {
           + (sous ? '<small>' + esc(sous) + '</small>' : '') + '</div><span class="pill ' + g[0] + '">' + esc(g[1]) + (f.univers ? ' ' + esc(f.univers) : '') + '</span></div>';
       };
       const cFil = '<div class="card"><div class="ch"><h3>Le fil de la journée</h3><span>' + plur(fil.length, 'événement') + ', le plus récent en haut</span></div>'
-        + (fil.length ? '<div>' + fil.map(ligne).join('') + '</div>' : '<div class="vide">Rien encore aujourd\'hui.</div>') + '</div>';
+        + (fil.length ? '<div>' + fil.map(ligne).join('') + '</div>' : '<div class="vide">' + (live ? 'Rien encore aujourd\'hui.' : 'Rien ce jour-là.') + '</div>') + '</div>';
       const eq = d.equipe || [];
-      const point = it => { if (!it) return ''; const m = (Date.now() - new Date(it).getTime()) / 60000; return m < 90 ? 'v' : m < 180 ? 'o' : ''; };
+      const point = it => { if (!it || !live) return ''; const m = (Date.now() - new Date(it).getTime()) / 60000; return m < 90 ? 'v' : m < 180 ? 'o' : ''; };
       const z = n => '<td' + (Number(n) ? '' : ' class="z"') + '>' + nf(n) + '</td>';
-      const cEq = '<div class="card"><div class="ch"><h3>L\'équipe aujourd\'hui</h3><span>Point vert : actif depuis moins d\'1 h 30</span></div>'
+      const cEq = '<div class="card"><div class="ch"><h3>' + (live ? 'L\'équipe aujourd\'hui' : 'L\'équipe ce jour-là') + '</h3><span>' + (live ? 'Point vert : actif depuis moins d\'1 h 30' : 'Vu à : dernière action de la journée') + '</span></div>'
         + (eq.length ? '<div class="scroll"><table class="eqd"><thead><tr><th>Vendeur</th><th>Cdes</th><th>Simu</th><th>RDV</th><th>Appels</th><th>Leads</th><th>Vu à</th></tr></thead><tbody>'
           + eq.map(p => '<tr><td><span class="pt ' + point(p.derniere_action) + '"></span><b>' + esc(p.nom || '') + '</b></td>' + z(p.commandes) + z(p.devis) + z(p.rdv) + z(p.appels)
             + '<td' + (Number(p.leads_pris) ? '' : ' class="z"') + '>' + nf(p.leads_contactes) + '/' + nf(p.leads_pris) + '</td><td' + (p.derniere_action ? '' : ' class="z"') + '>' + (p.derniere_action ? esc(hm(p.derniere_action)) : '—') + '</td></tr>').join('')
-          + '</tbody></table></div><div class="note">Leads : joints / pris aujourd\'hui. Appels : sortants passés par le 3CX.</div>' : '<div class="vide">Personne à suivre sur ce site.</div>') + '</div>';
+          + '</tbody></table></div><div class="note">Leads : joints / pris ' + (live ? 'aujourd\'hui' : 'ce jour-là') + '. Appels : sortants passés par le 3CX.</div>' : '<div class="vide">Personne à suivre sur ce site.</div>') + '</div>';
       const av = d.a_venir || [];
       const cAv = '<div class="card"><div class="ch"><h3>Encore aujourd\'hui</h3><span>' + plur(av.length, 'rendez-vous', 'rendez-vous') + '</span></div>'
         + (av.length ? '<div>' + av.map(r => '<div class="tl"><time>' + esc(hm(r.quand)) + '</time><div class="pin"><i></i></div><div class="tx"><b>' + esc((r.type || 'RDV') + (r.client ? ' · ' + r.client : '')) + '</b><small>' + esc(r.qui || '') + '</small></div></div>').join('') + '</div>'
           : '<div class="vide">Plus de rendez-vous prévu aujourd\'hui.</div>') + '</div>';
-      return rail + band + avert + '<div class="cols"><div class="pile">' + cFil + '</div><div class="pile">' + cEq + cAv + '</div></div>'
-        + '<div class="note">Commandes : VN au jour de la transmission au constructeur, VO validées ou en attente d\'approbation. Simulations : devis créés dans BACS. Hors grands comptes. Comparaison avec le même jour, à la même heure, il y a 7 jours. L\'écran se met à jour tout seul toutes les minutes.</div>';
+      return rail + band + avert + '<div class="cols"><div class="pile">' + cFil + '</div><div class="pile">' + cEq + (live ? cAv : '') + '</div></div>'
+        + '<div class="note">Commandes : VN au jour de la transmission au constructeur, VO validées ou en attente d\'approbation. Simulations : devis créés dans BACS. Hors grands comptes. '
+        + (live ? 'Comparaison avec le même jour, à la même heure, il y a 7 jours. L\'écran se met à jour tout seul toutes les minutes.'
+                : 'Comparaison avec la journée entière d\'il y a 7 jours.') + '</div>';
     }
     window.__act4RafDirect = () => rafraichirDirect(false);
+    window.__act4DirectLive = directLive;
 
     // ------------------------------------------------------------------ rendu
     const LIB_ECRAN = { direct: 'En direct', vendeur: 'Ma journée', chef: 'Point du matin', site: 'Site', groupe: 'Groupe' };
@@ -1020,6 +1053,8 @@ OD.define('activite', {
         if (!deb || !fin || deb > fin) return;
         S.plage = { deb, fin }; S.periode.chef = 'libre'; rendre();
       }));
+      __anchor.querySelectorAll('[data-direct-jour]').forEach(b => b.addEventListener('click', () => { S.directJour = b.getAttribute('data-direct-jour') || null; rendre(); }));
+      __anchor.querySelectorAll('[data-direct-date]').forEach(inp => inp.addEventListener('change', () => { const v = inp.value; if (!v) return; S.directJour = v >= jourParis() ? null : v; rendre(); }));
       __anchor.querySelectorAll('[data-direct-maj]').forEach(b => b.addEventListener('click', () => { b.disabled = true; b.textContent = 'Actualisation…'; rafraichirDirect(true); }));
       __anchor.querySelectorAll('[data-vendeur]').forEach(b => b.addEventListener('click', () => choisirVendeur(b.getAttribute('data-vendeur'))));
       __anchor.querySelectorAll('[data-fiche]').forEach(b => b.addEventListener('click', () => ouvrirFiche(b.getAttribute('data-fiche'))));
