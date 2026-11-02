@@ -1,5 +1,9 @@
 // ============================================================================
 //  SUIVI D'ACTIVITÉ v4 (28/10/2026) — un écran par rôle, une question par écran
+//  v12 (02/11/2026) : le choix d'un jour d'« En direct » ne réagissait pas au
+//    clic (le calendrier natif du navigateur ne s'ouvre pas dans la page) :
+//    il passe par le calendrier One Data, en mode « un seul jour », jours à
+//    venir grisés.
 //  v11 (02/11/2026) : « En direct » reçoit un sélecteur de jour (Aujourd'hui,
 //    Hier, ou un jour passé au calendrier) ; un jour passé est montré en entier
 //    et comparé à la journée entière d'il y a 7 jours, sans Pool ni rafraîchissement.
@@ -79,6 +83,7 @@ OD.define('activite', {
         + '#od-dp .kan-dp-day.today{box-shadow:inset 0 0 0 1.5px #acc5e4}'
         + '#od-dp .kan-dp-day.sel{background:#2a5ea9;color:#fff;font-weight:800}'
         + '#od-dp .kan-dp-day.inr{background:#eef4fc}'
+        + '#od-dp .kan-dp-day.off{color:#c9d6e8;cursor:default}#od-dp .kan-dp-day.off:hover{background:transparent}'
         + '#od-dp .kan-dp-foot{margin-top:8px;text-align:center;font-size:10px;color:#9bb3d1;font-style:italic}';
       doc.head.appendChild(st);
     }
@@ -94,7 +99,9 @@ OD.define('activite', {
       var p = doc.getElementById('od-dp'); if (p) p.remove();
       if (dehors) { doc.removeEventListener('mousedown', dehors, true); dehors = null; }
     }
-    function ouvrir(anchor, debut, surChoix) {
+    // opts.simple : un seul jour (un clic) ; opts.max : dernier jour cliquable (AAAA-MM-JJ).
+    function ouvrir(anchor, debut, surChoix, opts) {
+      opts = opts || {};
       if (doc.getElementById('od-dp')) { fermer(); return; }
       style();
       var pk = { mois: null, deb: null, fin: null, survol: null };
@@ -115,21 +122,25 @@ OD.define('activite', {
         for (var d = 1; d <= nb; d++) {
           var ds = ymd(y, m, d), c = 'kan-dp-day';
           if (ds === today) c += ' today';
+          if (opts.max && ds > opts.max) c += ' off';
+          if (opts.simple && ds === String(debut || '').slice(0, 10)) c += ' sel';
           if (pk.deb === ds || pk.fin === ds) c += ' sel'; else if (lo && hi && ds > lo && ds < hi) c += ' inr';
           h += '<span class="' + c + '" data-d="' + ds + '">' + d + '</span>';
         }
-        return h + '</div><div class="kan-dp-foot">' + (pk.deb ? 'Cliquez la date de fin' : 'Cliquez la date de début') + '</div></div>';
+        return h + '</div><div class="kan-dp-foot">' + (opts.simple ? 'Choisissez un jour' : pk.deb ? 'Cliquez la date de fin' : 'Cliquez la date de début') + '</div></div>';
       }
       function brancher() {
         pop.querySelectorAll('[data-nav]').forEach(function (b) { b.addEventListener('click', function (ev) { ev.stopPropagation(); pk.mois = new Date(pk.mois.getFullYear(), pk.mois.getMonth() + Number(b.getAttribute('data-nav')), 1); peindre(); }); });
         pop.querySelectorAll('.kan-dp-day').forEach(function (c) {
           c.addEventListener('click', function () {
             var ds = c.getAttribute('data-d');
+            if (opts.max && ds > opts.max) return;
+            if (opts.simple) { fermer(); surChoix(ds, ds); return; }
             if (!pk.deb || pk.fin) { pk.deb = ds; pk.fin = null; pk.survol = null; peindre(); return; }
             pk.fin = ds; var a = pk.deb, b = pk.fin; if (b < a) { var t = a; a = b; b = t; }
             fermer(); surChoix(a, b);
           });
-          c.addEventListener('mouseenter', function () { if (pk.deb && !pk.fin && pk.survol !== c.getAttribute('data-d')) { pk.survol = c.getAttribute('data-d'); peindre(); } });
+          c.addEventListener('mouseenter', function () { if (opts.simple) return; if (pk.deb && !pk.fin && pk.survol !== c.getAttribute('data-d')) { pk.survol = c.getAttribute('data-d'); peindre(); } });
         });
       }
       function peindre() { pop.innerHTML = cal(); brancher(); }
@@ -138,7 +149,8 @@ OD.define('activite', {
       setTimeout(function () { doc.addEventListener('mousedown', dehors, true); }, 0);
     }
     function moisEnCours() { var a = new Date(); return { du: ymd(a.getFullYear(), a.getMonth(), 1), au: ymd(a.getFullYear(), a.getMonth(), a.getDate()) }; }
-    return { bouton: bouton, ouvrir: ouvrir, fermer: fermer, fmt: fmt, moisEnCours: moisEnCours };
+    function boutonJour(libelle, attrs) { style(); return '<button type="button" class="od-range" ' + (attrs || '') + '>📅 <span class="od-range-t">' + e(libelle) + '</span> <span class="od-caret">▾</span></button>'; }
+    return { bouton: bouton, boutonJour: boutonJour, ouvrir: ouvrir, fermer: fermer, fmt: fmt, moisEnCours: moisEnCours };
   }
     const DP = odPeriodeKit(doc, FW());
     const SUPABASE_URL = ctx.tenant.supabase_url;
@@ -958,7 +970,7 @@ OD.define('activite', {
       // v11 : sélecteur de jour — aujourd'hui (en direct), hier, ou n'importe quel jour passé.
       const selJour = '<div class="seg"><button data-direct-jour="" aria-pressed="' + live + '">Aujourd\'hui</button>'
         + '<button data-direct-jour="' + hier + '" aria-pressed="' + (choisi === hier) + '">Hier</button></div>'
-        + '<input type="date" class="djour" data-direct-date="1" max="' + auj + '" value="' + esc(choisi) + '" aria-label="Choisir un jour">';
+        + DP.boutonJour(new Date(choisi + 'T12:00:00').toLocaleDateString('fr-FR', { weekday: 'short', day: '2-digit', month: '2-digit', year: 'numeric' }), 'data-direct-cal="1" aria-label="Choisir un jour"');
       const rail = '<div class="rail"><h1>' + (live ? 'En direct' : 'Journée du ' + esc(dateLongue(choisi))) + '</h1><span class="badge">' + esc(nomSite(site)) + '</span><div class="droite">'
         + selJour
         + (live && d && d.__le ? '<span class="live' + (bacsVieux ? ' vieux' : '') + '"><i></i>Mis à jour à ' + hm(d.__le) + '</span>' : '')
@@ -1054,7 +1066,11 @@ OD.define('activite', {
         S.plage = { deb, fin }; S.periode.chef = 'libre'; rendre();
       }));
       __anchor.querySelectorAll('[data-direct-jour]').forEach(b => b.addEventListener('click', () => { S.directJour = b.getAttribute('data-direct-jour') || null; rendre(); }));
-      __anchor.querySelectorAll('[data-direct-date]').forEach(inp => inp.addEventListener('change', () => { const v = inp.value; if (!v) return; S.directJour = v >= jourParis() ? null : v; rendre(); }));
+      __anchor.querySelectorAll('[data-direct-cal]').forEach(btn => btn.addEventListener('click', (ev) => {
+        ev.stopPropagation();
+        const auj = jourParis();
+        DP.ouvrir(btn, S.directJour || auj, (v) => { S.directJour = v >= auj ? null : v; rendre(); }, { simple: true, max: auj });
+      }));
       __anchor.querySelectorAll('[data-direct-maj]').forEach(b => b.addEventListener('click', () => { b.disabled = true; b.textContent = 'Actualisation…'; rafraichirDirect(true); }));
       __anchor.querySelectorAll('[data-vendeur]').forEach(b => b.addEventListener('click', () => choisirVendeur(b.getAttribute('data-vendeur'))));
       __anchor.querySelectorAll('[data-fiche]').forEach(b => b.addEventListener('click', () => ouvrirFiche(b.getAttribute('data-fiche'))));
