@@ -1,6 +1,10 @@
 // ============================================================================
 //  LEAD MANAGEMENT — module One Data (OD.define 'lead-mgmt')
-//  VERSION TEAM COLIN (v92) — déploiement CIBLÉ (publish-targets :
+//  VERSION TEAM COLIN (v93) — déploiement CIBLÉ (publish-targets :
+//  v93 (02/11/2026) : tuiles au design One Data (fond bleu très pâle, sans
+//    bordure ni ombre, coins 8 px, chiffres en bleu, aucun rouge ni beige).
+//    Liseré bleu à gauche au survol, seulement sur une tuile cliquable ;
+//    la tuile choisie garde son liseré en bleu foncé.
 //  v92 (02/11/2026) : le chef des ventes peut s'attribuer un lead : « Moi »
 //  en tête de la liste des vendeurs, et bouton « Pour moi » sur le Pool de
 //  son accueil. Le lead passe dans son onglet « Mes leads ».
@@ -2270,6 +2274,8 @@
 .lmsv .sv-k.good b{color:var(--m-vert)}
 .lmsv .sv-k.warn{background:var(--alerte-bg);border-color:#f0d9a0}.lmsv .sv-k.warn b{color:var(--m-orange)}
 .lmsv .sv-k.bad{background:var(--chaud-bg);border-color:#f2c4c4}.lmsv .sv-k.bad b{color:var(--m-rouge)}
+.lmsv .sv-k,.lmsv .sv-k.warn,.lmsv .sv-k.bad{background:#f5f8fc;border:0;border-radius:8px;box-shadow:none}
+.lmsv .sv-k span{color:#7a9cc4}.lmsv .sv-k b{color:#2a5ea9}.lmsv .sv-k.good b{color:#53bda7}.lmsv .sv-k.warn b,.lmsv .sv-k.bad b{color:#c7820a}
 .lmsv .sv-g2{display:grid;grid-template-columns:minmax(0,1.45fr) minmax(0,1fr);gap:14px;align-items:start;margin-bottom:14px}
 .lmsv .sv-g3{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px;align-items:start;margin-top:14px}
 .lmsv .sv-pan{background:var(--card);border:1px solid var(--line);border-radius:14px;box-shadow:var(--ombre);padding:14px;display:grid;gap:8px;min-width:0;align-content:start}
@@ -5559,6 +5565,7 @@
 .lmtc-ov .fx-tiles{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}
 .lmtc-ov .fx-tiles>div{border:1px solid #e6eef8;border-radius:14px;padding:14px 16px;display:grid;gap:3px}.lmtc-ov .fx-tiles span{font-size:11px;font-weight:900;letter-spacing:.06em;text-transform:uppercase;color:#4b5563}
 .lmtc-ov .fx-tiles b{font-size:14.5px;font-weight:900;color:#1c2b45}.lmtc-ov .fx-tiles small{font-size:12.5px;color:#4b5563}
+.lmtc-ov .fx-tiles>div{background:#f5f8fc;border:0;border-radius:8px}.lmtc-ov .fx-tiles span{color:#7a9cc4}.lmtc-ov .fx-tiles b{color:#1F4A85}.lmtc-ov .fx-tiles small{color:#4a6a8a}
 @media (max-width:620px){.lmtc-ov .fx-delco,.lmtc-ov .fx-tiles{grid-template-columns:minmax(0,1fr)}}
 .lmtc-ov .fx-fil{display:flex;gap:12px;padding:8px 0;border-bottom:1px solid #f0f4fa;font-size:13px;align-items:flex-start}.lmtc-ov .fx-fil:last-child{border-bottom:0}
 .lmtc-ov .fx-fil .q{flex:0 0 92px;color:#4b5563;font-weight:700}.lmtc-ov .fx-fil i{flex:0 0 auto;width:8px;height:8px;border-radius:50%;margin-top:6px}
