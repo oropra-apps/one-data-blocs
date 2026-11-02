@@ -1,4 +1,13 @@
 // ============================================================================
+//  v34 (02/11/2026) : FICHE VITRINE PDF. Nouveau document, sur le modèle de
+//    l'« affiche Label » imprimée par Planet VO² : page 1 vitrine (photos, prix,
+//    n° VO, kilométrage, garantie, CO₂, Crit'Air, QR vers l'annonce), page 2
+//    fiche technique et liste complète des équipements.
+//    * barre de sélection : bouton « Fiche vitrine » à côté de l'affiche prix
+//      (jusqu'à 50 véhicules, 2 pages chacun) ;
+//    * fiche d'un VO : bouton « Fiche vitrine » dans l'en-tête, pour ce VO.
+//    Même Edge Function (generate-vo-poster v41), gabarit TEMPLATE_FICHE ; les
+//    données sont relues en base (public.vo_fiche_vitrine_donnees).
 //  v33 (29/10/2026) : FILTRE MODÈLE PAR FAMILLE. Les libellés Planet VO² / DBS
 //    d'un même modèle (« Yaris », « YARIS », « YARIS HYBRIDE », « YARISHYBRIDE »)
 //    sont regroupés : v_liste_vo.MODELE_FAMILLE (table public.ref_modele_famille,
@@ -197,6 +206,7 @@ OD.define('vo-liste', {
   var SUPABASE_URL = ctx.tenant.supabase_url;
   var SUPABASE_KEY = ctx.tenant.supabase_anon_key;
   var TEMPLATE_VO = '05ac91b9-fc68-470e-aa7b-1cbbbfdcd154';  // template affiche VO
+  var TEMPLATE_FICHE = 'b7e3f0d2-5a41-4c8e-9f16-2d0a7c3e8b51';  // fiche vitrine VO (v34)
   var MAX_AFFICHES = 50;
   var FN_POSTER = SUPABASE_URL + '/functions/v1/generate-vo-poster';
   var FN_XLSX = SUPABASE_URL + '/functions/v1/export-xslx';
@@ -517,6 +527,7 @@ OD.define('vo-liste', {
       + '.vf-status.cm{background:#fcebeb;color:#a32d2d;border:1px solid #f5a5a5}'
       + '.vf-close{position:absolute;top:12px;right:12px;width:34px;height:34px;border-radius:50%;border:1.5px solid #e2eaf5;background:#fff;cursor:pointer;display:flex;align-items:center;justify-content:center;color:#7a98c5;flex:0 0 auto;transition:all .12s;z-index:10}'
       + '.vf-close:hover{background:#fcebeb;border-color:#e24b4a;color:#e24b4a}'
+      + '.vf-pdf{display:inline-flex;align-items:center;gap:6px;padding:6px 12px;border-radius:999px;background:#fff;color:#2a5ea9;font:inherit;font-size:13px;font-weight:700;border:1.5px solid #d6e2f2;cursor:pointer;white-space:nowrap;flex-shrink:0;transition:all .12s}.vf-pdf:hover{border-color:#53bda7;color:#1F4A85}.vf-pdf:disabled{cursor:wait}.vf-pdf svg{width:15px;height:15px}'
       + '.vf-like{padding:7px 14px;border-radius:999px;background:#53bda7;color:#fff;font:inherit;font-size:13px;font-weight:700;border:none;cursor:pointer;transition:background .12s;white-space:nowrap;flex-shrink:0}'
       + '.vf-like:hover{background:#3da08a}'
       // chips KPI
@@ -598,7 +609,7 @@ OD.define('vo-liste', {
       + '.vf-apv-table tfoot td:first-child{text-align:left;color:#54678a;font-weight:600}'
       + '@media(max-width:700px){.vf-apv-kpis{grid-template-columns:1fr}.vf-apv-table .c-ref{width:120px}.vf-apv-table .c-num{width:78px}}'
       + '@media(max-width:860px){.vf-fiche{grid-template-columns:1fr}.vf-sections{grid-template-columns:1fr 1fr}}'
-      + '@media(max-width:600px){.vf-sections{grid-template-columns:1fr}.vf-head{padding:12px 48px 10px 14px}.vf-head-top{flex-wrap:wrap;gap:8px}.vf-head-right{gap:6px;max-width:100%}.vf-title{font-size:16px;line-height:1.2}.vf-sub{font-size:11px}.vf-price{font-size:15px}.vf-status{font-size:10px;padding:3px 8px}.vf-like{font-size:11px;padding:5px 11px}.vf-body{padding:12px 14px}.vf-tabs{padding:0 14px}.vf-tab{padding:9px 12px;font-size:12px}.vf-chips{gap:6px;margin-top:8px}.vf-chip{padding:5px 9px;font-size:11px}}'
+      + '@media(max-width:600px){.vf-sections{grid-template-columns:1fr}.vf-head{padding:12px 48px 10px 14px}.vf-head-top{flex-wrap:wrap;gap:8px}.vf-head-right{gap:6px;max-width:100%}.vf-title{font-size:16px;line-height:1.2}.vf-sub{font-size:11px}.vf-price{font-size:15px}.vf-status{font-size:10px;padding:3px 8px}.vf-like{font-size:11px;padding:5px 11px}.vf-pdf{font-size:11px;padding:4px 10px}.vf-body{padding:12px 14px}.vf-tabs{padding:0 14px}.vf-tab{padding:9px 12px;font-size:12px}.vf-chips{gap:6px;margin-top:8px}.vf-chip{padding:5px 9px;font-size:11px}}'
       + '</style>';
 
     // ── header ──
@@ -610,6 +621,7 @@ OD.define('vo-liste', {
       + '<div class="vf-head-right">'
       + '<div class="vf-price">' + esc(prix) + '</div>'
       + '<span class="vf-status ' + (isDisp ? 'dispo' : 'cm') + '">' + (isDisp ? 'Disponible à la vente' : 'Contremarqué') + '</span>'
+      + '<button type="button" class="vf-pdf" id="vf-pdf" title="Fiche vitrine de ce VO (PDF)">' + IC.pdf + 'Fiche vitrine</button>'
       + '<button type="button" class="vf-like" id="vf-like">' + (odCreaPropaleSync() ? 'Like / P.Com' : 'Like') + '</button>'
       + '</div>'
       + '</div>';
@@ -646,6 +658,12 @@ OD.define('vo-liste', {
 
     // bindings
     doc.getElementById('vf-close').addEventListener('click', closeFichePopup);
+    var pdfBtn = doc.getElementById('vf-pdf');
+    if (pdfBtn) pdfBtn.addEventListener('click', function (e) {
+      e.stopPropagation();
+      var r = ficheState.row; if (!r) return;
+      generatePosters(pdfBtn, TEMPLATE_FICHE, 'fiche_vitrine_' + (r.NUMERO_POLICE || r.VIN) + '_', [r]);
+    });
     var likeBtn = doc.getElementById('vf-like');
     if (likeBtn) likeBtn.addEventListener('click', function (e) {
       e.stopPropagation();
@@ -2282,6 +2300,7 @@ OD.define('vo-liste', {
     + '.vo-btn:hover{border-color:#53bda7;color:#1F4A85}.vo-btn svg{width:16px;height:16px}'
     + '.vo-btn.primary{border:none;background:#2a5ea9;color:#fff}.vo-btn.primary:hover{background:#1F4A85;color:#fff}'
     + '.vo-btn.ghost{border:none;background:transparent;color:#7a98c5}.vo-btn.ghost:hover{color:#e24b4a}'
+    + '.vo-btn.vo-btn-fiche{padding:7px 12px;font-size:13px;border-radius:9px}'
     + '.vo-btn .vo-fbadge{min-width:18px;height:18px;padding:0 5px;border-radius:9px;background:#53bda7;color:#fff;font-size:10px;font-weight:800;display:inline-flex;align-items:center;justify-content:center}'
     + '.vo-toggle{display:flex;align-items:center;gap:9px;margin-left:auto;font-size:13px;font-weight:700;color:#7a98c5}'
     + '.vo-switch{position:relative;width:46px;height:26px;border-radius:14px;background:#d8e2f0;cursor:pointer;transition:background .2s;flex:0 0 auto}'
@@ -2566,7 +2585,8 @@ OD.define('vo-liste', {
     return '<div class="vo-selbar" id="vo-selbar"' + (n ? '' : ' style="display:none"') + '>'
       + '<span class="vo-selbar-n"><b id="vo-seln">' + n + '</b> véhicule(s) sélectionné(s)</span>'
       + '<div class="vo-selbar-acts">'
-      + '<button type="button" class="vo-logo" id="vo-pdf" title="Générer les affiches prix (PDF)" onclick="window.__voPosters()">' + LOGO.pdf + '</button>'
+      + '<button type="button" class="vo-logo" id="vo-pdf" title="Affiches prix (PDF)" onclick="window.__voPosters()">' + LOGO.pdf + '</button>'
+      + '<button type="button" class="vo-btn vo-btn-fiche" id="vo-fiche" title="Fiche vitrine : 2 pages par véhicule (PDF)" onclick="window.__voFiches()">' + IC.pdf + 'Fiche vitrine</button>'
       + '<button type="button" class="vo-logo" id="vo-xls" title="Exporter la sélection (Excel)" onclick="window.__voExcel()">' + LOGO.xls + '</button>'
       + '<button type="button" class="vo-btn ghost" id="vo-selclear" onclick="window.__voClearSel()">Effacer la sélection</button>'
       + '</div></div>';
@@ -2814,8 +2834,8 @@ OD.define('vo-liste', {
     return null;
   }
   function busy(btn, on) { if (!btn) return; btn.disabled = on; btn.style.opacity = on ? '.45' : ''; }
-  async function generatePosters(btn) {
-    var rows = selectedRows();
+  async function generatePosters(btn, templateId, prefixe, lignes) {
+    var rows = lignes || selectedRows();
     if (!rows.length) return;
     if (rows.length > MAX_AFFICHES) { try { alert('Trop de véhicules (' + rows.length + '). Maximum ' + MAX_AFFICHES + '.'); } catch (e) { } return; }
     var jwt = await getJwt();
@@ -2826,7 +2846,7 @@ OD.define('vo-liste', {
       var res = await fetch(FN_POSTER, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + jwt, 'apikey': SUPABASE_KEY },
-        body: JSON.stringify({ template_id: TEMPLATE_VO, vehicules: rows })
+        body: JSON.stringify({ template_id: templateId || TEMPLATE_VO, vehicules: rows })
       });
       if (!res.ok) {
         var t = ''; try { t = await res.text(); } catch (e) { }
@@ -2837,11 +2857,11 @@ OD.define('vo-liste', {
       if (!result.ok) throw new Error(result.error || 'Erreur de génération');
       var a = doc.createElement('a');
       a.href = result.signed_url;
-      a.download = 'affiches_vo_' + (result.nb_vehicules || rows.length) + 'veh.pdf';
+      a.download = (prefixe || 'affiches_vo_') + (result.nb_vehicules || rows.length) + 'veh.pdf';
       a.target = '_blank';
       doc.body.appendChild(a); a.click(); setTimeout(function () { a.remove(); }, 0);
     } catch (err) {
-      console.error('[vo] affiches', err);
+      console.error('[vo] pdf', err);
       try { alert('Erreur : ' + err.message); } catch (e) { }
     } finally {
       busy(btn, false);
@@ -2969,6 +2989,7 @@ OD.define('vo-liste', {
   function reloadForSite() { S.f.reseau = null; S.f.affaire = null; S.f.site = null; S.sel = {}; start(); }
   window.__voReload = function () { start(true); };
   win.__voPosters = window.__voPosters = function () { generatePosters(doc.getElementById('vo-pdf')); };
+  win.__voFiches = window.__voFiches = function () { generatePosters(doc.getElementById('vo-fiche'), TEMPLATE_FICHE, 'fiches_vitrine_'); };
   win.__voExcel = window.__voExcel = function () { exportExcel(doc.getElementById('vo-xls')); };
   win.__voClearSel = window.__voClearSel = function () { S.sel = {}; renderContent(); };
 
@@ -3525,6 +3546,7 @@ OD.define('vo-liste', {
     + '.vo-btn:hover{border-color:#53bda7;color:#1F4A85}.vo-btn svg{width:16px;height:16px}'
     + '.vo-btn.primary{border:none;background:#2a5ea9;color:#fff}.vo-btn.primary:hover{background:#1F4A85;color:#fff}'
     + '.vo-btn.ghost{border:none;background:transparent;color:#7a98c5}.vo-btn.ghost:hover{color:#e24b4a}'
+    + '.vo-btn.vo-btn-fiche{padding:7px 12px;font-size:13px;border-radius:9px}'
     + '.vo-btn .vo-fbadge{min-width:18px;height:18px;padding:0 5px;border-radius:9px;background:#53bda7;color:#fff;font-size:10px;font-weight:800;display:inline-flex;align-items:center;justify-content:center}'
     + '.vo-toggle{display:flex;align-items:center;gap:9px;margin-left:auto;font-size:13px;font-weight:700;color:#7a98c5}'
     + '.vo-switch{position:relative;width:46px;height:26px;border-radius:14px;background:#d8e2f0;cursor:pointer;transition:background .2s;flex:0 0 auto}'
@@ -3977,7 +3999,8 @@ OD.define('vo-liste', {
     return '<div class="vo-selbar" id="vo-selbar"' + (n ? '' : ' style="display:none"') + '>'
       + '<span class="vo-selbar-n"><b id="vo-seln">' + n + '</b> véhicule(s) sélectionné(s)</span>'
       + '<div class="vo-selbar-acts">'
-      + '<button type="button" class="vo-logo" id="vo-pdf" title="Générer les affiches prix (PDF)" onclick="window.__voPosters()">' + LOGO.pdf + '</button>'
+      + '<button type="button" class="vo-logo" id="vo-pdf" title="Affiches prix (PDF)" onclick="window.__voPosters()">' + LOGO.pdf + '</button>'
+      + '<button type="button" class="vo-btn vo-btn-fiche" id="vo-fiche" title="Fiche vitrine : 2 pages par véhicule (PDF)" onclick="window.__voFiches()">' + IC.pdf + 'Fiche vitrine</button>'
       + '<button type="button" class="vo-logo" id="vo-xls" title="Exporter la sélection (Excel)" onclick="window.__voExcel()">' + LOGO.xls + '</button>'
       + '<button type="button" class="vo-btn ghost" id="vo-selclear" onclick="window.__voClearSel()">Effacer la sélection</button>'
       + '</div></div>';
@@ -4220,8 +4243,8 @@ OD.define('vo-liste', {
     return null;
   }
   function busy(btn, on) { if (!btn) return; btn.disabled = on; btn.style.opacity = on ? '.45' : ''; }
-  async function generatePosters(btn) {
-    var rows = selectedRows();
+  async function generatePosters(btn, templateId, prefixe, lignes) {
+    var rows = lignes || selectedRows();
     if (!rows.length) return;
     if (rows.length > MAX_AFFICHES) { try { alert('Trop de véhicules (' + rows.length + '). Maximum ' + MAX_AFFICHES + '.'); } catch (e) { } return; }
     var jwt = await getJwt();
@@ -4232,7 +4255,7 @@ OD.define('vo-liste', {
       var res = await fetch(FN_POSTER, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + jwt, 'apikey': SUPABASE_KEY },
-        body: JSON.stringify({ template_id: TEMPLATE_VO, vehicules: rows })
+        body: JSON.stringify({ template_id: templateId || TEMPLATE_VO, vehicules: rows })
       });
       if (!res.ok) {
         var t = ''; try { t = await res.text(); } catch (e) { }
@@ -4243,11 +4266,11 @@ OD.define('vo-liste', {
       if (!result.ok) throw new Error(result.error || 'Erreur de génération');
       var a = doc.createElement('a');
       a.href = result.signed_url;
-      a.download = 'affiches_vo_' + (result.nb_vehicules || rows.length) + 'veh.pdf';
+      a.download = (prefixe || 'affiches_vo_') + (result.nb_vehicules || rows.length) + 'veh.pdf';
       a.target = '_blank';
       doc.body.appendChild(a); a.click(); setTimeout(function () { a.remove(); }, 0);
     } catch (err) {
-      console.error('[vo] affiches', err);
+      console.error('[vo] pdf', err);
       try { alert('Erreur : ' + err.message); } catch (e) { }
     } finally {
       busy(btn, false);
@@ -4410,6 +4433,7 @@ OD.define('vo-liste', {
   }
   window.__voReload = function () { start(true); };
   win.__voPosters = window.__voPosters = function () { generatePosters(doc.getElementById('vo-pdf')); };
+  win.__voFiches = window.__voFiches = function () { generatePosters(doc.getElementById('vo-fiche'), TEMPLATE_FICHE, 'fiches_vitrine_'); };
   win.__voExcel = window.__voExcel = function () { exportExcel(doc.getElementById('vo-xls')); };
   win.__voClearSel = window.__voClearSel = function () { S.sel = {}; renderContent(); };
 
