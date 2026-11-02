@@ -1,6 +1,11 @@
 // ============================================================================
 //  LEAD MANAGEMENT — module One Data (OD.define 'lead-mgmt')
-//  VERSION TEAM COLIN (v90) — déploiement CIBLÉ (publish-targets :
+//  VERSION TEAM COLIN (v91) — déploiement CIBLÉ (publish-targets :
+//  v91 (02/11/2026) : retours vendeurs. Historique : un lead dont le client a
+//  acheté est « Vendu » (même s'il était rangé « écarté ») ; le contact fait
+//  depuis la fiche client (appel, SMS, e-mail, WhatsApp, compte rendu) y
+//  figure avec son canal. « Joint · RDV » : plus de raccourcis « Demain
+//  10:00… », seulement le choix de la date et de l'heure.
 //  v90 (02/11/2026) : Historique par rôle. Le vendeur ne voit que ses leads ;
 //  le chef des ventes et la direction voient ceux de toute l'équipe des sites
 //  qu'ils gèrent (site de la barre du haut), avec un filtre « Vendeur » et
@@ -3476,15 +3481,18 @@
                     pas_interesse: 'Clos · pas intéressé', injoignable: 'Clos · injoignable', concurrent: 'Clos · concurrence',
                     doublon: 'Clos · doublon', spam: 'Clos · fausse demande', autre: 'Clos · autre' };
     var ST_LIB = { recu: 'Nouveau', resolu: 'Nouveau', attribue: 'En cours', contacte: 'Contacté', perdu: 'Perdu', rejete: 'Écarté', converti: 'Vendu' };
+    var CANAL_LIB = { 'appel': 'appel', 'SMS': 'SMS', 'e-mail': 'e-mail', 'WhatsApp': 'WhatsApp', 'compte rendu': 'compte rendu' };
     function resLib(h) {
+      if (h.resultat == null) return 'Contacté depuis la fiche client' + (h.canal ? ' · ' + (CANAL_LIB[h.canal] || h.canal) : '');
       if (h.resultat === 'bacs') return 'Dans BACS · ' + (ST_LIB[h.resultat_statut] || h.resultat_statut || '').toLowerCase();
       return RES_LIB[h.resultat] || String(h.resultat || '—').replace(/_/g, ' ');
     }
     function stLib(h) {
+      if (h.vendu_le) return 'Vendu';
       if (h.statut === 'attribue' && !h.encore_a_moi) return h.hierarchie && h.attribue_nom ? 'En cours · ' + prenom(h.attribue_nom) : 'Chez un collègue';
       return ST_LIB[h.statut] || h.statut || '—';
     }
-    function stCls(h) { return { attribue: 'enc', recu: 'enc', resolu: 'enc', contacte: 'ok', converti: 'ok', perdu: 'ko', rejete: 'ko' }[h.statut] || ''; }
+    function stCls(h) { if (h.vendu_le) return 'ok'; return { attribue: 'enc', recu: 'enc', resolu: 'enc', contacte: 'ok', converti: 'ok', perdu: 'ko', rejete: 'ko' }[h.statut] || ''; }
     function histEtat() {
       if (!S.hist) {
         var f = function (x) { return x.getFullYear() + '-' + String(x.getMonth() + 1).padStart(2, '0') + '-' + String(x.getDate()).padStart(2, '0'); };
@@ -3498,8 +3506,8 @@
       catch (e) { H.rows = []; H.err = messageErreur(e); }
       if (S.tab === 'historique') render();
     }
-    function famRes(r) { return r === 'pas_joint' ? 'pas_joint' : (r === 'joint' || r === 'joint_rdv') ? 'joint' : r === 'bacs' ? 'bacs' : RES_LIB[r] && /^Clos/.test(RES_LIB[r]) ? 'clos' : 'autre'; }
-    function famSt(h) { return h.statut === 'attribue' && !h.encore_a_moi && !h.hierarchie ? 'collegue' : ({ recu: 'cours', resolu: 'cours', attribue: 'cours', contacte: 'contacte', converti: 'contacte', perdu: 'perdu', rejete: 'perdu' }[h.statut] || 'autre'); }
+    function famRes(r) { return r == null ? 'fiche' : r === 'pas_joint' ? 'pas_joint' : (r === 'joint' || r === 'joint_rdv') ? 'joint' : r === 'bacs' ? 'bacs' : RES_LIB[r] && /^Clos/.test(RES_LIB[r]) ? 'clos' : 'autre'; }
+    function famSt(h) { if (h.vendu_le) return 'vendu'; return h.statut === 'attribue' && !h.encore_a_moi && !h.hierarchie ? 'collegue' : ({ recu: 'cours', resolu: 'cours', attribue: 'cours', contacte: 'contacte', converti: 'contacte', perdu: 'perdu', rejete: 'perdu' }[h.statut] || 'autre'); }
     function vueHistorique() {
       var H = histEtat(), tous = H.rows || [];
       var hier = POSTE !== 'vendeur' || tous.some(function (x) { return x.hierarchie; });
@@ -3534,10 +3542,12 @@
         + '<label>Du<input type="date" data-x="hist-du" value="' + esc(H.du || '') + '"></label>'
         + '<label>Au<input type="date" data-x="hist-au" value="' + esc(H.au || '') + '"></label>'
         + '<label>Statut<select data-x="hist-statut">' + opt('', 'Tous', H.statut) + opt('cours', (hier ? 'En cours · ' : 'En cours chez moi · ') + cnt(function (x) { return famSt(x) === 'cours'; }), H.statut)
+          + opt('vendu', 'Vendus · ' + cnt(function (x) { return famSt(x) === 'vendu'; }), H.statut)
           + opt('contacte', 'Contactés · ' + cnt(function (x) { return famSt(x) === 'contacte'; }), H.statut) + opt('perdu', 'Perdus ou écartés · ' + cnt(function (x) { return famSt(x) === 'perdu'; }), H.statut)
           + (hier ? '' : opt('collegue', 'Chez un collègue · ' + cnt(function (x) { return famSt(x) === 'collegue'; }), H.statut)) + '</select></label>'
         + '<label>' + (hier ? 'Résultat' : 'Mon résultat') + '<select data-x="hist-res">' + opt('', 'Tous', H.res) + opt('pas_joint', 'Pas joint · ' + cnt(function (x) { return famRes(x.resultat) === 'pas_joint'; }), H.res)
-          + opt('joint', 'Joint · ' + cnt(function (x) { return famRes(x.resultat) === 'joint'; }), H.res) + opt('clos', 'Clos · ' + cnt(function (x) { return famRes(x.resultat) === 'clos'; }), H.res)
+          + opt('joint', 'Joint · ' + cnt(function (x) { return famRes(x.resultat) === 'joint'; }), H.res)
+          + opt('fiche', 'Contact depuis la fiche client · ' + cnt(function (x) { return famRes(x.resultat) === 'fiche'; }), H.res) + opt('clos', 'Clos · ' + cnt(function (x) { return famRes(x.resultat) === 'clos'; }), H.res)
           + opt('bacs', 'Traité dans BACS · ' + cnt(function (x) { return x.resultat === 'bacs'; }), H.res) + opt('autre', 'Autre geste · ' + cnt(function (x) { return famRes(x.resultat) === 'autre'; }), H.res) + '</select></label>'
         + '<label>Source<select data-x="hist-source">' + opt('', 'Toutes', H.source) + sources.map(function (x) { return opt(x, x, H.source); }).join('') + '</select></label>'
         + '<label class="q">Rechercher<input type="text" data-x="hist-q" placeholder="Nom, téléphone, véhicule…" value="' + esc(H.q || '') + '"></label>'
@@ -3558,7 +3568,7 @@
           + '<td>' + esc(x.source_libelle || x.source || '—') + '</td>'
           + '<td>' + esc(siteNom(x.site) || '—') + '</td>'
           + '<td class="l">' + esc(resLib(x)) + (x.note ? '<small title="' + esc(x.note) + '">' + esc(String(x.note).slice(0, 60)) + '</small>' : '') + '</td>'
-          + '<td><span class="h-st ' + stCls(x) + '">' + esc(stLib(x)) + '</span></td>'
+          + '<td><span class="h-st ' + stCls(x) + '"' + (x.vendu_le ? ' title="Vente du ' + esc(jour(x.vendu_le)) + '"' : '') + '>' + esc(stLib(x)) + '</span>' + (x.vendu_le ? '<small>le ' + esc(jour(x.vendu_le)) + '</small>' : '') + '</td>'
           + '<td>' + suite + '</td></tr>';
       });
       return h + '</tbody></table></div>';
@@ -4053,7 +4063,6 @@
     function samediProchain() { var d = new Date(); var k = (6 - d.getDay() + 7) % 7 || 7; return creneau(k, 10); }
     function formRdv(l) {
       var D = S.dr, f = D.rdvF || (D.rdvF = { objet: estVO(l) ? 'Essai' : 'RDV Vente', date: dateLocale(creneau(1, 10)), duree: '60', inv: [], com: '' });
-      var rapides = [['Demain 10:00', creneau(1, 10)], ['Demain 14:00', creneau(1, 14)], ['Samedi 10:00', samediProchain()]];
       var invS = S.invitables[l.id_site];
       if (!invS) chargerInvitables(l.id_site);
       var inv = (invS || []).filter(function (u) { return Number(u.id_user) !== Number(l.id_user_attribue || MOI); });
@@ -4061,8 +4070,7 @@
       var h = '<div class="rdvf">'
         + '<div class="q"><span>Objet <em class="bacs-tag">libellés BACS</em></span><div class="chips">' + OBJETS_RDV.map(function (o) {
             return '<button type="button" class="qk' + (f.objet === o ? ' on' : '') + '" data-a="rdv-objet" data-id="' + esc(o) + '">' + esc(o) + '</button>'; }).join('') + '</div></div>'
-        + '<div class="q"><span>Quand</span><div class="chips">' + rapides.map(function (x) {
-            var v = dateLocale(x[1]); return '<button type="button" class="qk' + (f.date === v ? ' on' : '') + '" data-a="rdv-quand" data-id="' + v + '">' + x[0] + '</button>'; }).join('') + '</div>'
+        + '<div class="q"><span>Quand</span>'
         + '<div class="row"><input type="datetime-local" id="rdv-date" value="' + esc(f.date) + '" aria-label="Date et heure"><select id="rdv-duree" aria-label="Durée">'
         + [['30', '30 min'], ['60', '1h00'], ['90', '1h30'], ['120', '2h00']].map(function (d) { return '<option value="' + d[0] + '"' + (f.duree === d[0] ? ' selected' : '') + '>' + d[1] + '</option>'; }).join('') + '</select></div></div>'
         + '<div class="q"><span>Inviter un collègue</span><div class="inv-l">'
