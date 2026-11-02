@@ -1,4 +1,8 @@
 // ============================================================================
+//  v72 (02/11/2026) : tuiles au design One Data (fond bleu très pâle, sans
+//    bordure ni ombre, coins 8 px, chiffres en bleu, aucun rouge ni beige).
+//    Liseré bleu à gauche au survol, seulement sur une tuile cliquable ;
+//    la tuile choisie garde son liseré en bleu foncé.
 //  v70 (26/10/2026) : pastille « Clôturée » pour les commandes que BACS a
 //  clôturées. Elles restaient sans statut, à côté des « Transmise à TFR » et
 //  « Validée ».
@@ -2955,8 +2959,8 @@ OD.define('kanban', {
   //  kilométrage actuel du véhicule sur chaque facture, pas celui relevé à l'OR.
   //  Locataire sans ces fonctions : repli sur la vue APV (ancien comportement).
   var HV_CSS = '<style>'
-    + '.hv-kpis{display:grid;grid-template-columns:repeat(3,1fr);gap:1px;background:#e8eef7;border:1px solid #e8eef7;border-radius:10px;overflow:hidden;margin-bottom:18px}'
-    + '.hv-kpi{background:#fff;padding:13px 15px}'
+    + '.hv-kpis{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;background:none;border:0;border-radius:0;overflow:visible;margin-bottom:18px}'
+    + '.hv-kpi{background:#f5f8fc;padding:13px 15px;border-radius:8px}'
     + '.hv-kpi-l{font-size:11.5px;color:#8ba3c0;font-weight:600;margin-bottom:5px}'
     + '.hv-kpi-v{font-size:21px;font-weight:800;line-height:1.1;color:#1F4A85;font-variant-numeric:tabular-nums}'
     + '.hv-kpi-n{font-size:11.5px;color:#a8bcd4;margin-top:3px}'
