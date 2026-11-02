@@ -1,5 +1,9 @@
 // ============================================================================
 //  PERFORMANCES ÉQUIPE — module One Data (OD.define)  v1
+//  v31 (02/11/2026) : tuiles au design One Data (fond bleu très pâle, sans
+//    bordure ni ombre, coins 8 px, chiffres en bleu, aucun rouge ni beige).
+//    Liseré bleu à gauche au survol, seulement sur une tuile cliquable ;
+//    la tuile choisie garde son liseré en bleu foncé.
 //  v30 (29/10/2026) : LEXUS SANS VU NI ARVAL. Les concessions Lexus ne
 //  vendent pas de véhicules utilitaires et ne travaillent pas avec Arval :
 //  quand tout le périmètre affiché est Lexus, les colonnes VU et Arval
@@ -886,7 +890,8 @@ OD.define('performances', {
 #perf-root .pf-c { border-radius:7px; padding:6px 9px; text-align:right; font-variant-numeric:tabular-nums;
                    white-space:nowrap; line-height:19px; }
 #perf-root .pf-c[data-kpi-click] { cursor:pointer; }
-#perf-root .pf-c[data-kpi-click]:hover { box-shadow:inset 0 0 0 1.5px var(--blue-lt); }
+#perf-root .pf-c[data-kpi-click] { transition:box-shadow .15s ease; }
+#perf-root .pf-c[data-kpi-click]:hover { box-shadow:inset 3px 0 0 0 var(--blue-dk); }
 #perf-root .pf-c .v { font-size:14px; font-weight:700; }
 #perf-root .pf-c .o { font-size:11.5px; font-weight:400; color:#97a4ba; }
 #perf-root .pf-c .pen { font-size:10.5px; font-weight:600; color:#97a4ba; margin-left:5px; letter-spacing:.01em; }
@@ -2727,11 +2732,11 @@ OD.define('performances', {
 .pl-per{margin-left:auto;font-size:12px;color:#8b99b0;font-weight:600}
 .pl-tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(165px,1fr));gap:10px;margin-bottom:14px}
 .pl-tiles.mini{grid-template-columns:repeat(auto-fit,minmax(120px,1fr));margin-bottom:10px}
-.pl-tile{background:#fff;border:1px solid #e3e9f3;border-radius:14px;padding:14px 16px;display:grid;gap:3px;box-shadow:inset 3px 0 0 #acc5e4}
-.pl-tile.ok{box-shadow:inset 3px 0 0 #53bda7}.pl-tile.warn{box-shadow:inset 3px 0 0 #fac055}.pl-tile.crit{box-shadow:inset 3px 0 0 #d97070}
+.pl-tile{background:#f5f8fc;border:0;border-radius:8px;padding:14px 16px;display:grid;gap:3px}
 .pl-tile-t{font-size:10.5px;font-weight:800;letter-spacing:.05em;text-transform:uppercase;color:#8b99b0}
 .pl-tile-v{font-size:28px;font-weight:800;color:#1F4A85;line-height:1.1;font-variant-numeric:tabular-nums}
-.pl-tile.ok .pl-tile-v{color:#00997f}.pl-tile.warn .pl-tile-v{color:#d2941f}.pl-tile.crit .pl-tile-v{color:#c0524f}
+.pl-tile-v{color:#2a5ea9 !important}.pl-tile.ok .pl-tile-v{color:#53bda7 !important}.pl-tile.warn .pl-tile-v,.pl-tile.crit .pl-tile-v{color:#c7820a !important}
+.pl-tile-t{color:#7a9cc4 !important;font-weight:700 !important}.pl-tile-s{color:#4a6a8a !important}
 .pl-tiles.mini .pl-tile-v{font-size:21px}
 .pl-tile-s{font-size:11.5px;color:#5a6b86;font-weight:600}
 .pl-tr{font-size:11px;font-weight:800;margin-top:2px}
