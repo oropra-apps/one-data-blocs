@@ -1,4 +1,19 @@
 // ============================================================================
+//  v38 (02/11/2026) : EXPERT PRODUIT, PRÉPARATEUR, LIVRAISONS DU SITE.
+//  - Onglet « Livraisons du site » : toutes les livraisons (= mises en main)
+//    et préparations du site, quel que soit l'agenda où elles sont posées.
+//    Une livraison reste UN rendez-vous : celui du vendeur est celui que voit
+//    l'expert produit, jamais une copie. Couleur pleine : l'expert livre ;
+//    pointillé : le vendeur livre lui-même.
+//  - Fiche livraison au clic (sites avec expert produit, et préparateur) :
+//    client, téléphone, véhicule, n° de commande, vendeur, commentaire BACS,
+//    préparation, et « Qui livre ? » (agenda_mes_roles, rdv_livraison_qui).
+//  - Préparateur (rôle 12) : lecture seule, rien à créer ni à déplacer ;
+//    il ne voit que livraisons, préparations, réceptions de son site.
+//  - Plannings imprimés : téléphone, véhicule, commande, vendeur, qui livre,
+//    commentaire BACS complet, préparation ; nouvelle entrée « Choisir les
+//    dates » (du … au …).
+// ============================================================================
 //  v37 (02/11/2026) : fenêtre de saisie — le commentaire prend la hauteur de
 //  son texte (il était coupé à 2 lignes) ; les invités qui n'ont que BACS
 //  s'affichent par leur nom (agenda_invitables).
@@ -344,7 +359,24 @@ OD.define('agenda', {
       extendedProps: Object.assign({ _accent: c }, e),
     };
   }
+  function livInfo(e) { return (e && e.extra && e.extra.livraison) || {}; }
+  function prenomDe(n) { return String(n || '').split(/\s+/)[0]; }
+  function mapEventLivr(e) {
+    const f = familleEvt(e), li = livInfo(e);
+    const vendeurLivre = f === 'livraison' && li.livre_par === 'vendeur';
+    const c = f === 'livraison' ? (vendeurLivre ? '#7f9cc4' : CFG.colors.livraison) : (CFG.colors[f] || CFG.colors.creneau);
+    const qui = f === 'livraison' ? (li.vendeur ? prenomDe(li.vendeur) : '') : prenomDe(e.extra && e.extra.proprietaire);
+    return {
+      id: e.uid, title: (PICTO[f] ? PICTO[f] + ' ' : '') + composeTitle(e) + (qui ? ' · ' + qui : ''),
+      start: toFc(e.event_start_time), end: toFc(e.event_end_time), allDay: false,
+      backgroundColor: f === 'livraison' && !vendeurLivre ? tint(c, 0.20) : tint(c, 0.10), borderColor: tint(c, 0.5), textColor: '#1F4A85',
+      classNames: vendeurLivre ? ['ag-livr-vendeur'] : [],
+      editable: !lectureSeule() && (!!e.can_edit && e.source_type === 'rdv' && !isPastSlot(e.event_start_time)),
+      extendedProps: Object.assign({ _accent: c }, e),
+    };
+  }
   function mapEventSite(e) {
+    if (vueLivr()) return mapEventLivr(e);
     const c = couleurPersonne(e.id_user);
     const f = familleEvt(e);
     const pic = PICTO[f] ? PICTO[f] + ' ' : '';
@@ -371,7 +403,7 @@ OD.define('agenda', {
       // Filtre des chips. Appliqué ICI et non dans la RPC : on ne recharge
       // pas le réseau pour masquer une catégorie, et recocher est instantané.
       if (typesActifs.indexOf(familleEvt(e)) < 0) continue;
-      if (vueSite() && e.id_user != null && siteAg.masques.has(Number(e.id_user))) continue;
+      if (vue === 'site' && e.id_user != null && siteAg.masques.has(Number(e.id_user))) continue;
       out.push(mapEvent(e));
     }
     // Agenda du site : chaque livraison reste visible avec la couleur de sa
@@ -767,7 +799,7 @@ OD.define('agenda', {
   function familleEvt(e) {
     if (e.source_type === 'bilat') return 'bilat';
     const t = String(e.id_rdv_type ?? e.extra?.ID_Rdv_Type ?? '');
-    if (t === '4') return 'livraison';
+    if (t === '4' || t === '9') return 'livraison';
     if (t === '12') return 'prepa';
     if (t === '13') return 'recep';
     if (t === '14') return 'bloque';
@@ -835,8 +867,23 @@ OD.define('agenda', {
      (rang alphabétique dans le site). La nature se lit au pictogramme.
   ======================================================================== */
   const VUE_CLE = 'od_agenda_vue';
-  let vue = (function () { try { return frontWin().sessionStorage.getItem(VUE_CLE) === 'site' ? 'site' : 'perso'; } catch (e) { return 'perso'; } })();
-  function vueSite() { return vue === 'site'; }
+  let vue = (function () { try { const v = frontWin().sessionStorage.getItem(VUE_CLE); return v === 'site' || v === 'livr' ? v : 'perso'; } catch (e) { return 'perso'; } })();
+  function vueSite() { return vue === 'site' || vue === 'livr'; }
+  // v38 : « Livraisons du site » — la vue du site réduite aux livraisons,
+  // préparations, réceptions et créneaux « pas de livraison ».
+  function vueLivr() { return vue === 'livr'; }
+  const FAMILLES_LIVR = ['livraison', 'prepa', 'recep', 'bloque'];
+  // v38 : rôles du viewer pour l'agenda (agenda_mes_roles).
+  let ROLES = null;
+  function lectureSeule() { return !!(ROLES && ROLES.lecture_seule); }
+  function siteAExpert(id) { return !!(ROLES && (ROLES.sites_avec_expert || []).map(Number).indexOf(Number(id)) >= 0); }
+  async function chargerRoles() {
+    if (ROLES) return ROLES;
+    try { const r = await sb().rpc('agenda_mes_roles'); ROLES = (!r.error && r.data) ? r.data : { lecture_seule: false, sites_avec_expert: [], expert_sites: [], prep_sites: [] }; }
+    catch (e) { ROLES = { lecture_seule: false, sites_avec_expert: [], expert_sites: [], prep_sites: [] }; }
+    if (lectureSeule() && vue !== 'livr') { vue = 'livr'; try { frontWin().sessionStorage.setItem(VUE_CLE, 'livr'); } catch (e) {} }
+    return ROLES;
+  }
   const siteAg = { id: null, sites: null, masques: new Set() };
   const membresCache = {};          // id_site -> [{id_user, nom, id_role, role_nom, bacs, couleur}]
   const membresEnCours = {};
@@ -902,6 +949,98 @@ OD.define('agenda', {
     const n = Math.abs(Number(id) || 0);
     return CFG.personnes[n % CFG.personnes.length];
   }
+  // ==========================================================================
+  //  v38 : FICHE LIVRAISON (et lecture seule du préparateur)
+  // ==========================================================================
+  function dateLongue(ts) {
+    try { const d = new Date(toFc(ts)); return d.toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long' }) + ' · ' + String(ts).slice(11, 16).replace(':', 'h'); }
+    catch (e) { return String(ts || ''); }
+  }
+  function commentaireLivr(p) {
+    const li = livInfo(p);
+    if (li.bacs_desc) return li.bacs_desc;
+    const c = String(p.description || '').trim();
+    const i = c.indexOf(' · ');
+    return i > 0 && /^Livraison|^Mise en main|^Nouvelle mise/i.test(c) ? c.slice(i + 3) : c;
+  }
+  function ouvrirFicheLivraison(p, ev) {
+    const d = frontDoc(); try { hideTip(); } catch (e) {}
+    let ov = d.getElementById('agenda-livr-ov'); if (ov) ov.remove();
+    const f = familleEvt(p), li = livInfo(p), estLiv = f === 'livraison';
+    const ro = lectureSeule();
+    const peutQui = estLiv && !ro && siteAExpert(p.id_site);
+    const nomCli = clientName(p);
+    const veh = [li.vehicule, li.vn_vo].filter(Boolean).join(' · ');
+    const vinCde = [li.vin || (p.extra && p.extra.vin) ? 'VIN ' + (li.vin || p.extra.vin) : '', li.commande ? 'commande ' + li.commande : ''].filter(Boolean).join(' · ');
+    const comm = estLiv ? commentaireLivr(p) : String(p.description || '').trim();
+    const ligne = (lab, val, sub) => val ? '<div class="alv-b"><span>' + esc(lab) + '</span><b>' + esc(val) + '</b>' + (sub ? '<em>' + esc(sub) + '</em>' : '') + '</div>' : '';
+    let h = '<style>'
+      + '#agenda-livr-ov{position:fixed;inset:0;z-index:99990;background:rgba(31,74,133,.28);display:flex;align-items:center;justify-content:center;padding:16px;font-family:"Nunito Sans",system-ui,sans-serif}'
+      + '#agenda-livr-ov .alv{background:#fff;border-radius:16px;box-shadow:0 16px 50px rgba(42,94,169,.25);width:min(560px,100%);max-height:calc(100vh - 32px);overflow:auto;color:#1F4A85}'
+      + '#agenda-livr-ov .alv-h{display:flex;justify-content:space-between;align-items:center;padding:14px 18px;border-bottom:1.5px solid #eef2f8;font-size:12.5px;font-weight:800;text-transform:uppercase;letter-spacing:.04em}'
+      + '#agenda-livr-ov .alv-x{border:0;background:#f2f6fc;color:#2a5ea9;border-radius:8px;width:30px;height:30px;font-size:17px;cursor:pointer}'
+      + '#agenda-livr-ov .alv-c{padding:14px 18px;display:grid;gap:12px}'
+      + '#agenda-livr-ov .alv-t{font-size:17px;font-weight:800}#agenda-livr-ov .alv-s{font-size:13px;font-weight:600;color:#4b628a}'
+      + '#agenda-livr-ov .alv-g{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}@media(max-width:520px){#agenda-livr-ov .alv-g{grid-template-columns:minmax(0,1fr)}}'
+      + '#agenda-livr-ov .alv-b{background:#f7f9fc;border-radius:10px;padding:9px 11px;display:grid;gap:2px}#agenda-livr-ov .alv-b span,#agenda-livr-ov .alv-l{font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:.05em;color:#5f7aa3}'
+      + '#agenda-livr-ov .alv-b b{font-size:13.5px}#agenda-livr-ov .alv-b em{font-style:normal;font-size:12px;font-weight:600;color:#4b628a}'
+      + '#agenda-livr-ov .alv-cm{background:#f7f9fc;border:1.5px solid #e2eaf5;border-radius:10px;padding:10px 12px;font-size:13px;font-weight:600;white-space:pre-wrap;line-height:1.45}'
+      + '#agenda-livr-ov .alv-q{display:flex;gap:8px}#agenda-livr-ov .alv-q button{flex:1;border:1.5px solid #d6e2f2;background:#fff;color:#1F4A85;border-radius:10px;padding:10px;font:700 13px "Nunito Sans",system-ui,sans-serif;cursor:pointer}'
+      + '#agenda-livr-ov .alv-q button.on{background:#2a5ea9;border-color:#2a5ea9;color:#fff;font-weight:800}'
+      + '#agenda-livr-ov .alv-p{display:flex;justify-content:space-between;gap:10px;align-items:center;border-radius:10px;padding:9px 12px;font-size:13px;font-weight:700}'
+      + '#agenda-livr-ov .alv-p.ok{background:#eef7f4;color:#2c7a68}#agenda-livr-ov .alv-p.ko{background:#fff8ec;color:#7a5208}'
+      + '#agenda-livr-ov .alv-f{display:flex;gap:10px;flex-wrap:wrap;padding:12px 18px;border-top:1.5px solid #eef2f8}'
+      + '#agenda-livr-ov .alv-f button{border:1.5px solid #d6e2f2;background:#fff;color:#2a5ea9;border-radius:10px;padding:10px 14px;font:800 13px "Nunito Sans",system-ui,sans-serif;cursor:pointer}'
+      + '#agenda-livr-ov .alv-f button.pri{background:#2a5ea9;border-color:#2a5ea9;color:#fff}'
+      + '</style><div class="alv" role="dialog" aria-modal="true" aria-label="Livraison">'
+      + '<div class="alv-h"><span>' + esc((estLiv ? (p.title || 'Livraison') : (p.title || 'Rendez-vous'))) + '</span><button type="button" class="alv-x" data-x aria-label="Fermer">×</button></div>'
+      + '<div class="alv-c">'
+      + '<div><div class="alv-t">' + esc(nomCli || composeTitle(p) || '—') + '</div><div class="alv-s">' + esc(dateLongue(p.event_start_time)) + (li.tel ? ' · ' + esc(li.tel) : '') + '</div></div>';
+    if (estLiv) {
+      h += '<div class="alv-g">' + ligne('Véhicule', veh || (vinCde ? '—' : ''), vinCde) + ligne('Vendu par', li.vendeur || '', p.extra && p.extra.proprietaire && p.extra.proprietaire !== li.vendeur ? 'posé par ' + p.extra.proprietaire : '') + '</div>';
+      if (siteAExpert(p.id_site) || li.livre_par === 'vendeur') {
+        h += '<div><div class="alv-l">Qui livre ?</div>';
+        if (peutQui) {
+          h += '<div class="alv-q"><button type="button" data-qui="expert" class="' + (li.livre_par === 'expert' ? 'on' : '') + '">L’expert produit' + (li.expert ? ' · ' + esc(prenomDe(li.expert)) : '') + '</button>'
+            + '<button type="button" data-qui="vendeur" class="' + (li.livre_par === 'vendeur' ? 'on' : '') + '">Le vendeur' + (li.vendeur ? ' · ' + esc(prenomDe(li.vendeur)) : '') + '</button></div>';
+        } else {
+          h += '<div class="alv-s" style="margin-top:4px">' + esc(li.livre_par === 'vendeur' ? 'Le vendeur' + (li.vendeur ? ' (' + li.vendeur + ')' : '') : 'L’expert produit' + (li.expert ? ' (' + li.expert + ')' : '')) + '</div>';
+        }
+        h += '</div>';
+      }
+      h += '<div class="alv-p ' + (li.prepa_le ? 'ok' : 'ko') + '"><span>' + (li.prepa_le ? 'Préparation planifiée ' + esc(dateLongue(li.prepa_le)) : 'Préparation pas encore planifiée') + '</span></div>';
+    } else if (p.extra && p.extra.proprietaire) {
+      h += '<div class="alv-g">' + ligne(f === 'prepa' ? 'Demandée par' : 'Dans l’agenda de', p.extra.proprietaire, '') + (p.extra.vin ? ligne('VIN', p.extra.vin, '') : '') + '</div>';
+    }
+    if (comm) h += '<div><div class="alv-l">' + (estLiv ? 'Commentaire BACS' : 'Commentaire') + '</div><div class="alv-cm">' + esc(comm) + '</div></div>';
+    h += '</div><div class="alv-f">'
+      + (!ro && p.can_edit && !isPastSlot(p.event_start_time) ? '<button type="button" class="pri" data-edit>Modifier le rendez-vous</button>' : '')
+      + (!ro && p.can_edit && isPastSlot(p.event_start_time) && Number(p.id_client) > 0 ? '<button type="button" class="pri" data-edit>Compte rendu</button>' : '')
+      + '<button type="button" data-print>Imprimer la fiche</button><button type="button" data-x>Fermer</button></div></div>';
+    ov = d.createElement('div'); ov.id = 'agenda-livr-ov'; ov.innerHTML = h;
+    (d.body || d.documentElement).appendChild(ov);
+    const close = () => { try { ov.remove(); } catch (e) {} };
+    ov.addEventListener('mousedown', (e) => { if (e.target === ov) close(); });
+    ov.querySelectorAll('[data-x]').forEach(b => b.addEventListener('click', close));
+    const be = ov.querySelector('[data-edit]'); if (be) be.addEventListener('click', () => { close(); window.__agendaSelected = p; openEdit(ev); });
+    const bp = ov.querySelector('[data-print]'); if (bp) bp.addEventListener('click', () => {
+      const lot = [p]; const jour = new Date(toFc(p.event_start_time));
+      planningSeul = estLiv ? 'livraison' : null;
+      ouvrirImpression(estLiv ? planningLivraisonsHtml(lot, 'Livraison du ' + jour.toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' }), nomSiteDe(p.id_site))
+                              : planningJourHtml(lot, jour, nomSiteDe(p.id_site)));
+    });
+    ov.querySelectorAll('[data-qui]').forEach(b => b.addEventListener('click', async () => {
+      const q = b.getAttribute('data-qui');
+      try {
+        const r = await sb().rpc('rdv_livraison_qui', { p_id_rdv: Number(p.origin_id), p_qui: q });
+        if (r.error) throw r.error;
+        p.extra = Object.assign({}, p.extra, { livraison: Object.assign({}, li, { livre_par: q, livre_par_fixe: true }) });
+        toast(q === 'vendeur' ? 'Noté : le vendeur livre lui-même.' : 'Noté : l’expert produit livre.', 'ok');
+        close(); ouvrirFicheLivraison(p, ev); refetch();
+      } catch (e) { toast('Impossible : ' + ((e && e.message) || e)); }
+    }));
+  }
+  function nomSiteDe(id) { return ((siteAg.sites || []).find(x => Number(x.id_site) === Number(id)) || {}).nom || ('Site ' + id); }
   function nomPersonne(id) {
     for (const k in membresCache) { const m = membresCache[k].find(x => Number(x.id_user) === Number(id)); if (m) return m.nom; }
     const i = (invitablesCache || []).find(x => Number(x.id_user) === Number(id));
@@ -927,6 +1066,7 @@ OD.define('agenda', {
 
   function changerVue(v) {
     if (v === vue) return;
+    if (lectureSeule() && v !== 'livr') return;
     vue = v;
     try { frontWin().sessionStorage.setItem(VUE_CLE, v); } catch (e) {}
     if (vueSite()) { const t = siteIds(); if (t && t.length === 1) siteAg.id = Number(t[0]); else if (siteAg.id == null) siteAg.id = siteParDefaut(); siteAg.topSig = JSON.stringify(t); }
@@ -945,11 +1085,17 @@ OD.define('agenda', {
   function renderVues() {
     const host = document.getElementById('agenda-vues');
     if (!host) return;
+    const ls = lectureSeule();
     host.innerHTML = '<div class="agv-seg">'
-      + '<button type="button" data-vue="perso" class="' + (vueSite() ? '' : 'is-on') + '">Mon agenda</button>'
-      + '<button type="button" data-vue="site" class="' + (vueSite() ? 'is-on' : '') + '">Agenda du site</button></div>'
+      + (ls ? '' : '<button type="button" data-vue="perso" class="' + (vue === 'perso' ? 'is-on' : '') + '">Mon agenda</button>')
+      + '<button type="button" data-vue="livr" class="' + (vueLivr() ? 'is-on' : '') + '">' + (ls ? 'Préparations et livraisons' : 'Livraisons du site') + '</button>'
+      + (ls ? '' : '<button type="button" data-vue="site" class="' + (vue === 'site' ? 'is-on' : '') + '">Agenda du site</button>') + '</div>'
       + '<div class="agv-print"><button type="button" class="agl-btn" id="agv-print">🖨 Planning</button>'
       + '<div class="agv-print-menu" id="agv-print-menu"' + (printMenuOuvert ? '' : ' style="display:none"') + '>'
+      + '<div class="agv-dates"><span>Choisir les dates</span><label>Du<input type="date" id="agv-du"></label><label>Au<input type="date" id="agv-au"></label>'
+      + '<div class="agv-dates-b"><button type="button" data-print="periode">Tout</button><button type="button" data-print="periode" data-seul="prepa">Préparations</button><button type="button" data-print="periode" data-seul="livraison">Livraisons</button></div></div>'
+      + '<button type="button" data-print="jour" data-seul="livraison">Livraisons · jour<small>Le détail de chaque livraison, jour affiché</small></button>'
+      + '<button type="button" data-print="semaine" data-seul="livraison">Livraisons · semaine<small>Le détail de chaque livraison, semaine affichée</small></button>'
       + '<button type="button" data-print="jour">Planning du jour<small>Livraisons, préparations, réceptions — jour affiché</small></button>'
       + '<button type="button" data-print="semaine">Planning de la semaine<small>Du lundi au samedi de la semaine affichée</small></button>'
       + '<button type="button" data-print="jour" data-seul="prepa">Préparateur · jour<small>Les seules préparations du site, jour affiché</small></button>'
@@ -957,9 +1103,24 @@ OD.define('agenda', {
       + '</div></div>';
     host.querySelectorAll('[data-vue]').forEach(b => b.addEventListener('click', () => changerVue(b.getAttribute('data-vue'))));
     const pb = host.querySelector('#agv-print'), pm = host.querySelector('#agv-print-menu');
+    // Dates proposées : la semaine affichée.
+    try {
+      const d0 = calendar ? new Date(calendar.getDate()) : new Date(); const dw = (d0.getDay() + 6) % 7;
+      const lu = new Date(d0.getFullYear(), d0.getMonth(), d0.getDate() - dw), sa = new Date(lu); sa.setDate(lu.getDate() + 5);
+      const iDu = host.querySelector('#agv-du'), iAu = host.querySelector('#agv-au');
+      if (iDu && !iDu.value) iDu.value = ymd(lu); if (iAu && !iAu.value) iAu.value = ymd(sa);
+      [iDu, iAu].forEach(x => x && x.addEventListener('click', ev => ev.stopPropagation()));
+    } catch (e) {}
     if (pb) pb.addEventListener('click', (e) => { e.stopPropagation(); printMenuOuvert = !printMenuOuvert; pm.style.display = printMenuOuvert ? '' : 'none'; });
     host.querySelectorAll('[data-print]').forEach(b => b.addEventListener('click', (e) => {
-      e.stopPropagation(); printMenuOuvert = false; pm.style.display = 'none'; imprimerPlanning(b.getAttribute('data-print'), b.getAttribute('data-seul'));
+      e.stopPropagation();
+      const k = b.getAttribute('data-print');
+      let du = null, au = null;
+      if (k === 'periode') {
+        du = (host.querySelector('#agv-du') || {}).value; au = (host.querySelector('#agv-au') || {}).value;
+        if (!du || !au || au < du) { toast('Choisissez une date de début et une date de fin.'); return; }
+      }
+      printMenuOuvert = false; pm.style.display = 'none'; imprimerPlanning(k, b.getAttribute('data-seul'), du, au);
     }));
     if (!window.__agendaPrintOutside) {
       window.__agendaPrintOutside = (e) => { const m = document.getElementById('agv-print-menu'); const h = document.getElementById('agenda-vues'); if (printMenuOuvert && m && h && !h.contains(e.target)) { printMenuOuvert = false; m.style.display = 'none'; } };
@@ -983,7 +1144,13 @@ OD.define('agenda', {
     if (sites.length > 1) {
       h += '<select class="ags-sel" id="ags-site">' + sites.map(x => '<option value="' + x.id_site + '"' + (Number(x.id_site) === Number(siteAg.id) ? ' selected' : '') + '>' + esc(x.nom) + '</option>').join('') + '</select>';
     }
-    if (!ms) h += '<span class="ags-vide">Chargement de l’équipe…</span>';
+    if (vueLivr()) {
+      h += '<span class="ags-lg"><i class="exp"></i>' + (siteAExpert(siteAg.id) ? 'L’expert produit livre' : 'Livraison') + '</span>'
+        + (siteAExpert(siteAg.id) ? '<span class="ags-lg"><i class="vdr"></i>Le vendeur livre lui-même</span>' : '')
+        + '<span class="ags-lg"><i class="prp"></i>Préparation</span>'
+        + (lectureSeule() ? '<span class="ags-lg ro">Lecture seule</span>' : '');
+    }
+    else if (!ms) h += '<span class="ags-vide">Chargement de l’équipe…</span>';
     else if (!ms.length) h += '<span class="ags-vide">Personne n’est rattaché à ce site.</span>';
     else {
       h += ms.map(m => {
@@ -1016,7 +1183,7 @@ OD.define('agenda', {
       const idSite = Number(siteAg.id);
       const ms = await chargerMembresPour(idSite);
       if (Number(siteAg.id) !== idSite) return success([]);   // site changé pendant le chargement
-      const ids = ms.map(m => m.id_user).filter(id => !siteAg.masques.has(id));
+      const ids = ms.map(m => m.id_user).filter(id => vueLivr() || !siteAg.masques.has(id));
       if (!ids.length) { retirerProvisoires(); return success([]); }
       const { data, error } = await client.rpc('get_calendar_events', {
         p_start: info.startStr.slice(0, 19).replace('T', ' '), p_end: info.endStr.slice(0, 19).replace('T', ' '),
@@ -1029,7 +1196,8 @@ OD.define('agenda', {
       // Les rapports vendeur (relances à faire) restent dans l'agenda personnel.
       // Événements DE CE SITE seulement (une absence suit la personne partout).
       const duSite = (r) => r.id_site == null || Number(r.id_site) === idSite || familleEvt(r) === 'absence';
-      const rows = (data || []).filter(r => ((r.source_type === 'rdv' && garde.has(Number(r.id_user))) || r.source_type === 'bilat') && duSite(r));
+      const rows = (data || []).filter(r => ((r.source_type === 'rdv' && garde.has(Number(r.id_user))) || r.source_type === 'bilat') && duSite(r)
+        && (!vueLivr() || FAMILLES_LIVR.indexOf(familleEvt(r)) >= 0));
       retirerProvisoires();
       success(buildEvents(rows));
     } catch (err) { console.error('[agenda] agenda du site', err); failure(err); }
@@ -1049,7 +1217,7 @@ OD.define('agenda', {
   ];
   function ymd(d) { return d.getFullYear() + '-' + pad2(d.getMonth() + 1) + '-' + pad2(d.getDate()); }
   let planningSeul = null;            // v35 : 'prepa' = planning du préparateur
-  async function imprimerPlanning(kind, seul) {
+  async function imprimerPlanning(kind, seul, duPer, auPer) {
     planningSeul = seul || null;
     const idSite = siteCourant();
     if (idSite == null) { showAgError('Planning', 'Choisissez un site dans la barre du haut.'); return; }
@@ -1063,6 +1231,10 @@ OD.define('agenda', {
       let debut = d0, fin;
       if (kind === 'semaine') { const dw = (d0.getDay() + 6) % 7; debut = new Date(d0); debut.setDate(d0.getDate() - dw); }
       fin = new Date(debut); fin.setDate(debut.getDate() + (kind === 'semaine' ? 7 : 1));
+      if (kind === 'periode' && duPer && auPer) {
+        const a = duPer.split('-').map(Number), z = auPer.split('-').map(Number);
+        debut = new Date(a[0], a[1] - 1, a[2]); fin = new Date(z[0], z[1] - 1, z[2] + 1);
+      }
       const ids = ms.map(m => m.id_user);
       const { data, error } = await sb().rpc('get_calendar_events', { p_start: ymd(debut) + ' 00:00:00', p_end: ymd(fin) + ' 00:00:00', p_user_ids: ids.length ? ids : [-1], p_site_ids: null });
       if (error) throw error;
@@ -1072,7 +1244,20 @@ OD.define('agenda', {
         && NATURES_PLANNING.some(n => n.cle === familleEvt(r))
         && (!planningSeul || familleEvt(r) === planningSeul))
         .sort((a, b) => String(a.event_start_time).localeCompare(String(b.event_start_time)));
-      const html = kind === 'semaine' ? planningSemaineHtml(rows, debut, nomSite) : planningJourHtml(rows, debut, nomSite);
+      let html;
+      if (planningSeul === 'livraison') {
+        const t = kind === 'jour' ? 'Livraisons du ' + debut.toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })
+          : 'Livraisons du ' + debut.toLocaleDateString('fr-FR', { day: 'numeric', month: 'long' }) + ' au ' + new Date(fin.getTime() - 86400000).toLocaleDateString('fr-FR', { day: 'numeric', month: 'long', year: 'numeric' });
+        html = planningLivraisonsHtml(rows, t, nomSite);
+      } else if (kind === 'periode') {
+        html = '';
+        for (let d = new Date(debut); d < fin; d.setDate(d.getDate() + 1)) {
+          const lot = rows.filter(r => String(r.event_start_time || '').slice(0, 10) === ymd(d));
+          if (!lot.length) continue;
+          html += '<div class="jr">' + planningJourHtml(lot, new Date(d), nomSite) + '</div>';
+        }
+        if (!html) html = '<div class="ent"><h1>Rien de prévu</h1><div class="s">' + esc(nomSite) + '</div></div>';
+      } else html = kind === 'semaine' ? planningSemaineHtml(rows, debut, nomSite) : planningJourHtml(rows, debut, nomSite);
       ouvrirImpression(html);
     } catch (e) { console.error('[agenda] planning', e); toast('Planning impossible : ' + ((e && e.message) || e)); }
   }
@@ -1081,8 +1266,13 @@ OD.define('agenda', {
     const hd = String(r.event_start_time || '').slice(11, 16).replace(':', 'h');
     const hf = String(r.event_end_time || '').slice(11, 16).replace(':', 'h');
     const invites = (Array.isArray(x.invites) ? x.invites : []).map(nomPersonne).filter(n => !/^Utilisateur \d/.test(n)).join(', ');
-    return { hd, hf, client: clientName(r) || '', vin: x.vin || '', comm: String(r.description || '').trim(),
-             qui: x.proprietaire || nomPersonne(r.id_user), invites, couleur: couleurPersonne(r.id_user) };
+    const li = x.livraison || {};
+    const estLiv = familleEvt(r) === 'livraison';
+    return { hd, hf, client: clientName(r) || '', vin: li.vin || x.vin || '', comm: estLiv ? commentaireLivr(r) : String(r.description || '').trim(),
+             qui: x.proprietaire || nomPersonne(r.id_user), invites, couleur: couleurPersonne(r.id_user),
+             tel: li.tel || '', vehicule: li.vehicule || '', commande: li.commande || '', vendeur: li.vendeur || '',
+             livre: estLiv ? (li.livre_par === 'vendeur' ? 'le vendeur' + (li.vendeur ? ' (' + prenomDe(li.vendeur) + ')' : '') : (li.expert ? li.expert : 'le vendeur')) : '',
+             prepa: estLiv ? (li.prepa_le ? 'planifiée ' + String(li.prepa_le).slice(8, 10) + '/' + String(li.prepa_le).slice(5, 7) + ' ' + String(li.prepa_le).slice(11, 16).replace(':', 'h') : 'pas planifiée') : '' };
   }
   const CSS_PRINT = '@page{size:A4 landscape;margin:10mm}*{box-sizing:border-box}body{font-family:"Nunito Sans",Arial,sans-serif;color:#1F4A85;margin:0;font-size:11px}'
     + '.ent{display:flex;justify-content:space-between;align-items:flex-end;border-bottom:2px solid #1F4A85;padding-bottom:6px;margin-bottom:10px}'
@@ -1096,7 +1286,7 @@ OD.define('agenda', {
     + '.vin{font-family:monospace;font-size:10.5px}.c{color:#3d4f6b}.vide{color:#7d93b2;font-style:italic;padding:6px 0}'
     + '.sem{display:grid;gap:6px}.col{border:1px solid #c9d9ee;border-radius:6px;min-height:150mm;overflow:hidden}.col h3{margin:0;padding:5px 6px;font-size:11.5px;background:#eef3fa;border-bottom:1px solid #c9d9ee}'
     + '.ev{margin:4px;padding:4px 5px;border-radius:4px;border-left:3px solid;background:#f7f9fc;page-break-inside:avoid}.ev b{display:block;font-size:10.5px}.ev span{display:block;font-size:9.5px;color:#3d4f6b}'
-    + '.lg{display:flex;flex-wrap:wrap;gap:10px;margin-top:8px;font-size:10px;color:#5a6b8c}'
+    + '.lg{display:flex;flex-wrap:wrap;gap:10px;margin-top:8px;font-size:10px;color:#5a6b8c}.jr{page-break-after:always}.jr:last-child{page-break-after:auto}'
     + '@media screen{body{padding:16px;background:#f2f6fc}.feuille{background:#fff;padding:14px;max-width:290mm;margin:auto;box-shadow:0 4px 18px rgba(31,74,133,.12)}}';
   function planningJourHtml(rows, jour, nomSite) {
     const titreJour = jour.toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
@@ -1106,12 +1296,36 @@ OD.define('agenda', {
       if (n.cle === 'bloque' && !lot.length) return;
       b += '<h2><i style="background:' + CFG.colors[n.cle] + '"></i>' + esc(n.titre) + ' <em>' + lot.length + '</em></h2>';
       if (!lot.length) { b += '<div class="vide">Rien de prévu.</div>'; return; }
+      if (n.cle === 'livraison') { b += tableLivraisons(lot); return; }
       b += '<table><thead><tr><th>Heure</th><th>' + esc(n.qui) + '</th><th>Client</th><th>VIN</th><th>Vendeur / invités</th><th>Commentaire</th><th>Fait</th></tr></thead><tbody>'
         + lot.map(r => { const l = lignePlanning(r); return '<tr><td class="h">' + esc(l.hd) + (l.hf ? '<br><span class="c">→ ' + esc(l.hf) + '</span>' : '') + '</td>'
           + '<td><span class="p"><i style="background:' + l.couleur + '"></i>' + esc(l.qui) + '</span></td>'
-          + '<td>' + esc(l.client) + '</td><td class="vin">' + esc(l.vin) + '</td><td>' + esc(l.invites) + '</td>'
+          + '<td>' + esc(l.client) + (l.tel ? '<br><span class="c">' + esc(l.tel) + '</span>' : '') + '</td><td class="vin">' + esc(l.vin) + '</td><td>' + esc(l.invites) + '</td>'
           + '<td class="c">' + esc(l.comm) + '</td><td class="ck"><span></span></td></tr>'; }).join('')
         + '</tbody></table>';
+    });
+    return b;
+  }
+  // v38 : le tableau complet des livraisons (expert produit, préparateur).
+  function tableLivraisons(lot) {
+    return '<table><thead><tr><th>Heure</th><th>Client</th><th>Véhicule</th><th>Vendu par · livré par</th><th>Commentaire BACS</th><th>Préparation</th><th>Fait</th></tr></thead><tbody>'
+      + lot.map(r => { const l = lignePlanning(r); return '<tr><td class="h">' + esc(l.hd) + (l.hf ? '<br><span class="c">→ ' + esc(l.hf) + '</span>' : '') + '</td>'
+        + '<td><b>' + esc(l.client || '—') + '</b>' + (l.tel ? '<br>' + esc(l.tel) : '') + '</td>'
+        + '<td>' + esc(l.vehicule || '') + (l.vin ? '<br><span class="vin">' + esc(l.vin) + '</span>' : '') + (l.commande ? '<br><span class="c">commande ' + esc(l.commande) + '</span>' : '') + '</td>'
+        + '<td><b>' + esc(l.vendeur || l.qui || '') + '</b><br><span class="c">livré par ' + esc(l.livre) + '</span></td>'
+        + '<td class="c">' + esc(l.comm) + '</td><td class="c">' + esc(l.prepa) + '</td><td class="ck"><span></span></td></tr>'; }).join('')
+      + '</tbody></table>';
+  }
+  function planningLivraisonsHtml(rows, titre, nomSite) {
+    const lot = rows.filter(r => familleEvt(r) === 'livraison');
+    let b = '<div class="ent"><h1>' + esc(titre) + '</h1><div class="s">' + esc(nomSite) + ' · ' + lot.length + ' livraison' + (lot.length > 1 ? 's' : '') + '<br>Imprimé le ' + esc(new Date().toLocaleString('fr-FR', { dateStyle: 'short', timeStyle: 'short' })) + '</div></div>';
+    if (!lot.length) return b + '<div class="vide">Aucune livraison.</div>';
+    const jours = [];
+    lot.forEach(r => { const j = String(r.event_start_time || '').slice(0, 10); if (jours.indexOf(j) < 0) jours.push(j); });
+    jours.forEach(j => {
+      const d = new Date(j + 'T12:00:00');
+      if (jours.length > 1) b += '<h2>' + esc(d.toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long' })) + '</h2>';
+      b += tableLivraisons(lot.filter(r => String(r.event_start_time || '').slice(0, 10) === j));
     });
     return b;
   }
@@ -1131,7 +1345,9 @@ OD.define('agenda', {
               + '<span><span class="p" style="display:inline-flex"><i style="background:' + l.couleur + '"></i>' + esc(l.qui) + '</span></span>'
               + (l.vin ? '<span class="vin">' + esc(l.vin) + '</span>' : '')
               + (l.invites ? '<span>avec ' + esc(l.invites) + '</span>' : '')
-              + (l.comm ? '<span>' + esc(planningSeul ? l.comm : l.comm.slice(0, 90)) + '</span>' : '') + '</div>'; }).join('')
+              + (l.tel ? '<span>' + esc(l.tel) + '</span>' : '')
+              + (l.vendeur ? '<span>vendu par ' + esc(l.vendeur) + ' · livré par ' + esc(l.livre) + '</span>' : '')
+              + (l.comm ? '<span>' + esc(planningSeul || f === 'livraison' ? l.comm : l.comm.slice(0, 90)) + '</span>' : '') + '</div>'; }).join('')
           : '<div class="vide" style="padding:6px">—</div>')
         + '</div>';
     }
@@ -1228,6 +1444,19 @@ OD.define('agenda', {
 #agenda-root .agv-print-menu button{display:block;width:100%;text-align:left;border:0;background:transparent;padding:9px 11px;border-radius:8px;font:700 13px "Nunito Sans",system-ui,sans-serif;color:#1F4A85;cursor:pointer}
 #agenda-root .agv-print-menu button:hover{background:#f2f6fc}
 #agenda-root .agv-print-menu small{display:block;font-weight:600;color:#7d93b2;font-size:11.5px}
+#agenda-root .agv-print-menu{min-width:280px}
+#agenda-root .agv-dates{display:grid;grid-template-columns:1fr 1fr;gap:6px;padding:8px 10px 10px;border-bottom:1.5px solid #eef2f8;margin-bottom:4px}
+#agenda-root .agv-dates > span{grid-column:1/-1;font-size:10.5px;font-weight:800;text-transform:uppercase;letter-spacing:.05em;color:#5f7aa3}
+#agenda-root .agv-dates label{display:grid;gap:3px;font-size:11px;font-weight:700;color:#5f7aa3}
+#agenda-root .agv-dates input{border:1.5px solid #e8eef7;border-radius:8px;padding:5px 7px;font:700 12.5px "Nunito Sans",system-ui,sans-serif;color:#1F4A85}
+#agenda-root .agv-dates-b{grid-column:1/-1;display:flex;gap:6px}
+#agenda-root .agv-print-menu .agv-dates-b button{flex:1;text-align:center;background:#2a5ea9;color:#fff;padding:7px 6px;font-size:12px}
+#agenda-root .agv-print-menu .agv-dates-b button:hover{background:#1F4A85}
+#agenda-root .ags-lg{display:inline-flex;align-items:center;gap:6px;font-size:12px;font-weight:700;color:#4b628a}
+#agenda-root .ags-lg i{width:12px;height:12px;border-radius:3px;display:inline-block}
+#agenda-root .ags-lg i.exp{background:${CFG.colors.livraison}}#agenda-root .ags-lg i.vdr{background:#fff;border:1.5px dashed #7f9cc4}#agenda-root .ags-lg i.prp{background:${CFG.colors.prepa}}
+#agenda-root .ags-lg.ro{background:#fff6e6;color:#7a5208;border:1.5px solid #f3d9a4;border-radius:999px;padding:3px 10px}
+#agenda-root .fc-event.ag-livr-vendeur{border-style:dashed!important;border-width:1.5px!important}
 #agenda-root #agenda-site{margin:-4px 0 12px}
 #agenda-root .ags-bar{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
 #agenda-root .ags-sel{border:1.5px solid #e8eef7;border-radius:10px;padding:6px 10px;font:700 13px "Nunito Sans",system-ui,sans-serif;color:#1F4A85;background:#fff;max-width:260px}
@@ -1695,14 +1924,15 @@ OD.define('agenda', {
       // Au doigt : appui long de 1 s par défaut, beaucoup trop lent pour créer
       // un RDV ou déplacer un événement.
       longPressDelay: 400, eventLongPressDelay: 400, selectLongPressDelay: 400,
-      select: (sel) => openCreate(sel),
+      select: (sel) => { if (lectureSeule()) { try { calendar.unselect(); } catch (e) {} return; } openCreate(sel); },
       events: fetchEvents,
       // FullCalendar re-rend un evenement APRES eventDidMount — un creneau
       // court est reclasse « short » au recalcul des hauteurs — et une classe
       // posee a la main disparait alors. C'est ce qui laissait un rendez-vous
       // de trente minutes sans marquage pendant qu'un bloc de deux heures
       // l'avait. eventClassNames est reapplique a chaque rendu.
-      eventClassNames: (arg) => (resteAConclure(arg.event.extendedProps) ? ['ag-aconclure'] : []),
+      eventClassNames: (arg) => (resteAConclure(arg.event.extendedProps) && !lectureSeule() ? ['ag-aconclure'] : [])
+        .concat(vueLivr() && livInfo(arg.event.extendedProps).livre_par === 'vendeur' && familleEvt(arg.event.extendedProps) === 'livraison' ? ['ag-livr-vendeur'] : []),
       eventDidMount: (info) => {
         const c = info.event.extendedProps._accent; if (c) { info.el.style.borderLeft = '3px solid ' + c; }
         // v32 : pastille « BACS » tant qu'un geste n'est pas écrit dans BACS.
@@ -1768,6 +1998,9 @@ OD.define('agenda', {
         const p = arg.event.extendedProps || {};
         if (p._provisoire) return;                       // en cours d'enregistrement
         if (p._groupe) { ouvrirGroupe(p); return; }      // bloc « N livraisons »
+        // v38 : fiche livraison (sites avec expert produit, vue Livraisons, préparateur).
+        if (p.source_type === 'rdv' && familleEvt(p) === 'livraison' && (lectureSeule() || vueLivr() || siteAExpert(p.id_site))) { ouvrirFicheLivraison(p, arg.event); return; }
+        if (lectureSeule()) { ouvrirFicheLivraison(p, arg.event); return; }
         window.__agendaSelected = p; openEdit(arg.event);
       },
       // Le regroupement des livraisons dépend de la vue (empilée ou non) :
@@ -1799,6 +2032,13 @@ OD.define('agenda', {
       } catch (e) {}
     }
     getUserId().then(() => { renderCollab(true); refetch(); });
+    chargerRoles().then(() => {
+      if (lectureSeule()) {
+        try { calendar.setOption('editable', false); calendar.setOption('selectable', false); calendar.setOption('slotEventOverlap', false); } catch (e) {}
+        if (siteAg.id == null) siteAg.id = siteParDefaut();
+      }
+      collabSig = null; renderCollab(true); renderSiteBar(); refetch();
+    });
     wireRefresh();
   }
 
@@ -3375,6 +3615,7 @@ OD.define('agenda', {
   }
   // Drag & resize d'un event -> update_* (type / commentaire inchang\u00e9s).
   async function applyDragResize(arg) {
+    if (lectureSeule()) { try { arg.revert(); } catch (x) {} return; }
     const ev = arg.event; const p = ev.extendedProps || {};
     const st = String(p.source_type || '');
     const mins = (ev.end && ev.start) ? Math.max(15, Math.round((ev.end - ev.start) / 60000)) : 30;
