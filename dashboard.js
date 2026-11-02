@@ -1,5 +1,9 @@
 // ============================================================================
-//  DASHBOARD — module One Data (OD.define)   v51 — PROFIL TEAM COLIN
+//  DASHBOARD — module One Data (OD.define)   v53 — PROFIL TEAM COLIN
+//
+//  v53 (02/11/2026) : le compte « Préparateur » (rôle 12) n'a pas de tableau
+//  de bord : un simple bandeau qui renvoie à son planning (l'agenda de la
+//  page, en lecture seule) et à l'impression.
 //
 //  v51 (08/10/2026) : sans objectif du mois saisi, le bandeau ne dit plus
 //  « toute l'équipe tient son objectif » : il dit que les objectifs ne sont
@@ -1590,6 +1594,12 @@ OD.define('dashboard', {
 #dash-root .pl-lien{display:inline-flex;align-items:center;gap:6px;background:#2a5ea9;color:#fff;border:0;border-radius:9px;padding:7px 13px;font:inherit;font-size:12.5px;font-weight:700;cursor:pointer;text-decoration:none;margin-left:auto}
 #dash-root .pl-lien:hover{background:#1F4A85}
 `;
+    // v53 : préparateur — pas de chiffres, son planning est dans l'agenda.
+    function pagePreparateur() {
+      getRoot().innerHTML = '<div class="dw"><div class="drail"><h1>Bonjour</h1><span class="dt">' + esc(dateLongue()) + '</span><span class="drole">Préparateur</span></div>'
+        + '<section class="dband"><div class="d"><div class="q">Mon planning</div>'
+        + '<p>Les préparations demandées et les livraisons du site sont dans l’agenda ci-dessous. Le bouton « Planning » l’imprime, pour le jour, la semaine ou les dates de votre choix.</p></div></section></div>';
+    }
     async function tableauPlateau() {
       if (!doc.getElementById('dash-tc-css-pl')) {
         const st = doc.createElement('style'); st.id = 'dash-tc-css-pl'; st.textContent = CSS_PL;
@@ -1726,6 +1736,7 @@ OD.define('dashboard', {
     // L'opérateur plateau a sa propre page : on le sait souvent avant tout appel.
     const roleUser = await roleConnu();
     if (roleUser === 10) { await tableauPlateau(); return; }
+    if (roleUser === 12) { pagePreparateur(); return; }
 
     squelette();
 
@@ -1739,6 +1750,7 @@ OD.define('dashboard', {
     }
     // Rôle inconnu au montage : dash_lire le donne.
     if (!state.erreur && state.j && num(state.j.role) === 10) { await tableauPlateau(); return; }
+    if (!state.erreur && state.j && num(state.j.role) === 12) { pagePreparateur(); return; }
     if (!state.erreur && siteInitial != null) {
       const per = (state.j.perimetre || []);
       if (per.length > 1 && per.some(x => Number(x.id_site) === siteInitial)) poserSite(siteInitial);
