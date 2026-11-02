@@ -1,6 +1,9 @@
 // ============================================================================
 //  LEAD MANAGEMENT — module One Data (OD.define 'lead-mgmt')
-//  VERSION TEAM COLIN (v91) — déploiement CIBLÉ (publish-targets :
+//  VERSION TEAM COLIN (v92) — déploiement CIBLÉ (publish-targets :
+//  v92 (02/11/2026) : le chef des ventes peut s'attribuer un lead : « Moi »
+//  en tête de la liste des vendeurs, et bouton « Pour moi » sur le Pool de
+//  son accueil. Le lead passe dans son onglet « Mes leads ».
 //  v91 (02/11/2026) : retours vendeurs. Historique : un lead dont le client a
 //  acheté est « Vendu » (même s'il était rangé « écarté ») ; le contact fait
 //  depuis la fiche client (appel, SMS, e-mail, WhatsApp, compte rendu) y
@@ -3346,7 +3349,12 @@
         .map(function (v) { return [v, charge(v.id_user, sid)]; })
         .sort(function (a, b) { return (a[0].exclu - b[0].exclu) || (a[1] - b[1]) || String(a[0].nom).localeCompare(String(b[0].nom), 'fr'); });
       if (choisi == null && vs.length) choisi = vs[0][0].id_user;
-      return vs.map(function (x) { return '<option value="' + x[0].id_user + '"' + (String(x[0].id_user) === String(choisi) ? ' selected' : '') + '>' + esc(propre(x[0].nom)) + ' · ' + x[1] + ' en cours' + (x[0].exclu ? ' · écarté' : String(x[0].id_user) === String(choisi) ? ' · suggéré' : '') + '</option>'; }).join('');
+      // v92 : le chef des ventes peut se l'attribuer.
+      var moi = '';
+      if (POSTE !== 'vendeur' && !S.comme && MOI != null && manager(sid) && String(MOI) !== String(exclu)
+          && !vs.some(function (x) { return String(x[0].id_user) === String(MOI); }))
+        moi = '<option value="' + MOI + '"' + (String(MOI) === String(choisi) ? ' selected' : '') + '>Moi · ' + charge(MOI, sid) + ' en cours</option>';
+      return moi + vs.map(function (x) { return '<option value="' + x[0].id_user + '"' + (String(x[0].id_user) === String(choisi) ? ' selected' : '') + '>' + esc(propre(x[0].nom)) + ' · ' + x[1] + ' en cours' + (x[0].exclu ? ' · écarté' : String(x[0].id_user) === String(choisi) ? ' · suggéré' : '') + '</option>'; }).join('');
     }
     function sitesRenvoi(l) {
       var m = marqueNorm(l.marque_lead);
@@ -3698,6 +3706,7 @@
             else if (verrouAutre(l)) act = '<span class="resa-l">Réservé par ' + esc(propre(l.verrou_nom || 'un collègue')) + '</span>';
             else if (g && g.id_user) act = '<span class="ac-sg">suggéré : <b>' + esc(prenom(g.nom)) + '</b></span><button type="button" class="btn sm pri" data-a="attribuer-sugg" data-id="' + l.id_lead + '">Attribuer</button><button type="button" class="btn sm" data-a="open" data-id="' + l.id_lead + '">Autre…</button>';
             else act = '<button type="button" class="btn sm pri" data-a="open" data-id="' + l.id_lead + '">Attribuer</button>';
+            if (gere && !verrouAutre(l) && !S.comme) act += '<button type="button" class="btn sm" data-a="pour-moi" data-id="' + l.id_lead + '">Pour moi</button>';
             return acLigne(l, '<div class="ac-act">' + act + '</div>'); }).join('')
           + (vis.length > 15 ? '<button type="button" class="ac-plus" data-a="tab" data-id="pool">Voir les ' + vis.length + ' leads</button>' : '')
           : '<p class="ac-vide">' + (pool.length ? 'Aucun lead pour ce filtre.' : 'Le Pool est vide : chaque lead a son vendeur.') + '</p>') + '</section>';
@@ -4397,6 +4406,14 @@
         rafraichir(true);
       });
     }
+    function attribuerMoi(id) {
+      var l = leadDe(id);
+      return geste(async function () {
+        var r = await rpc('poste_attribuer', { p_id_lead: Number(id), p_id_user: Number(MOI) });
+        if (r && r.ok === false) { toast(r.motif || 'Attribution impossible.', true); return; }
+        apres(nomLead(l) + ' est à vous : il est dans « Mes leads ».', true);
+      });
+    }
     function attribuer(v) {
       var p = String(v).split('|'), id = p[0], dr = p[1] === 'dr';
       var sel = dr ? $drawer.querySelector('#dr-vendeur') : (root.querySelector('#sel-' + id) || $drawer.querySelector('#sel-' + id));
@@ -4649,6 +4666,7 @@
         case 'solder-ok': return solder(id);
         case 'modal-close': return fermerModal();
         case 'attribuer': return attribuer(id);
+        case 'pour-moi': return attribuerMoi(id);
         case 'attribuer-regle': return attribuerRegle();
         case 'rendre': return rendre(id);
         case 'confier': return confier(id);
