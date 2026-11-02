@@ -1,5 +1,25 @@
 // ============================================================================
-//  NOTIFICATIONS — module One Data (OD.define)   v8 — PROFIL TEAM COLIN
+//  NOTIFICATIONS — module One Data (OD.define)   v9 — PROFIL TEAM COLIN
+//
+//  v9 (02/11/2026) : CLASSER, AVEC UN MOTIF. Demande de Julien Faugeras : un
+//  mail qui n'appelle pas de réponse (un « merci », un organisme de cartes
+//  grises rattaché par erreur à un client) restait dans « On m'attend ».
+//   * « Pas de réponse à faire » sur chaque carte de « On m'attend » : motif
+//     obligatoire (échange clos, répondu par un autre moyen, pas pour moi,
+//     expéditeur non client). Le classement vaut un geste sortant : si le
+//     client réécrit, la carte revient.
+//   * « Expéditeur non client » peut exclure l'adresse, tout le domaine (sauf
+//     messagerie grand public) ou le numéro : ses messages n'entrent plus
+//     dans la file de personne.
+//   * « Classer sans suite » sur les relances promises (test, déjà traité,
+//     injoignable ou abandon) et sur les inconnus (test, personnel ou
+//     démarchage, non client).
+//   * Tout est tracé : « Reportées » montre mes classements des 7 derniers
+//     jours, annulables ; « L'équipe » compte les classements de chaque
+//     vendeur sur 30 jours, les liste, et montre les expéditeurs exclus
+//     (retirables). Classé n'est jamais compté comme soldé.
+//   Prérequis SQL : migration 20261102180000_notif_classement (notif_classer,
+//   notif_declasser, notif_exclusions, notif_exclusion_retirer).
 //
 //  v8 (28/10/2026) : LES INCONNUS SE TRANSFORMENT EN FICHE.
 //   * Bouton « Créer la fiche » sur chaque inconnu : la recherche client
@@ -431,6 +451,8 @@ OD.define('notifications', {
 #notif-root .report .q{font-size:12px;font-weight:600;padding:4px 10px;border-radius:7px;
   border:1px solid var(--line-2);background:var(--card);cursor:pointer;color:var(--ink-2)}
 #notif-root .report .q:hover{border-color:var(--bleu-clair);color:var(--bleu)}
+#notif-root .report.classer .lib{font-weight:700;color:var(--ink-2)}
+#notif-root .report.classer .q.ann{border-color:transparent;background:none;color:var(--ink-3)}
 
 #notif-root .jour{display:flex;align-items:center;gap:10px;margin:8px 0 0}
 #notif-root .jour .t{font-size:11px;font-weight:800;letter-spacing:.07em;text-transform:uppercase;color:var(--ink-2)}
@@ -602,6 +624,7 @@ OD.define('notifications', {
     // =========================================================================
     const state = { j: null, section: null, canal: 'TOUS', erreur: null,
                     chargement: true, reportOuvert: null, busBound: false,
+                    classOuvert: null, classNonClient: false, exclusions: [],
                     sig: null };
 
     // Le périmètre choisi dans la barre du haut. « Tout mon périmètre » ne
@@ -692,6 +715,11 @@ OD.define('notifications', {
           const sites = sitesDuPerimetre();
           const j = await rpc('notif_lire', { p_sites: sites });
           state.j = j; state.erreur = null; state.sig = signature(sites);
+          // v9 : les expéditeurs exclus, pour les managers seulement
+          if (famille() !== 'vendeur') {
+            try { state.exclusions = (await rpc('notif_exclusions', {})) || []; }
+            catch (e) { state.exclusions = []; }
+          } else state.exclusions = [];
         } catch (e) {
           state.erreur = (e && e.message) || 'erreur inconnue';
         } finally {
@@ -882,10 +910,14 @@ OD.define('notifications', {
         +     '<span class="ev">' + esc(quandLisible(x.attend_depuis)) + '</span></div>'
         +   apercuHtml(x)
         +   (ouvert ? blocReport('client', x.id_client) : '')
+        +   (state.classOuvert === 'client:' + x.id_client
+              ? blocClasser('client', x.id_client, x.expediteur) : '')
         + '</div>'
         + '<div class="actes">'
         +   '<button type="button" class="btn p" data-role="repondre">Contacter</button>'
         +   '<button type="button" class="btn t" data-role="reporter">Reporter</button>'
+        +   '<button type="button" class="btn t" data-role="classer" data-cscope="client" data-ccle="'
+        +     esc(x.id_client) + '">Pas de réponse à faire</button>'
         + '</div></article>';
     }
 
@@ -900,6 +932,50 @@ OD.define('notifications', {
         + '<button type="button" class="q" data-demain="9">demain 9 h</button>'
         + '<button type="button" class="q" data-jours="2">après-demain</button>'
         + '</div>';
+    }
+
+    // v9 : classer, avec un motif. Pas de champ libre : un clic, comme le report.
+    const MOTIFS = {
+      client: [['echange_clos', 'Le client a clos l’échange'],
+               ['autre_canal', 'J’ai répondu par un autre moyen'],
+               ['pas_pour_moi', 'Ce n’est pas pour moi'],
+               ['non_client', 'Expéditeur non client']],
+      rpv:    [['test', 'Test'],
+               ['deja_traite', 'Déjà traité hors One Data'],
+               ['abandon', 'Client injoignable ou projet abandonné']],
+      orphan: [['test', 'Test'],
+               ['perso_demarchage', 'Personnel ou démarchage'],
+               ['non_client', 'Expéditeur non client']]
+    };
+    const LIB_MOTIF = {};
+    Object.keys(MOTIFS).forEach(k => MOTIFS[k].forEach(m => { LIB_MOTIF[m[0]] = m[1]; }));
+    const WEBMAIL = ['gmail.com','googlemail.com','hotmail.com','hotmail.fr','outlook.com','outlook.fr',
+      'live.com','live.fr','msn.com','yahoo.com','yahoo.fr','icloud.com','me.com','orange.fr',
+      'wanadoo.fr','free.fr','sfr.fr','neuf.fr','laposte.net','bbox.fr','aol.com','gmx.fr','gmx.com',
+      'numericable.fr','club-internet.fr','proton.me','protonmail.com'];
+    function blocClasser(scope, cle, expediteur) {
+      const att = ' data-cscope="' + esc(scope) + '" data-ccle="' + esc(cle) + '"';
+      if (state.classNonClient) {
+        const exp = String(expediteur || '').trim().toLowerCase();
+        const mail = /@/.test(exp), dom = mail ? exp.split('@')[1] : '';
+        let h = '<div class="report classer"' + att + '>'
+          + '<span class="lib">Expéditeur non client. Ses prochains messages : </span>';
+        if (mail) {
+          h += '<button type="button" class="q" data-excl="expediteur">exclure ' + esc(exp) + '</button>';
+          if (dom && WEBMAIL.indexOf(dom) === -1)
+            h += '<button type="button" class="q" data-excl="domaine">exclure tout @' + esc(dom) + '</button>';
+        } else if (exp && estNumero(exp)) {
+          h += '<button type="button" class="q" data-excl="expediteur">exclure ce numéro</button>';
+        }
+        h += '<button type="button" class="q" data-excl="">ne rien exclure</button>'
+          + '<button type="button" class="q ann" data-role="classer-fermer">annuler</button></div>';
+        return h;
+      }
+      return '<div class="report classer"' + att + '>'
+        + '<span class="lib">' + (scope === 'client' ? 'Pourquoi pas de réponse ? ' : 'Pourquoi sans suite ? ') + '</span>'
+        + (MOTIFS[scope] || []).map(m => '<button type="button" class="q" data-motif="' + m[0] + '">'
+            + esc(m[1]) + '</button>').join('')
+        + '<button type="button" class="q ann" data-role="classer-fermer">annuler</button></div>';
     }
 
     function carteAlerte(a) {
@@ -946,6 +1022,8 @@ OD.define('notifications', {
         +   (i.site ? '<span class="ev">Reçu sur ' + esc(i.site) + '</span>' : '') + '</div>'
         + (i.apercu ? '<p class="extrait' + (estMedia(i.apercu) ? ' media' : '') + '">'
             + esc(libelleApercu(i.apercu)) + '</p>' : '')
+        + (state.classOuvert === 'orphan:' + i.interlocuteur
+            ? blocClasser('orphan', i.interlocuteur, i.interlocuteur) : '')
         + '</div>'
         + '<div class="actes">'
         +   ((tel || mail) ? '<button type="button" class="btn p" data-role="creer-fiche" data-qui="'
@@ -954,6 +1032,8 @@ OD.define('notifications', {
         +     esc(i.interlocuteur) + '">' + (SUR_MOBILE ? 'Appeler' : 'Copier le numéro')
         +     '</button>' : '')
         +   '<button type="button" class="btn t" data-role="ecarter">Écarter 7 jours</button>'
+        +   '<button type="button" class="btn t" data-role="classer" data-cscope="orphan" data-ccle="'
+        +     esc(i.interlocuteur) + '">Classer sans suite</button>'
         + '</div></article>';
     }
 
@@ -1002,11 +1082,15 @@ OD.define('notifications', {
           + '<div class="h">' + esc(heure(p.quand))
           +   '<small>' + (p.en_retard ? 'En retard' : jourLisible(p.quand)) + '</small></div>'
           + '<div><b>Relancer ' + esc(p.client_nom || ('client ' + p.id_client)) + '</b>'
-          +   (p.quoi ? '<div class="quoi">' + esc(p.quoi) + '</div>' : '') + '</div>'
+          +   (p.quoi ? '<div class="quoi">' + esc(p.quoi) + '</div>' : '')
+          +   (state.classOuvert === 'rpv:' + p.id_rapport ? blocClasser('rpv', p.id_rapport, null) : '')
+          + '</div>'
           + '<div class="actes">'
           +   (p.id_client ? '<button type="button" class="btn p" data-role="repondre">'
                            + 'Contacter</button>' : '')
           +   '<button type="button" class="btn t" data-role="reporter-rpv">Reporter</button>'
+          +   '<button type="button" class="btn t" data-role="classer" data-cscope="rpv" data-ccle="'
+          +     esc(p.id_rapport) + '">Classer sans suite</button>'
           + '</div></article>';
       }
       const vins = (p.vins || []).length;
@@ -1056,14 +1140,15 @@ OD.define('notifications', {
         return '<div class="vide"><div class="ico">'
           + '<svg viewBox="0 0 24 24"><path d="m5 13 4 4L19 7"/></svg></div>'
           + '<h3>Personne ne doit rien à personne</h3>'
-          + '<p>Tous les clients du périmètre ont eu leur réponse.</p></div>';
+          + '<p>Tous les clients du périmètre ont eu leur réponse.</p></div>' + blocTraces();
       }
       const estVendeur = niveau === 'vendeur';
       const max = Math.max.apply(null, lignes.map(x => num(x.dette)).concat([1]));
       let h = '<div class="dscroll"><table class="tab"><thead><tr>'
         + '<th>' + (estVendeur ? 'Vendeur' : 'Affaire') + '</th>'
         + '<th>Dette</th><th>En retard</th><th>Plus ancienne</th>'
-        + '<th>Réponse médiane</th><th>Charge</th><th></th></tr></thead><tbody>';
+        + '<th>Réponse médiane</th>' + (estVendeur ? '<th title="Classées sans suite, 30 derniers jours">Classées (30 j)</th>' : '')
+        + '<th>Charge</th><th></th></tr></thead><tbody>';
       lignes.forEach(x => {
         const r = num(x.en_retard);
         h += '<tr data-cle="' + esc(x.cle) + '">'
@@ -1079,6 +1164,7 @@ OD.define('notifications', {
               : (num(x.reponse_mediane_min) <= 60
                   ? '<span class="bon">' + duree(x.reponse_mediane_min) + '</span>'
                   : duree(x.reponse_mediane_min))) + '</td>'
+          + (estVendeur ? '<td class="f">' + (num(x.classees_30j) > 0 ? fmt(x.classees_30j) : '—') + '</td>' : '')
           + '<td><span class="barre"><i style="width:'
               + Math.round(num(x.dette) / max * 100) + '%;background:'
               + (r > 0 ? 'var(--m-rouge)' : 'var(--m-bleu)') + '"></i></span></td>'
@@ -1090,6 +1176,42 @@ OD.define('notifications', {
       if (estVendeur) h += '<p class="dnote" style="font-size:11.5px;color:var(--ink-3);margin-top:8px">'
         + '« Alerter » envoie au vendeur une notification nommée dans sa propre file. '
         + 'Vous ne voyez pas ses messages : le détail reste chez celui qui doit agir.</p>';
+      return h + blocTraces();
+    }
+
+    // v9 : ce qui a été classé sans suite, et les expéditeurs exclus. Compté à
+    // part : un classement n'est jamais une dette soldée.
+    function blocTraces() {
+      const cl = (state.j && state.j.classements) || [];
+      const ex = state.exclusions || [];
+      let h = '';
+      if (cl.length) {
+        h += '<div class="jour" style="margin-top:18px"><span class="t">Classées sans suite (30 jours)</span>'
+          + '<span class="ligne"></span><span class="n">' + fmt(cl.length) + '</span></div>'
+          + '<div class="dscroll"><table class="tab"><thead><tr><th>Quand</th><th>Vendeur</th><th>Quoi</th>'
+          + '<th>Motif</th></tr></thead><tbody>'
+          + cl.map(k => '<tr><td>' + esc(jourLisible(k.classe_le)) + ' ' + esc(heure(k.classe_le)) + '</td>'
+              + '<td>' + esc(k.vendeur || '') + '</td>'
+              + '<td>' + esc(k.libelle || (k.scope === 'client' ? 'Client' : '')) + '</td>'
+              + '<td>' + esc(LIB_MOTIF[k.motif] || k.motif)
+              + (k.expediteur ? ' · exclu : ' + esc(k.expediteur) : '') + '</td></tr>').join('')
+          + '</tbody></table></div>';
+      }
+      if (ex.length) {
+        h += '<div class="jour" style="margin-top:18px"><span class="t">Expéditeurs exclus</span>'
+          + '<span class="ligne"></span><span class="n">' + fmt(ex.length) + '</span></div>'
+          + '<p class="dnote" style="font-size:11.5px;color:var(--ink-3);margin:6px 0 8px">'
+          + 'Leurs messages n’entrent dans la file de personne. Retirez une exclusion si elle '
+          + 'cache un vrai client.</p>'
+          + '<div class="dscroll"><table class="tab"><thead><tr><th>Expéditeur</th><th>Exclu par</th>'
+          + '<th>Le</th><th></th></tr></thead><tbody>'
+          + ex.map(x => '<tr data-excl-cle="' + esc(x.cle) + '"><td>'
+              + (x.genre === 'domaine' ? 'tout ' : '') + esc(x.cle) + '</td>'
+              + '<td>' + esc(x.par || '') + '</td>'
+              + '<td>' + esc(jourLisible(x.le)) + '</td>'
+              + '<td><button type="button" class="mini" data-role="exclusion-retirer">Retirer</button></td></tr>').join('')
+          + '</tbody></table></div>';
+      }
       return h;
     }
 
@@ -1232,7 +1354,19 @@ OD.define('notifications', {
 
       if (sec === 'reportees') {
         const l = (j.reportees || []);
-        if (!l.length) return vide('reportees');
+        const mc = (j.mes_classements || []);
+        // v9 : mes classements des 7 derniers jours, annulables (erreur de clic)
+        const mesCl = !mc.length ? '' :
+          '<div class="jour" style="margin-top:14px"><span class="t">Classées sans suite (7 jours)</span>'
+          + '<span class="ligne"></span><span class="n">' + fmt(mc.length) + '</span></div>'
+          + '<div class="pile">' + mc.map(k => '<article class="pr" data-classement="' + esc(k.id) + '">'
+              + '<div class="h">' + esc(heure(k.classe_le)) + '<small>' + esc(jourLisible(k.classe_le)) + '</small></div>'
+              + '<div><b>' + esc(k.libelle || (k.scope === 'client' ? 'Client ' + k.cle : k.cle)) + '</b>'
+              + '<div class="quoi">' + esc(LIB_MOTIF[k.motif] || k.motif)
+              + (k.expediteur ? ' · exclu : ' + esc(k.expediteur) : '') + '</div></div>'
+              + '<div class="actes"><button type="button" class="btn s" data-role="declasser">Annuler</button></div>'
+              + '</article>').join('') + '</div>';
+        if (!l.length) return (mc.length ? '' : vide('reportees')) + mesCl;
         return '<div class="pile">' + l.map(x =>
           '<article class="cli froid" data-client="' + esc(x.id_client) + '">'
           + '<div class="av">' + esc(initiales(x.client_nom)) + '</div>'
@@ -1245,7 +1379,7 @@ OD.define('notifications', {
           + '</div><div class="actes">'
           + '<button type="button" class="btn s" data-role="reprendre-report">Reprendre maintenant</button>'
           + '<button type="button" class="btn t" data-role="repondre">Ouvrir la fiche</button>'
-          + '</div></article>').join('') + '</div>';
+          + '</div></article>').join('') + '</div>' + mesCl;
       }
       return '';
     }
@@ -1258,6 +1392,8 @@ OD.define('notifications', {
         + 'et non par l’heure qui passe. Un numéro inconnu se '
         + 'solde quand il est rattaché à une fiche. Un <b>report</b> ne solde rien : il '
         + 'met la dette de côté jusqu’à l’heure dite, puis elle revient. '
+        + 'Ce qui n’appelle aucune réponse se <b>classe</b>, avec un motif : la trace reste, '
+        + 'visible du chef des ventes, et un client qui réécrit revient dans la file. '
         + 'Les leads ne sont pas ici : ils sont traités dans le lead management.</p>';
     }
 
@@ -1900,6 +2036,56 @@ OD.define('notifications', {
       const p = ev.target.closest('.puce[data-canal]');
       if (p && r.contains(p)) { state.canal = p.getAttribute('data-canal'); rendre(); return; }
 
+      // --- v9 : classer, avec un motif
+      const ff = ev.target.closest('[data-role="classer-fermer"]');
+      if (ff && r.contains(ff)) { state.classOuvert = null; state.classNonClient = false; rendre(); return; }
+      const oc = ev.target.closest('[data-role="classer"]');
+      if (oc && r.contains(oc)) {
+        const k = oc.getAttribute('data-cscope') + ':' + oc.getAttribute('data-ccle');
+        state.classOuvert = (state.classOuvert === k) ? null : k;
+        state.classNonClient = false; state.reportOuvert = null;
+        rendre(); return;
+      }
+      const qm = ev.target.closest('.report.classer .q[data-motif], .report.classer .q[data-excl]');
+      if (qm && r.contains(qm)) {
+        const z = qm.closest('.report.classer');
+        const motif = qm.hasAttribute('data-excl') ? 'non_client' : qm.getAttribute('data-motif');
+        if (motif === 'non_client' && !qm.hasAttribute('data-excl')) {
+          state.classNonClient = true; rendre(); return;
+        }
+        const excl = qm.hasAttribute('data-excl') ? (qm.getAttribute('data-excl') || null) : null;
+        qm.textContent = '…';
+        try {
+          const res = await rpc('notif_classer', { p_scope: z.getAttribute('data-cscope'),
+                                                   p_cle: String(z.getAttribute('data-ccle')),
+                                                   p_motif: motif, p_commentaire: null, p_exclure: excl });
+          if (!res || !res.ok) throw new Error((res && res.erreur) || 'échec');
+          state.classOuvert = null; state.classNonClient = false;
+          await recharger();
+        } catch (e) { qm.textContent = 'échec : ' + ((e && e.message) || ''); }
+        return;
+      }
+      const dc = ev.target.closest('[data-role="declasser"]');
+      if (dc && r.contains(dc)) {
+        const art = dc.closest('[data-classement]');
+        dc.textContent = '…';
+        try {
+          await rpc('notif_declasser', { p_id: Number(art.getAttribute('data-classement')) });
+          await recharger();
+        } catch (e) { dc.textContent = 'échec'; }
+        return;
+      }
+      const xr = ev.target.closest('[data-role="exclusion-retirer"]');
+      if (xr && r.contains(xr)) {
+        const tr = xr.closest('[data-excl-cle]');
+        xr.textContent = '…';
+        try {
+          await rpc('notif_exclusion_retirer', { p_cle: tr.getAttribute('data-excl-cle') });
+          await recharger();
+        } catch (e) { xr.textContent = 'échec'; }
+        return;
+      }
+
       // --- échéances de report
       //     Le compte rendu de rendez-vous réutilise la même boîte visuelle,
       //     sans data-scope : sans cette condition, il était intercepté ici et
@@ -1925,6 +2111,7 @@ OD.define('notifications', {
       if (br && r.contains(br)) {
         const c = clientDe(br);
         state.reportOuvert = (String(state.reportOuvert) === String(c)) ? null : c;
+        state.classOuvert = null; state.classNonClient = false;
         rendre(); return;
       }
       const brp = ev.target.closest('[data-role="reporter-rpv"]');
