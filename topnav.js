@@ -1,5 +1,12 @@
 // ============================================================================
-//  TOP NAV — module One Data (OD.define)  v38 — SÉLECTEUR DE PÉRIMÈTRE
+//  TOP NAV — module One Data (OD.define)  v41 — SÉLECTEUR DE PÉRIMÈTRE
+//  v41 (02/11/2026) : CHAMP DE RECHERCHE au centre de la barre client/site.
+//  La nav ne pose qu'une ancre (#od-recherche, module 'recherche') entre le
+//  client sélectionné et le sélecteur de site ; tout le reste vit dans
+//  recherche.js. Pas d'ancre pour le préparateur (rôle 12), qui n'a que son
+//  planning. Sous 560 px, le champ passe sur sa propre ligne, pleine largeur,
+//  sous le client et le site. Si le module n'est pas encore publié pour le
+//  tenant, l'ancre reste vide et la barre garde son aspect actuel.
 //  v38 (02/11/2026) : compte « Préparateur » (rôle 12) : aucun menu, ni
 //  Delco, ni fiche client, ni arbitrage ; seule la page d'accueil (son
 //  planning). Toute autre page le ramène à l'accueil. Le menu de l'avatar
@@ -145,7 +152,7 @@ OD.define('topnav', {
   const wwLib = window.wwLib;
   const doc = __anchor.ownerDocument || wwLib.getFrontDocument();
   const ROOT_ID = 'nav-root';
-  const NAV_VER = 40; // <- numéro de version (témoin de chargement)
+  const NAV_VER = 41; // <- numéro de version (témoin de chargement)
 
   // ------------------------------------------------------------- favicon
   // Posée une fois par chargement de l'app ; les balises existantes (icônes
@@ -493,6 +500,12 @@ OD.define('topnav', {
 #oropra-client-history{display:inline-flex;flex:0 0 auto}
 #nav-root #oropra-client-history .ch-trigger svg{transform:none}
 .od-site{position:relative;margin-left:auto;flex:0 0 auto}
+/* v41 : champ de recherche, centré entre le client et le site. L'emplacement
+   prend toute la place libre ; le champ lui-même est borné à 520 px par le
+   module. Vide (module absent), il ne prend aucune place visible. */
+.od-rech-slot{flex:1 1 auto;min-width:0;display:flex;justify-content:center;padding:0 16px}
+.od-rech-slot:empty,.od-rech-slot>#od-recherche:empty{padding:0}
+.od-rech-slot+.od-site{margin-left:0}
 .od-site>button{display:inline-flex;align-items:center;gap:7px;background:#fff;border:1px solid #d6e2f2;cursor:pointer;font:inherit;font-size:13px;font-weight:600;color:#2a5ea9;padding:7px 11px;border-radius:9px}
 .od-site>button:hover{border-color:#acc5e4}
 .od-site>button svg.od-pin{width:15px;height:15px;color:#53bda7;flex:0 0 auto}
@@ -548,6 +561,7 @@ OD.define('topnav', {
   .od-client-btn{flex:1 1 auto;min-width:0;max-width:100%}
   .od-client-name{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   .od-site{flex:0 1 auto;max-width:48%}
+  .od-rech-slot{padding:0 8px}
   .od-site>button{padding:7px 10px}
   .od-site-name{display:inline-block;max-width:130px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;vertical-align:middle}
   .od-site .od-drop{max-width:calc(100vw - 28px)}
@@ -560,6 +574,7 @@ OD.define('topnav', {
   /* barre 2 empilée : client en haut, sélecteur de site dessous -> jamais de débordement */
   .od-client{flex:1 1 100%;min-width:0}
   .od-site{flex:1 1 100%;max-width:100%;margin-left:0}
+  .od-rech-slot{order:3;flex:1 1 100%;padding:0}
   .od-site>button{width:100%;justify-content:flex-start}
   .od-site-name{flex:1 1 auto;min-width:0;max-width:none;text-align:left}
   .od-modal{width:100%}
@@ -647,6 +662,8 @@ OD.define('topnav', {
             // F5 ou en navigation. Monté ici, il est présent partout.
             '<div id="oropra-client-history" data-od-module="client-history"></div>' +
           '</span>' +
+          // v41 : ancre du module 'recherche' (champ + listes catégorisées).
+          (__role === 12 ? '' : '<div class="od-rech-slot"><div id="od-recherche" data-od-module="recherche"></div></div>') +
           '<div class="od-site"><button data-toggle="site">' + I.pin.replace('<svg', '<svg class="od-pin"') +
             '<span class="od-site-name">Site</span></button>' +
             '<div class="od-drop"></div></div>' +
