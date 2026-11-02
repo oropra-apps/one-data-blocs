@@ -1,5 +1,10 @@
 // ============================================================================
-//  NOTIFICATIONS — module One Data (OD.define)   v9 — PROFIL TEAM COLIN
+//  NOTIFICATIONS — module One Data (OD.define)   v10 — PROFIL TEAM COLIN
+//
+//  v10 (02/11/2026) : « Expéditeur non client » posait une question obscure
+//  (« ne rien exclure » seul choix sur un appel). La question n'apparaît plus
+//  que s'il y a une adresse ou un numéro à exclure, et elle est formulée en
+//  clair : ne plus afficher ses messages / continuer à les afficher.
 //
 //  v9 (02/11/2026) : CLASSER, AVEC UN MOTIF. Demande de Julien Faugeras : un
 //  mail qui n'appelle pas de réponse (un « merci », un organisme de cartes
@@ -954,20 +959,24 @@ OD.define('notifications', {
       'wanadoo.fr','free.fr','sfr.fr','neuf.fr','laposte.net','bbox.fr','aol.com','gmx.fr','gmx.com',
       'numericable.fr','club-internet.fr','proton.me','protonmail.com'];
     function blocClasser(scope, cle, expediteur) {
-      const att = ' data-cscope="' + esc(scope) + '" data-ccle="' + esc(cle) + '"';
+      const att = ' data-cscope="' + esc(scope) + '" data-ccle="' + esc(cle) + '" data-cexp="' + esc(expediteur || '') + '"';
       if (state.classNonClient) {
         const exp = String(expediteur || '').trim().toLowerCase();
         const mail = /@/.test(exp), dom = mail ? exp.split('@')[1] : '';
+        // v9.1 : la question est posée en clair, et seulement quand il y a
+        // quelque chose à exclure (une adresse ou un numéro connus).
         let h = '<div class="report classer"' + att + '>'
-          + '<span class="lib">Expéditeur non client. Ses prochains messages : </span>';
+          + '<span class="lib">Pas un client. Quand ' + (mail ? 'cette adresse' : 'ce numéro')
+          + ' vous écrira à nouveau : </span>';
         if (mail) {
-          h += '<button type="button" class="q" data-excl="expediteur">exclure ' + esc(exp) + '</button>';
+          h += '<button type="button" class="q" data-excl="expediteur">ne plus afficher ses messages ('
+            + esc(exp) + ')</button>';
           if (dom && WEBMAIL.indexOf(dom) === -1)
-            h += '<button type="button" class="q" data-excl="domaine">exclure tout @' + esc(dom) + '</button>';
-        } else if (exp && estNumero(exp)) {
-          h += '<button type="button" class="q" data-excl="expediteur">exclure ce numéro</button>';
+            h += '<button type="button" class="q" data-excl="domaine">ne plus rien afficher de @' + esc(dom) + '</button>';
+        } else {
+          h += '<button type="button" class="q" data-excl="expediteur">ne plus afficher ses appels et messages</button>';
         }
-        h += '<button type="button" class="q" data-excl="">ne rien exclure</button>'
+        h += '<button type="button" class="q" data-excl="">continuer à les afficher</button>'
           + '<button type="button" class="q ann" data-role="classer-fermer">annuler</button></div>';
         return h;
       }
@@ -2051,7 +2060,9 @@ OD.define('notifications', {
         const z = qm.closest('.report.classer');
         const motif = qm.hasAttribute('data-excl') ? 'non_client' : qm.getAttribute('data-motif');
         if (motif === 'non_client' && !qm.hasAttribute('data-excl')) {
-          state.classNonClient = true; rendre(); return;
+          // Rien à exclure (un appel, sans adresse connue) : on classe directement.
+          const exp = String(z.getAttribute('data-cexp') || '').trim();
+          if (/@/.test(exp) || estNumero(exp)) { state.classNonClient = true; rendre(); return; }
         }
         const excl = qm.hasAttribute('data-excl') ? (qm.getAttribute('data-excl') || null) : null;
         qm.textContent = '…';
