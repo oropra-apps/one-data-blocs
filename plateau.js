@@ -1,5 +1,9 @@
 // ============================================================================
-//  VROOM TEAM (plateau) — module One Data (OD.define 'plateau')  v3
+//  VROOM TEAM (plateau) — module One Data (OD.define 'plateau')  v4
+//  v4 (02/11/2026) : tuiles au design One Data (fond bleu très pâle, sans
+//    bordure ni ombre, coins 8 px, chiffres en bleu, aucun rouge ni beige).
+//    Liseré bleu à gauche au survol, seulement sur une tuile cliquable ;
+//    la tuile choisie garde son liseré en bleu foncé.
 //  v3 (30/10/2026) : bouton « Nouveau lead » dans l'en-tête et l'écran
 //  d'attente du poste (opt.creer) : l'opératrice crée une demande et choisit
 //  le vendeur ; il la reçoit « Qualifiée par la Vroom Team ». Touche N.
@@ -215,18 +219,18 @@
       '.odpl .wait h2{font-size:28px;margin-bottom:8px}',
       '.odpl .tiles{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:14px;margin:28px 0}',
       '@media (max-width:700px){.odpl .tiles{grid-template-columns:repeat(2,minmax(0,1fr))}}',
-      '.odpl .tile{background:#fff;border:1px solid var(--ln);border-radius:16px;padding:16px}.odpl .tile b{display:block;font-size:28px;font-weight:900;color:var(--bl2)}.odpl .tile.r b{color:var(--ro2)}.odpl .tile.o b{color:var(--or2)}',
+      '.odpl .tile{background:#f5f8fc;border:0;border-radius:8px;padding:16px}.odpl .tile b{display:block;font-size:28px;font-weight:900;color:var(--bl2)}.odpl .tile.r b,.odpl .tile.o b{color:#c7820a}',
       '.odpl .bigbtn{font-size:17px;font-weight:900;padding:18px 34px;border-radius:16px;border:0;background:var(--bl);color:#fff;box-shadow:0 10px 26px rgba(42,94,169,.3);min-height:60px}',
       '.odpl .lnk{border:0;background:transparent;color:var(--bl);font-weight:800;font-size:13px;text-decoration:underline;padding:6px}',
       '.odpl kbd{font:inherit;font-size:11px;font-weight:900;padding:1px 6px;border-radius:5px;border:1px solid currentColor;opacity:.75}',
       // tour de contrôle
       '.odpl .kpis{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:14px}',
       '@media (max-width:1180px){.odpl .kpis{grid-template-columns:repeat(3,minmax(0,1fr))}}@media (max-width:640px){.odpl .kpis{grid-template-columns:repeat(2,minmax(0,1fr))}}',
-      '.odpl .kpi{background:#fff;border:1px solid var(--ln);border-radius:16px;padding:14px 16px}',
+      '.odpl .kpi{background:#f5f8fc;border:0;border-radius:8px;padding:14px 16px}',
       '.odpl .kpi .l{font-size:12px;font-weight:800;color:var(--tx2)}.odpl .kpi .v{font-size:26px;font-weight:900;color:var(--bl2);line-height:1.25}',
-      '.odpl .kpi .v.g{color:var(--ve2)}.odpl .kpi .v.r{color:var(--ro2)}.odpl .kpi .v.o{color:var(--or2)}',
+      '.odpl .kpi .v.g{color:var(--ve2)}.odpl .kpi .v.r,.odpl .kpi .v.o{color:#c7820a}',
       '.odpl .bar{height:6px;background:#e6eef8;border-radius:3px;overflow:hidden;margin:7px 0 5px}.odpl .bar i{display:block;height:100%;border-radius:3px;background:var(--bl)}',
-      '.odpl .bar i.g{background:var(--ve)}.odpl .bar i.r{background:var(--ro)}.odpl .bar i.o{background:var(--or)}',
+      '.odpl .bar i.g{background:var(--ve)}.odpl .bar i.r,.odpl .bar i.o{background:var(--or)}',
       '.odpl .tour{max-width:1480px;margin:0 auto;padding:24px 28px 40px;display:flex;flex-direction:column;gap:22px}',
       '.odpl .g3{display:grid;grid-template-columns:minmax(0,340px) minmax(0,1fr) minmax(0,360px);gap:22px;align-items:start}',
       '@media (max-width:1280px){.odpl .g3{grid-template-columns:minmax(0,320px) minmax(0,1fr)}.odpl .g3>.col3{grid-column:1/-1}}@media (max-width:860px){.odpl .g3{grid-template-columns:minmax(0,1fr)}.odpl .tour{padding:16px}}',
