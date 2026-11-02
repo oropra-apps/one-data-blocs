@@ -1,5 +1,9 @@
 // ============================================================================
-//  DASHBOARD — module One Data (OD.define)   v53 — PROFIL TEAM COLIN
+//  DASHBOARD — module One Data (OD.define)   v54 — PROFIL TEAM COLIN
+//
+//  v54 (02/11/2026) : survol d'une tuile = liseré bleu à gauche (il suit la
+//    souris de tuile en tuile), comme sur Activité ; la tuile ouverte garde
+//    son liseré en bleu foncé. Plus de cadre bleu ni de tuile qui se soulève.
 //
 //  v53 (02/11/2026) : le compte « Préparateur » (rôle 12) n'a pas de tableau
 //  de bord : un simple bandeau qui renvoie à son planning (l'agenda de la
@@ -176,11 +180,9 @@ OD.define('dashboard', {
 #dash-root .dtuile{position:relative;text-align:left;font:inherit;color:var(--ink);cursor:pointer;
   background:var(--card);border:1px solid var(--line);border-radius:13px;padding:11px 13px 9px;
   box-shadow:var(--ombre);display:flex;flex-direction:column;min-width:0;min-height:84px;
-  transition:border-color .12s,transform .12s}
-#dash-root .dtuile:hover{border-color:var(--line-2);transform:translateY(-1px)}
-#dash-root .dtuile[aria-expanded="true"]{border-color:var(--bleu);
-  box-shadow:0 0 0 2px rgba(42,94,169,.22),var(--ombre)}
-#dash-root .dtuile:focus-visible{outline:2px solid var(--bleu);outline-offset:2px}
+  transition:box-shadow .15s ease}
+#dash-root .dtuile:hover,#dash-root .dtuile:focus-visible{box-shadow:inset 3px 0 0 0 var(--bleu),var(--ombre);outline:none}
+#dash-root .dtuile[aria-expanded="true"],#dash-root .dtuile[aria-expanded="true"]:hover{box-shadow:inset 3px 0 0 0 #1F4A85,var(--ombre)}
 #dash-root .dtuile.muette{opacity:.62;border-style:dashed}
 #dash-root .dtuile.muette .v{color:var(--ink-3)}
 #dash-root .dtuile .lab{font-size:10.5px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;
