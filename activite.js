@@ -1,10 +1,15 @@
 // ============================================================================
 //  SUIVI D'ACTIVITÉ v4 (28/10/2026) — un écran par rôle, une question par écran
-//  v13 (02/11/2026) : couleurs alignées sur la charte One Data (mêmes teintes que
-//    Performances et Objectifs : bleus #1F4A85 / #2a5ea9, vert #53bda7, orange
-//    #fac055, rouge #e24b4a ; fonds pâles et textes foncés associés). Flux :
-//    bandes bleues pleines, pertes en rouge franc. Anneau : libellé court
-//    sous le chiffre (« commandes · 31 oct. »), marque de projection bleue.
+//  v14 (02/11/2026) : design One Data sur les quatre onglets, calqué sur
+//    Performances. Textes en bleus (#1F4A85 / #2a5ea9 / #7a9cc4, jamais de
+//    noir), cartes blanches à bordure fine sans ombre, titres de carte
+//    précédés d'un trait de couleur, sélecteurs en boutons bleus. Aucun rouge :
+//    l'orange #fac055 signale ce qui demande de l'attention, le vert ce qui va
+//    bien. L'anneau devient une tuile « Commandes signées » (chiffre / objectif,
+//    pastille %, jauge, projection). Onglet Site : tuiles chiffrées, parcours
+//    en barres horizontales avec les chiffres dans les barres (ce qui passe
+//    l'étape en plein, ce qui est perdu en orange pâle), « Pourquoi on perd »
+//    et « Leads web » en barres simples.
 //  v12 (02/11/2026) : « En direct » prend le sélecteur de dates de One Data
 //    (le même bouton « 📅 du → au » que partout ailleurs ; le calendrier natif
 //    du navigateur ne s'ouvrait pas) : un jour ou une période (act_direct
@@ -86,7 +91,7 @@ OD.define('activite', {
         + '#od-dp .kan-dp-head button:hover{background:#f5f8fc}'
         + '#od-dp .kan-dp-grid{display:grid;grid-template-columns:repeat(7,33px);gap:2px}'
         + '#od-dp .kan-dp-dow{font-size:9px;color:#acc5e4;text-align:center;font-weight:800;padding-bottom:3px}'
-        + '#od-dp .kan-dp-day{height:29px;line-height:29px;text-align:center;font-size:11px;color:#2c2c2a;border-radius:7px;cursor:pointer}'
+        + '#od-dp .kan-dp-day{height:29px;line-height:29px;text-align:center;font-size:11px;color:#1F4A85;border-radius:7px;cursor:pointer}'
         + '#od-dp .kan-dp-day:hover{background:#eef4fc}'
         + '#od-dp .kan-dp-day.today{box-shadow:inset 0 0 0 1.5px #acc5e4}'
         + '#od-dp .kan-dp-day.sel{background:#2a5ea9;color:#fff;font-weight:800}'
@@ -283,11 +288,11 @@ OD.define('activite', {
 
     // ------------------------------------------------------------------ styles (charte One Data)
     const CSS = `
-#act-root{--bleu:#2a5ea9;--bleu-fonce:#1F4A85;--bleu-clair:#acc5e4;--vert:#53bda7;--orange:#fac055;--rouge:#e24b4a;
-  --m-vert:#085041;--m-orange:#633806;--m-bleu:#2a5ea9;--m-rouge:#791f1f;
-  --ground:#f5f8fc;--card:#fff;--line:#e3e9f3;--line-2:#cfd9e9;--ink:#1c2b45;--ink-2:#5a6b86;--ink-3:#8b99b0;
-  --ok-bg:#e1f5ee;--alerte-bg:#faeeda;--chaud-bg:#fcebeb;--calme-bg:#eaf0f9;
-  --ombre:0 1px 2px rgba(28,43,69,.05),0 8px 24px rgba(28,43,69,.06);
+#act-root{--bleu:#2a5ea9;--bleu-fonce:#1F4A85;--bleu-clair:#acc5e4;--vert:#53bda7;--orange:#fac055;--rouge:#fac055;
+  --m-vert:#085041;--m-orange:#8a5a0b;--m-bleu:#2a5ea9;--m-rouge:#8a5a0b;
+  --ground:#fafbfd;--card:#fff;--line:#eaf0f9;--line-2:#d6e2f2;--ink:#1F4A85;--ink-2:#4a6a8a;--ink-3:#7a9cc4;
+  --ok-bg:#e1f5ee;--alerte-bg:#faeeda;--chaud-bg:#faeeda;--calme-bg:#eaf0f9;
+  --ombre:none;
   --ui:"Nunito Sans",system-ui,-apple-system,"Segoe UI",Arial,sans-serif;
   display:block;width:100%;box-sizing:border-box;padding:18px 16px 48px;background:var(--ground);color:var(--ink);
   font-family:var(--ui);font-size:14px;line-height:1.5;font-variant-numeric:tabular-nums}
@@ -461,7 +466,66 @@ OD.define('activite', {
   #act-root .mosaic{height:auto;flex-wrap:wrap}#act-root .mosaic div{flex:1 1 40% !important;min-height:76px}
   #act-root .chart.anneau{width:140px;justify-self:center}
   #act-root .band h2{font-size:18px}
-}`;
+}
+/* v14 : design One Data (repris de Performances) */
+#act-root .card,#act-root .band{border-radius:10px;box-shadow:none;border:1px solid var(--line)}
+#act-root .card{padding:15px 16px}
+#act-root .rail{background:#fff;border:1px solid var(--line);border-radius:10px;padding:10px 15px}
+#act-root .rail h1{font-size:17px;color:var(--bleu-fonce)}
+#act-root .badge{background:#fff;border:1px solid var(--line);color:var(--ink-3);font-size:10px}
+#act-root .seg{background:#fff;border:1px solid var(--bleu-clair);border-radius:6px;padding:0;gap:0;overflow:hidden}
+#act-root .seg button{border-radius:0;color:var(--ink-2);font-weight:600;font-size:11.5px;padding:6px 11px}
+#act-root .seg button:hover{color:var(--bleu);background:#f5f8fc}
+#act-root .seg button[aria-pressed="true"]{background:var(--bleu);color:#fff;box-shadow:none}
+#act-root .ecrans{border-color:var(--line)}
+#act-root .ecrans button{font-size:12.5px;padding:7px 14px}
+#act-root .ch{margin-bottom:14px}
+#act-root .ch h3{display:flex;align-items:center;gap:8px;font-size:13.5px;font-weight:700;letter-spacing:0;text-transform:none;color:var(--bleu)}
+#act-root .ch h3::before{content:"";width:3px;height:17px;background:var(--bleu);flex:0 0 auto}
+#act-root .ch span{font-size:10.5px;color:var(--ink-3)}
+#act-root .band h2{font-size:17px;font-weight:600;color:var(--bleu-fonce)}
+#act-root .pouls .n{color:var(--bleu)}
+#act-root .tuile{background:#f5f8fc;border-radius:8px}
+#act-root .who{box-shadow:none}
+#act-root .who[aria-selected="true"]{box-shadow:0 0 0 2px rgba(42,94,169,.22)}
+#act-root .tl.retard .pin i{border-color:var(--orange);background:#fff}
+#act-root .tl.retard time{color:var(--m-orange)}
+#act-root th{color:var(--ink-3);font-weight:600}
+#act-root td{border-top-color:var(--line);color:var(--bleu)}
+#act-root .chart.anneau{width:250px}
+/* tuiles chiffrées */
+#act-root .kg{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:10px}
+#act-root .kg .chart.anneau{width:auto;min-height:0}
+#act-root .k{background:#f5f8fc;border-radius:8px;padding:12px 13px;min-width:0;height:100%}
+#act-root .kl{font-size:10px;color:var(--ink-3);text-transform:uppercase;letter-spacing:.4px;font-weight:600;margin-bottom:6px}
+#act-root .kv{display:flex;align-items:baseline;justify-content:space-between;gap:8px;margin-bottom:7px}
+#act-root .kv b{font-size:24px;font-weight:700;color:var(--bleu);line-height:1.1;white-space:nowrap}
+#act-root .kv b small{font-size:12px;color:var(--ink-3);font-weight:600}
+#act-root .kv b.t{font-size:15px}
+#act-root .pct{font-size:11px;font-weight:700;padding:2px 7px;border-radius:4px}
+#act-root .trk{height:4px;background:#e3edf9;border-radius:3px;overflow:hidden}
+#act-root .trk i{display:block;height:4px;border-radius:3px}
+#act-root .ks{font-size:10.5px;color:var(--ink-2);margin-top:6px}
+/* parcours */
+#act-root .fu{display:flex;flex-direction:column;gap:12px}
+#act-root .fu-r{display:grid;grid-template-columns:120px minmax(0,1fr) 60px;gap:14px;align-items:center}
+#act-root .fu-n{font-size:12.5px;font-weight:700;color:var(--bleu)}
+#act-root .fu-b{position:relative;height:34px;border-radius:6px;background:#f5f8fc}
+#act-root .fu-b i{position:absolute;left:0;top:0;bottom:0;border-radius:6px}
+#act-root .fu-b i.p{border-radius:0 6px 6px 0;background:#fdf3de}
+#act-root .fu-b span{position:absolute;top:50%;transform:translateY(-50%);padding-left:12px;font-size:17px;font-weight:800;white-space:nowrap}
+#act-root .fu-v{text-align:right;font-size:13px;font-weight:700;color:var(--ink-3)}
+#act-root .fu-leg{display:flex;gap:18px;margin-left:134px;font-size:11px;color:var(--ink-3);font-weight:600}
+#act-root .fu-leg span{display:flex;align-items:center;gap:6px}
+#act-root .fu-leg i{width:12px;height:12px;border-radius:3px;display:inline-block}
+@media(max-width:560px){#act-root .fu-r{grid-template-columns:84px minmax(0,1fr) 44px;gap:8px}#act-root .fu-leg{margin-left:0}}
+/* barres simples */
+#act-root .hb{display:grid;grid-template-columns:minmax(0,170px) minmax(0,1fr) 46px;gap:10px;align-items:center;margin-bottom:10px;font-size:12px;font-weight:600;color:var(--bleu)}
+#act-root .hb small{display:block;font-size:10.5px;color:var(--ink-3);font-weight:600}
+#act-root .hb .t{height:8px;background:#f5f8fc;border-radius:4px;overflow:hidden}
+#act-root .hb .t i{display:block;height:8px;border-radius:4px}
+#act-root .hb b{text-align:right;font-weight:700}
+`;
     function poserStyle() {
       let st = doc.getElementById('act4-style');
       if (!st) { st = doc.createElement('style'); st.id = 'act4-style'; (doc.head || doc.body).appendChild(st); }
@@ -469,33 +533,24 @@ OD.define('activite', {
     }
 
     // ------------------------------------------------------------------ graphiques
-    const C = { bleu: '#2a5ea9', fonce: '#1F4A85', clair: '#acc5e4', vert: '#53bda7', orange: '#fac055', rouge: '#e24b4a',
-      mvert: '#085041', morange: '#633806', mbleu: '#2a5ea9', mrouge: '#791f1f', line: '#e3e9f3', line2: '#cfd9e9',
-      ink: '#1c2b45', ink2: '#5a6b86', ink3: '#8b99b0', okbg: '#e1f5ee', alerte: '#faeeda', chaud: '#fcebeb', calme: '#eaf0f9', card: '#ffffff' };
+    const C = { bleu: '#2a5ea9', fonce: '#1F4A85', clair: '#acc5e4', vert: '#53bda7', orange: '#fac055', rouge: '#fac055',
+      mvert: '#085041', morange: '#8a5a0b', mbleu: '#2a5ea9', mrouge: '#8a5a0b', line: '#eaf0f9', line2: '#d6e2f2',
+      ink: '#1F4A85', ink2: '#4a6a8a', ink3: '#7a9cc4', okbg: '#eef8f5', alerte: '#fdf6e6', chaud: '#fdf6e6', calme: '#eaf0f9', card: '#ffffff' };
     const NS = 'http://www.w3.org/2000/svg';
     function el(n, a, p) { const e = doc.createElementNS(NS, n); for (const k in a) e.setAttribute(k, a[k]); if (p) p.appendChild(e); return e; }
     function tx(p, x, y, s, o) { o = o || {}; const t = el('text', { x: x, y: y, fill: o.c || C.ink, 'text-anchor': o.a || 'start', 'font-size': o.s || 11.5, 'font-weight': o.w || 700 }, p); t.textContent = s; return t; }
     function svgIn(box, W, H, label) { box.innerHTML = ''; const s = el('svg', { width: W, height: H, viewBox: '0 0 ' + W + ' ' + H, role: 'img' }, box); if (label) s.setAttribute('aria-label', label); return s; }
     const G = {};   // dessinateurs ; la donnée est posée sur box.__d
 
+    // v13 : l'anneau devient une tuile « Commandes signées » (même dessin que
+    // les tuiles d'objectifs de Performances).
     G.anneau = function (box) {
-      const d = box.__d, S2 = box.clientWidth, s = svgIn(box, S2, S2, d.label), cx = S2 / 2, cy = S2 / 2, r = S2 / 2 - 11, Cf = 2 * Math.PI * r;
-      const arc = (f, col) => el('circle', { cx, cy, r, fill: 'none', stroke: col, 'stroke-width': 13, 'stroke-linecap': 'round', transform: 'rotate(-90 ' + cx + ' ' + cy + ')', 'stroke-dasharray': (Cf * Math.max(0, Math.min(f, 1))) + ' ' + Cf }, s);
-      el('circle', { cx, cy, r, fill: 'none', stroke: C.calme, 'stroke-width': 13 }, s);
-      if (d.cible > 0) {
-        if (d.proj > d.fait) arc(d.proj / d.cible, C.clair);
-        if (d.fait > 0) arc(d.fait / d.cible, C.bleu);
-        if (d.proj != null) {
-          const a = -Math.PI / 2 + 2 * Math.PI * Math.min(d.proj / d.cible, 1);
-          el('circle', { cx: cx + r * Math.cos(a), cy: cy + r * Math.sin(a), r: 5, fill: C.card, stroke: C.fonce, 'stroke-width': 3 }, s);
-        }
-        tx(s, cx, cy + 4, d.fait + ' / ' + nf(d.cible), { a: 'middle', s: Math.round(S2 * ((String(d.fait) + nf(d.cible)).length > 5 ? .11 : .15)), w: 600 });
-      } else {
-        tx(s, cx, cy + 4, nf(d.fait), { a: 'middle', s: Math.round(S2 * (nf(d.fait).length > 4 ? .15 : .19)), w: 600 });
-      }
-      tx(s, cx, cy + 24, d.sous, { a: 'middle', s: 11, c: C.ink2 });
-      if (d.proj != null && d.cible > 0) tx(s, cx, cy + 40, 'projection ' + d.proj, { a: 'middle', s: 11, c: C.bleu, w: 800 });
-      else if (!(d.cible > 0)) tx(s, cx, cy + 40, d.vide || 'pas d\'objectif saisi', { a: 'middle', s: 10.5, c: C.ink3 });
+      const d = box.__d, pc = d.cible > 0 ? Math.round(d.fait / d.cible * 100) : null;
+      const col = pc == null ? C.clair : pc >= 100 ? C.vert : pc >= 80 ? C.orange : C.bleu;
+      const pill = pc == null ? '' : '<span class="pct" style="background:' + (pc >= 100 ? '#e1f5ee;color:#085041' : pc >= 80 ? '#faeeda;color:#8a5a0b' : '#eaf0f9;color:#2a5ea9') + '">' + pc + ' %</span>';
+      const sous = d.cible > 0 ? (d.proj != null ? 'projection fin de période : ' + nf(d.proj) : esc(d.sous || '')) : esc(d.vide || 'pas d\'objectif saisi');
+      box.innerHTML = '<div class="k"><div class="kl">' + esc(d.titre || 'Commandes signées') + '</div><div class="kv"><b>' + nf(d.fait) + (d.cible > 0 ? ' <small>/ ' + nf(d.cible) + '</small>' : '') + '</b>' + pill + '</div>' +
+        '<div class="trk"><i style="width:' + Math.min(100, pc || 0) + '%;background:' + col + '"></i></div><div class="ks">' + sous + '</div></div>';
     };
 
     // Carte des affaires : stade x jours depuis la dernière activité.
@@ -510,10 +565,10 @@ OD.define('activite', {
       const delai = { commande: 3, devis: 3, affaire: 7 };
       STADES.forEach((b, i) => {
         const y = T + i * bh;
-        el('rect', { x: L, y: y + 2, width: R - L, height: bh - 4, rx: 8, fill: C.calme }, s);
+        el('rect', { x: L, y: y + 2, width: R - L, height: bh - 4, rx: 6, fill: '#f5f8fc' }, s);
         const dl = delai[b.cle];
-        el('rect', { x: X(dl), y: y + 2, width: R - X(dl), height: bh - 4, rx: 8, fill: C.chaud }, s);
-        el('line', { x1: X(dl), y1: y + 4, x2: X(dl), y2: y + bh - 4, stroke: C.mrouge, 'stroke-width': 1.5, 'stroke-dasharray': '3 3' }, s);
+        el('rect', { x: X(dl), y: y + 2, width: R - X(dl), height: bh - 4, rx: 6, fill: C.chaud }, s);
+        el('line', { x1: X(dl), y1: y + 4, x2: X(dl), y2: y + bh - 4, stroke: C.orange, 'stroke-width': 1.5, 'stroke-dasharray': '3 3' }, s);
         el('circle', { cx: 8, cy: y + bh / 2, r: 5, fill: b.col }, s);
         tx(s, 19, y + bh / 2 + 4, b.lib, { s: 11.5, w: 800 });
         const n = A.filter(a => a.etape === b.cle).length;
@@ -528,7 +583,7 @@ OD.define('activite', {
         const st = STADES[i], j = (lignes[i] = (lignes[i] || 0) + 1);
         const y = T + i * bh + bh / 2 + ((j % 3) - 1) * 7, x = X(Number(a.jours) || 0), r = a.montant ? 3.5 + 8 * Math.sqrt(a.montant / mx) : 4;
         const late = a.etat === 'bloquee', froid = a.etat === 'froide';
-        const c = el('circle', { cx: x, cy: y, r, fill: st.col, 'fill-opacity': froid ? .3 : (late ? 1 : .75), stroke: late ? C.mrouge : C.card, 'stroke-width': late ? 2 : 1.2 }, s);
+        const c = el('circle', { cx: x, cy: y, r, fill: st.col, 'fill-opacity': froid ? .3 : (late ? 1 : .75), stroke: late ? C.orange : C.card, 'stroke-width': late ? 2.5 : 1.2 }, s);
         const t = el('title', {}, c); t.textContent = a.client + (a.montant ? ' · ' + eur(a.montant) : '') + ' · ' + a.jours + ' j';
         if (etiquetees.has(a.id_affaire)) {
           const mot = (a.client || '').split(' ').slice(-1)[0], lx = Math.min(Math.max(x, L + 30), R - 34), lw = mot.length * 6.5 + 8;
@@ -541,8 +596,8 @@ OD.define('activite', {
       const P = box.__d || [], W = box.clientWidth, H = 240, s = svgIn(box, W, H, 'Équipe : objectif atteint et opportunités bloquées'), L = 30, R = W - 8, T = 8, B = H - 36;
       const maxB = Math.max(4, ...P.map(p => p.bloquees));
       const X = p => L + (R - L) * Math.min(p, 120) / 120, Y = n => B - (B - T) * Math.min(n, maxB) / maxB;
-      el('rect', { x: L, y: T, width: X(80) - L, height: Y(maxB * .35) - T, rx: 10, fill: C.chaud }, s);
-      el('rect', { x: X(80), y: Y(maxB * .35), width: R - X(80), height: B - Y(maxB * .35), rx: 10, fill: C.okbg }, s);
+      el('rect', { x: L, y: T, width: X(80) - L, height: Y(maxB * .35) - T, rx: 8, fill: C.chaud }, s);
+      el('rect', { x: X(80), y: Y(maxB * .35), width: R - X(80), height: B - Y(maxB * .35), rx: 8, fill: C.okbg }, s);
       el('line', { x1: X(100), y1: T, x2: X(100), y2: B, stroke: C.line2, 'stroke-dasharray': '3 4' }, s);
       el('line', { x1: L, y1: B, x2: R, y2: B, stroke: C.line2 }, s);
       tx(s, L + 8, T + 16, 'À accompagner', { s: 11, w: 800, c: C.mrouge });
@@ -583,19 +638,22 @@ OD.define('activite', {
         const x = i * step, h = hh(p[1]);
         if (i < n - 1) {
           const nx = (i + 1) * step, hn = hh(st[i + 1][1]), lost = p[1] - st[i + 1][1], lw = h - hn;
-          el('rect', { x: x + nw, y: y0, width: nx - x - nw, height: hn, fill: C.bleu, 'fill-opacity': .16 }, s);
+          el('rect', { x: x + nw, y: y0 + .75, width: nx - x - nw, height: Math.max(1, hn - 1.5), fill: '#fff', stroke: C.bleu, 'stroke-width': 1.5 }, s);
           const sx = x + nw, sy = y0 + hn + lw / 2, dx = x + nw + Math.min(step * .42, 90);
           if (lost > 0) {
-            el('path', { d: 'M' + sx + ' ' + sy + ' C' + (dx - 10) + ' ' + sy + ' ' + dx + ' ' + (sy + 10) + ' ' + dx + ' ' + (drop - 8), fill: 'none', stroke: C.rouge, 'stroke-opacity': .7, 'stroke-width': Math.max(2, lw) }, s);
-            el('circle', { cx: dx, cy: drop - 4, r: 3.5, fill: C.rouge }, s);
+            const dd = 'M' + sx + ' ' + sy + ' C' + (dx - 10) + ' ' + sy + ' ' + dx + ' ' + (sy + 10) + ' ' + dx + ' ' + (drop - 8), ep = Math.max(3, lw);
+            el('path', { d: dd, fill: 'none', stroke: C.orange, 'stroke-width': ep }, s);
+            if (ep > 6) el('path', { d: dd, fill: 'none', stroke: '#fff', 'stroke-width': ep - 3 }, s);
+            el('circle', { cx: dx, cy: drop - 4, r: 3.5, fill: C.orange }, s);
           }
-          tx(s, dx, drop + 14, '−' + nf(lost), { a: 'middle', s: 13, w: 800, c: C.rouge });
+          tx(s, dx, drop + 14, '−' + nf(lost), { a: 'middle', s: 13, w: 800, c: C.fonce });
           tx(s, dx, drop + 28, loss[i], { a: 'middle', s: 10.5, c: C.ink2 });
         }
         el('rect', { x, y: y0, width: nw, height: h, rx: 3, fill: i === n - 1 ? C.vert : C.fonce }, s);
-        tx(s, x, y0 - 36, p[0].toUpperCase(), { s: 9.5, w: 700, c: C.ink3 });
-        tx(s, x, y0 - 14, nf(p[1]), { s: 20, w: 600 });
-        if (i > 0) tx(s, x + nf(p[1]).length * 11 + 8, y0 - 14, pctTxt(p[1], st[i - 1][1]), { s: 11.5, w: 800, c: C.ink3 });
+        const fin = i === n - 1, ax = fin ? x + nw : x, an = fin ? 'end' : 'start';
+        tx(s, ax, y0 - 36, p[0].toUpperCase(), { a: an, s: 9.5, w: 700, c: C.ink3 });
+        if (!fin) { tx(s, x, y0 - 14, nf(p[1]), { s: 20, w: 600, c: C.fonce }); if (i > 0) tx(s, x + nf(p[1]).length * 11 + 8, y0 - 14, pctTxt(p[1], st[i - 1][1]), { s: 11.5, w: 800, c: C.ink3 }); }
+        else { const pc = i > 0 ? pctTxt(p[1], st[i - 1][1]) : ''; tx(s, ax, y0 - 14, pc, { a: 'end', s: 11.5, w: 800, c: C.ink3 }); tx(s, ax - (pc ? pc.length * 6.5 + 8 : 0), y0 - 14, nf(p[1]), { a: 'end', s: 20, w: 600, c: C.fonce }); }
       });
     };
 
@@ -606,7 +664,7 @@ OD.define('activite', {
       const y0 = Math.max(0, Math.floor((Math.min(...ys) - 10) / 10) * 10), y1 = Math.min(100, Math.ceil((Math.max(...ys) + 10) / 10) * 10);
       const X = v => L + (R - L) * (v - x0) / Math.max(1, x1 - x0), Y = v => B - (B - T) * (v - y0) / Math.max(1, y1 - y0);
       const mx = box.__d.moyX, my = box.__d.moyY;
-      el('rect', { x: X(mx), y: T, width: R - X(mx), height: Y(my) - T, rx: 10, fill: C.okbg }, s);
+      el('rect', { x: X(mx), y: T, width: R - X(mx), height: Y(my) - T, rx: 8, fill: C.okbg }, s);
       tx(s, R - 10, T + 18, 'au-dessus des deux moyennes', { a: 'end', s: 10.5, w: 800, c: C.mvert });
       for (let v = y0; v <= y1; v += 10) { el('line', { x1: L, y1: Y(v), x2: R, y2: Y(v), stroke: C.line }, s); tx(s, L - 8, Y(v) + 4, v + ' %', { a: 'end', s: 10.5, c: C.ink3 }); }
       for (let v = x0; v <= x1; v += 5) tx(s, X(v), B + 16, v + ' %', { a: 'middle', s: 10.5, c: C.ink3 });
@@ -798,7 +856,30 @@ OD.define('activite', {
     }
 
     // ------------------------------------------------------------------ écran SITE
-    const MOSAIQUE = { 'Refus de financement': ['var(--chaud-bg)', 'var(--m-rouge)'], 'Hors budget': ['var(--alerte-bg)', 'var(--m-orange)'], 'Acheté ailleurs': ['var(--calme-bg)', 'var(--m-bleu)'], 'Délai de livraison': ['var(--calme-bg)', 'var(--ink-2)'], 'Produit indisponible': ['var(--calme-bg)', 'var(--ink-2)'], 'Autre ou non précisé': ['var(--ground)', 'var(--ink-3)'] };
+    const MOSAIQUE = { 'Refus de financement': ['var(--orange)', 'var(--bleu-fonce)'], 'Hors budget': ['var(--orange)', 'var(--bleu-fonce)'], 'Acheté ailleurs': ['var(--bleu)', 'var(--bleu)'], 'Délai de livraison': ['var(--bleu-clair)', 'var(--ink-2)'], 'Produit indisponible': ['var(--bleu-clair)', 'var(--ink-2)'], 'Autre ou non précisé': ['var(--line-2)', 'var(--ink-3)'] };
+    // v13 : tuile chiffrée, barre simple et parcours de l'onglet Site.
+    const COUL_MOTIF = { 'Refus de financement': '#fac055', 'Hors budget': '#fac055', 'Acheté ailleurs': '#2a5ea9' };
+    function tuileK(lib, val, jauge, col, sous, brut) {
+      return '<div class="k"><div class="kl">' + esc(lib) + '</div><div class="kv">' + (brut ? val : '<b>' + val + '</b>') + '</div>' +
+        '<div class="trk">' + (jauge != null ? '<i style="width:' + Math.max(0, Math.min(100, jauge)) + '%;background:' + col + '"></i>' : '') + '</div><div class="ks">' + esc(sous) + '</div></div>';
+    }
+    function barre(lib, sous, p, col) {
+      return '<div class="hb"><span>' + esc(lib) + (sous ? '<small>' + esc(sous) + '</small>' : '') + '</span><div class="t"><i style="width:' + Math.max(0, Math.min(100, p)) + '%;background:' + col + '"></i></div><b>' + p + ' %</b></div>';
+    }
+    function parcours(t) {
+      const top = Math.max(1, Number(t.affaires) || 0), w = v => Math.max(0, Math.min(100, (Number(v) || 0) / top * 100));
+      const et = [['Opportunités', t.affaires, C.clair], ['Simulées', t.devis, C.bleu], ['Commandes', t.gagnees, C.vert]];
+      return '<div class="fu">' + et.map((x, i) => {
+        const v = Number(x[1]) || 0, av = i ? Number(et[i - 1][1]) || 0 : v, perte = Math.max(0, av - v), wv = w(v), wa = w(av);
+        const dedans = wv >= 7, coulN = i === 0 || !dedans ? C.fonce : '#ffffff';
+        return '<div class="fu-r"><div class="fu-n">' + x[0] + '</div><div class="fu-b">' +
+          (perte ? '<i class="p" style="left:' + wv + '%;width:' + (wa - wv) + '%"></i>' : '') +
+          (v ? '<i style="width:' + wv + '%;background:' + x[2] + '"></i>' : '') +
+          '<span style="left:0;color:' + coulN + '">' + nf(v) + '</span>' +
+          (perte ? '<span style="left:' + (dedans ? wv : Math.max(wv, 6)) + '%;color:' + C.fonce + '">−' + nf(perte) + '</span>' : '') +
+          '</div><div class="fu-v">' + (i ? pctTxt(v, av) : '') + '</div></div>';
+      }).join('') + '<div class="fu-leg"><span><i style="background:' + C.bleu + '"></i>passent l\'étape</span><span><i style="background:#fdf3de;box-shadow:inset 0 0 0 1px ' + C.orange + '"></i>perdues à l\'étape</span></div></div>';
+    }
     function ecranSite() {
       const bus1 = siteBus(); const sites = bus1 != null && S.ctx.sites.some(s => Number(s.id) === Number(bus1)) ? [Number(bus1)] : null;
       const per = S.periode.site, b = bornes(per);
@@ -817,8 +898,7 @@ OD.define('activite', {
       const tr = pct(t.gagnees, t.affaires);
       const fuite = (t.affaires - t.devis) >= (t.devis - t.gagnees) ? 'avant la simulation' : 'entre la simulation et la commande';
       setTimeout(() => {
-        const a = __anchor.querySelector('[data-g="anneau"]'); if (a) a.__d = { fait: Number(m.cdes) || 0, cible: Number(m.objectif) || 0, proj: pj, sous: 'commandes · ' + libCourt(b), label: m.cdes + ' commandes' };
-        const f = __anchor.querySelector('[data-g="flux"]'); if (f) f.__d = { etapes: [['Opportunités', t.affaires], ['Simulations', t.devis], ['Commandes issues', t.gagnees]], pertes: ['sans simulation', 'simulations non signées'] };
+        const a = __anchor.querySelector('[data-g="anneau"]'); if (a) a.__d = { fait: Number(m.cdes) || 0, cible: Number(m.objectif) || 0, proj: pj, sous: 'commandes · ' + libCourt(b), label: m.cdes + ' commandes', titre: 'Commandes signées' };
       });
       const h2 = enCours && m.objectif > 0
         ? 'Le mois finira à <b>' + plur(pj, 'commande') + ' sur ' + nf(m.objectif) + '</b> si le rythme se maintient. Les opportunités se perdent surtout <b>' + fuite + '</b>.'
@@ -840,32 +920,32 @@ OD.define('activite', {
       const sansVendeur = Math.max(0, (Number(d.cdes) || 0) - sommeV);
       const cdesV = {}; (d.vendeurs || []).forEach(x => { cdesV[x.id] = x.cdes; });
       return rail +
-        '<div class="band"><div><div class="q">' + esc(b.lib) + '</div><h2>' + h2 + '</h2><div class="pouls">' +
-        '<div><div class="n">' + (tr == null ? '—' : tr + ' %') + '</div><div class="l">opportunités transformées</div></div>' +
-        (!U() && d.cdes_univers ? '<div><div class="n" style="font-size:15px;padding-top:5px">' + esc(repartition(d.cdes_univers)) + '</div><div class="l">commandes par univers</div></div>' : '') +
-        '<div><div class="n">' + pctTxt(d.fi, d.cdes) + '</div><div class="l">ventes financées par nos soins</div></div>' +
-        '<div><div class="n">' + (L.delai_cde != null ? L.delai_cde + ' j' : '—') + '</div><div class="l">délai lead → commande</div></div>' +
-        '</div></div>' + graph('anneau', 'anneau') + '</div>' +
-        '<div class="card"><div class="ch"><h3>Le parcours des ' + plur(t.affaires, 'opportunité créée', 'opportunités créées') + '</h3><span>Ce qui avance, ce qui tombe à chaque étape</span></div>' +
-        (t.affaires ? graph('flux') : '<div class="vide">Aucune opportunité créée sur la période.</div>') +
-        // v11 : l'anneau compte TOUTES les commandes de la période, le parcours
-        // seulement celles issues des opportunités créées sur la période. Les
-        // deux chiffres différaient sans explication.
+        '<div class="card"><div class="ch"><h3>Commandes · ' + esc(b.lib) + '</h3><span>' + (t.affaires ? 'Les opportunités se perdent surtout ' + fuite : '') + '</span></div><div class="kg">' +
+        graph('anneau', 'anneau') +
+        tuileK('Opportunités transformées', tr == null ? '—' : tr + ' %', tr, C.bleu, nf(t.gagnees) + ' sur ' + plur(t.affaires, 'créée', 'créées')) +
+        tuileK('Ventes financées', pctTxt(d.fi, d.cdes), pct(d.fi, d.cdes), C.bleu, nf(d.fi) + ' sur ' + plur(Number(d.cdes) || 0, 'commande')) +
+        (!U() && d.cdes_univers ? tuileK('Par univers', '<b class="t">' + esc(repartition(d.cdes_univers)) + '</b>', null, null, 'commandes de la période', true) : '') +
+        tuileK('Délai lead → commande', L.delai_cde != null ? L.delai_cde + ' j' : '—', null, null, L.delai_cde != null ? 'en moyenne' : 'aucune commande issue d\'un lead') +
+        '</div></div>' +
+        '<div class="card"><div class="ch"><h3>Parcours des ' + plur(t.affaires, 'opportunité créée', 'opportunités créées') + '</h3><span>Ce qui passe chaque étape, ce qui s\'y perd</span></div>' +
+        (t.affaires ? parcours(t) : '<div class="vide">Aucune opportunité créée sur la période.</div>') +
+        // v11 : la tuile compte TOUTES les commandes de la période, le parcours
+        // seulement celles issues des opportunités créées sur la période.
         ((Number(d.cdes) || 0) !== (Number(t.gagnees) || 0)
-          ? '<div class="note">' + plur(Number(d.cdes) || 0, 'commande signée', 'commandes signées') + ' sur la période (anneau ci-dessus), dont <b>' + nf(t.gagnees) + '</b> issues des opportunités créées sur la période. Les '
+          ? '<div class="note">' + plur(Number(d.cdes) || 0, 'commande signée', 'commandes signées') + ' sur la période, dont <b>' + nf(t.gagnees) + '</b> issue' + (t.gagnees > 1 ? 's' : '') + ' des opportunités créées sur la période ; les '
             + nf(Math.max(0, (Number(d.cdes) || 0) - (Number(t.gagnees) || 0))) + ' autres viennent d\'opportunités plus anciennes.</div>' : '') + '</div>' +
         '<div class="cols eq"><div class="card"><div class="ch"><h3>Pourquoi on perd</h3><span>Opportunités abandonnées · 90 jours</span></div>' +
-        (totM ? '<div class="mosaic">' + motifs.slice(0, 6).map(x => { const c = MOSAIQUE[x.motif] || ['var(--calme-bg)', 'var(--ink-2)']; return '<div style="flex:' + x.n + ' 1 0;background:' + c[0] + ';color:' + c[1] + '"><b>' + Math.round(x.n / totM * 100) + ' %</b><span>' + esc(x.motif) + '</span></div>'; }).join('') + '</div>' +
+        (totM ? motifs.slice(0, 6).map(x => { const p4 = Math.round(x.n / totM * 100); return barre(x.motif, '', p4, COUL_MOTIF[x.motif] || C.clair); }).join('') +
           '<div class="note">Motif d\'abandon saisi dans BACS sur ' + plur(totM, 'opportunité') + ' (doublons exclus). Seules ' + precis + ' % portent un motif précis : un levier de qualité de saisie.</div>' : '<div class="vide">Aucun motif d\'abandon saisi sur 90 jours.</div>') + '</div>' +
-        '<div class="card"><div class="ch"><h3>Leads web : ce que donne chaque source</h3><span>1 point = 2 % des leads · part obtenant un RDV</span></div>' +
-        (sources.length ? '<div class="dots">' + sources.map(s => { const p2 = pct(s.rdv, s.n) || 0; let g = ''; for (let i = 0; i < 50; i++) g += '<i' + (i < Math.round(p2 / 2) ? ' class="f"' : '') + '></i>'; return '<div class="dotrow"><span>' + esc(s.source) + '<small>' + plur(s.n, 'lead') + '</small></span><div class="g">' + g + '</div><b>' + p2 + ' %</b></div>'; }).join('') + '</div>' : '<div class="vide">Pas assez de leads sur la période.</div>') +
+        '<div class="card"><div class="ch"><h3>Leads web : ce que donne chaque source</h3><span>Part des leads obtenant un RDV</span></div>' +
+        (sources.length ? sources.map(s => barre(s.source, plur(s.n, 'lead'), pct(s.rdv, s.n) || 0, C.vert)).join('') : '<div class="vide">Pas assez de leads sur la période.</div>') +
         '<div class="note">' + nf(L.recus) + ' leads reçus, ' + pctTxt(L.contactes, L.recus) + ' joints' + (P.recus ? ' (période précédente : ' + nf(P.recus) + ' reçus)' : '') + '.' + (U() === 'PRO' ? ' Un lead n\'indique pas s\'il vient d\'un professionnel : tous les leads sont comptés.' : '') + '</div></div></div>' +
         '<div class="cols"><div class="card"><div class="ch"><h3>Les vendeurs côte à côte</h3><span>' + esc(b.lib) + '</span></div>' +
         (ev.length ? '<div class="scroll"><table><thead><tr><th>Vendeur</th><th>Opportunités</th><th>Simulations</th><th title="Commandes issues des opportunités créées sur la période">Cdes issues</th><th>Transformation</th><th title="Toutes les commandes de la période, quelle que soit la date de l\'opportunité">Total cdes</th></tr></thead><tbody>' +
           ev.map(x => { const p3 = pct(x.gagnees, x.affaires) || 0; return '<tr><td><b>' + esc(x.nom) + '</b></td><td>' + nf(x.affaires) + '</td><td>' + nf(x.devis) + '</td><td>' + nf(x.gagnees) + '</td><td><b>' + p3 + ' %</b><span class="mini"><i style="width:' + Math.min(100, p3 * 2) + '%"></i></span></td><td>' + nf(cdesV[x.id_user] != null ? cdesV[x.id_user] : 0) + '</td></tr>'; }).join('') +
           (sansVendeur ? '<tr><td><b>Sans vendeur rattaché</b></td><td></td><td></td><td></td><td></td><td>' + nf(sansVendeur) + '</td></tr>' : '') +
           '<tr><td><b>Total du site</b></td><td>' + nf(t.affaires) + '</td><td>' + nf(t.devis) + '</td><td>' + nf(t.gagnees) + '</td><td><b>' + (pct(t.gagnees, t.affaires) || 0) + ' %</b></td><td><b>' + nf(d.cdes) + '</b></td></tr>' +
-          '</tbody></table></div><div class="note">« Total cdes » : toutes les commandes signées sur la période, le même chiffre que l\'anneau et qu\'« Anatomie d\'une vente ». « Cdes issues » : seulement celles nées d\'opportunités créées sur la période. Vendeurs ayant signé une commande ou ouvert au moins 3 opportunités.</div>' : '<div class="vide">Pas d\'activité vendeur sur la période.</div>') + '</div>' +
+          '</tbody></table></div><div class="note">« Total cdes » : toutes les commandes signées sur la période, le même chiffre que la tuile « Commandes signées » et qu\'« Anatomie d\'une vente ». « Cdes issues » : seulement celles nées d\'opportunités créées sur la période. Vendeurs ayant signé une commande ou ouvert au moins 3 opportunités.</div>' : '<div class="vide">Pas d\'activité vendeur sur la période.</div>') + '</div>' +
         '<div class="card"><div class="ch"><h3>Anatomie d\'une vente</h3><span class="pill attente">À brancher · ventes DMS</span></div>' +
         '<div class="vide">La marge par vente (véhicule, financement, services, remise) s\'affichera ici dès que le flux des ventes du DMS sera validé.</div>' +
         '<div class="kpis"><div><div class="n">' + nf(d.cdes) + '</div><div class="l">commandes sur la période</div></div><div><div class="n">' + nf(d.fi) + '</div><div class="l">avec financement</div></div></div></div></div>';
@@ -933,7 +1013,7 @@ OD.define('activite', {
         '<div class="cols"><div class="card"><div class="ch"><h3>Transformation et financement</h3><span>Bulle = commandes · clic pour ouvrir le site</span></div>' +
         (pts.length >= 2 ? graph('constellation') + lecture('En vert : les sites au-dessus de la moyenne du groupe sur les deux axes. Plus la bulle est à droite, plus les opportunités deviennent des commandes ; plus elle est haute, plus les ventes passent par notre financement.') : '<div class="vide">Pas assez de sites actifs pour les comparer.</div>') + '</div>' +
         '<div class="card"><div class="ch"><h3>Ce qui mérite une question</h3><span>Détecté automatiquement</span></div>' +
-        (sig.length ? '<div>' + sig.map(x => '<div class="signal"><span class="lv" style="background:var(--' + (x[1] === 'rouge' ? 'chaud-bg' : x[1] === 'vert' ? 'ok-bg' : 'alerte-bg') + ');color:var(--m-' + x[1] + ')">' + x[0] + '</span><p>' + esc(x[2]) + '<small>' + esc(x[3]) + '</small></p></div>').join('') + '</div>' : '<div class="vide">Aucun écart marquant.</div>') +
+        (sig.length ? '<div>' + sig.map(x => '<div class="signal"><span class="lv" style="background:var(--' + (x[1] === 'vert' ? 'ok-bg' : x[1] === 'bleu' ? 'calme-bg' : 'alerte-bg') + ');color:var(--m-' + (x[1] === 'vert' ? 'vert' : x[1] === 'bleu' ? 'bleu' : 'orange') + ')">' + x[0] + '</span><p>' + esc(x[2]) + '<small>' + esc(x[3]) + '</small></p></div>').join('') + '</div>' : '<div class="vide">Aucun écart marquant.</div>') +
         (sansObj ? '<div class="note">' + plur(sansObj, 'site n\'a', 'sites n\'ont') + ' pas d\'objectif saisi ce mois-ci.</div>' : '') + '</div></div>' +
         '<div class="sites">' + S2.map(s => '<div class="card site" data-site-go="' + s.id + '"><div class="top"><h4>' + esc(s.nom) + '</h4>' +
           (s.objectif_mois > 0 ? '<span class="pill ' + (s.cdes_mois / s.objectif_mois >= (mois.jours_ecoules / mois.jours_total) * .95 ? 'vert">Dans l\'objectif' : 'orange">En retard') + '</span>' : '<span class="pill bleu">' + esc(s.reseau || '') + '</span>') + '</div>' +
