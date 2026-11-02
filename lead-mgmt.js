@@ -1,6 +1,20 @@
 // ============================================================================
 //  LEAD MANAGEMENT — module One Data (OD.define 'lead-mgmt')
-//  VERSION TEAM COLIN (v86) — déploiement CIBLÉ (publish-targets :
+//  VERSION TEAM COLIN (v89) — déploiement CIBLÉ (publish-targets :
+//  v89 (02/11/2026) : republication du contenu prévu en v88 (la v88 publiée
+//  contenait par erreur une ancienne v86).
+//  v88 (02/11/2026) : retours vendeurs. « Pas joint » demande la date et
+//  l'heure de la prochaine tentative (raccourcis ou saisie libre) ; le lead
+//  reste dans les leads à rappeler, classé à l'heure de son rappel, avec
+//  « rappel prévu … » (rouge quand l'heure est passée). Avant, l'appel de la
+//  tentative faisait passer le lead en « contacté » et il disparaissait
+//  (corrigé en base : lead_detecter_contacts). Le fil du client ne montre que
+//  les contacts avec l'affaire du site choisi dans la barre du haut. Nouvel
+//  onglet « Historique » : les leads que j'ai traités, filtres période,
+//  statut, résultat, source et recherche.
+//  v87 (31/10/2026) : sur téléphone, la liste « Vendeur » s'ouvrait hors de
+//  l'écran (ancrée à droite d'un bouton placé à gauche) : elle s'ancre à
+//  gauche et tient dans la largeur de l'écran.
 //  v86 (30/10/2026) : la Vroom Team crée un lead depuis le mode flux
 //  (« + Nouveau lead », touche N, plateau v3) et l'envoie au vendeur choisi ;
 //  il le reçoit « Qualifié par la Vroom Team » dans ses leads à rappeler
@@ -2471,7 +2485,7 @@
       POSTE = S.poste0 || POSTE; S.comme = null; S.poste0 = null; MOI = S.stats ? S.stats.moi : MOI;
       S.tab = 'pool'; S.cell = null; S.leads = filtrerUniv(S.tous); render(); chargerAide();
     }
-    var ACTIONS_APERCU = ['tab', 'comme-off', 'comme', 'comme-menu', 'univ', 'dates', 'dem-plus', 'open', 'close', 'retour-liste', 'ack', 'reessayer', 'cell', 'fermer'];
+    var ACTIONS_APERCU = ['hist-open', 'tab', 'comme-off', 'comme', 'comme-menu', 'univ', 'dates', 'dem-plus', 'open', 'close', 'retour-liste', 'ack', 'reessayer', 'cell', 'fermer'];
     function fermerDates() { fermerCalendrier(doc); }
     function appliquerDates(du, au) {
       fermerDates();
@@ -2482,7 +2496,25 @@
     function ouvrirDates(anchor) { ouvrirCalendrier(doc, FW, anchor, S.per.du, appliquerDates); }
     function libres(id) { return piscine(id).filter(function (l) { return !verrouAutre(l); }); }
     function mesLeads() {
-      return S.leads.filter(estMien).sort(function (a, b) { return (slaDe(a) - mins(arrive(a))) - (slaDe(b) - mins(arrive(b))); });
+      return S.leads.filter(estMien).sort(function (a, b) { return cleUrgence(a) - cleUrgence(b); });
+    }
+    // v88 : minutes avant d'agir. Un lead « pas joint » attend son rappel ;
+    // les autres, la fin de leur délai.
+    function cleUrgence(l) { return l.rappel_le ? (ts(l.rappel_le) - Date.now()) / 60000 : slaDe(l) - mins(arrive(l)); }
+    function rappelDu(l) { return !!l.rappel_le && ts(l.rappel_le) <= Date.now(); }
+    function quandRappel(v) {
+      var d = new Date(v), n = new Date(), dem = new Date(); dem.setDate(n.getDate() + 1);
+      if (d.toDateString() === n.toDateString()) return 'aujourd\'hui ' + hh(v);
+      if (d.toDateString() === dem.toDateString()) return 'demain ' + hh(v);
+      return d.toLocaleDateString('fr-FR', { weekday: 'short' }) + ' ' + jour(v) + ' ' + hh(v);
+    }
+    function texteRappel(l) {
+      if (!l.rappel_le) return '';
+      return rappelDu(l) ? 'à rappeler depuis ' + duree(Math.max(1, mins(l.rappel_le))) : 'rappel prévu ' + quandRappel(l.rappel_le);
+    }
+    function tmRappel(l) {
+      var du = rappelDu(l), d = new Date(l.rappel_le), auj = d.toDateString() === new Date().toDateString();
+      return '<span class="tm ' + (du ? 'crit' : 'rap') + '"><b>' + esc(auj ? hh(l.rappel_le) : jour(l.rappel_le) + ' ' + hh(l.rappel_le)) + '</b><small>' + (du ? 'rappel à faire' : 'rappel prévu') + '</small></span>';
     }
     function prisSansAppel(l) { return l.zone === 'vendeur' && l.attribution_regle === 'prise_directe' && !l.tentatives && l.attribue_le && mins(l.attribue_le) > 20; }
     function marqueNorm(s) { return String(s || '').toUpperCase().replace(/[^A-Z]/g, ''); }
@@ -2643,6 +2675,7 @@
     }
     function surBus() {
       if (__busEcrit || !S.charge) return;
+      if (S.dr && S.dr.id) rechargerFil();
       if (adopterSite(siteDuBus())) { render(); chargerAide(); if (S.tab === 'campagnes') chargerCampagnes().then(render); }
     }
 
@@ -2840,15 +2873,18 @@
       if (POSTE === 'vendeur') {
         return [['accueil', 'Accueil', null, false, 'b'], ['pool', poolNom(), libres(null).length, false, 'v'],
                 ['arappeler', 'À rappeler', aRappeler().length, aRappeler().some(function (l) { return niveau(l) === 'crit'; }), 'r'],
-                ['relances', 'Relances', aRelancer().length, false, 'b'],
-                ['campagnes', 'Campagnes', S.mesSollis ? S.mesSollis.length : null, false, 'b']].filter(function (o) { return !(S.comme && o[0] === 'campagnes'); });
+                ['relances', 'Relances', aRelancer().length, aRelancer().some(rappelDu), 'b'],
+                ['campagnes', 'Campagnes', S.mesSollis ? S.mesSollis.length : null, false, 'b'],
+                ['historique', 'Historique', null, false, 'b']].filter(function (o) { return !(S.comme && (o[0] === 'campagnes' || o[0] === 'historique')); });
       }
       var sid = sitePoste(), pool = libres(sid);
       var t = [['pool', sid == null ? 'Pool' : poolNom(sid), pool.length, pool.some(function (l) { return niveau(l) === 'crit'; }), 'v']];
       if (POSTE === 'chef' && sid != null) t.unshift(['accueil', 'Accueil', null, false, 'b']);
       if (chefVend(sid)) { var mes = mesLeadsDu(sid); t.push(['mes', 'Mes leads', mes.length, mes.some(function (l) { return niveau(l) === 'crit'; }), 'r']); }
-      return t.concat([['bloques', 'En souffrance', bloques(sid).length, bloques(sid).length > 0, 'r'],
+      t = t.concat([['bloques', 'En souffrance', bloques(sid).length, bloques(sid).length > 0, 'r'],
               ['campagnes', 'Campagnes', null, false, 'b']]);
+      if (POSTE === 'chef' && !S.comme) t.push(['historique', 'Historique', null, false, 'b']);
+      return t;
     }
     function renderTabs() {
       var analyse = ['mur', 'mursites', 'relais'].indexOf(S.tab) !== -1;
@@ -2878,7 +2914,7 @@
       return r > 0 && r <= minRetour() ? r : null;
     }
     function etatCourt(l) {
-      if (l.tentatives) return 'pas joint ×' + l.tentatives + (l.dernier_essai ? ', ' + quand(l.dernier_essai) : '');
+      if (l.tentatives) return 'pas joint ×' + l.tentatives + (l.rappel_le ? ' · ' + texteRappel(l) : l.dernier_essai ? ', ' + quand(l.dernier_essai) : '');
       var rt = retourDans(l); if (rt != null) return 'à traiter : retour au Pool dans ' + Math.ceil(rt) + ' min';
       if (l.par_plateau) return 'qualifié par la Vroom Team';
       if (l.zone === 'piscine') return 'libre';
@@ -2888,7 +2924,7 @@
       var a;
       if (act === 'prendre') a = verrouAutre(l) ? '<span class="resa-l">Réservé par ' + esc(propre(l.verrou_nom || 'un collègue')) + '</span>' : '<button type="button" class="btn vr" data-a="prendre" data-id="' + l.id_lead + '">Prendre</button>';
       else a = '<button type="button" class="btn pri" data-a="appeler" data-id="' + l.id_lead + '">' + (__lmPeutAppeler() ? (l.tentatives ? 'Rappeler' : 'Appeler') : 'Traiter') + '</button>';
-      return '<div class="lr v2' + univCls(l) + '" data-a="open" data-id="' + l.id_lead + '" tabindex="0"><div>' + rebours(l) + '</div>'
+      return '<div class="lr v2' + univCls(l) + (rappelDu(l) ? ' rap-du' : '') + '" data-a="open" data-id="' + l.id_lead + '" tabindex="0"><div>' + (l.rappel_le && act !== 'prendre' ? tmRappel(l) : rebours(l)) + '</div>'
         + '<div class="who"><span class="lr-n">' + esc(nomLead(l)) + '</span><p class="lr-d">' + esc(demandeDe(l)) + ' · ' + esc(etatCourt(l)) + '</p></div>'
         + '<div class="src">' + univTag(l) + '<span class="tag">' + esc(l.source_libelle || l.source || 'Lead') + '</span></div>'
         + '<div class="lr-a">' + a + '</div></div>';
@@ -3163,8 +3199,8 @@
         var sous = l.tentatives ? 'tentative ' + (l.tentatives + 1) + ' sur 3' : 'premier contact';
         var why = l.par_plateau ? 'Qualifié par ' + (l.transfere_par_nom ? propre(l.transfere_par_nom) + ' (Vroom Team)' : 'la Vroom Team') + (l.qualification ? ' : ' + l.qualification : '')
           : l.attribue_par_nom ? 'Attribué par ' + propre(l.attribue_par_nom) + (l.attribue_le ? ' il y a ' + duree(mins(l.attribue_le)) : '')
-          : l.tentatives ? 'Pas joint, dernier essai ' + quand(l.dernier_essai) : (l.message ? String(l.message).replace(/^\[[^\]]*\]\s*/, '').slice(0, 140) : (l.source_libelle || ''));
-        var gauche = mins(arrive(l)) >= 1440 ? '<span class="tm crit"><b>' + duree(mins(arrive(l))) + '</b><small>arrivé le ' + jour(arrive(l)) + '</small></span>' : tm(arrive(l), slaDe(l), 'depuis l\'arrivée · SLA ' + slaTxt(slaDe(l)));
+          : l.tentatives ? 'Pas joint ×' + l.tentatives + (l.rappel_le ? ' · ' + texteRappel(l) : ', dernier essai ' + quand(l.dernier_essai)) : (l.message ? String(l.message).replace(/^\[[^\]]*\]\s*/, '').slice(0, 140) : (l.source_libelle || ''));
+        var gauche = l.rappel_le ? tmRappel(l) : mins(arrive(l)) >= 1440 ? '<span class="tm crit"><b>' + duree(mins(arrive(l))) + '</b><small>arrivé le ' + jour(arrive(l)) + '</small></span>' : tm(arrive(l), slaDe(l), 'depuis l\'arrivée · SLA ' + slaTxt(slaDe(l)));
         h += '<div class="todo" data-a="open" data-id="' + l.id_lead + '" tabindex="0"><div class="todo-v">' + verbe + '<small>' + sous + '</small></div>'
           + '<div><span class="lr-n">' + esc(nomLead(l)) + '</span> <span class="lr-v">' + esc(demandeDe(l)) + '</span><p class="why">' + esc(why) + '</p><div class="tags">' + tagsLead(l) + '</div></div>'
           + '<div>' + gauche + '</div></div>';
@@ -3417,6 +3453,7 @@
     }
 
     function renderPanel() {
+      if (S.tab === 'historique') return vueHistorique();
       if (S.tab === 'accueil' && POSTE === 'vendeur') return accueilVendeur();
       if (S.tab === 'accueil' && POSTE === 'chef' && sitePoste() != null) return accueilChef();
       if (S.tab === 'accueil') S.tab = 'pool';
@@ -3428,6 +3465,91 @@
       if (S.tab === 'mursites') return '<div class="seg-a"><button type="button" class="on" data-a="tab" data-id="mursites">Le mur des sites</button><button type="button" data-a="tab" data-id="relais">Le relais</button></div>' + vueMurSites();
       if (S.tab === 'relais') return '<div class="seg-a"><button type="button" data-a="tab" data-id="mursites">Le mur des sites</button><button type="button" class="on" data-a="tab" data-id="relais">Le relais</button></div>' + vueRelais();
       return vuePool();
+    }
+    // ── v88 : historique des leads traités par l'utilisateur ──────────────
+    var RES_LIB = { pas_joint: 'Pas joint', joint: 'Joint', joint_rdv: 'Joint · RDV posé', prise: 'Pris dans le Pool', attribution: 'Attribué',
+                    rendu: 'Rendu au Pool', plateau: 'Confié à la Vroom Team', rattachement_client: 'Fiche client rattachée', clos: 'Clos',
+                    pas_interesse: 'Clos · pas intéressé', injoignable: 'Clos · injoignable', concurrent: 'Clos · concurrence',
+                    doublon: 'Clos · doublon', spam: 'Clos · fausse demande', autre: 'Clos · autre' };
+    var ST_LIB = { recu: 'Nouveau', resolu: 'Nouveau', attribue: 'En cours', contacte: 'Contacté', perdu: 'Perdu', rejete: 'Écarté', converti: 'Vendu' };
+    function resLib(h) {
+      if (h.resultat === 'bacs') return 'Dans BACS · ' + (ST_LIB[h.resultat_statut] || h.resultat_statut || '').toLowerCase();
+      return RES_LIB[h.resultat] || String(h.resultat || '—').replace(/_/g, ' ');
+    }
+    function stLib(h) { return h.statut === 'attribue' && !h.encore_a_moi ? 'Chez un collègue' : (ST_LIB[h.statut] || h.statut || '—'); }
+    function stCls(h) { return { attribue: 'enc', recu: 'enc', resolu: 'enc', contacte: 'ok', converti: 'ok', perdu: 'ko', rejete: 'ko' }[h.statut] || ''; }
+    function histEtat() {
+      if (!S.hist) {
+        var f = function (x) { return x.getFullYear() + '-' + String(x.getMonth() + 1).padStart(2, '0') + '-' + String(x.getDate()).padStart(2, '0'); };
+        S.hist = { du: f(new Date(Date.now() - 6 * 86400000)), au: f(new Date()), statut: '', res: '', source: '', q: '', rows: null, err: null };
+      }
+      return S.hist;
+    }
+    async function chargerHistorique() {
+      var H = histEtat(); H.rows = null; H.err = null; render();
+      try { H.rows = await rpc('poste_historique', { p_du: H.du || null, p_au: H.au || null }) || []; }
+      catch (e) { H.rows = []; H.err = messageErreur(e); }
+      if (S.tab === 'historique') render();
+    }
+    function famRes(r) { return r === 'pas_joint' ? 'pas_joint' : (r === 'joint' || r === 'joint_rdv') ? 'joint' : r === 'bacs' ? 'bacs' : RES_LIB[r] && /^Clos/.test(RES_LIB[r]) ? 'clos' : 'autre'; }
+    function famSt(h) { return h.statut === 'attribue' && !h.encore_a_moi ? 'collegue' : ({ recu: 'cours', resolu: 'cours', attribue: 'cours', contacte: 'contacte', converti: 'contacte', perdu: 'perdu', rejete: 'perdu' }[h.statut] || 'autre'); }
+    function vueHistorique() {
+      var H = histEtat(), rows = H.rows || [];
+      var q = String(H.q || '').trim().toLowerCase();
+      var vis = rows.filter(function (h) {
+        if (H.statut && famSt(h) !== H.statut) return false;
+        if (H.res && famRes(h.resultat) !== H.res) return false;
+        if (H.source && (h.source_libelle || h.source || '') !== H.source) return false;
+        if (q && [h.nom, h.telephone, h.email, h.vehicule].join(' ').toLowerCase().indexOf(q) === -1) return false;
+        return true;
+      });
+      var sources = rows.map(function (h) { return h.source_libelle || h.source || ''; }).filter(function (x, i, a) { return x && a.indexOf(x) === i; }).sort();
+      var cnt = function (fn) { return rows.filter(fn).length; };
+      var opt = function (v, lib, cur) { return '<option value="' + esc(v) + '"' + (v === cur ? ' selected' : '') + '>' + esc(lib) + '</option>'; };
+      var h = '<div class="ph"><div><h2>Historique</h2><p>Les leads sur lesquels vous avez agi pendant la période, avec votre dernier geste. Un lead encore ouvert s\'ouvre ici ; un lead clos ouvre la fiche du client.</p></div></div>'
+        + '<div class="hist-f">'
+        + '<label>Du<input type="date" data-x="hist-du" value="' + esc(H.du || '') + '"></label>'
+        + '<label>Au<input type="date" data-x="hist-au" value="' + esc(H.au || '') + '"></label>'
+        + '<label>Statut<select data-x="hist-statut">' + opt('', 'Tous', H.statut) + opt('cours', 'En cours chez moi · ' + cnt(function (x) { return famSt(x) === 'cours'; }), H.statut)
+          + opt('contacte', 'Contactés · ' + cnt(function (x) { return famSt(x) === 'contacte'; }), H.statut) + opt('perdu', 'Perdus ou écartés · ' + cnt(function (x) { return famSt(x) === 'perdu'; }), H.statut)
+          + opt('collegue', 'Chez un collègue · ' + cnt(function (x) { return famSt(x) === 'collegue'; }), H.statut) + '</select></label>'
+        + '<label>Mon résultat<select data-x="hist-res">' + opt('', 'Tous', H.res) + opt('pas_joint', 'Pas joint · ' + cnt(function (x) { return famRes(x.resultat) === 'pas_joint'; }), H.res)
+          + opt('joint', 'Joint · ' + cnt(function (x) { return famRes(x.resultat) === 'joint'; }), H.res) + opt('clos', 'Clos · ' + cnt(function (x) { return famRes(x.resultat) === 'clos'; }), H.res)
+          + opt('bacs', 'Traité dans BACS · ' + cnt(function (x) { return x.resultat === 'bacs'; }), H.res) + opt('autre', 'Autre geste · ' + cnt(function (x) { return famRes(x.resultat) === 'autre'; }), H.res) + '</select></label>'
+        + '<label>Source<select data-x="hist-source">' + opt('', 'Toutes', H.source) + sources.map(function (x) { return opt(x, x, H.source); }).join('') + '</select></label>'
+        + '<label class="q">Rechercher<input type="text" data-x="hist-q" placeholder="Nom, téléphone, véhicule…" value="' + esc(H.q || '') + '"></label>'
+        + '</div>';
+      if (H.err) return h + '<p class="alerte">' + esc(H.err) + '</p>';
+      if (H.rows == null) return h + '<div class="empty">Chargement de l\'historique…</div>';
+      if (!vis.length) return h + '<div class="empty">' + (rows.length ? 'Aucun lead pour ces filtres.' : 'Aucun lead traité sur cette période.') + '</div>';
+      h += '<p class="hist-n">' + plural(vis.length, 'lead') + (vis.length !== rows.length ? ' sur ' + rows.length : '') + '</p>'
+        + '<div class="hist-w"><table class="hist"><thead><tr><th>Mon dernier geste</th><th>Client</th><th>Demande</th><th>Source</th><th>Site</th><th>Résultat</th><th>Statut du lead</th><th>Suite</th></tr></thead><tbody>';
+      vis.forEach(function (x) {
+        var suite = x.ouvert && x.encore_a_moi && x.rappel_le ? '<span class="h-rap' + (ts(x.rappel_le) <= Date.now() ? ' du' : '') + '">' + esc(ts(x.rappel_le) <= Date.now() ? 'à rappeler' : 'rappel ' + quandRappel(x.rappel_le)) + '</span>'
+          : x.tentatives ? plural(x.tentatives, 'tentative') : '';
+        h += '<tr class="clic" data-a="hist-open" data-id="' + x.id_lead + '" tabindex="0">'
+          + '<td>' + esc(quand(x.resultat_le)) + '</td>'
+          + '<td class="l"><b>' + esc(propre(x.nom) || 'Sans nom') + '</b>' + (x.telephone ? '<small>' + esc(x.telephone) + '</small>' : '') + '</td>'
+          + '<td class="l">' + esc(x.vehicule || '—') + '<small>reçu le ' + esc(jour(x.recu_le)) + '</small></td>'
+          + '<td>' + esc(x.source_libelle || x.source || '—') + '</td>'
+          + '<td>' + esc(siteNom(x.site) || '—') + '</td>'
+          + '<td class="l">' + esc(resLib(x)) + (x.note ? '<small title="' + esc(x.note) + '">' + esc(String(x.note).slice(0, 60)) + '</small>' : '') + '</td>'
+          + '<td><span class="h-st ' + stCls(x) + '">' + esc(stLib(x)) + '</span></td>'
+          + '<td>' + suite + '</td></tr>';
+      });
+      return h + '</tbody></table></div>';
+    }
+    function histOuvrir(id) {
+      var x = ((S.hist && S.hist.rows) || []).find(function (r) { return Number(r.id_lead) === Number(id); });
+      if (S.leads.some(function (l) { return Number(l.id_lead) === Number(id); })) return ouvrir(id);
+      if (x && x.id_client) return ficheClient(x.id_client);
+      toast('Ce lead est clos et n\'a pas de fiche client rattachée.', true);
+    }
+    function histFiltre(t) {
+      var H = histEtat(), k = t.getAttribute('data-x'), v = t.value;
+      if (k === 'hist-du' || k === 'hist-au') { H[k === 'hist-du' ? 'du' : 'au'] = v; if (H.du && H.au && H.du > H.au) { if (k === 'hist-du') H.au = v; else H.du = v; } chargerHistorique(); return; }
+      if (k === 'hist-q') { H.q = v; var y = FW.scrollY || 0; render(); var qi = root.querySelector('[data-x="hist-q"]'); if (qi) { try { qi.focus(); qi.setSelectionRange(v.length, v.length); } catch (e) {} } try { FW.scrollTo(0, y); } catch (e) {} return; }
+      H[{ 'hist-statut': 'statut', 'hist-res': 'res', 'hist-source': 'source' }[k]] = v; render();
     }
     function render() {
       if (!el.isConnected) return;
@@ -3450,6 +3572,10 @@
     function sansPlateauSite(sid) { var si = siteInfo(sid); return !!si && /^LEXUS$/i.test(String(si.reseau || '').trim()); }
     function dureeC(m) { return m < 1 ? '1 min' : duree(m); }
     function pastille(l) {
+      if (l.rappel_le) {
+        var auj = new Date(l.rappel_le).toDateString() === new Date().toDateString();
+        return '<span class="ac-p ' + (rappelDu(l) ? 'crit' : 'rap') + '" title="' + esc(texteRappel(l)) + '">' + esc(auj ? hh(l.rappel_le) : jour(l.rappel_le)) + '</span>';
+      }
       var m = mins(arrive(l)), r = slaDe(l) - m, cl, t;
       if (m >= 1440) { cl = 'crit'; t = dureeC(m); }
       else if (r <= 0) { cl = 'crit'; t = '+' + dureeC(-r); }
@@ -3496,7 +3622,7 @@
               + '<button type="button" class="ac-go" data-a="open" data-id="' + cible.id_lead + '">Ouvrir la fiche</button>')) + '</div></section>';
       }
       h += '<div class="ac-g v">';
-      h += '<section class="ac-c"><div class="ac-ch"><b>À rappeler · ' + ml.length + '</b><span>le plus urgent en haut</span></div>'
+      h += '<section class="ac-c"><div class="ac-ch"><b>À rappeler · ' + ml.length + '</b><span>le plus urgent en haut · les « pas joint » à l\'heure de leur rappel</span></div>'
         + (ml.length ? ml.slice(0, 8).map(function (l) { return acLigne(l); }).join('') + (ml.length > 8 ? '<button type="button" class="ac-plus" data-a="tab" data-id="arappeler">Voir les ' + ml.length + ' leads</button>' : '')
           : '<p class="ac-vide">Rien à rappeler pour l\'instant.</p>') + '</section>';
       var sidP = poolVendeurSite() != null ? poolVendeurSite() : (sitesVendeur().length === 1 ? sitesVendeur()[0].id_site : null);
@@ -3634,7 +3760,8 @@
         e.quoi = 'Lead ' + ODLIB[m[2]] + (m[3] && !/^(joint|prise)$/.test(m[3]) ? ' · ' + m[3].replace(/_/g, ' ') : '');
         return true;
       });
-      return '<div class="fx-card"><div class="fx-th"><h3 class="fx-t">Fil du client</h3><small>BACS, One Data, Vroom Team, appels, messages, RDV, atelier</small></div>'
+      var sf = (cx.sites_fil || []).map(function (i) { var si = siteInfo(i); return si ? siteNom(si.site) : null; }).filter(Boolean);
+      return '<div class="fx-card"><div class="fx-th"><h3 class="fx-t">Fil du client</h3><small>' + (sf.length ? 'Contacts avec ' + esc(sf.join(', ')) + ' · ' : '') + 'BACS, One Data, Vroom Team, appels, messages, RDV, atelier</small></div>'
         + (f.length ? f.slice(0, 12).map(function (e) {
             return '<div class="fx-fil"><span class="q">' + esc(quand(e.le)) + '</span><i style="background:' + (FIL_K[e.k] || '#acc5e4') + '"></i><span class="t">' + esc(e.quoi) + (e.par ? '<small>' + esc(propre(e.par)) + '</small>' : '') + '</span></div>'; }).join('')
           : '<p class="hint">' + (cx.fil ? 'Rien d\'autre que cette demande.' : 'Chargement…') + '</p>') + '</div>';
@@ -3757,6 +3884,7 @@
       } else if (r === 'joint') {
         h += '<input type="text" id="res-note" placeholder="Ce qui a été dit (facultatif)" aria-label="Note"><button type="button" class="btn pri" data-a="joint" data-id="' + l.id_lead + '">Enregistrer le contact</button>';
       } else if (r === 'pasjoint') {
+        h += '</div>' + formRappel(l) + '<div class="row">';
         h += '<input type="text" id="res-note" placeholder="Messagerie, numéro erroné…" aria-label="Note"><button type="button" class="btn pri" data-a="pasjoint" data-id="' + l.id_lead + '">Noter la tentative ' + ((l.tentatives || 0) + 1) + ' sur 3</button>';
       } else {
         return h + '</div>' + piedClore(l);
@@ -3764,6 +3892,23 @@
       h += '</div>';
       if (!dansChef) h += '<div class="row pied"><span class="hint">' + (l.sf_lead_id ? 'Lead BACS : le RDV et la clôture partent aussi dans BACS.' : 'Lead hors BACS : tout est enregistré dans One Data.') + '</span><button type="button" class="btn sm ghost" data-a="rendre" data-id="' + l.id_lead + '">Rendre au Pool</button></div>';
       return h;
+    }
+    // v88 : la prochaine tentative, choisie par le vendeur.
+    function dansMin(m) { var d = new Date(Date.now() + m * 60000); d.setSeconds(0, 0); d.setMinutes(Math.ceil(d.getMinutes() / 5) * 5); return d; }
+    function aujA(hr) { var d = new Date(); d.setHours(hr, 0, 0, 0); return d; }
+    function rappelsRapides() {
+      var n = new Date(), t = [['Dans 1 h', dansMin(60)], ['Dans 2 h', dansMin(120)]];
+      if (n.getHours() < 17) t.push(['Ce soir 18:00', aujA(18)]);
+      t.push(['Demain 09:00', demainA(9)], ['Demain 14:00', demainA(14)]);
+      return t;
+    }
+    function formRappel(l) {
+      var D = S.dr;
+      if (!D.rappel) D.rappel = dateLocale(dansMin(120));
+      return '<div class="rdvf rap-f"><div class="q"><span>Prochaine tentative</span><div class="chips">' + rappelsRapides().map(function (x) {
+          var v = dateLocale(x[1]); return '<button type="button" class="qk' + (D.rappel === v ? ' on' : '') + '" data-a="rappel-quand" data-id="' + v + '">' + x[0] + '</button>'; }).join('') + '</div>'
+        + '<div class="row"><input type="datetime-local" id="res-rappel" value="' + esc(D.rappel) + '" min="' + esc(dateLocale(new Date())) + '" aria-label="Date et heure du prochain appel">'
+        + '<span class="hint">Le lead reste dans vos leads à rappeler, rangé à cette heure.</span></div></div></div>';
     }
     // ── v62 : modèles de messages adaptés au lead ─────────────────────────
     // v79 : réseaux sans plateau VROOM (Lexus).
@@ -4006,7 +4151,7 @@
     function demainA(hr, j) { var d = new Date(); d.setDate(d.getDate() + (j || 1)); d.setHours(hr, 0, 0, 0); return d; }
     function lireForm() {
       var g = function (s) { var x2 = $drawer.querySelector(s); return x2 ? x2.value : null; };
-      return { vendeur: g('#dr-vendeur'), site: g('#dr-site'), note: g('#res-note'), motif: g('#clore-motif'), cnote: g('#clore-note') };
+      return { vendeur: g('#dr-vendeur'), site: g('#dr-site'), note: g('#res-note'), motif: g('#clore-motif'), cnote: g('#clore-note'), rappel: g('#res-rappel') };
     }
     function lireCompose() {
       var D = S.dr; if (!D || !D.canal) return;
@@ -4043,6 +4188,7 @@
       Object.keys(v).forEach(function (k) {
         if (v[k] == null) return;
         var sel = { vendeur: '#dr-vendeur', site: '#dr-site', note: '#res-note', motif: '#clore-motif', cnote: '#clore-note' }[k];
+        if (!sel) return;
         var x2 = $drawer.querySelector(sel); if (x2) x2.value = v[k];
       });
     }
@@ -4064,6 +4210,12 @@
       $scrim.hidden = false; $drawer.hidden = false;
       renderDrawer();
     }
+    // v88 : le fil du client se lit pour l'affaire du site de la barre du haut.
+    function siteFil(l) { var b = siteDuBus(); if (b != null) return b; if (S.site != null) return Number(S.site); return l && l.id_site != null ? Number(l.id_site) : null; }
+    async function rechargerFil() {
+      var D0 = S.dr; if (!D0 || !D0.id || D0.demo) return;
+      try { var cx = await rpc('poste_lead_contexte', { p_id_lead: Number(D0.id), p_id_site: siteFil(D0.l) }); if (S.dr === D0) { D0.cx = cx || {}; renderDrawerPreserve(); } } catch (e) {}
+    }
     async function ouvrir(id) {
       var l = S.leads.find(function (x) { return Number(x.id_lead) === Number(id); });
       if (!l) { toast('Ce lead n\'est plus ouvert.', true); return; }
@@ -4074,7 +4226,7 @@
       var D0 = S.dr;
       var rs = await Promise.all([
         rpc('poste_bacs_envois', { p_id_lead: Number(id) }).catch(function () { return []; }),
-        rpc('poste_lead_contexte', { p_id_lead: Number(id) }).catch(function () { return {}; })
+        rpc('poste_lead_contexte', { p_id_lead: Number(id), p_id_site: siteFil(l) }).catch(function () { return {}; })
       ]);
       if (S.dr !== D0) return;
       D0.envois = rs[0] || []; D0.cx = rs[1] || {};
@@ -4241,8 +4393,15 @@
     function resultat(id, res) {
       var f = lireForm(), l = leadDe(id);
       return geste(async function () {
-        var r = await rpc('poste_resultat', { p_id_lead: Number(id), p_resultat: res, p_note: (f.note || '').trim() || null });
-        if (res === 'pas_joint') apres('Tentative ' + ((r && r.tentatives) || '') + ' notée. ' + (r && r.tentatives >= 3 ? 'Trois essais : pensez à clore ou à confier le lead.' : 'Le lead reste dans « À faire ».'));
+        var quandR = null;
+        if (res === 'pas_joint') {
+          var dv = f.rappel || (S.dr && S.dr.rappel), d = dv ? new Date(dv) : null;
+          if (!d || isNaN(d.getTime())) { toast('Choisissez la date et l\'heure de la prochaine tentative.', true); return; }
+          if (d.getTime() < Date.now() - 60000) { toast('La prochaine tentative doit être dans le futur.', true); return; }
+          quandR = d.toISOString();
+        }
+        var r = await rpc('poste_resultat', { p_id_lead: Number(id), p_resultat: res, p_note: (f.note || '').trim() || null, p_rappel_le: quandR });
+        if (res === 'pas_joint') apres('Tentative ' + ((r && r.tentatives) || '') + ' notée. Rappel prévu ' + quandRappel((r && r.rappel_le) || quandR) + '. ' + (r && r.tentatives >= 3 ? 'Trois essais : pensez à clore ou à confier le lead.' : 'Le lead reste dans vos leads à rappeler.'));
         else apres('Contact enregistré : ' + nomLead(l) + ' sort de vos leads à appeler.');
       });
     }
@@ -4405,6 +4564,7 @@
         case 'tab':
           S.tab = id; S.cell = null; render();
           if (id === 'campagnes' && !S.campagnes) { await chargerCampagnes(); render(); }
+          if (id === 'historique') chargerHistorique();
           if (id === 'relais' && !S.relais) { try { S.relais = await rpc('poste_relais', { p_jours: 30 }) || []; } catch (e) { S.relais = []; toast(messageErreur(e), true); } render(); }
           return;
         case 'ack': S.ack.add(id); memoAck(); render(); return;
@@ -4488,6 +4648,8 @@
         case 'joint': return resultat(id, 'joint');
         case 'rattacher': return rattacher(id);
         case 'pasjoint': return resultat(id, 'pas_joint');
+        case 'rappel-quand': if (S.dr) { S.dr.rappel = id; renderDrawerPreserve(); } return;
+        case 'hist-open': return histOuvrir(id);
         case 'clore': return clore(id);
         case 'bacs-relancer':
           return geste(async function () {
@@ -4528,17 +4690,23 @@
     });
     root.addEventListener('input', function (ev) {
       if (ev.target.getAttribute && ev.target.getAttribute('data-x') === 'comme-q') { S.commeQ = ev.target.value; var li = root.querySelector('.k-vlist'); if (li) li.innerHTML = listeComme(); }
+      if (ev.target.getAttribute && ev.target.getAttribute('data-x') === 'hist-q') histFiltre(ev.target);
+    });
+    root.addEventListener('change', function (ev) {
+      var k = ev.target.getAttribute && ev.target.getAttribute('data-x');
+      if (k && k.indexOf('hist-') === 0 && k !== 'hist-q') histFiltre(ev.target);
     });
     $scrim.addEventListener('click', function () { if (S.modal) fermerModal(); else fermerTout(); });
     root.addEventListener('keydown', function (ev) {
       var t = ev.target;
-      if ((ev.key === 'Enter' || ev.key === ' ') && t.classList && (t.classList.contains('lr') || t.classList.contains('todo') || t.classList.contains('clic') || t.classList.contains('carte-l') || t.classList.contains('l'))) { ev.preventDefault(); action(t.getAttribute('data-a'), t.getAttribute('data-id')); }
+      if ((ev.key === 'Enter' || ev.key === ' ') && t.classList && (t.classList.contains('lr') || t.classList.contains('todo') || (t.classList.contains('clic') && t.tagName !== 'INPUT') || t.classList.contains('carte-l') || t.classList.contains('l'))) { ev.preventDefault(); action(t.getAttribute('data-a'), t.getAttribute('data-id')); }
     });
     ov.addEventListener('keydown', function (ev) {
       var t = ev.target;
       if ((ev.key === 'Enter' || ev.key === ' ') && t.classList && t.classList.contains('lr')) { ev.preventDefault(); action(t.getAttribute('data-a'), t.getAttribute('data-id')); }
     });
     ov.addEventListener('change', function (ev) {
+      if (ev.target.id === 'res-rappel' && S.dr) { S.dr.rappel = ev.target.value; renderDrawerPreserve(); return; }
       if (ev.target.id === 'rdv-inv-plus' && S.dr && S.dr.rdvF && ev.target.value) { lireRdvF(); var n3 = Number(ev.target.value); if (S.dr.rdvF.inv.indexOf(n3) === -1) S.dr.rdvF.inv.push(n3); renderDrawerPreserve(); return; }
       if (ev.target.id === 'c-aff' || ev.target.id === 'c-site') majVendeursCamp();
       if (ev.target.closest && ev.target.closest('.mb')) { var go = $modal.querySelector('#c-go'); if (go && ev.target.id !== 'c-nom') { go.disabled = true; go.removeAttribute('data-confirme'); go.textContent = 'Lancer la campagne'; } }
@@ -4720,6 +4888,24 @@
 .lmtc .tm.warn b{background:var(--alerte-bg);color:var(--m-orange)}
 .lmtc .tm.crit b{background:var(--chaud-bg);color:var(--m-rouge)}
 .lmtc .tm.neutre b{background:var(--calme-bg);color:var(--ink-2)}
+.lmtc .tm.rap b{background:#e9f0fb;color:#2a5ea9}
+.lmtc .lr.rap-du{background:#fdf6f5}
+.lmtc .ac-p.rap{background:#e9f0fb;color:#2a5ea9}
+.lmtc .hist-f{display:flex;flex-wrap:wrap;gap:10px 12px;align-items:flex-end;margin:0 0 12px}
+.lmtc .hist-f label{display:grid;gap:4px;font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:.05em;color:var(--ink-3)}
+.lmtc .hist-f label.q{flex:1 1 200px}
+.lmtc .hist-f label.q input{width:100%}
+.lmtc .hist-n{font-size:12px;font-weight:700;color:var(--ink-3);margin:0 0 6px}
+.lmtc .hist-w{overflow-x:auto}
+.lmtc table.hist{min-width:860px}
+.lmtc table.hist td{font-size:13px}
+.lmtc table.hist td.l{text-align:left;max-width:240px}
+.lmtc table.hist td small{display:block;font-size:11.5px;font-weight:600;color:var(--ink-3);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.lmtc table.hist tr.clic{cursor:pointer}
+.lmtc table.hist tr.clic:hover td{background:#f5f8fd}
+.lmtc .h-st{display:inline-block;border-radius:999px;padding:3px 9px;font-size:11.5px;font-weight:800;background:var(--calme-bg);color:var(--ink-2);white-space:nowrap}
+.lmtc .h-st.enc{background:#e9f0fb;color:#2a5ea9}.lmtc .h-st.ok{background:#eaf7f4;color:#2c7a68}.lmtc .h-st.ko{background:#fdeeee;color:#b23433}
+.lmtc .h-rap{font-size:12px;font-weight:800;color:#2a5ea9;white-space:nowrap}.lmtc .h-rap.du{color:#b23433}
 .lmtc .tm small{font-size:10.5px;color:var(--ink-3);font-weight:600;white-space:nowrap}
 
 /* Lignes de lead */
@@ -5079,6 +5265,7 @@
 .lmtc-ov .rdvf .row{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
 .lmtc-ov .qk{border:1.5px solid var(--line-in);background:#fff;color:var(--ink-2);border-radius:999px;padding:6px 12px;font:inherit;font-size:12.5px;font-weight:700;cursor:pointer}
 .lmtc-ov .qk.on{border-color:var(--vert);background:var(--ok-bg);color:var(--m-vert)}
+.lmtc-ov .rap-f{margin:8px 0}
 .lmtc-ov .bacs-tag{font-style:normal;text-transform:none;letter-spacing:0;font-size:10.5px;font-weight:800;color:var(--bleu);background:var(--sel);border-radius:999px;padding:1px 7px;margin-left:6px}
 .lmtc-ov .rdvf textarea{min-height:52px}
 .lmtc-ov label.chk{display:inline-flex;align-items:center;gap:8px;cursor:pointer;color:var(--ink-2);font-size:12.5px}
@@ -5140,6 +5327,7 @@
 :is(.lmtc,.lmtc-ov) .k-vend-btn{background:#fff;border:1px solid #ece9e1;border-radius:10px;padding:5px 12px;cursor:pointer;text-align:left;font-family:inherit}
 :is(.lmtc,.lmtc-ov) .k-vend-btn:hover{border-color:#2a5ea9}
 :is(.lmtc,.lmtc-ov) .k-vpanel{position:absolute;top:calc(100% + 6px);right:0;z-index:30;width:300px;max-height:380px;overflow-y:auto;background:#fff;border:1px solid #ece9e1;border-radius:12px;box-shadow:0 12px 32px rgba(42,94,169,.16);padding:8px;text-align:left}
+@media (max-width:760px){:is(.lmtc,.lmtc-ov) .k-vend-sel .k-vpanel{left:0;right:auto;width:min(300px,calc(100vw - 32px))}}
 :is(.lmtc,.lmtc-ov) .k-vsearch{width:100%;border:1px solid #ece9e1;border-radius:8px;padding:8px 11px;font-family:inherit;font-size:13px;color:#1c2b45;box-sizing:border-box;margin-bottom:6px}
 :is(.lmtc,.lmtc-ov) .k-vsearch:focus{outline:none;border-color:#2a5ea9}
 :is(.lmtc,.lmtc-ov) .k-vgroup{font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:.04em;color:#888780;padding:8px 8px 4px}
