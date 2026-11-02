@@ -1,4 +1,4 @@
-// LIKES — module One Data (OD.define) v1 (Lot B)
+// LIKES — module One Data (OD.define) v3 (Lot B)
 // ============================================================================
 //  FICHE CLIENT — Onglet LIKES  ·  root: #oropra-likes-root
 //  Véhicules qui INTÉRESSENT le client : CLIENT_STOCK.Status = 'interested'.
@@ -7,6 +7,12 @@
 //  (VO, Contremarqué), action Pcom (Nouvelle Pcom / propale en cours).
 //  v2 (07/10/2026) : si le tenant crée ses propositions dans BACS
 //  (app_settings.propale_creation_one_data = false), aucune action Pcom.
+//  v3 (02/11/2026) : un like posé depuis la fiche VO n'apparaissait pas.
+//  La liste était gardée en mémoire par client et jamais relue quand on
+//  revenait sur le même client ; et la surveillance du changement de client
+//  écrivait dans l'ancrage du premier affichage (disparu après navigation).
+//  Désormais : relecture à chaque affichage de l'onglet, ancrage courant
+//  partagé, et une réponse périmée (autre client) est ignorée.
 // ============================================================================
 OD.define('likes', {
   mount(__anchor, ctx) {
@@ -15,7 +21,8 @@ OD.define('likes', {
   var VAR_CLIENT = '55490583-c88b-4748-916e-4d203db07742';
   var doc = wwLib.getFrontDocument();
   var sb = ctx.supabase;
-  function getRoot() { return __anchor; }
+  window.__likesRoot = __anchor;
+  function getRoot() { var r = window.__likesRoot; return (r && r.isConnected) ? r : (__anchor.isConnected ? __anchor : null); }
   var VO_VAR_ID = 'bcb187ac-e66e-4bfb-bc48-1b7b7dfda0ba';
   var PROPALE_VAR_ID = 'aac565e9-ad32-4f81-bf8d-adb611322e62';
   var PAGE_CREATE = '8c7d5738-4d1f-4047-b101-814651576678';
@@ -116,9 +123,10 @@ OD.define('likes', {
 
   // ---- data ----
   async function load() {
+    var jeton = state.jeton = (state.jeton || 0) + 1;   // v3 : seule la dernière lecture compte
     state.creaOD = await creationPropaleOD();
     var idvu = currentIdvu();
-    if (idvu == null) { state.rows = []; state.loading = false; return; }
+    if (idvu == null) { if (jeton === state.jeton) { state.rows = []; state.loading = false; } return; }
     try {
       var res = await sb.rpc('get_v_likes', { p_id_client: Number(idvu), p_id_user: Number(meId()) });
       if (res.error) throw res.error;
@@ -144,8 +152,9 @@ OD.define('likes', {
       }
       // préchargement des tooltips contremarqué
       try { await Promise.all(rows.filter(function (r) { return r.etat_cm; }).map(function (r) { return loadCM(r.VIN); })); } catch (e) {}
+      if (jeton !== state.jeton) return;
       state.rows = rows; state.idvu = idvu; state.loading = false;
-    } catch (e) { console.error('[likes]', e); state.err = e.message || String(e); state.loading = false; }
+    } catch (e) { if (jeton !== state.jeton) return; console.error('[likes]', e); state.err = e.message || String(e); state.loading = false; }
   }
 
   // ---- actions (à recréer côté Supabase — placeholders pour l'instant) ----
@@ -253,9 +262,9 @@ OD.define('likes', {
   }, 500);
 
   if (!getRoot()) return;
-  var _cur = currentIdvu();
-  if (_cur !== state.idvu) { state.rows = null; state.loading = true; state.err = null; state.idvu = _cur; }
+  // v3 : relecture systématique à chaque affichage (un like vient peut-être d'être posé)
+  state.rows = null; state.loading = true; state.err = null; state.idvu = currentIdvu();
   render();
-  if (state.rows == null) { load().then(render); }
+  load().then(render);
 }
 });
