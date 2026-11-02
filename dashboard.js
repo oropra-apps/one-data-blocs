@@ -1,9 +1,16 @@
 // ============================================================================
-//  DASHBOARD — module One Data (OD.define)   v54 — PROFIL TEAM COLIN
+//  DASHBOARD — module One Data (OD.define)   v55 — PROFIL TEAM COLIN
 //
-//  v54 (02/11/2026) : survol d'une tuile = liseré bleu à gauche (il suit la
+//  v55 (02/11/2026) : design One Data aligné sur Activité et Performances :
+//    textes en bleus (jamais de noir), aucun rouge (l'orange signale ce qui
+//    demande de l'attention), tuiles sur fond bleu très pâle sans bordure ni
+//    ombre, cartes blanches à bordure fine, titres de famille précédés d'un
+//    trait bleu, plus de pavés beiges (encart « Ce qu'on trouve », avis).
+//    Survol d'une tuile = liseré bleu à gauche (il suit la
 //    souris de tuile en tuile), comme sur Activité ; la tuile ouverte garde
 //    son liseré en bleu foncé. Plus de cadre bleu ni de tuile qui se soulève.
+//    Le liseré ne vaut que pour une tuile cliquable (bouton) : jamais sur les
+//    tuiles de chargement.
 //
 //  v53 (02/11/2026) : le compte « Préparateur » (rôle 12) n'a pas de tableau
 //  de bord : un simple bandeau qui renvoie à son planning (l'agenda de la
@@ -132,12 +139,12 @@ OD.define('dashboard', {
     //  CHARTE
     // =========================================================================
     const CSS = `
-#dash-root{--bleu:#2a5ea9;--bleu-clair:#acc5e4;--vert:#53bda7;--orange:#fac055;--rouge:#d97070;
-  --m-vert:#00997f;--m-orange:#d2941f;--m-bleu:#3f7cba;--m-rouge:#c0524f;
-  --ground:#f4f7fb;--card:#fff;--line:#e3e9f3;--line-2:#cfd9e9;
-  --ink:#1c2b45;--ink-2:#5a6b86;--ink-3:#8b99b0;
-  --ok-bg:#e4f4f0;--alerte-bg:#fdf3de;--chaud-bg:#fbeceb;--calme-bg:#eef2f8;
-  --ombre:0 1px 2px rgba(28,43,69,.05),0 8px 24px rgba(28,43,69,.06);
+#dash-root{--bleu:#2a5ea9;--bleu-clair:#acc5e4;--vert:#53bda7;--orange:#fac055;--rouge:#fac055;--bleu-fonce:#1F4A85;
+  --m-vert:#085041;--m-orange:#c7820a;--m-bleu:#2a5ea9;--m-rouge:#c7820a;
+  --ground:#fafbfd;--card:#fff;--line:#eaf0f9;--line-2:#d6e2f2;
+  --ink:#1F4A85;--ink-2:#4a6a8a;--ink-3:#7a9cc4;
+  --ok-bg:#e1f5ee;--alerte-bg:#f5f8fc;--chaud-bg:#f5f8fc;--calme-bg:#eaf0f9;
+  --ombre:none;
   --ui:"Nunito Sans",system-ui,-apple-system,sans-serif;
   --mono:"Nunito Sans",system-ui,-apple-system,sans-serif;
   font-family:var(--ui);color:var(--ink);background:var(--ground);font-variant-numeric:tabular-nums;
@@ -181,8 +188,8 @@ OD.define('dashboard', {
   background:var(--card);border:1px solid var(--line);border-radius:13px;padding:11px 13px 9px;
   box-shadow:var(--ombre);display:flex;flex-direction:column;min-width:0;min-height:84px;
   transition:box-shadow .15s ease}
-#dash-root .dtuile:hover,#dash-root .dtuile:focus-visible{box-shadow:inset 3px 0 0 0 var(--bleu),var(--ombre);outline:none}
-#dash-root .dtuile[aria-expanded="true"],#dash-root .dtuile[aria-expanded="true"]:hover{box-shadow:inset 3px 0 0 0 #1F4A85,var(--ombre)}
+#dash-root button.dtuile:hover,#dash-root button.dtuile:focus-visible{box-shadow:inset 3px 0 0 0 var(--bleu);outline:none}
+#dash-root .dtuile[aria-expanded="true"],#dash-root .dtuile[aria-expanded="true"]:hover{box-shadow:inset 3px 0 0 0 #1F4A85}
 #dash-root .dtuile.muette{opacity:.62;border-style:dashed}
 #dash-root .dtuile.muette .v{color:var(--ink-3)}
 #dash-root .dtuile .lab{font-size:10.5px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;
@@ -272,6 +279,29 @@ OD.define('dashboard', {
 #dash-root .dvide{padding:22px;color:var(--ink-2);font-size:14px}
 #dash-root .dlead{font:inherit;font-size:12px;font-weight:700;color:#fff;background:var(--bleu);border:0;border-radius:8px;padding:5px 11px;cursor:pointer;white-space:nowrap}
 #dash-root .dlead:hover{background:#1F4A85}
+/* v54 : design One Data */
+#dash-root .drail{background:#fff;border:1px solid var(--line);border-radius:10px;padding:10px 15px}
+#dash-root .drail h1{font-size:17px;color:var(--bleu-fonce)}
+#dash-root .drole{background:#fff;border:1px solid var(--line);font-size:10px}
+#dash-root .dmois{background:#fff;border:1px solid var(--bleu-clair);border-radius:6px;padding:0;gap:0;overflow:hidden}
+#dash-root .dmois button{border-radius:0;color:var(--ink-2);font-weight:600;padding:6px 11px}
+#dash-root .dmois button:hover{color:var(--bleu);background:#f5f8fc}
+#dash-root .dmois button[aria-pressed="true"]{background:var(--bleu);color:#fff;box-shadow:none}
+#dash-root .dband,#dash-root .dperim,#dash-root .pl-carte{border-radius:10px;box-shadow:none;border:1px solid var(--line)}
+#dash-root .dband p{color:var(--bleu-fonce)}
+#dash-root .dpouls .n{color:var(--bleu)}
+#dash-root .dfam > h2{font-size:12px;font-weight:700;letter-spacing:0;text-transform:none;color:var(--bleu)}
+#dash-root .dfam > h2::before{content:"";width:3px;height:14px;background:var(--bleu);flex:0 0 auto}
+#dash-root .dtuile,#dash-root .pl-t{background:#f5f8fc;border:0;border-radius:8px;box-shadow:none}
+#dash-root .dtuile .lab{color:var(--ink-3);font-weight:600}
+#dash-root .dtuile .v{color:var(--bleu)}
+#dash-root .dtuile .pl{background:#fff}
+#dash-root .dtuile.muette{border:0;opacity:.62}
+#dash-root .dtiroir{border-radius:10px;box-shadow:none;border:1px solid var(--line)}
+#dash-root .dtiroir h3{color:var(--bleu-fonce)}
+#dash-root .dtrouve,#dash-root .davis{background:#f5f8fc;border-radius:8px;box-shadow:inset 3px 0 0 var(--bleu-clair);color:var(--bleu-fonce)}
+#dash-root table.dmini td{color:var(--bleu)}
+#dash-root table.dmini th{font-weight:600}
 @media (prefers-reduced-motion:reduce){#dash-root *{transition:none!important}}
 `;
     if (!doc.getElementById('dash-tc-css')) {
@@ -1643,7 +1673,7 @@ OD.define('dashboard', {
       let t = (prenom ? esc(prenom) + ', l' : 'L') + 'a piscine BACS compte <b>' + fmt(f.n_piscine || 0) + ' lead' + (num(f.n_piscine) > 1 ? 's' : '') + '</b> à traiter';
       t += num(f.n_rappels_dus) ? ' et <b style="color:#d2941f">' + fmt(f.n_rappels_dus) + ' rappel' + (num(f.n_rappels_dus) > 1 ? 's sont dus' : ' est dû') + '</b>.' : '.';
       t += ' Aujourd’hui, vous avez pris <b>' + fmt(moi.pris || 0) + '</b> lead' + (num(moi.pris) > 1 ? 's' : '') + ' et transmis <b>' + fmt(moi.qualifies || 0) + '</b> aux sites.';
-      if (num(f.n_transferts_sans_contact)) t += ' <b style="color:#c0524f">' + fmt(f.n_transferts_sans_contact) + ' transfert' + (num(f.n_transferts_sans_contact) > 1 ? 's attendent' : ' attend') + '</b> encore un vendeur.';
+      if (num(f.n_transferts_sans_contact)) t += ' <b style="color:#c7820a">' + fmt(f.n_transferts_sans_contact) + ' transfert' + (num(f.n_transferts_sans_contact) > 1 ? 's attendent' : ' attend') + '</b> encore un vendeur.';
 
       const qualifTaux = (num(p.qualifies) + num(p.abandons)) ? Math.round(100 * num(p.qualifies) / (num(p.qualifies) + num(p.abandons))) : null;
       const dans1h = num(dp.n) ? Math.round(100 * num(dp.dans_1h) / num(dp.n)) : null;
@@ -1707,7 +1737,7 @@ OD.define('dashboard', {
         + '</div>';
       if (sites.length) {
         h += '<table class="pl-tab"><thead><tr><th>Site</th><th>Transmis</th><th>Contactés</th><th>En retard</th><th>Délai médian</th></tr></thead><tbody>'
-          + sites.map(s => '<tr><td>' + esc(siteNom(s.site)) + '</td><td>' + fmt(s.n) + '</td><td>' + fmt(s.contactes) + '</td><td>' + (num(s.en_retard) ? '<b style="color:#c0524f">' + fmt(s.en_retard) + '</b>' : '<span class="pl-na">0</span>') + '</td><td>' + duree(s.median_min) + '</td></tr>').join('')
+          + sites.map(s => '<tr><td>' + esc(siteNom(s.site)) + '</td><td>' + fmt(s.n) + '</td><td>' + fmt(s.contactes) + '</td><td>' + (num(s.en_retard) ? '<b style="color:#c7820a">' + fmt(s.en_retard) + '</b>' : '<span class="pl-na">0</span>') + '</td><td>' + duree(s.median_min) + '</td></tr>').join('')
           + '</tbody></table>';
       }
       h += '</div>';
