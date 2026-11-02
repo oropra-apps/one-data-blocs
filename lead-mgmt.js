@@ -1,6 +1,10 @@
 // ============================================================================
 //  LEAD MANAGEMENT — module One Data (OD.define 'lead-mgmt')
-//  VERSION TEAM COLIN (v89) — déploiement CIBLÉ (publish-targets :
+//  VERSION TEAM COLIN (v90) — déploiement CIBLÉ (publish-targets :
+//  v90 (02/11/2026) : Historique par rôle. Le vendeur ne voit que ses leads ;
+//  le chef des ventes et la direction voient ceux de toute l'équipe des sites
+//  qu'ils gèrent (site de la barre du haut), avec un filtre « Vendeur » et
+//  une colonne « Par ». Données : poste_historique (hiérarchie en base).
 //  v89 (02/11/2026) : republication du contenu prévu en v88 (la v88 publiée
 //  contenait par erreur une ancienne v86).
 //  v88 (02/11/2026) : retours vendeurs. « Pas joint » demande la date et
@@ -2883,7 +2887,7 @@
       if (chefVend(sid)) { var mes = mesLeadsDu(sid); t.push(['mes', 'Mes leads', mes.length, mes.some(function (l) { return niveau(l) === 'crit'; }), 'r']); }
       t = t.concat([['bloques', 'En souffrance', bloques(sid).length, bloques(sid).length > 0, 'r'],
               ['campagnes', 'Campagnes', null, false, 'b']]);
-      if (POSTE === 'chef' && !S.comme) t.push(['historique', 'Historique', null, false, 'b']);
+      if (!S.comme) t.push(['historique', 'Historique', null, false, 'b']);
       return t;
     }
     function renderTabs() {
@@ -3476,12 +3480,15 @@
       if (h.resultat === 'bacs') return 'Dans BACS · ' + (ST_LIB[h.resultat_statut] || h.resultat_statut || '').toLowerCase();
       return RES_LIB[h.resultat] || String(h.resultat || '—').replace(/_/g, ' ');
     }
-    function stLib(h) { return h.statut === 'attribue' && !h.encore_a_moi ? 'Chez un collègue' : (ST_LIB[h.statut] || h.statut || '—'); }
+    function stLib(h) {
+      if (h.statut === 'attribue' && !h.encore_a_moi) return h.hierarchie && h.attribue_nom ? 'En cours · ' + prenom(h.attribue_nom) : 'Chez un collègue';
+      return ST_LIB[h.statut] || h.statut || '—';
+    }
     function stCls(h) { return { attribue: 'enc', recu: 'enc', resolu: 'enc', contacte: 'ok', converti: 'ok', perdu: 'ko', rejete: 'ko' }[h.statut] || ''; }
     function histEtat() {
       if (!S.hist) {
         var f = function (x) { return x.getFullYear() + '-' + String(x.getMonth() + 1).padStart(2, '0') + '-' + String(x.getDate()).padStart(2, '0'); };
-        S.hist = { du: f(new Date(Date.now() - 6 * 86400000)), au: f(new Date()), statut: '', res: '', source: '', q: '', rows: null, err: null };
+        S.hist = { du: f(new Date(Date.now() - 6 * 86400000)), au: f(new Date()), statut: '', res: '', source: '', vend: '', q: '', rows: null, err: null };
       }
       return S.hist;
     }
@@ -3492,9 +3499,22 @@
       if (S.tab === 'historique') render();
     }
     function famRes(r) { return r === 'pas_joint' ? 'pas_joint' : (r === 'joint' || r === 'joint_rdv') ? 'joint' : r === 'bacs' ? 'bacs' : RES_LIB[r] && /^Clos/.test(RES_LIB[r]) ? 'clos' : 'autre'; }
-    function famSt(h) { return h.statut === 'attribue' && !h.encore_a_moi ? 'collegue' : ({ recu: 'cours', resolu: 'cours', attribue: 'cours', contacte: 'contacte', converti: 'contacte', perdu: 'perdu', rejete: 'perdu' }[h.statut] || 'autre'); }
+    function famSt(h) { return h.statut === 'attribue' && !h.encore_a_moi && !h.hierarchie ? 'collegue' : ({ recu: 'cours', resolu: 'cours', attribue: 'cours', contacte: 'contacte', converti: 'contacte', perdu: 'perdu', rejete: 'perdu' }[h.statut] || 'autre'); }
     function vueHistorique() {
-      var H = histEtat(), rows = H.rows || [];
+      var H = histEtat(), tous = H.rows || [];
+      var hier = POSTE !== 'vendeur' || tous.some(function (x) { return x.hierarchie; });
+      // La hiérarchie lit le site de la barre du haut ; sans site : tout son périmètre.
+      var sidH = hier ? sitePoste() : null;
+      var rows = sidH == null ? tous : tous.filter(function (x) { return Number(x.id_site) === Number(sidH); });
+      var vends = [];
+      if (hier) rows.forEach(function (x) {
+        if (x.par_id_user == null) return;
+        var v = vends.find(function (z) { return Number(z.id) === Number(x.par_id_user); });
+        if (v) v.n++; else vends.push({ id: x.par_id_user, nom: propre(x.par_nom) || 'Utilisateur ' + x.par_id_user, n: 1 });
+      });
+      vends.sort(function (a, b) { return Number(b.id) === Number(MOI) ? 1 : Number(a.id) === Number(MOI) ? -1 : a.nom.localeCompare(b.nom, 'fr'); });
+      if (H.vend && !vends.some(function (v) { return String(v.id) === String(H.vend); })) H.vend = '';
+      if (H.vend) rows = rows.filter(function (x) { return String(x.par_id_user) === String(H.vend); });
       var q = String(H.q || '').trim().toLowerCase();
       var vis = rows.filter(function (h) {
         if (H.statut && famSt(h) !== H.statut) return false;
@@ -3506,14 +3526,17 @@
       var sources = rows.map(function (h) { return h.source_libelle || h.source || ''; }).filter(function (x, i, a) { return x && a.indexOf(x) === i; }).sort();
       var cnt = function (fn) { return rows.filter(fn).length; };
       var opt = function (v, lib, cur) { return '<option value="' + esc(v) + '"' + (v === cur ? ' selected' : '') + '>' + esc(lib) + '</option>'; };
-      var h = '<div class="ph"><div><h2>Historique</h2><p>Les leads sur lesquels vous avez agi pendant la période, avec votre dernier geste. Un lead encore ouvert s\'ouvre ici ; un lead clos ouvre la fiche du client.</p></div></div>'
+      var h = '<div class="ph"><div><h2>Historique</h2><p>' + (hier
+          ? 'Les leads traités par votre équipe pendant la période' + (sidH != null ? ' sur ' + esc(siteNom((siteInfo(sidH) || {}).site)) : '') + ', avec le dernier geste et qui l\'a fait.'
+          : 'Les leads sur lesquels vous avez agi pendant la période, avec votre dernier geste.') + ' Un lead encore ouvert s\'ouvre ici ; un lead clos ouvre la fiche du client.</p></div></div>'
         + '<div class="hist-f">'
+        + (hier ? '<label>Vendeur<select data-x="hist-vend">' + opt('', 'Toute l\'équipe', H.vend) + vends.map(function (v) { return opt(String(v.id), (Number(v.id) === Number(MOI) ? 'Moi' : v.nom) + ' · ' + v.n, H.vend); }).join('') + '</select></label>' : '')
         + '<label>Du<input type="date" data-x="hist-du" value="' + esc(H.du || '') + '"></label>'
         + '<label>Au<input type="date" data-x="hist-au" value="' + esc(H.au || '') + '"></label>'
-        + '<label>Statut<select data-x="hist-statut">' + opt('', 'Tous', H.statut) + opt('cours', 'En cours chez moi · ' + cnt(function (x) { return famSt(x) === 'cours'; }), H.statut)
+        + '<label>Statut<select data-x="hist-statut">' + opt('', 'Tous', H.statut) + opt('cours', (hier ? 'En cours · ' : 'En cours chez moi · ') + cnt(function (x) { return famSt(x) === 'cours'; }), H.statut)
           + opt('contacte', 'Contactés · ' + cnt(function (x) { return famSt(x) === 'contacte'; }), H.statut) + opt('perdu', 'Perdus ou écartés · ' + cnt(function (x) { return famSt(x) === 'perdu'; }), H.statut)
-          + opt('collegue', 'Chez un collègue · ' + cnt(function (x) { return famSt(x) === 'collegue'; }), H.statut) + '</select></label>'
-        + '<label>Mon résultat<select data-x="hist-res">' + opt('', 'Tous', H.res) + opt('pas_joint', 'Pas joint · ' + cnt(function (x) { return famRes(x.resultat) === 'pas_joint'; }), H.res)
+          + (hier ? '' : opt('collegue', 'Chez un collègue · ' + cnt(function (x) { return famSt(x) === 'collegue'; }), H.statut)) + '</select></label>'
+        + '<label>' + (hier ? 'Résultat' : 'Mon résultat') + '<select data-x="hist-res">' + opt('', 'Tous', H.res) + opt('pas_joint', 'Pas joint · ' + cnt(function (x) { return famRes(x.resultat) === 'pas_joint'; }), H.res)
           + opt('joint', 'Joint · ' + cnt(function (x) { return famRes(x.resultat) === 'joint'; }), H.res) + opt('clos', 'Clos · ' + cnt(function (x) { return famRes(x.resultat) === 'clos'; }), H.res)
           + opt('bacs', 'Traité dans BACS · ' + cnt(function (x) { return x.resultat === 'bacs'; }), H.res) + opt('autre', 'Autre geste · ' + cnt(function (x) { return famRes(x.resultat) === 'autre'; }), H.res) + '</select></label>'
         + '<label>Source<select data-x="hist-source">' + opt('', 'Toutes', H.source) + sources.map(function (x) { return opt(x, x, H.source); }).join('') + '</select></label>'
@@ -3523,12 +3546,13 @@
       if (H.rows == null) return h + '<div class="empty">Chargement de l\'historique…</div>';
       if (!vis.length) return h + '<div class="empty">' + (rows.length ? 'Aucun lead pour ces filtres.' : 'Aucun lead traité sur cette période.') + '</div>';
       h += '<p class="hist-n">' + plural(vis.length, 'lead') + (vis.length !== rows.length ? ' sur ' + rows.length : '') + '</p>'
-        + '<div class="hist-w"><table class="hist"><thead><tr><th>Mon dernier geste</th><th>Client</th><th>Demande</th><th>Source</th><th>Site</th><th>Résultat</th><th>Statut du lead</th><th>Suite</th></tr></thead><tbody>';
+        + '<div class="hist-w"><table class="hist"><thead><tr><th>' + (hier ? 'Dernier geste' : 'Mon dernier geste') + '</th>' + (hier ? '<th>Par</th>' : '') + '<th>Client</th><th>Demande</th><th>Source</th><th>Site</th><th>Résultat</th><th>Statut du lead</th><th>Suite</th></tr></thead><tbody>';
       vis.forEach(function (x) {
-        var suite = x.ouvert && x.encore_a_moi && x.rappel_le ? '<span class="h-rap' + (ts(x.rappel_le) <= Date.now() ? ' du' : '') + '">' + esc(ts(x.rappel_le) <= Date.now() ? 'à rappeler' : 'rappel ' + quandRappel(x.rappel_le)) + '</span>'
+        var suite = x.ouvert && (x.encore_a_moi || hier) && x.rappel_le ? '<span class="h-rap' + (ts(x.rappel_le) <= Date.now() ? ' du' : '') + '">' + esc(ts(x.rappel_le) <= Date.now() ? 'à rappeler' : 'rappel ' + quandRappel(x.rappel_le)) + '</span>'
           : x.tentatives ? plural(x.tentatives, 'tentative') : '';
         h += '<tr class="clic" data-a="hist-open" data-id="' + x.id_lead + '" tabindex="0">'
           + '<td>' + esc(quand(x.resultat_le)) + '</td>'
+          + (hier ? '<td class="l">' + esc(Number(x.par_id_user) === Number(MOI) ? 'Moi' : propre(x.par_nom) || '—') + '</td>' : '')
           + '<td class="l"><b>' + esc(propre(x.nom) || 'Sans nom') + '</b>' + (x.telephone ? '<small>' + esc(x.telephone) + '</small>' : '') + '</td>'
           + '<td class="l">' + esc(x.vehicule || '—') + '<small>reçu le ' + esc(jour(x.recu_le)) + '</small></td>'
           + '<td>' + esc(x.source_libelle || x.source || '—') + '</td>'
@@ -3549,7 +3573,7 @@
       var H = histEtat(), k = t.getAttribute('data-x'), v = t.value;
       if (k === 'hist-du' || k === 'hist-au') { H[k === 'hist-du' ? 'du' : 'au'] = v; if (H.du && H.au && H.du > H.au) { if (k === 'hist-du') H.au = v; else H.du = v; } chargerHistorique(); return; }
       if (k === 'hist-q') { H.q = v; var y = FW.scrollY || 0; render(); var qi = root.querySelector('[data-x="hist-q"]'); if (qi) { try { qi.focus(); qi.setSelectionRange(v.length, v.length); } catch (e) {} } try { FW.scrollTo(0, y); } catch (e) {} return; }
-      H[{ 'hist-statut': 'statut', 'hist-res': 'res', 'hist-source': 'source' }[k]] = v; render();
+      H[{ 'hist-statut': 'statut', 'hist-res': 'res', 'hist-source': 'source', 'hist-vend': 'vend' }[k]] = v; render();
     }
     function render() {
       if (!el.isConnected) return;
