@@ -790,16 +790,20 @@ OD.define('agenda', {
     }).join('') +
     // Un raccourci pour revenir à l'état complet : sans lui, l'utilisateur
     // qui a tout décoché doit recliquer cinq fois.
-    '<button type="button" class="agf-all" data-cle="__all">Tout</button>';
+    '<button type="button" class="agf-all" data-cle="__all">Tout</button>' +
+    '<button type="button" class="agf-all" data-cle="__none">Aucun</button>' +
+    (typesActifs.length ? '' : '<span class="agf-vide">Rien d\u2019affiché : cochez les natures à voir.</span>');
     host.querySelectorAll('[data-cle]').forEach(b => b.addEventListener('click', () => {
       const c = b.getAttribute('data-cle');
       if (c === '__all') typesActifs = TYPES_EVT.map(x => x.cle);
+      else if (c === '__none') typesActifs = [];
       else {
         const i = typesActifs.indexOf(c);
         if (i >= 0) typesActifs.splice(i, 1); else typesActifs.push(c);
         // Ne jamais tout masquer : un agenda vide sans raison visible est un
         // faux bug qu'on nous signalerait.
-        if (!typesActifs.length) typesActifs = TYPES_EVT.map(x => x.cle);
+        // v35 : on peut tout décocher (« Aucun ») puis cocher une à une les
+        // natures voulues ; l'agenda vide le dit en clair (bandeau ci-dessous).
       }
       renderChips();
       try { window.__agendaRefetch && window.__agendaRefetch(); } catch (e) {}
@@ -933,12 +937,14 @@ OD.define('agenda', {
       + '<div class="agv-print-menu" id="agv-print-menu"' + (printMenuOuvert ? '' : ' style="display:none"') + '>'
       + '<button type="button" data-print="jour">Planning du jour<small>Livraisons, préparations, réceptions — jour affiché</small></button>'
       + '<button type="button" data-print="semaine">Planning de la semaine<small>Du lundi au samedi de la semaine affichée</small></button>'
+      + '<button type="button" data-print="jour" data-seul="prepa">Préparateur · jour<small>Les seules préparations du site, jour affiché</small></button>'
+      + '<button type="button" data-print="semaine" data-seul="prepa">Préparateur · semaine<small>Les seules préparations du site, semaine affichée</small></button>'
       + '</div></div>';
     host.querySelectorAll('[data-vue]').forEach(b => b.addEventListener('click', () => changerVue(b.getAttribute('data-vue'))));
     const pb = host.querySelector('#agv-print'), pm = host.querySelector('#agv-print-menu');
     if (pb) pb.addEventListener('click', (e) => { e.stopPropagation(); printMenuOuvert = !printMenuOuvert; pm.style.display = printMenuOuvert ? '' : 'none'; });
     host.querySelectorAll('[data-print]').forEach(b => b.addEventListener('click', (e) => {
-      e.stopPropagation(); printMenuOuvert = false; pm.style.display = 'none'; imprimerPlanning(b.getAttribute('data-print'));
+      e.stopPropagation(); printMenuOuvert = false; pm.style.display = 'none'; imprimerPlanning(b.getAttribute('data-print'), b.getAttribute('data-seul'));
     }));
     if (!window.__agendaPrintOutside) {
       window.__agendaPrintOutside = (e) => { const m = document.getElementById('agv-print-menu'); const h = document.getElementById('agenda-vues'); if (printMenuOuvert && m && h && !h.contains(e.target)) { printMenuOuvert = false; m.style.display = 'none'; } };
@@ -1022,12 +1028,14 @@ OD.define('agenda', {
   ======================================================================== */
   const NATURES_PLANNING = [
     { cle: 'livraison', type: 4,  titre: 'Livraisons',                qui: 'Metteur en main' },
-    { cle: 'prepa',     type: 12, titre: 'Préparations',              qui: 'Préparateur' },
+    { cle: 'prepa',     type: 12, titre: 'Préparations',              qui: 'Demandée par' },
     { cle: 'recep',     type: 13, titre: 'Réceptions / restitutions', qui: 'Accueil' },
     { cle: 'bloque',    type: 14, titre: 'Créneaux « pas de livraison »', qui: 'Agenda', court: 'Pas de livraison' },
   ];
   function ymd(d) { return d.getFullYear() + '-' + pad2(d.getMonth() + 1) + '-' + pad2(d.getDate()); }
-  async function imprimerPlanning(kind) {
+  let planningSeul = null;            // v35 : 'prepa' = planning du préparateur
+  async function imprimerPlanning(kind, seul) {
+    planningSeul = seul || null;
     const idSite = siteCourant();
     if (idSite == null) { showAgError('Planning', 'Choisissez un site dans la barre du haut.'); return; }
     toast('Préparation du planning…', 'ok');
@@ -1046,7 +1054,8 @@ OD.define('agenda', {
       const garde = new Set(ids);
       const rows = (data || []).filter(r => r.source_type === 'rdv' && garde.has(Number(r.id_user))
         && (r.id_site == null || Number(r.id_site) === Number(idSite))
-        && NATURES_PLANNING.some(n => n.cle === familleEvt(r)))
+        && NATURES_PLANNING.some(n => n.cle === familleEvt(r))
+        && (!planningSeul || familleEvt(r) === planningSeul))
         .sort((a, b) => String(a.event_start_time).localeCompare(String(b.event_start_time)));
       const html = kind === 'semaine' ? planningSemaineHtml(rows, debut, nomSite) : planningJourHtml(rows, debut, nomSite);
       ouvrirImpression(html);
@@ -1076,8 +1085,8 @@ OD.define('agenda', {
     + '@media screen{body{padding:16px;background:#f2f6fc}.feuille{background:#fff;padding:14px;max-width:290mm;margin:auto;box-shadow:0 4px 18px rgba(31,74,133,.12)}}';
   function planningJourHtml(rows, jour, nomSite) {
     const titreJour = jour.toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
-    let b = '<div class="ent"><h1>Planning du ' + esc(titreJour) + '</h1><div class="s">' + esc(nomSite) + '<br>Imprimé le ' + esc(new Date().toLocaleString('fr-FR', { dateStyle: 'short', timeStyle: 'short' })) + '</div></div>';
-    NATURES_PLANNING.forEach(n => {
+    let b = '<div class="ent"><h1>' + (planningSeul === 'prepa' ? 'Préparations du ' : 'Planning du ') + esc(titreJour) + '</h1><div class="s">' + esc(nomSite) + '<br>Imprimé le ' + esc(new Date().toLocaleString('fr-FR', { dateStyle: 'short', timeStyle: 'short' })) + '</div></div>';
+    NATURES_PLANNING.filter(n => !planningSeul || n.cle === planningSeul).forEach(n => {
       const lot = rows.filter(r => familleEvt(r) === n.cle);
       if (n.cle === 'bloque' && !lot.length) return;
       b += '<h2><i style="background:' + CFG.colors[n.cle] + '"></i>' + esc(n.titre) + ' <em>' + lot.length + '</em></h2>';
@@ -1097,7 +1106,7 @@ OD.define('agenda', {
     const parJour = jours.map(d => rows.filter(r => String(r.event_start_time || '').slice(0, 10) === ymd(d)));
     const cols = parJour[6].length ? 7 : 6;
     const dim = jours[cols - 1];
-    let b = '<div class="ent"><h1>Planning de la semaine du ' + esc(lundi.toLocaleDateString('fr-FR', { day: 'numeric', month: 'long' })) + ' au ' + esc(dim.toLocaleDateString('fr-FR', { day: 'numeric', month: 'long', year: 'numeric' })) + '</h1>'
+    let b = '<div class="ent"><h1>' + (planningSeul === 'prepa' ? 'Préparations de la semaine du ' : 'Planning de la semaine du ') + esc(lundi.toLocaleDateString('fr-FR', { day: 'numeric', month: 'long' })) + ' au ' + esc(dim.toLocaleDateString('fr-FR', { day: 'numeric', month: 'long', year: 'numeric' })) + '</h1>'
       + '<div class="s">' + esc(nomSite) + ' · ' + rows.length + ' événement' + (rows.length > 1 ? 's' : '') + '<br>Imprimé le ' + esc(new Date().toLocaleString('fr-FR', { dateStyle: 'short', timeStyle: 'short' })) + '</div></div>';
     b += '<div class="sem" style="grid-template-columns:repeat(' + cols + ',1fr)">';
     for (let i = 0; i < cols; i++) {
@@ -1107,11 +1116,11 @@ OD.define('agenda', {
               + '<span><span class="p" style="display:inline-flex"><i style="background:' + l.couleur + '"></i>' + esc(l.qui) + '</span></span>'
               + (l.vin ? '<span class="vin">' + esc(l.vin) + '</span>' : '')
               + (l.invites ? '<span>avec ' + esc(l.invites) + '</span>' : '')
-              + (l.comm ? '<span>' + esc(l.comm.slice(0, 90)) + '</span>' : '') + '</div>'; }).join('')
+              + (l.comm ? '<span>' + esc(planningSeul ? l.comm : l.comm.slice(0, 90)) + '</span>' : '') + '</div>'; }).join('')
           : '<div class="vide" style="padding:6px">—</div>')
         + '</div>';
     }
-    b += '</div><div class="lg">' + NATURES_PLANNING.map(n => '<span><i style="display:inline-block;width:9px;height:9px;border-radius:2px;background:' + CFG.colors[n.cle] + '"></i> ' + esc(n.titre) + '</span>').join('') + '</div>';
+    b += '</div><div class="lg">' + NATURES_PLANNING.filter(n => !planningSeul || n.cle === planningSeul).map(n => '<span><i style="display:inline-block;width:9px;height:9px;border-radius:2px;background:' + CFG.colors[n.cle] + '"></i> ' + esc(n.titre) + '</span>').join('') + '</div>';
     return b;
   }
   function ouvrirImpression(corps) {
@@ -1224,6 +1233,7 @@ OD.define('agenda', {
 #agenda-root .agf-chip i{width:8px;height:8px;border-radius:50%;flex-shrink:0;opacity:.35}
 #agenda-root .agf-chip.is-on i{opacity:1}
 #agenda-root .agf-chip:hover{border-color:#c9d9ee}
+#agenda-root .agf-vide{font-size:12px;font-weight:700;color:#b45f1a;align-self:center}
 #agenda-root .agf-all{border:none;background:none;color:#7a98c5;font-weight:700;font-size:11.5px;padding:5px 8px;cursor:pointer;font-family:inherit;text-decoration:underline}
 #agenda-root .agf-all:hover{color:#2a5ea9}
 @media(max-width:560px){#agenda-root #agenda-chips{gap:5px}#agenda-root .agf-chip{font-size:11px;padding:4px 9px}}
@@ -3078,7 +3088,7 @@ OD.define('agenda', {
     } else if (cs.owner != null) {
       const aide = cs.editing && Number(cs.owner) !== Number(cs.ownerInit) ? 'Passera dans l’agenda de cette personne, ici et dans BACS.'
         : (!ed && nat === 'livraison') ? 'Le metteur en main ; vous y serez invité.'
-        : (!ed && nat === 'prepa') ? 'Le préparateur.'
+        : (!ed && nat === 'prepa') ? 'Celui qui la demande, comme dans BACS : elle sort au planning du préparateur (bouton Planning).'
         : '';
       qui = '<div class="agm-cell"><div class="agm-lbl">Dans l’agenda de</div><select class="agm-sel agm-w" id="agm-owner">' + optionsProprietaire(cs.owner, cs.ownerNom) + '</select>'
         + (aide ? '<div class="agm-hint">' + esc(aide) + '</div>' : '') + '</div>';
