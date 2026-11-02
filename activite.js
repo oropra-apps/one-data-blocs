@@ -1,5 +1,11 @@
 // ============================================================================
 //  SUIVI D'ACTIVITÉ v4 (28/10/2026) — un écran par rôle, une question par écran
+//  v15 (02/11/2026) : plus aucun pavé beige ou orange pâle (encart Lecture,
+//    tuile en alerte, pastilles, zones des graphiques) : fond bleu très pâle et
+//    touche orange en liseré. Parcours : pas de rail derrière les barres (la
+//    barre Commandes s'arrête où s'arrêtait Simulées). Leads web : la barre
+//    reste le taux de RDV de chaque source ; le nombre de leads et de RDV
+//    est écrit sous le nom de la source.
 //  v14 (02/11/2026) : design One Data sur les quatre onglets, calqué sur
 //    Performances. Textes en bleus (#1F4A85 / #2a5ea9 / #7a9cc4, jamais de
 //    noir), cartes blanches à bordure fine sans ombre, titres de carte
@@ -289,9 +295,9 @@ OD.define('activite', {
     // ------------------------------------------------------------------ styles (charte One Data)
     const CSS = `
 #act-root{--bleu:#2a5ea9;--bleu-fonce:#1F4A85;--bleu-clair:#acc5e4;--vert:#53bda7;--orange:#fac055;--rouge:#fac055;
-  --m-vert:#085041;--m-orange:#8a5a0b;--m-bleu:#2a5ea9;--m-rouge:#8a5a0b;
+  --m-vert:#085041;--m-orange:#c7820a;--m-bleu:#2a5ea9;--m-rouge:#c7820a;
   --ground:#fafbfd;--card:#fff;--line:#eaf0f9;--line-2:#d6e2f2;--ink:#1F4A85;--ink-2:#4a6a8a;--ink-3:#7a9cc4;
-  --ok-bg:#e1f5ee;--alerte-bg:#faeeda;--chaud-bg:#faeeda;--calme-bg:#eaf0f9;
+  --ok-bg:#e1f5ee;--alerte-bg:#f5f8fc;--chaud-bg:#f5f8fc;--calme-bg:#eaf0f9;
   --ombre:none;
   --ui:"Nunito Sans",system-ui,-apple-system,"Segoe UI",Arial,sans-serif;
   display:block;width:100%;box-sizing:border-box;padding:18px 16px 48px;background:var(--ground);color:var(--ink);
@@ -486,6 +492,12 @@ OD.define('activite', {
 #act-root .band h2{font-size:17px;font-weight:600;color:var(--bleu-fonce)}
 #act-root .pouls .n{color:var(--bleu)}
 #act-root .tuile{background:#f5f8fc;border-radius:8px}
+#act-root .tuile.alerte{background:#f5f8fc;box-shadow:inset 3px 0 0 var(--orange)}#act-root .tuile.alerte .n{color:var(--bleu-fonce)}
+#act-root .lecture{background:#f5f8fc;border-radius:8px;box-shadow:inset 3px 0 0 var(--bleu-clair);color:var(--bleu-fonce)}
+#act-root .lecture .t{color:var(--ink-3)}
+#act-root .erreur{background:#f5f8fc;border-radius:8px;box-shadow:inset 3px 0 0 var(--orange);color:var(--bleu-fonce)}
+#act-root .pill.rouge,#act-root .pill.orange,#act-root .pill.u-PRO{background:#fff;color:var(--bleu-fonce);box-shadow:inset 0 0 0 1px var(--orange)}
+#act-root .pill.bleu,#act-root .pill.u-VN{background:var(--calme-bg);color:var(--bleu)}
 #act-root .who{box-shadow:none}
 #act-root .who[aria-selected="true"]{box-shadow:0 0 0 2px rgba(42,94,169,.22)}
 #act-root .tl.retard .pin i{border-color:var(--orange);background:#fff}
@@ -510,7 +522,7 @@ OD.define('activite', {
 #act-root .fu{display:flex;flex-direction:column;gap:12px}
 #act-root .fu-r{display:grid;grid-template-columns:120px minmax(0,1fr) 60px;gap:14px;align-items:center}
 #act-root .fu-n{font-size:12.5px;font-weight:700;color:var(--bleu)}
-#act-root .fu-b{position:relative;height:34px;border-radius:6px;background:#f5f8fc}
+#act-root .fu-b{position:relative;height:34px;border-radius:6px}
 #act-root .fu-b i{position:absolute;left:0;top:0;bottom:0;border-radius:6px}
 #act-root .fu-b i.p{border-radius:0 6px 6px 0;background:#fdf3de}
 #act-root .fu-b span{position:absolute;top:50%;transform:translateY(-50%);padding-left:12px;font-size:17px;font-weight:800;white-space:nowrap}
@@ -534,8 +546,8 @@ OD.define('activite', {
 
     // ------------------------------------------------------------------ graphiques
     const C = { bleu: '#2a5ea9', fonce: '#1F4A85', clair: '#acc5e4', vert: '#53bda7', orange: '#fac055', rouge: '#fac055',
-      mvert: '#085041', morange: '#8a5a0b', mbleu: '#2a5ea9', mrouge: '#8a5a0b', line: '#eaf0f9', line2: '#d6e2f2',
-      ink: '#1F4A85', ink2: '#4a6a8a', ink3: '#7a9cc4', okbg: '#eef8f5', alerte: '#fdf6e6', chaud: '#fdf6e6', calme: '#eaf0f9', card: '#ffffff' };
+      mvert: '#085041', morange: '#c7820a', mbleu: '#2a5ea9', mrouge: '#c7820a', line: '#eaf0f9', line2: '#d6e2f2',
+      ink: '#1F4A85', ink2: '#4a6a8a', ink3: '#7a9cc4', okbg: '#eef8f5', alerte: '#eef3fa', chaud: '#eef3fa', calme: '#eaf0f9', card: '#ffffff' };
     const NS = 'http://www.w3.org/2000/svg';
     function el(n, a, p) { const e = doc.createElementNS(NS, n); for (const k in a) e.setAttribute(k, a[k]); if (p) p.appendChild(e); return e; }
     function tx(p, x, y, s, o) { o = o || {}; const t = el('text', { x: x, y: y, fill: o.c || C.ink, 'text-anchor': o.a || 'start', 'font-size': o.s || 11.5, 'font-weight': o.w || 700 }, p); t.textContent = s; return t; }
@@ -547,7 +559,7 @@ OD.define('activite', {
     G.anneau = function (box) {
       const d = box.__d, pc = d.cible > 0 ? Math.round(d.fait / d.cible * 100) : null;
       const col = pc == null ? C.clair : pc >= 100 ? C.vert : pc >= 80 ? C.orange : C.bleu;
-      const pill = pc == null ? '' : '<span class="pct" style="background:' + (pc >= 100 ? '#e1f5ee;color:#085041' : pc >= 80 ? '#faeeda;color:#8a5a0b' : '#eaf0f9;color:#2a5ea9') + '">' + pc + ' %</span>';
+      const pill = pc == null ? '' : '<span class="pct" style="background:' + (pc >= 100 ? '#e1f5ee;color:#085041' : '#eaf0f9;color:#2a5ea9') + '">' + pc + ' %</span>';
       const sous = d.cible > 0 ? (d.proj != null ? 'projection fin de période : ' + nf(d.proj) : esc(d.sous || '')) : esc(d.vide || 'pas d\'objectif saisi');
       box.innerHTML = '<div class="k"><div class="kl">' + esc(d.titre || 'Commandes signées') + '</div><div class="kv"><b>' + nf(d.fait) + (d.cible > 0 ? ' <small>/ ' + nf(d.cible) + '</small>' : '') + '</b>' + pill + '</div>' +
         '<div class="trk"><i style="width:' + Math.min(100, pc || 0) + '%;background:' + col + '"></i></div><div class="ks">' + sous + '</div></div>';
@@ -908,7 +920,8 @@ OD.define('activite', {
       const autreN = motifs0.filter(x => x.motif === 'Autre' || x.n / totM < .025).reduce((a, x) => a + x.n, 0);
       const motifs = motifs0.filter(x => x.motif !== 'Autre' && x.n / totM >= .025).concat(autreN ? [{ motif: 'Autre ou non précisé', n: autreN }] : []);
       const precis = totM ? Math.round((totM - (motifs0.find(x => x.motif === 'Autre') || { n: 0 }).n) / totM * 100) : 0;
-      const sources = (d.sources || []).slice(0, 6);
+      const src0 = (d.sources || []).slice().sort((a, b) => b.n - a.n), totS = src0.reduce((a, x) => a + (Number(x.n) || 0), 0);
+      const sources = src0.length > 7 ? src0.slice(0, 6).concat([src0.slice(6).reduce((a, x) => ({ source: 'Autres sources', n: a.n + (Number(x.n) || 0), rdv: a.rdv + (Number(x.rdv) || 0) }), { source: 'Autres sources', n: 0, rdv: 0 })]) : src0;
       // v12 : tout vendeur qui a signé une commande figure au tableau (avant : seuls
       // ceux qui avaient ouvert au moins 3 opportunités, d'où un total inférieur à l'anneau).
       const cdesV0 = {}; (d.vendeurs || []).forEach(x => { cdesV0[x.id] = x; });
@@ -937,8 +950,8 @@ OD.define('activite', {
         '<div class="cols eq"><div class="card"><div class="ch"><h3>Pourquoi on perd</h3><span>Opportunités abandonnées · 90 jours</span></div>' +
         (totM ? motifs.slice(0, 6).map(x => { const p4 = Math.round(x.n / totM * 100); return barre(x.motif, '', p4, COUL_MOTIF[x.motif] || C.clair); }).join('') +
           '<div class="note">Motif d\'abandon saisi dans BACS sur ' + plur(totM, 'opportunité') + ' (doublons exclus). Seules ' + precis + ' % portent un motif précis : un levier de qualité de saisie.</div>' : '<div class="vide">Aucun motif d\'abandon saisi sur 90 jours.</div>') + '</div>' +
-        '<div class="card"><div class="ch"><h3>Leads web : ce que donne chaque source</h3><span>Part des leads obtenant un RDV</span></div>' +
-        (sources.length ? sources.map(s => barre(s.source, plur(s.n, 'lead'), pct(s.rdv, s.n) || 0, C.vert)).join('') : '<div class="vide">Pas assez de leads sur la période.</div>') +
+        '<div class="card"><div class="ch"><h3>Leads web : ce que donne chaque source</h3><span>Part des leads de la source ayant obtenu un RDV</span></div>' +
+        (sources.length ? sources.map(s => barre(s.source, plur(s.n, 'lead') + ' · ' + plur(Number(s.rdv) || 0, 'RDV', 'RDV'), pct(s.rdv, s.n) || 0, C.vert)).join('') : '<div class="vide">Pas assez de leads sur la période.</div>') +
         '<div class="note">' + nf(L.recus) + ' leads reçus, ' + pctTxt(L.contactes, L.recus) + ' joints' + (P.recus ? ' (période précédente : ' + nf(P.recus) + ' reçus)' : '') + '.' + (U() === 'PRO' ? ' Un lead n\'indique pas s\'il vient d\'un professionnel : tous les leads sont comptés.' : '') + '</div></div></div>' +
         '<div class="cols"><div class="card"><div class="ch"><h3>Les vendeurs côte à côte</h3><span>' + esc(b.lib) + '</span></div>' +
         (ev.length ? '<div class="scroll"><table><thead><tr><th>Vendeur</th><th>Opportunités</th><th>Simulations</th><th title="Commandes issues des opportunités créées sur la période">Cdes issues</th><th>Transformation</th><th title="Toutes les commandes de la période, quelle que soit la date de l\'opportunité">Total cdes</th></tr></thead><tbody>' +
