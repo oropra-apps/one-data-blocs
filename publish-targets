@@ -91,3 +91,10 @@ client-search = teamcolin
 # `modeles` dans le manifeste du locataire, leur onglet / bouton n'apparaît pas.
 modeles       = teamcolin
 plateau       = teamcolin
+
+# Recherche globale de la top nav (02/11/2026) : elle appelle
+# recherche_globale(), qui lit l'index od_recherche (table, triggers et cron
+# livrés par 20261102233000_od_recherche_index.sql) — présent sur la seule
+# base de Team Colin. Sur un autre tenant, la top nav v41 pose l'ancre mais
+# le module n'est pas dans son manifeste : rien ne s'affiche, rien ne casse.
+recherche     = teamcolin
