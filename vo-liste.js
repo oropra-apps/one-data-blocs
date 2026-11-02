@@ -1,4 +1,12 @@
 // ============================================================================
+//  v35 (02/11/2026) : UN SEUL BOUTON PDF, SPINNER, CLIC SUR LA LIGNE.
+//    * barre de sélection : l'icône PDF génère la fiche vitrine ; le bouton
+//      « Fiche vitrine » et l'affiche prix disparaissent de la barre ;
+//    * pendant une génération (PDF, export Excel, fiche vitrine depuis la fiche
+//      VO), l'icône du bouton est remplacée par un spinner ;
+//    * un clic n'importe où sur la ligne d'un VO ouvre sa fiche, comme l'œil.
+//      Case à cocher, photo (diaporama), pastille, pictos et liens gardent leur
+//      action ; un texte sélectionné à la souris n'ouvre rien.
 //  v34 (02/11/2026) : FICHE VITRINE PDF. Nouveau document, sur le modèle de
 //    l'« affiche Label » imprimée par Planet VO² : page 1 vitrine (photos, prix,
 //    n° VO, kilométrage, garantie, CO₂, Crit'Air, QR vers l'annonce), page 2
@@ -2320,7 +2328,7 @@ OD.define('vo-liste', {
     + '.vo-selbar-acts{display:flex;align-items:center;gap:10px;margin-left:auto;flex-wrap:wrap}'
     + '.vo-logo{background:none;border:none;padding:3px;cursor:pointer;line-height:0;border-radius:10px;position:relative;z-index:1;transition:transform .12s,background .12s}'
     + '.vo-logo:hover{background:#fff;transform:translateY(-1px);box-shadow:0 4px 12px rgba(31,74,133,.15)}'
-    + '.vo-logo svg{width:34px;height:34px;display:block;pointer-events:none}.vo-logo:disabled{opacity:.45;cursor:default;transform:none;box-shadow:none}'
+    + '.vo-logo svg{width:34px;height:34px;display:block;pointer-events:none}.vo-logo:disabled{opacity:.45;cursor:default;transform:none;box-shadow:none}.vo-logo[aria-busy]{opacity:1;cursor:wait}'
     + '.vo-tip{position:fixed;z-index:2000;max-width:280px;background:#1F4A85;color:#fff;font-size:12px;font-weight:600;line-height:1.45;padding:8px 11px;border-radius:9px;box-shadow:0 8px 24px rgba(31,74,133,.3);pointer-events:none;opacity:0;transition:opacity .12s}'
     // pager
     + '.vo-pager{display:flex;align-items:center;justify-content:flex-end;gap:6px;flex-wrap:wrap}'
@@ -2585,8 +2593,7 @@ OD.define('vo-liste', {
     return '<div class="vo-selbar" id="vo-selbar"' + (n ? '' : ' style="display:none"') + '>'
       + '<span class="vo-selbar-n"><b id="vo-seln">' + n + '</b> véhicule(s) sélectionné(s)</span>'
       + '<div class="vo-selbar-acts">'
-      + '<button type="button" class="vo-logo" id="vo-pdf" title="Affiches prix (PDF)" onclick="window.__voPosters()">' + LOGO.pdf + '</button>'
-      + '<button type="button" class="vo-btn vo-btn-fiche" id="vo-fiche" title="Fiche vitrine : 2 pages par véhicule (PDF)" onclick="window.__voFiches()">' + IC.pdf + 'Fiche vitrine</button>'
+      + '<button type="button" class="vo-logo" id="vo-pdf" title="Fiche vitrine (PDF, 2 pages par véhicule)" onclick="window.__voFiches()">' + LOGO.pdf + '</button>'
       + '<button type="button" class="vo-logo" id="vo-xls" title="Exporter la sélection (Excel)" onclick="window.__voExcel()">' + LOGO.xls + '</button>'
       + '<button type="button" class="vo-btn ghost" id="vo-selclear" onclick="window.__voClearSel()">Effacer la sélection</button>'
       + '</div></div>';
@@ -2833,7 +2840,27 @@ OD.define('vo-liste', {
     try { if (typeof c.auth.session === 'function') { var s = c.auth.session(); if (s) return s.access_token; } } catch (e) { }
     return null;
   }
-  function busy(btn, on) { if (!btn) return; btn.disabled = on; btn.style.opacity = on ? '.45' : ''; }
+  // v35 : spinner à la place de l'icône pendant le traitement.
+  function busy(btn, on) {
+    if (!btn) return;
+    if (on) {
+      if (btn.__voIcone != null) return;
+      var ico = btn.querySelector('svg'), t = ico ? Math.round(ico.getBoundingClientRect().width) || 18 : 18;
+      if (!doc.getElementById('vo-spin-css')) {
+        var st = doc.createElement('style'); st.id = 'vo-spin-css';
+        st.textContent = '@keyframes vo-tourne{to{transform:rotate(360deg)}}.vo-spin{animation:vo-tourne .8s linear infinite;flex-shrink:0}';
+        (doc.head || doc.body).appendChild(st);
+      }
+      btn.__voIcone = btn.innerHTML;
+      var spin = '<svg class="vo-spin" viewBox="0 0 24 24" width="' + t + '" height="' + t + '" fill="none" stroke-width="2.6" stroke-linecap="round" style="width:' + t + 'px;height:' + t + 'px">'
+        + '<circle cx="12" cy="12" r="9" stroke="#d6e2f2"/><path d="M21 12a9 9 0 0 0-9-9" stroke="#2a5ea9"/></svg>';
+      btn.innerHTML = ico ? btn.__voIcone.replace(/<svg[\s\S]*?<\/svg>/, spin) : spin;
+      btn.disabled = true; btn.setAttribute('aria-busy', 'true');
+    } else {
+      if (btn.__voIcone != null) { btn.innerHTML = btn.__voIcone; btn.__voIcone = null; }
+      btn.disabled = false; btn.removeAttribute('aria-busy');
+    }
+  }
   async function generatePosters(btn, templateId, prefixe, lignes) {
     var rows = lignes || selectedRows();
     if (!rows.length) return;
@@ -2890,6 +2917,14 @@ OD.define('vo-liste', {
   }
   function bindContent(host) {
     host.querySelectorAll('[data-act="eye"]').forEach(function (el) { el.addEventListener('click', function (e) { e.stopPropagation(); openFicheVO(el.getAttribute('data-vin')); }); });
+    // v35 : clic sur la ligne = œil. Les éléments qui ont leur propre action la gardent.
+    host.querySelectorAll('.vl-row[data-vin]').forEach(function (row) {
+      row.addEventListener('click', function (e) {
+        if (e.target.closest('input, button, a, select, label, textarea, [data-act], [data-url], .vo-dot, .vl-chk')) return;
+        try { var sel = (win.getSelection ? win.getSelection() : window.getSelection()); if (sel && String(sel).trim()) return; } catch (x) { }
+        openFicheVO(row.getAttribute('data-vin'));
+      });
+    });
     host.querySelectorAll('[data-act="photos"]').forEach(function (el) { el.addEventListener('click', function (e) { e.stopPropagation(); openDiaporama(el.getAttribute('data-vin')); }); });
     host.querySelectorAll('[data-act="histo"]').forEach(function (el) { el.addEventListener('click', function (e) { e.stopPropagation(); openFicheVO(el.getAttribute('data-vin'), 'apv'); }); });
     host.querySelectorAll('[data-act="globe"]').forEach(function (el) { el.addEventListener('click', function (e) { e.stopPropagation(); openWeb(el.getAttribute('data-url')); }); });
@@ -2989,7 +3024,7 @@ OD.define('vo-liste', {
   function reloadForSite() { S.f.reseau = null; S.f.affaire = null; S.f.site = null; S.sel = {}; start(); }
   window.__voReload = function () { start(true); };
   win.__voPosters = window.__voPosters = function () { generatePosters(doc.getElementById('vo-pdf')); };
-  win.__voFiches = window.__voFiches = function () { generatePosters(doc.getElementById('vo-fiche'), TEMPLATE_FICHE, 'fiches_vitrine_'); };
+  win.__voFiches = window.__voFiches = function () { generatePosters(doc.getElementById('vo-pdf'), TEMPLATE_FICHE, 'fiches_vitrine_'); };
   win.__voExcel = window.__voExcel = function () { exportExcel(doc.getElementById('vo-xls')); };
   win.__voClearSel = window.__voClearSel = function () { S.sel = {}; renderContent(); };
 
@@ -3566,7 +3601,7 @@ OD.define('vo-liste', {
     + '.vo-selbar-acts{display:flex;align-items:center;gap:10px;margin-left:auto;flex-wrap:wrap}'
     + '.vo-logo{background:none;border:none;padding:3px;cursor:pointer;line-height:0;border-radius:10px;position:relative;z-index:1;transition:transform .12s,background .12s}'
     + '.vo-logo:hover{background:#fff;transform:translateY(-1px);box-shadow:0 4px 12px rgba(31,74,133,.15)}'
-    + '.vo-logo svg{width:34px;height:34px;display:block;pointer-events:none}.vo-logo:disabled{opacity:.45;cursor:default;transform:none;box-shadow:none}'
+    + '.vo-logo svg{width:34px;height:34px;display:block;pointer-events:none}.vo-logo:disabled{opacity:.45;cursor:default;transform:none;box-shadow:none}.vo-logo[aria-busy]{opacity:1;cursor:wait}'
     + '.vo-tip{position:fixed;z-index:2000;max-width:280px;background:#1F4A85;color:#fff;font-size:12px;font-weight:600;line-height:1.45;padding:8px 11px;border-radius:9px;box-shadow:0 8px 24px rgba(31,74,133,.3);pointer-events:none;opacity:0;transition:opacity .12s}'
     // pager
     + '.vo-pager{display:flex;align-items:center;justify-content:flex-end;gap:6px;flex-wrap:wrap}'
@@ -3592,7 +3627,7 @@ OD.define('vo-liste', {
     + '.vl-dir{border:1.5px solid #e2eaf5;background:#fff;color:#2a5ea9;border-radius:9px;width:32px;height:31px;cursor:pointer;font-size:13px;font-weight:800}'
     + '.vl-list{margin-top:12px;background:#fff;border:1px solid #e8eef7;border-radius:16px;overflow:hidden;box-shadow:0 6px 20px rgba(31,74,133,.05)}'
     + '.vl-row{display:grid;grid-template-columns:24px 128px minmax(210px,1.5fr) minmax(150px,1fr) minmax(150px,1fr) minmax(220px,1.7fr) auto;grid-template-areas:"chk img id st loc com act";gap:14px;align-items:start;padding:14px 16px;border-bottom:1px solid #eef2f8}'
-    + '.vl-row:last-child{border-bottom:none}.vl-row:hover{background:#fafcff}.vl-row.sel{background:#f2f7fe}'
+    + '.vl-row:last-child{border-bottom:none}.vl-row{cursor:pointer}.vl-row:hover{background:#f5f9ff}.vl-row.sel{background:#f2f7fe}'
     + '.vl-chk{grid-area:chk;padding-top:30px}.vl-img{grid-area:img}.vl-id{grid-area:id;min-width:0}.vl-st{grid-area:st;min-width:0}.vl-loc{grid-area:loc;min-width:0}.vl-com{grid-area:com;min-width:0}.vl-act{grid-area:act}'
     + '.vl-ph{position:relative;width:128px;height:86px;border-radius:10px;overflow:hidden;background:#eef2f8;display:flex;align-items:center;justify-content:center;color:#c0cee0;cursor:pointer}'
     + '.vl-ph img{width:100%;height:100%;object-fit:cover;display:block}.vl-ph svg{width:40px;height:40px}'
@@ -3897,7 +3932,7 @@ OD.define('vo-liste', {
         + '<div class="vl-lbl">Commentaire PVO²' + (age != null && com ? ' · ' + esc(depuisTxt(age)) : '') + (neuf ? '<span class="vl-new">nouveau</span>' : '') + '</div>'
         + '<div class="vl-ctxt">' + (com ? esc(com) : 'Aucun commentaire') + '</div></div>'
       : '<div class="vl-com"></div>';
-    return '<div class="vl-row' + (sel ? ' sel' : '') + '">'
+    return '<div class="vl-row' + (sel ? ' sel' : '') + '" data-vin="' + esc(r.VIN) + '">'
       + '<div class="vl-chk"><input type="checkbox" class="vo-chk vo-rowchk" data-vin="' + esc(r.VIN) + '"' + (sel ? ' checked' : '') + '></div>'
       + '<div class="vl-img"><div class="vl-ph"' + (hasPhoto(r) ? ' data-act="photos" data-vin="' + esc(r.VIN) + '" title="Diaporama"' : '') + '>' + ph
       + (n ? '<span class="vl-nb">' + IC.camera + n + '</span>' : '') + '</div></div>'
@@ -3999,8 +4034,7 @@ OD.define('vo-liste', {
     return '<div class="vo-selbar" id="vo-selbar"' + (n ? '' : ' style="display:none"') + '>'
       + '<span class="vo-selbar-n"><b id="vo-seln">' + n + '</b> véhicule(s) sélectionné(s)</span>'
       + '<div class="vo-selbar-acts">'
-      + '<button type="button" class="vo-logo" id="vo-pdf" title="Affiches prix (PDF)" onclick="window.__voPosters()">' + LOGO.pdf + '</button>'
-      + '<button type="button" class="vo-btn vo-btn-fiche" id="vo-fiche" title="Fiche vitrine : 2 pages par véhicule (PDF)" onclick="window.__voFiches()">' + IC.pdf + 'Fiche vitrine</button>'
+      + '<button type="button" class="vo-logo" id="vo-pdf" title="Fiche vitrine (PDF, 2 pages par véhicule)" onclick="window.__voFiches()">' + LOGO.pdf + '</button>'
       + '<button type="button" class="vo-logo" id="vo-xls" title="Exporter la sélection (Excel)" onclick="window.__voExcel()">' + LOGO.xls + '</button>'
       + '<button type="button" class="vo-btn ghost" id="vo-selclear" onclick="window.__voClearSel()">Effacer la sélection</button>'
       + '</div></div>';
@@ -4242,7 +4276,27 @@ OD.define('vo-liste', {
     try { if (typeof c.auth.session === 'function') { var s = c.auth.session(); if (s) return s.access_token; } } catch (e) { }
     return null;
   }
-  function busy(btn, on) { if (!btn) return; btn.disabled = on; btn.style.opacity = on ? '.45' : ''; }
+  // v35 : spinner à la place de l'icône pendant le traitement.
+  function busy(btn, on) {
+    if (!btn) return;
+    if (on) {
+      if (btn.__voIcone != null) return;
+      var ico = btn.querySelector('svg'), t = ico ? Math.round(ico.getBoundingClientRect().width) || 18 : 18;
+      if (!doc.getElementById('vo-spin-css')) {
+        var st = doc.createElement('style'); st.id = 'vo-spin-css';
+        st.textContent = '@keyframes vo-tourne{to{transform:rotate(360deg)}}.vo-spin{animation:vo-tourne .8s linear infinite;flex-shrink:0}';
+        (doc.head || doc.body).appendChild(st);
+      }
+      btn.__voIcone = btn.innerHTML;
+      var spin = '<svg class="vo-spin" viewBox="0 0 24 24" width="' + t + '" height="' + t + '" fill="none" stroke-width="2.6" stroke-linecap="round" style="width:' + t + 'px;height:' + t + 'px">'
+        + '<circle cx="12" cy="12" r="9" stroke="#d6e2f2"/><path d="M21 12a9 9 0 0 0-9-9" stroke="#2a5ea9"/></svg>';
+      btn.innerHTML = ico ? btn.__voIcone.replace(/<svg[\s\S]*?<\/svg>/, spin) : spin;
+      btn.disabled = true; btn.setAttribute('aria-busy', 'true');
+    } else {
+      if (btn.__voIcone != null) { btn.innerHTML = btn.__voIcone; btn.__voIcone = null; }
+      btn.disabled = false; btn.removeAttribute('aria-busy');
+    }
+  }
   async function generatePosters(btn, templateId, prefixe, lignes) {
     var rows = lignes || selectedRows();
     if (!rows.length) return;
@@ -4299,6 +4353,14 @@ OD.define('vo-liste', {
   }
   function bindContent(host) {
     host.querySelectorAll('[data-act="eye"]').forEach(function (el) { el.addEventListener('click', function (e) { e.stopPropagation(); openFicheVO(el.getAttribute('data-vin')); }); });
+    // v35 : clic sur la ligne = œil. Les éléments qui ont leur propre action la gardent.
+    host.querySelectorAll('.vl-row[data-vin]').forEach(function (row) {
+      row.addEventListener('click', function (e) {
+        if (e.target.closest('input, button, a, select, label, textarea, [data-act], [data-url], .vo-dot, .vl-chk')) return;
+        try { var sel = (win.getSelection ? win.getSelection() : window.getSelection()); if (sel && String(sel).trim()) return; } catch (x) { }
+        openFicheVO(row.getAttribute('data-vin'));
+      });
+    });
     host.querySelectorAll('[data-act="photos"]').forEach(function (el) { el.addEventListener('click', function (e) { e.stopPropagation(); openDiaporama(el.getAttribute('data-vin')); }); });
     host.querySelectorAll('[data-act="histo"]').forEach(function (el) { el.addEventListener('click', function (e) { e.stopPropagation(); openFicheVO(el.getAttribute('data-vin'), 'apv'); }); });
     host.querySelectorAll('[data-act="globe"]').forEach(function (el) { el.addEventListener('click', function (e) { e.stopPropagation(); openWeb(el.getAttribute('data-url')); }); });
@@ -4433,7 +4495,7 @@ OD.define('vo-liste', {
   }
   window.__voReload = function () { start(true); };
   win.__voPosters = window.__voPosters = function () { generatePosters(doc.getElementById('vo-pdf')); };
-  win.__voFiches = window.__voFiches = function () { generatePosters(doc.getElementById('vo-fiche'), TEMPLATE_FICHE, 'fiches_vitrine_'); };
+  win.__voFiches = window.__voFiches = function () { generatePosters(doc.getElementById('vo-pdf'), TEMPLATE_FICHE, 'fiches_vitrine_'); };
   win.__voExcel = window.__voExcel = function () { exportExcel(doc.getElementById('vo-xls')); };
   win.__voClearSel = window.__voClearSel = function () { S.sel = {}; renderContent(); };
 
