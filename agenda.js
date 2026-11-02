@@ -1,4 +1,11 @@
 // ============================================================================
+//  v39 (02/11/2026) : CRÉNEAUX RÉCURRENTS. À la création d'un créneau (pas
+//  de livraison, préparation, absence…), « Se répète » : les jours cochés,
+//  toutes les 1 à 4 semaines, de l'heure de début à l'heure de fin, jusqu'à
+//  la date choisie (create_creneau_serie : un vrai rendez-vous par date,
+//  envoyé à BACS). Sur une occurrence : « Supprimer celui-ci » ou « Toute la
+//  série à partir de celui-ci » (delete_rdv_serie).
+// ============================================================================
 //  v38 (02/11/2026) : EXPERT PRODUIT, PRÉPARATEUR, LIVRAISONS DU SITE.
 //  - Onglet « Livraisons du site » : toutes les livraisons (= mises en main)
 //    et préparations du site, quel que soit l'agenda où elles sont posées.
@@ -1674,6 +1681,14 @@ OD.define('agenda', {
 #agenda-ov .agm-now:hover{background:#eef4fc}
 #agenda-ov .agm-now:disabled{opacity:.55;cursor:default}
 #agenda-ov .agm-hint{font-size:11px;color:#7a98c5;font-weight:600;margin-top:6px;line-height:1.4}
+#agenda-ov .agm-rep{margin-top:10px}
+#agenda-ov .agm-rj{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
+#agenda-ov .agm-rj button{min-width:34px;height:34px;border:1.5px solid #e2eaf5;background:#fff;color:#7a98c5;border-radius:9px;font:800 12.5px "Nunito Sans",system-ui,sans-serif;cursor:pointer;padding:0 8px}
+#agenda-ov .agm-rj button.on{background:#2a5ea9;border-color:#2a5ea9;color:#fff}
+#agenda-ov .agm-rj button.agm-rj-t{color:#2a5ea9}
+#agenda-ov .agm-rep-l{margin-top:8px;gap:12px;flex-wrap:wrap;font-size:12.5px;font-weight:700;color:#5f7aa3}
+#agenda-ov .agm-rep-l label{display:inline-flex;align-items:center;gap:6px}
+#agenda-ov .agm-rep .agm-hint b{color:#1F4A85}
 #agenda-ov .agm-grp-list{display:flex;flex-direction:column;gap:6px}
 #agenda-ov .agm-grp-it{display:flex;align-items:center;gap:10px;width:100%;text-align:left;border:1.5px solid #e2eaf5;background:#fff;border-radius:10px;padding:9px 12px;font-family:inherit;font-size:13px;font-weight:700;color:#1F4A85;cursor:pointer}
 #agenda-ov .agm-grp-it:hover{border-color:#acc5e4;background:#f7f9fc}
@@ -3189,6 +3204,11 @@ OD.define('agenda', {
   }
 
   function closeCreate() { clearTimeout(bacsSuiviT); const o = frontDoc().getElementById('agenda-ov'); if (o) o.remove(); cs = null; try { calendar && calendar.unselect(); } catch (e) {} }
+  // v39 : règle de répétition par défaut — le jour de la date, chaque semaine, 4 semaines.
+  function isoJour(dstr) { const a = String(dstr || '').split('-').map(Number); const d = new Date(a[0], (a[1] || 1) - 1, a[2] || 1); return ((d.getDay() + 6) % 7) + 1; }
+  function plusJours(dstr, n) { const a = String(dstr || '').split('-').map(Number); const d = new Date(a[0], (a[1] || 1) - 1, (a[2] || 1) + n); return ymd(d); }
+  function repDefaut(dstr) { return { on: false, jours: dstr ? [isoJour(dstr)] : [1], intervalle: 1, au: dstr ? plusJours(dstr, 27) : '' }; }
+  const JOURS_REP = [[1, 'L', 'lundi'], [2, 'M', 'mardi'], [3, 'M', 'mercredi'], [4, 'J', 'jeudi'], [5, 'V', 'vendredi'], [6, 'S', 'samedi'], [7, 'D', 'dimanche']];
   function openCreate(sel) {
     if (isPastSlot(sel.startStr || '')) { try { calendar && calendar.unselect(); } catch (e) {} hideTip(); showAgError('Impossible de placer un \u00e9v\u00e9nement dans le pass\u00e9.', 'Choisis un cr\u00e9neau \u00e0 partir de maintenant.'); return; }
     const startStr = sel.startStr || '';
@@ -3198,7 +3218,7 @@ OD.define('agenda', {
     // plage tirée à la souris (plus d'une case) garde sa longueur.
     let dur = DUREE_DEFAUT; if (sel.end && sel.start) { const d = Math.round((sel.end - sel.start) / 60000); if (d > 30) dur = d; }
     const proprio0 = vueSite() ? Number(CACHED_UID) : Number(currentCollabId());
-    cs = { editing: false, editId: null, idRpv: null, mode: 'rdv', date, time, dur, idClient: null, clientLabel: '', client: null, origine: ORIGINES[0], physique: true, rdvType: null, creneauType: null, bilatUser: null, bilatNom: '', comment: '', saving: false, err: '', invites: [], invitesInit: [], owner: proprio0, ownerInit: proprio0 };
+    cs = { editing: false, editId: null, idRpv: null, mode: 'rdv', date, time, dur, idClient: null, clientLabel: '', client: null, origine: ORIGINES[0], physique: true, rdvType: null, creneauType: null, bilatUser: null, bilatNom: '', comment: '', saving: false, err: '', invites: [], invitesInit: [], owner: proprio0, ownerInit: proprio0, rep: repDefaut(date) };
     chargerInvitables().then(() => { if (cs) renderCreate(); });
     chargerMembresPour(siteCourant()).then(() => { if (cs) renderCreate(); });
     chargerAgendaBacs().then(() => { if (cs) { renderCreate(); suivreBacs(); } });
@@ -3252,7 +3272,7 @@ OD.define('agenda', {
       comment: (st === 'bilat' ? '' : (p.description || '')), saving: false, err: '',
       invites: ((p.extra && Array.isArray(p.extra.invites)) ? p.extra.invites : []).map(Number),
       invitesInit: ((p.extra && Array.isArray(p.extra.invites)) ? p.extra.invites : []).map(Number),
-      idBacs: (p.extra && p.extra.id_bacs) || null, sync: null,
+      idBacs: (p.extra && p.extra.id_bacs) || null, sync: null, serieId: (p.extra && p.extra.serie_id) || null, startInit: String(p.event_start_time || '').slice(0, 19),
       owner: (st === 'rdv' && p.id_user != null) ? Number(p.id_user) : null,
       ownerInit: (st === 'rdv' && p.id_user != null) ? Number(p.id_user) : null,
       ownerNom: (p.extra && p.extra.proprietaire) || ''
@@ -3370,6 +3390,25 @@ OD.define('agenda', {
       quoi += '<div class="agm-cell"><div class="agm-lbl">Type de créneau</div><select class="agm-sel agm-w" id="agm-ctype"><option value="">— choisir —</option>' + types.map(t => '<option value="' + t.id + '"' + (String(t.id) === String(cs.creneauType) ? ' selected' : '') + '>' + esc(t.label) + '</option>').join('') + '</select></div>';
     }
 
+    // v39 : répétition (création de créneau seulement).
+    let repet = '';
+    if (!ed && cs.mode === 'creneau') {
+      const r = cs.rep || (cs.rep = repDefaut(cs.date));
+      repet = '<div class="agm-cell agm-rep"><div class="agm-lbl">Répétition</div><div class="agm-row">'
+        + '<div class="agm-pf"><button type="button" data-rep="0" class="' + (r.on ? '' : 'on') + '">Une seule fois</button><button type="button" data-rep="1" class="' + (r.on ? 'on' : '') + '">Se répète</button></div></div>';
+      if (r.on) {
+        const finH = endStrFrom(cs.date || agToday(), cs.time || '09:00', cs.dur).slice(11, 16);
+        const nb = compterRep(r, cs.date);
+        repet += '<div class="agm-rj">' + JOURS_REP.map(j => '<button type="button" data-rj="' + j[0] + '" title="' + j[2] + '" class="' + (r.jours.indexOf(j[0]) >= 0 ? 'on' : '') + '">' + j[1] + '</button>').join('')
+          + '<button type="button" class="agm-rj-t" data-rjt="ouvres">Lun → ven</button><button type="button" class="agm-rj-t" data-rjt="ouvres6">Lun → sam</button></div>'
+          + '<div class="agm-row agm-rep-l"><label>Toutes les <select class="agm-sel" id="agm-rep-int">' + [1, 2, 3, 4].map(n => '<option value="' + n + '"' + (Number(r.intervalle) === n ? ' selected' : '') + '>' + n + '</option>').join('') + '</select> semaine' + (Number(r.intervalle) > 1 ? 's' : '') + '</label>'
+          + '<label>jusqu’au <input type="date" class="agm-inp" id="agm-rep-au" min="' + esc(cs.date || agToday()) + '" value="' + esc(r.au) + '"></label></div>'
+          + '<div class="agm-hint">De ' + esc(String(cs.time || '').replace(':', 'h')) + ' à ' + esc(finH.replace(':', 'h')) + ', ' + esc(r.jours.slice().sort().map(n => (JOURS_REP[n - 1] || [])[2]).join(', ') || 'aucun jour coché')
+          + (Number(r.intervalle) > 1 ? ', une semaine sur ' + r.intervalle : '') + ', du ' + esc(libDateCourte(cs.date)) + ' au ' + esc(libDateCourte(r.au)) + ' : <b>' + nb + ' créneau' + (nb > 1 ? 'x' : '') + '</b>.</div>';
+      }
+      repet += '</div>';
+    }
+
     let invites = '';
     if (cs.mode !== 'bilat') {
       const pris = (cs.invites || []).map(Number);
@@ -3394,15 +3433,33 @@ OD.define('agenda', {
            : '';
     }
     return chips
-      + '<div class="agm-grid">' + qui + quand + quoi + invites + '</div>'
+      + '<div class="agm-grid">' + qui + quand + quoi + invites + '</div>' + repet
       + comment + sync + (cs.err ? '<div class="agm-err">' + esc(cs.err) + '</div>' : '');
+  }
+  function libDateCourte(dstr) { const a = String(dstr || '').split('-').map(Number); if (!a[0]) return '—'; return new Date(a[0], a[1] - 1, a[2]).toLocaleDateString('fr-FR', { weekday: 'short', day: 'numeric', month: 'short' }); }
+  function compterRep(r, du) {
+    if (!du || !r.au || r.au < du || !r.jours.length) return 0;
+    const a = du.split('-').map(Number), z = r.au.split('-').map(Number);
+    const d0 = new Date(a[0], a[1] - 1, a[2]), fin = new Date(z[0], z[1] - 1, z[2]);
+    const lundi0 = new Date(d0); lundi0.setDate(d0.getDate() - ((d0.getDay() + 6) % 7));
+    let n = 0;
+    for (const d = new Date(d0); d <= fin && n < 999; d.setDate(d.getDate() + 1)) {
+      const iso = ((d.getDay() + 6) % 7) + 1, sem = Math.floor(Math.round((d - lundi0) / 86400000) / 7);
+      if (r.jours.indexOf(iso) >= 0 && sem % (Number(r.intervalle) || 1) === 0) n++;
+    }
+    return n;
   }
   function renderCreate() {
     const d = frontDoc(); let ov = d.getElementById('agenda-ov');
     if (!ov) { ov = d.createElement('div'); ov.id = 'agenda-ov'; (d.body || d.documentElement).appendChild(ov); ov.addEventListener('mousedown', (e) => { if (e.target === ov) closeCreate(); }); }
     const saveLbl = cs.saving ? 'Enregistrement\u2026' : (cs.editing ? '\ud83d\udcbe  Enregistrer les modifications' : '\ud83d\udcc5  Enregistrer dans l\'agenda');
     let foot;
-    if (cs.editing && cs.confirmDel) {
+    if (cs.editing && cs.confirmDel && cs.serieId) {
+      foot = '<div class="agm-confirm"><span class="agm-confirm-txt">Ce créneau fait partie d’une série.</span>'
+        + '<button class="agm-cancel" id="agm-del-cancel"' + (cs.saving ? ' disabled' : '') + '>Annuler</button>'
+        + '<button class="agm-del" id="agm-del-yes"' + (cs.saving ? ' disabled' : '') + '>' + (cs.saving ? 'Suppression\u2026' : 'Celui-ci seulement') + '</button>'
+        + '<button class="agm-del" id="agm-del-serie"' + (cs.saving ? ' disabled' : '') + '>Toute la série à partir de celui-ci</button></div>';
+    } else if (cs.editing && cs.confirmDel) {
       foot = '<div class="agm-confirm"><span class="agm-confirm-txt">Supprimer d\u00e9finitivement\u00a0?</span>'
         + '<button class="agm-cancel" id="agm-del-cancel"' + (cs.saving ? ' disabled' : '') + '>Annuler</button>'
         + '<button class="agm-del" id="agm-del-yes"' + (cs.saving ? ' disabled' : '') + '>' + (cs.saving ? 'Suppression\u2026' : 'Supprimer') + '</button></div>';
@@ -3436,6 +3493,8 @@ OD.define('agenda', {
     if (g('agm-bvend')) cs.bilatUser = g('agm-bvend').value || null;
     if (g('agm-ori')) cs.origine = ORIGINES[Number(g('agm-ori').value)] || cs.origine;
     if (g('agm-owner') && g('agm-owner').value) cs.owner = Number(g('agm-owner').value);
+    if (cs.rep && g('agm-rep-int')) cs.rep.intervalle = Number(g('agm-rep-int').value) || 1;
+    if (cs.rep && g('agm-rep-au')) cs.rep.au = g('agm-rep-au').value;
   }
   function wireCreate() {
     const d = frontDoc(); const g = (id) => d.getElementById(id);
@@ -3456,7 +3515,8 @@ OD.define('agenda', {
     if (g('agm-cli-pick')) g('agm-cli-pick').addEventListener('click', openPicker);
     if (g('agm-del')) g('agm-del').addEventListener('click', () => { cs.confirmDel = true; cs.err = ''; renderCreate(); });
     if (g('agm-del-cancel')) g('agm-del-cancel').addEventListener('click', () => { cs.confirmDel = false; renderCreate(); });
-    if (g('agm-del-yes')) g('agm-del-yes').addEventListener('click', performDelete);
+    if (g('agm-del-yes')) g('agm-del-yes').addEventListener('click', () => performDelete(false));
+    if (g('agm-del-serie')) g('agm-del-serie').addEventListener('click', () => performDelete(true));
     if (g('agm-save')) g('agm-save').addEventListener('click', doSave);
     if (g('agm-real-now')) g('agm-real-now').addEventListener('click', () => { if (cs && cs.editId != null) goBilaterale(cs.editId, true); });
     if (g('agm-start-now')) g('agm-start-now').addEventListener('click', demarrerBilatMaintenant);
@@ -3466,6 +3526,21 @@ OD.define('agenda', {
     if (ta) { const ajuster = () => { ta.style.height = 'auto'; ta.style.height = Math.min(260, ta.scrollHeight + 4) + 'px'; }; ajuster(); ta.addEventListener('input', ajuster); }
     if (g('agm-owner')) g('agm-owner').addEventListener('change', () => { syncInputs(); cs.invites = (cs.invites || []).filter(x => Number(x) !== Number(cs.owner)); renderCreate(); });
     if (g('agm-ctype')) g('agm-ctype').addEventListener('change', () => { syncInputs(); renderCreate(); });
+    // v39 : répétition
+    d.querySelectorAll('#agenda-ov [data-rep]').forEach(b => b.addEventListener('click', () => {
+      syncInputs(); cs.rep = cs.rep || repDefaut(cs.date); cs.rep.on = b.getAttribute('data-rep') === '1';
+      if (cs.rep.on && cs.date && cs.rep.jours.length === 1 && !cs.rep.touche) cs.rep.jours = [isoJour(cs.date)];
+      if (cs.rep.on && (!cs.rep.au || cs.rep.au < cs.date)) cs.rep.au = plusJours(cs.date, 27);
+      renderCreate();
+    }));
+    d.querySelectorAll('#agenda-ov [data-rj]').forEach(b => b.addEventListener('click', () => {
+      syncInputs(); const j = Number(b.getAttribute('data-rj')); const t = cs.rep.jours; cs.rep.touche = true;
+      cs.rep.jours = t.indexOf(j) >= 0 ? t.filter(x => x !== j) : t.concat([j]); renderCreate();
+    }));
+    d.querySelectorAll('#agenda-ov [data-rjt]').forEach(b => b.addEventListener('click', () => {
+      syncInputs(); cs.rep.touche = true; cs.rep.jours = b.getAttribute('data-rjt') === 'ouvres' ? [1, 2, 3, 4, 5] : [1, 2, 3, 4, 5, 6]; renderCreate();
+    }));
+    ['agm-rep-int', 'agm-rep-au', 'agm-date', 'agm-time', 'agm-dur'].forEach(id => { if (g(id) && cs.rep && cs.rep.on) g(id).addEventListener('change', () => { syncInputs(); renderCreate(); }); });
     if (g('agm-inv-add')) g('agm-inv-add').addEventListener('change', (e) => {
       const v = Number(e.target.value); if (!v) return;
       syncInputs(); cs.invites = (cs.invites || []).concat([v]); renderCreate();
@@ -3514,6 +3589,25 @@ OD.define('agenda', {
         if (!s.idClient) { s.err = 'S\u00e9lectionne un client.'; return renderCreate(); }
         s.saving = true; renderCreate();
         res = await c.rpc('create_rdv_client', { p_id_user: Number(uid), p_id_client: Number(s.idClient), p_id_site: site != null ? Number(site) : null, p_start: startStr, p_end: endStr, p_duree: dur, p_id_rdv_type: s.physique ? 5 : 10, p_origine: s.origine, p_commentaire: s.comment || null });
+      } else if (s.mode === 'creneau' && s.rep && s.rep.on) {
+        // v39 : série de créneaux
+        if (!s.creneauType) { s.err = 'Choisis la nature de l\u2019événement (ou le type de créneau).'; return renderCreate(); }
+        if (!s.rep.jours.length) { s.err = 'Coche au moins un jour.'; return renderCreate(); }
+        if (!s.rep.au || s.rep.au < s.date) { s.err = 'Choisis la date de fin de la répétition.'; return renderCreate(); }
+        if (endStr.slice(0, 10) !== s.date) { s.err = 'Un créneau qui se répète doit finir le jour même.'; return renderCreate(); }
+        s.saving = true; renderCreate();
+        const rs = await c.rpc('create_creneau_serie', { p_id_user: Number(uid), p_id_site: site != null ? Number(site) : null,
+          p_du: s.date, p_au: s.rep.au, p_heure_debut: s.time + ':00', p_heure_fin: endStr.slice(11, 19),
+          p_jours: s.rep.jours.slice().sort(), p_intervalle: Number(s.rep.intervalle) || 1, p_id_rdv_type: Number(s.creneauType),
+          p_commentaire: s.comment || null, p_invites: (s.invites || []).length ? (s.invites || []).map(Number) : null });
+        if (rs.error) throw rs.error;
+        pousserVersBacs();
+        const lab = (NATURES_SAISIE.find(x => x.cle === natureDe(s)) || {}).label || 'Créneau';
+        closeCreate();
+        toast(lab + ' : ' + ((rs.data && rs.data.n) || 0) + ' créneaux posés' + (Number(uid) !== Number(CACHED_UID) ? ' dans l’agenda de ' + nomPersonne(uid) : '')
+          + (rs.data && rs.data.sautes ? ' (' + rs.data.sautes + ' date' + (rs.data.sautes > 1 ? 's' : '') + ' passée' + (rs.data.sautes > 1 ? 's' : '') + ' ignorée' + (rs.data.sautes > 1 ? 's' : '') + ')' : ''), 'ok');
+        refetchApresEcriture();
+        return;
       } else if (s.mode === 'creneau') {
         if (!s.creneauType) { s.err = 'Choisis la nature de l\u2019événement (ou le type de créneau).'; return renderCreate(); }
         s.saving = true; renderCreate();
@@ -3573,15 +3667,17 @@ OD.define('agenda', {
       renderCreate();
     }
   }
-  async function performDelete() {
+  async function performDelete(serie) {
     const s = cs; if (!s || !s.editing) return; s.err = '';
     if (verrouille()) { s.confirmDel = false; s.err = 'BACS n\u2019est pas ouvert sur votre poste : ouvrez BACS dans un onglet de ce navigateur, connectez-vous, puis recommencez.'; return renderCreate(); }
     s.saving = true; renderCreate();
     try {
       const c = sb(); let res;
       if (s.mode === 'bilat') res = await c.rpc('delete_bilaterale', { p_id: s.editId });
+      else if (serie === true && s.serieId) res = await c.rpc('delete_rdv_serie', { p_serie: s.serieId, p_a_partir_de: (s.startInit || (s.date + ' ' + s.time + ':00')).replace('T', ' ') });
       else res = await c.rpc('delete_rdv_client', { p_id_rdv: s.editId });
       if (res && res.error) throw res.error;
+      if (serie === true && res && res.data) toast(((res.data && res.data.n) || 0) + ' créneaux de la série supprimés', 'ok');
       pousserVersBacs();
       closeCreate(); refetch();
     } catch (e) { console.error('[agenda] suppression', e); s.saving = false; s.confirmDel = false; s.err = (e && e.message) ? e.message : String(e); renderCreate(); }
