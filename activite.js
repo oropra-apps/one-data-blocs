@@ -1,5 +1,10 @@
 // ============================================================================
 //  SUIVI D'ACTIVITÉ v4 (28/10/2026) — un écran par rôle, une question par écran
+//  v13 (02/11/2026) : couleurs alignées sur la charte One Data (mêmes teintes que
+//    Performances et Objectifs : bleus #1F4A85 / #2a5ea9, vert #53bda7, orange
+//    #fac055, rouge #e24b4a ; fonds pâles et textes foncés associés). Flux :
+//    bandes bleues pleines, pertes en rouge franc. Anneau : libellé court
+//    sous le chiffre (« commandes · 31 oct. »), marque de projection bleue.
 //  v12 (02/11/2026) : « En direct » prend le sélecteur de dates de One Data
 //    (le même bouton « 📅 du → au » que partout ailleurs ; le calendrier natif
 //    du navigateur ne s'ouvrait pas) : un jour ou une période (act_direct
@@ -197,6 +202,11 @@ OD.define('activite', {
     const heure = iso => { const d = new Date(iso); return isNaN(d) ? '' : String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0'); };
 
     // v8 : la période est-elle le mois en cours (1er du mois → aujourd'hui) ?
+    function libCourt(b) {
+      if (estMois(b)) return MOIS[new Date(b.fin).getMonth()];
+      const MC = ['janv.', 'févr.', 'mars', 'avr.', 'mai', 'juin', 'juil.', 'août', 'sept.', 'oct.', 'nov.', 'déc.'], f = x => { const d = new Date(x + 'T12:00:00'); return (d.getDate() === 1 ? '1er' : d.getDate()) + ' ' + MC[d.getMonth()]; };
+      return b.deb === b.fin ? f(b.deb) : f(b.deb) + ' → ' + f(b.fin);
+    }
     function estMois(b) { const m = bornes('mois'); return b.deb === m.deb && b.fin === m.fin; }
     function bornes(code) {
       const d = auj(), y = d.getFullYear(), m = d.getMonth();
@@ -273,10 +283,10 @@ OD.define('activite', {
 
     // ------------------------------------------------------------------ styles (charte One Data)
     const CSS = `
-#act-root{--bleu:#2a5ea9;--bleu-fonce:#1F4A85;--bleu-clair:#acc5e4;--vert:#53bda7;--orange:#fac055;--rouge:#d97070;
-  --m-vert:#00997f;--m-orange:#d2941f;--m-bleu:#3f7cba;--m-rouge:#c0524f;
-  --ground:#f4f7fb;--card:#fff;--line:#e3e9f3;--line-2:#cfd9e9;--ink:#1c2b45;--ink-2:#5a6b86;--ink-3:#8b99b0;
-  --ok-bg:#e4f4f0;--alerte-bg:#fdf3de;--chaud-bg:#fbeceb;--calme-bg:#eef2f8;
+#act-root{--bleu:#2a5ea9;--bleu-fonce:#1F4A85;--bleu-clair:#acc5e4;--vert:#53bda7;--orange:#fac055;--rouge:#e24b4a;
+  --m-vert:#085041;--m-orange:#633806;--m-bleu:#2a5ea9;--m-rouge:#791f1f;
+  --ground:#f5f8fc;--card:#fff;--line:#e3e9f3;--line-2:#cfd9e9;--ink:#1c2b45;--ink-2:#5a6b86;--ink-3:#8b99b0;
+  --ok-bg:#e1f5ee;--alerte-bg:#faeeda;--chaud-bg:#fcebeb;--calme-bg:#eaf0f9;
   --ombre:0 1px 2px rgba(28,43,69,.05),0 8px 24px rgba(28,43,69,.06);
   --ui:"Nunito Sans",system-ui,-apple-system,"Segoe UI",Arial,sans-serif;
   display:block;width:100%;box-sizing:border-box;padding:18px 16px 48px;background:var(--ground);color:var(--ink);
@@ -459,9 +469,9 @@ OD.define('activite', {
     }
 
     // ------------------------------------------------------------------ graphiques
-    const C = { bleu: '#2a5ea9', fonce: '#1F4A85', clair: '#acc5e4', vert: '#53bda7', orange: '#fac055', rouge: '#d97070',
-      mvert: '#00997f', morange: '#d2941f', mbleu: '#3f7cba', mrouge: '#c0524f', line: '#e3e9f3', line2: '#cfd9e9',
-      ink: '#1c2b45', ink2: '#5a6b86', ink3: '#8b99b0', okbg: '#e4f4f0', alerte: '#fdf3de', chaud: '#fbeceb', calme: '#eef2f8', card: '#ffffff' };
+    const C = { bleu: '#2a5ea9', fonce: '#1F4A85', clair: '#acc5e4', vert: '#53bda7', orange: '#fac055', rouge: '#e24b4a',
+      mvert: '#085041', morange: '#633806', mbleu: '#2a5ea9', mrouge: '#791f1f', line: '#e3e9f3', line2: '#cfd9e9',
+      ink: '#1c2b45', ink2: '#5a6b86', ink3: '#8b99b0', okbg: '#e1f5ee', alerte: '#faeeda', chaud: '#fcebeb', calme: '#eaf0f9', card: '#ffffff' };
     const NS = 'http://www.w3.org/2000/svg';
     function el(n, a, p) { const e = doc.createElementNS(NS, n); for (const k in a) e.setAttribute(k, a[k]); if (p) p.appendChild(e); return e; }
     function tx(p, x, y, s, o) { o = o || {}; const t = el('text', { x: x, y: y, fill: o.c || C.ink, 'text-anchor': o.a || 'start', 'font-size': o.s || 11.5, 'font-weight': o.w || 700 }, p); t.textContent = s; return t; }
@@ -477,14 +487,14 @@ OD.define('activite', {
         if (d.fait > 0) arc(d.fait / d.cible, C.bleu);
         if (d.proj != null) {
           const a = -Math.PI / 2 + 2 * Math.PI * Math.min(d.proj / d.cible, 1);
-          el('circle', { cx: cx + r * Math.cos(a), cy: cy + r * Math.sin(a), r: 5, fill: C.card, stroke: C.morange, 'stroke-width': 3 }, s);
+          el('circle', { cx: cx + r * Math.cos(a), cy: cy + r * Math.sin(a), r: 5, fill: C.card, stroke: C.fonce, 'stroke-width': 3 }, s);
         }
         tx(s, cx, cy + 4, d.fait + ' / ' + nf(d.cible), { a: 'middle', s: Math.round(S2 * ((String(d.fait) + nf(d.cible)).length > 5 ? .11 : .15)), w: 600 });
       } else {
         tx(s, cx, cy + 4, nf(d.fait), { a: 'middle', s: Math.round(S2 * (nf(d.fait).length > 4 ? .15 : .19)), w: 600 });
       }
-      tx(s, cx, cy + 24, d.sous, { a: 'middle', s: 11, c: C.ink3 });
-      if (d.proj != null && d.cible > 0) tx(s, cx, cy + 40, 'projection ' + d.proj, { a: 'middle', s: 11, c: C.morange, w: 800 });
+      tx(s, cx, cy + 24, d.sous, { a: 'middle', s: 11, c: C.ink2 });
+      if (d.proj != null && d.cible > 0) tx(s, cx, cy + 40, 'projection ' + d.proj, { a: 'middle', s: 11, c: C.bleu, w: 800 });
       else if (!(d.cible > 0)) tx(s, cx, cy + 40, d.vide || 'pas d\'objectif saisi', { a: 'middle', s: 10.5, c: C.ink3 });
     };
 
@@ -573,16 +583,16 @@ OD.define('activite', {
         const x = i * step, h = hh(p[1]);
         if (i < n - 1) {
           const nx = (i + 1) * step, hn = hh(st[i + 1][1]), lost = p[1] - st[i + 1][1], lw = h - hn;
-          el('rect', { x: x + nw, y: y0, width: nx - x - nw, height: hn, fill: C.clair, 'fill-opacity': .55 }, s);
+          el('rect', { x: x + nw, y: y0, width: nx - x - nw, height: hn, fill: C.bleu, 'fill-opacity': .16 }, s);
           const sx = x + nw, sy = y0 + hn + lw / 2, dx = x + nw + Math.min(step * .42, 90);
           if (lost > 0) {
-            el('path', { d: 'M' + sx + ' ' + sy + ' C' + (dx - 10) + ' ' + sy + ' ' + dx + ' ' + (sy + 10) + ' ' + dx + ' ' + (drop - 8), fill: 'none', stroke: C.rouge, 'stroke-opacity': .38, 'stroke-width': Math.max(2, lw) }, s);
-            el('circle', { cx: dx, cy: drop - 4, r: 3, fill: C.mrouge }, s);
+            el('path', { d: 'M' + sx + ' ' + sy + ' C' + (dx - 10) + ' ' + sy + ' ' + dx + ' ' + (sy + 10) + ' ' + dx + ' ' + (drop - 8), fill: 'none', stroke: C.rouge, 'stroke-opacity': .7, 'stroke-width': Math.max(2, lw) }, s);
+            el('circle', { cx: dx, cy: drop - 4, r: 3.5, fill: C.rouge }, s);
           }
-          tx(s, dx, drop + 14, '−' + nf(lost), { a: 'middle', s: 13, w: 800, c: C.mrouge });
+          tx(s, dx, drop + 14, '−' + nf(lost), { a: 'middle', s: 13, w: 800, c: C.rouge });
           tx(s, dx, drop + 28, loss[i], { a: 'middle', s: 10.5, c: C.ink2 });
         }
-        el('rect', { x, y: y0, width: nw, height: h, rx: 3, fill: i === n - 1 ? C.mvert : C.fonce }, s);
+        el('rect', { x, y: y0, width: nw, height: h, rx: 3, fill: i === n - 1 ? C.vert : C.fonce }, s);
         tx(s, x, y0 - 36, p[0].toUpperCase(), { s: 9.5, w: 700, c: C.ink3 });
         tx(s, x, y0 - 14, nf(p[1]), { s: 20, w: 600 });
         if (i > 0) tx(s, x + nf(p[1]).length * 11 + 8, y0 - 14, pctTxt(p[1], st[i - 1][1]), { s: 11.5, w: 800, c: C.ink3 });
@@ -752,7 +762,7 @@ OD.define('activite', {
       setTimeout(() => {
         const q = __anchor.querySelector('[data-g="quad"]'); if (q) q.__d = eq.map(p => ({ id: p.id, ini: initiales(p), nom: nomCourt(p), x: atteinte(p), objectif: p.objectif, bloquees: p.bloquees }));
         const e = __anchor.querySelector('[data-g="ecart"]'); if (e) e.__d = [['Appels', 'appels'], ['RDV tenus', 'rdv'], ['Simulations', 'devis'], ['Commandes', 'cdes'], ['Leads joints', 'leads_contactes']].map(x => ({ lib: x[0], v: Number(v[x[1]]) || 0, moy: moy(x[1]) }));
-        const a = __anchor.querySelector('[data-g="anneau"]'); if (a) a.__d = { fait: v.cdes, cible: v.objectif, proj: estMois(b) && dv && dv.mois ? projection(dv.mois) : null, sous: prenom(v) + ' · ' + b.lib, label: v.cdes + ' commandes' };
+        const a = __anchor.querySelector('[data-g="anneau"]'); if (a) a.__d = { fait: v.cdes, cible: v.objectif, proj: estMois(b) && dv && dv.mois ? projection(dv.mois) : null, sous: prenom(v) + ' · ' + libCourt(b), label: v.cdes + ' commandes' };
       });
       const team = '<div class="team" role="tablist" aria-label="Vendeur">' + eq.map(p => '<button class="who" role="tab" data-vendeur="' + p.id + '" aria-selected="' + (String(p.id) === String(S.vendeur)) + '"><span class="av">' + esc(initiales(p)) + '</span><span><b>' + esc(nomCourt(p)) + '</b><small' + (p.bloquees ? ' class="r"' : '') + '>' + (p.bloquees ? plur(p.bloquees, 'bloquée', 'bloquées') : 'rien de bloqué') + '</small></span></button>').join('') + '</div>';
       const reste = Math.max(0, v.objectif - v.cdes);
@@ -807,7 +817,7 @@ OD.define('activite', {
       const tr = pct(t.gagnees, t.affaires);
       const fuite = (t.affaires - t.devis) >= (t.devis - t.gagnees) ? 'avant la simulation' : 'entre la simulation et la commande';
       setTimeout(() => {
-        const a = __anchor.querySelector('[data-g="anneau"]'); if (a) a.__d = { fait: Number(m.cdes) || 0, cible: Number(m.objectif) || 0, proj: pj, sous: 'commandes · ' + (estMois(b) ? MOIS[new Date(b.fin).getMonth()] : b.lib.toLowerCase()), label: m.cdes + ' commandes' };
+        const a = __anchor.querySelector('[data-g="anneau"]'); if (a) a.__d = { fait: Number(m.cdes) || 0, cible: Number(m.objectif) || 0, proj: pj, sous: 'commandes · ' + libCourt(b), label: m.cdes + ' commandes' };
         const f = __anchor.querySelector('[data-g="flux"]'); if (f) f.__d = { etapes: [['Opportunités', t.affaires], ['Simulations', t.devis], ['Commandes issues', t.gagnees]], pertes: ['sans simulation', 'simulations non signées'] };
       });
       const h2 = enCours && m.objectif > 0
