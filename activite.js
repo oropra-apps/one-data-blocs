@@ -1,6 +1,10 @@
 // ============================================================================
 //  SUIVI D'ACTIVITÉ v4 (28/10/2026) — un écran par rôle, une question par écran
-//  v15 (02/11/2026) : plus aucun pavé beige ou orange pâle (encart Lecture,
+//  v15 (02/11/2026) : En direct — les tuiles sont cliquables : un clic filtre
+//    le fil sur ce type d'événement (commandes, simulations, opportunités,
+//    leads, RDV), un second clic retire le filtre ; « en attente dans le Pool »
+//    ouvre la page Leads management. Plus de liseré d'alerte sur la tuile Pool.
+//    Plus aucun pavé beige ou orange pâle (encart Lecture,
 //    tuile en alerte, pastilles, zones des graphiques) : fond bleu très pâle et
 //    touche orange en liseré. Parcours : pas de rail derrière les barres (la
 //    barre Commandes s'arrête où s'arrêtait Simulées). Leads web : la barre
@@ -492,7 +496,9 @@ OD.define('activite', {
 #act-root .band h2{font-size:17px;font-weight:600;color:var(--bleu-fonce)}
 #act-root .pouls .n{color:var(--bleu)}
 #act-root .tuile{background:#f5f8fc;border-radius:8px}
-#act-root .tuile.alerte{background:#f5f8fc;box-shadow:inset 3px 0 0 var(--orange)}#act-root .tuile.alerte .n{color:var(--bleu-fonce)}
+#act-root .tuile.clic{cursor:pointer;box-shadow:inset 0 0 0 1px transparent;transition:box-shadow .12s,background .12s}
+#act-root .tuile.clic:hover{background:#eef4fc;box-shadow:inset 0 0 0 1px var(--bleu-clair)}
+#act-root .tuile.on{background:#fff;box-shadow:inset 0 0 0 2px var(--bleu)}
 #act-root .lecture{background:#f5f8fc;border-radius:8px;box-shadow:inset 3px 0 0 var(--bleu-clair);color:var(--bleu-fonce)}
 #act-root .lecture .t{color:var(--ink-3)}
 #act-root .erreur{background:#f5f8fc;border-radius:8px;box-shadow:inset 3px 0 0 var(--orange);color:var(--bleu-fonce)}
@@ -1070,13 +1076,16 @@ OD.define('activite', {
         if (st && st.ecran === 'direct' && !cache && window.__act4RafDirect && window.__act4DirectLive && window.__act4DirectLive()) window.__act4RafDirect();
       }, 60000);
     }
-    function tuile(n, lib, avant, alerte) {
+    const FILTRES = { commande: ['commande'], devis: ['devis'], affaire: ['affaire'], lead: ['lead', 'lead_pris', 'lead_contacte'], rdv: ['rdv', 'livraison'] };
+    const LIB_FILTRE = { commande: 'commandes', devis: 'simulations', affaire: 'opportunités', lead: 'leads', rdv: 'RDV et livraisons' };
+    function tuile(n, lib, avant, cle) {
       let d = '';
       if (avant != null) {
         const e = (Number(n) || 0) - (Number(avant) || 0);
         d = '<div class="d' + (e > 0 ? ' h' : e < 0 ? ' b' : '') + '">' + (e > 0 ? '+' + e : e < 0 ? String(e) : '=') + ' ' + (S.cmpLib || 'vs il y a 7 j') + ' (' + nf(avant) + ')</div>';
       }
-      return '<div class="tuile' + (alerte ? ' alerte' : '') + '"><div class="n">' + nf(n) + '</div><div class="l">' + lib + '</div>' + d + '</div>';
+      const att = cle === 'pool' ? ' data-pool="1" title="Ouvrir le Pool (Leads management)"' : cle ? ' data-filtre="' + cle + '" title="Filtrer le fil sur les ' + LIB_FILTRE[cle] + '"' : '';
+      return '<div class="tuile' + (cle ? ' clic' : '') + (cle && S.filtreFil === cle ? ' on' : '') + '"' + att + (cle ? ' role="button" tabindex="0"' : '') + '><div class="n">' + nf(n) + '</div><div class="l">' + lib + '</div>' + d + (cle === 'pool' && n > 0 ? '<div class="d">Ouvrir le Pool →</div>' : '') + '</div>';
     }
     function ecranDirect() {
       const site = siteUnique();
@@ -1108,12 +1117,12 @@ OD.define('activite', {
       if (live && t.pool) titre += ' <b>' + plur(t.pool, 'lead attend', 'leads attendent') + '</b> dans le Pool.';
       const band = '<div class="band" style="grid-template-columns:minmax(0,1fr)"><div><div class="q">' + esc(jour) + '</div><h2>' + titre + '</h2>'
         + '<div class="tuiles">'
-        + tuile(t.commandes, 'commandes<br><small style="font-weight:600;color:var(--ink-3)">VN transmises · VO validées</small>', w.commandes)
-        + tuile(t.devis, 'simulations', w.devis)
-        + tuile(t.affaires, 'opportunités ouvertes', w.affaires)
-        + tuile(t.leads, 'leads reçus · ' + nf(t.leads_pris) + ' pris · ' + nf(t.leads_contactes) + ' joints', w.leads)
-        + (live ? tuile(t.pool, 'en attente dans le Pool', null, t.pool > 0) : '')
-        + tuile(t.rdv_faits, (live ? 'RDV passés · ' + nf(t.rdv_a_venir) + ' à venir' : 'RDV') + (t.livraisons ? ' · ' + plur(t.livraisons, 'livraison') : ''), null)
+        + tuile(t.commandes, 'commandes<br><small style="font-weight:600;color:var(--ink-3)">VN transmises · VO validées</small>', w.commandes, 'commande')
+        + tuile(t.devis, 'simulations', w.devis, 'devis')
+        + tuile(t.affaires, 'opportunités ouvertes', w.affaires, 'affaire')
+        + tuile(t.leads, 'leads reçus · ' + nf(t.leads_pris) + ' pris · ' + nf(t.leads_contactes) + ' joints', w.leads, 'lead')
+        + (live ? tuile(t.pool, 'en attente dans le Pool', null, 'pool') : '')
+        + tuile(t.rdv_faits, (live ? 'RDV passés · ' + nf(t.rdv_a_venir) + ' à venir' : 'RDV') + (t.livraisons ? ' · ' + plur(t.livraisons, 'livraison') : ''), null, 'rdv')
         + tuile(t.appels_sortants, 'appels sortants · ' + nf(t.appels_entrants) + ' entrants', w.appels_sortants)
         + '</div></div></div>';
       const avert = bacsVieux ? lecture('Les commandes et simulations viennent de BACS : la dernière remontée date <b>' + esc(ilYa(d.bacs_a_jour)) + '</b>. Tant que la récolte BACS ne tourne pas, ces chiffres ne bougent pas.') : '';
@@ -1129,8 +1138,10 @@ OD.define('activite', {
         return '<div class="tl g-' + esc(f.genre) + '"><time>' + esc(hm(f.quand)) + '</time><div class="pin"><i></i></div><div class="tx"><b>' + esc(titreL) + '</b>'
           + (sous ? '<small>' + esc(sous) + '</small>' : '') + '</div><span class="pill ' + g[0] + '">' + esc(g[1]) + (f.univers ? ' ' + esc(f.univers) : '') + '</span></div>';
       };
-      const cFil = '<div class="card"><div class="ch"><h3>' + (periode ? 'Le fil de la période' : 'Le fil de la journée') + '</h3><span>' + plur(fil.length, 'événement') + ', le plus récent en haut</span></div>'
-        + (fil.length ? '<div>' + fil.map(ligne).join('') + '</div>' : '<div class="vide">' + (live ? 'Rien encore aujourd\'hui.' : periode ? 'Rien sur la période.' : 'Rien ce jour-là.') + '</div>') + '</div>';
+      const filV = S.filtreFil && FILTRES[S.filtreFil] ? fil.filter(f => FILTRES[S.filtreFil].indexOf(f.genre) >= 0) : fil;
+      const cFil = '<div class="card"><div class="ch"><h3>' + (periode ? 'Le fil de la période' : 'Le fil de la journée') + '</h3><span>' +
+        (S.filtreFil && FILTRES[S.filtreFil] ? plur(filV.length, 'événement') + ' · ' + LIB_FILTRE[S.filtreFil] + ' <button class="lien" data-filtre="' + S.filtreFil + '" style="color:var(--bleu);font-weight:700;margin-left:6px">✕ tout afficher</button>' : plur(fil.length, 'événement') + ', le plus récent en haut') + '</span></div>'
+        + (filV.length ? '<div>' + filV.map(ligne).join('') + '</div>' : fil.length ? '<div class="vide">Aucun événement de ce type.</div>' : '<div class="vide">' + (live ? 'Rien encore aujourd\'hui.' : periode ? 'Rien sur la période.' : 'Rien ce jour-là.') + '</div>') + '</div>';
       const eq = d.equipe || [];
       const point = it => { if (!it || !live) return ''; const m = (Date.now() - new Date(it).getTime()) / 60000; return m < 90 ? 'v' : m < 180 ? 'o' : ''; };
       const z = n => '<td' + (Number(n) ? '' : ' class="z"') + '>' + nf(n) + '</td>';
@@ -1197,6 +1208,14 @@ OD.define('activite', {
           rendre();
         }, { max: auj });
       }));
+      __anchor.querySelectorAll('[data-filtre]').forEach(b => {
+        const f = () => { const c = b.getAttribute('data-filtre'); S.filtreFil = S.filtreFil === c ? null : c; rendre(); };
+        b.addEventListener('click', f); b.addEventListener('keydown', ev => { if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); f(); } });
+      });
+      __anchor.querySelectorAll('[data-pool]').forEach(b => {
+        const f = () => { const href = '/fr/marketing'; try { wwLib.goTo(href); return; } catch (e) { } try { FW().location.href = href; } catch (e) { } };
+        b.addEventListener('click', f); b.addEventListener('keydown', ev => { if (ev.key === 'Enter') f(); });
+      });
       __anchor.querySelectorAll('[data-direct-maj]').forEach(b => b.addEventListener('click', () => { b.disabled = true; b.textContent = 'Actualisation…'; rafraichirDirect(true); }));
       __anchor.querySelectorAll('[data-vendeur]').forEach(b => b.addEventListener('click', () => choisirVendeur(b.getAttribute('data-vendeur'))));
       __anchor.querySelectorAll('[data-fiche]').forEach(b => b.addEventListener('click', () => ouvrirFiche(b.getAttribute('data-fiche'))));
