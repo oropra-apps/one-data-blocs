@@ -1,5 +1,9 @@
 // ============================================================================
-//  TOP NAV — module One Data (OD.define)  v37 — SÉLECTEUR DE PÉRIMÈTRE
+//  TOP NAV — module One Data (OD.define)  v38 — SÉLECTEUR DE PÉRIMÈTRE
+//  v38 (02/11/2026) : compte « Préparateur » (rôle 12) : aucun menu, ni
+//  Delco, ni fiche client, ni arbitrage ; seule la page d'accueil (son
+//  planning). Toute autre page le ramène à l'accueil. Le menu de l'avatar
+//  ne garde que « Se déconnecter ».
 //  v37 (30/10/2026) : la pastille « Leads » compte le Pool du SITE CHOISI
 //  dans le sélecteur de site (lead_pool_compte(p_id_site)), et se met à jour
 //  au changement de site. Avant : le Pool de tous les sites de l'utilisateur
@@ -141,7 +145,7 @@ OD.define('topnav', {
   const wwLib = window.wwLib;
   const doc = __anchor.ownerDocument || wwLib.getFrontDocument();
   const ROOT_ID = 'nav-root';
-  const NAV_VER = 39; // <- numéro de version (témoin de chargement)
+  const NAV_VER = 40; // <- numéro de version (témoin de chargement)
 
   // ------------------------------------------------------------- favicon
   // Posée une fois par chargement de l'app ; les balises existantes (icônes
@@ -575,9 +579,12 @@ OD.define('topnav', {
     // en base ; ce filtre évite seulement d'ouvrir des pages vides.
     var __roleMenu = Number((user() || {}).ID_Role != null ? user().ID_Role : (user() || {}).id_role);
     var __masque = (__roleMenu === 10) ? [P.pipe, P.perf, P.objectifs, P.bilat, P.activite, P.vnConfig] : [];
+    // v38 : préparateur (rôle 12) — aucun menu.
+    var __prep = (__roleMenu === 12);
     // v35 : compteur du Pool pour les vendeurs et les chefs des ventes.
     var __leadsBadge = (__roleMenu === 3 || __roleMenu === 4);
     MENUS.forEach(function (m, mi) {
+      if (__prep) return;
       if (!m.items.some(function (it) { return __masque.indexOf(it.p) === -1; })) return;
       let items = '';
       m.items.forEach(function (it) {
@@ -595,10 +602,11 @@ OD.define('topnav', {
     var __u = user();
     var __role = Number(__u.ID_Role != null ? __u.ID_Role : __u.id_role);
     // v32 : Delco suit la licence (Intelligence, Full) ; repli : ancienne règle par rôle.
-    var __delcoOk = (__role !== 10) && ((typeof OD !== 'undefined' && typeof OD.peut === 'function') ? OD.peut('delco') : (__role !== 4 && __role !== 9));
+    var __delcoOk = (__role !== 10) && (__role !== 12) && ((typeof OD !== 'undefined' && typeof OD.peut === 'function') ? OD.peut('delco') : (__role !== 4 && __role !== 9));
     // Arbitrage des doublons : administrateur, vendeur, secretaire (07/10/2026).
     var __arbOk = (__role === 1 || __role === 4 || __role === 9);
     var __userMenu = USER_MENU.filter(function (it) { return __arbOk || it.act !== 'doublons'; });
+    if (__role === 12) __userMenu = USER_MENU.filter(function (it) { return it.act === 'logout'; });
     if (__role === 1 || __role === 8) { __userMenu.splice(__userMenu.length - 1, 0, { t: 'Administration', p: P.admin }); }
     let userItems = '';
     __userMenu.forEach(function (it) {
@@ -633,7 +641,7 @@ OD.define('topnav', {
         '</div></div>' +
         '<div class="od-sub"><div class="od-sub-inner">' +
           '<span class="od-client">' +
-            '<button class="od-client-btn" data-act="fiche">' + I.person + '<span class="od-client-name"></span></button>' +
+            (__role === 12 ? '' : '<button class="od-client-btn" data-act="fiche">' + I.person + '<span class="od-client-name"></span></button>') +
             // Ancre : le loader y monte le module 'client-history'. Il vivait
             // dans auth.js et n'était initialisé qu'au login -> absent après un
             // F5 ou en navigation. Monté ici, il est présent partout.
@@ -647,6 +655,14 @@ OD.define('topnav', {
 
     bind();
     r.setAttribute('data-nav-ver', String(NAV_VER));
+    // v38 : le préparateur n'a que la page d'accueil.
+    if (__role === 12 && !inEditor()) {
+      try {
+        var __fw = (window.wwLib && wwLib.getFrontWindow && wwLib.getFrontWindow()) || window;
+        var __path = String((__fw.location && __fw.location.pathname) || '');
+        if (__path.indexOf(P.accueil) < 0 && __path.indexOf(P.auth) < 0 && !/^\/(fr\/?)?$/.test(__path)) goPage(P.accueil);
+      } catch (e) {}
+    }
     refreshClient();
     refreshNotifs();
     refreshLeads(true);
