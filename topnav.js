@@ -1,5 +1,10 @@
 // ============================================================================
-//  TOP NAV — module One Data (OD.define)  v41 — SÉLECTEUR DE PÉRIMÈTRE
+//  TOP NAV — module One Data (OD.define)  v42 — SÉLECTEUR DE PÉRIMÈTRE
+//  v42 (03/11/2026) : accès « Appels entrants » (rôle 13). Menus réduits à
+//  Clients › Base client et Véhicules › Stock VN / Stock VO ; bouton
+//  « + Nouveau lead » dans la barre (ancre #od-lead-appel, module
+//  'lead-appel') ; ni Delco, ni notifications, ni leads, ni pages de
+//  pilotage. Toute autre page (accueil compris) le ramène à la Base client.
 //  v41 (02/11/2026) : CHAMP DE RECHERCHE au centre de la barre client/site.
 //  La nav ne pose qu'une ancre (#od-recherche, module 'recherche') entre le
 //  client sélectionné et le sélecteur de site ; tout le reste vit dans
@@ -152,7 +157,7 @@ OD.define('topnav', {
   const wwLib = window.wwLib;
   const doc = __anchor.ownerDocument || wwLib.getFrontDocument();
   const ROOT_ID = 'nav-root';
-  const NAV_VER = 41; // <- numéro de version (témoin de chargement)
+  const NAV_VER = 42; // <- numéro de version (témoin de chargement)
 
   // ------------------------------------------------------------- favicon
   // Posée une fois par chargement de l'app ; les balises existantes (icônes
@@ -593,7 +598,10 @@ OD.define('topnav', {
     // objectifs, bilatérales, activité, import VN). Les droits sont tenus
     // en base ; ce filtre évite seulement d'ouvrir des pages vides.
     var __roleMenu = Number((user() || {}).ID_Role != null ? user().ID_Role : (user() || {}).id_role);
-    var __masque = (__roleMenu === 10) ? [P.pipe, P.perf, P.objectifs, P.bilat, P.activite, P.vnConfig] : [];
+    var __masque = (__roleMenu === 10) ? [P.pipe, P.perf, P.objectifs, P.bilat, P.activite, P.vnConfig]
+                 : (__roleMenu === 13) ? [P.pipe, P.perf, P.objectifs, P.bilat, P.activite, P.vnConfig, P.marketing, P.notifs] : [];
+    // v42 : appels entrants (rôle 13) — Base client, stocks, « Nouveau lead ».
+    var __appels = (__roleMenu === 13);
     // v38 : préparateur (rôle 12) — aucun menu.
     var __prep = (__roleMenu === 12);
     // v35 : compteur du Pool pour les vendeurs et les chefs des ventes.
@@ -617,7 +625,7 @@ OD.define('topnav', {
     var __u = user();
     var __role = Number(__u.ID_Role != null ? __u.ID_Role : __u.id_role);
     // v32 : Delco suit la licence (Intelligence, Full) ; repli : ancienne règle par rôle.
-    var __delcoOk = (__role !== 10) && (__role !== 12) && ((typeof OD !== 'undefined' && typeof OD.peut === 'function') ? OD.peut('delco') : (__role !== 4 && __role !== 9));
+    var __delcoOk = (__role !== 10) && (__role !== 12) && (__role !== 13) && ((typeof OD !== 'undefined' && typeof OD.peut === 'function') ? OD.peut('delco') : (__role !== 4 && __role !== 9));
     // Arbitrage des doublons : administrateur, vendeur, secretaire (07/10/2026).
     var __arbOk = (__role === 1 || __role === 4 || __role === 9);
     var __userMenu = USER_MENU.filter(function (it) { return __arbOk || it.act !== 'doublons'; });
@@ -633,9 +641,10 @@ OD.define('topnav', {
     r.innerHTML = STYLE +
       '<div class="od-nav">' +
         '<div class="od-bar"><div class="od-bar-inner">' +
-          '<div class="od-logo" data-page="' + P.accueil + '">' + (LOGO_URL ? '<img class="od-logo-img" src="' + LOGO_URL + '" alt="Oropra">' : 'Oropra') + '</div>' +
+          '<div class="od-logo" data-page="' + (__appels ? P.client : P.accueil) + '">' + (LOGO_URL ? '<img class="od-logo-img" src="' + LOGO_URL + '" alt="Oropra">' : 'Oropra') + '</div>' +
           '<button class="od-burger" data-burger>' + I.burger + '</button>' +
           '<div class="od-menus">' + menusHtml +
+            (__appels ? '<div id="od-lead-appel" data-od-module="lead-appel"></div>' : '') +
             // Delco réservé à l'encadrement et aux fonctions support (07/10/2026) :
             // pas de lien pour les vendeurs (4) ni les secrétaires (9). La base
             // refuse aussi Delco à ces rôles ; ce filtre évite une page vide.
@@ -679,6 +688,22 @@ OD.define('topnav', {
         var __path = String((__fw.location && __fw.location.pathname) || '');
         if (__path.indexOf(P.accueil) < 0 && __path.indexOf(P.auth) < 0 && !/^\/(fr\/?)?$/.test(__path)) goPage(P.accueil);
       } catch (e) {}
+    }
+    // v42 : appels entrants — seules la Base client, la fiche, les stocks,
+    // l'annuaire et les tutos ; le reste ramène à la Base client (contrôlé
+    // aussi en continu : WeWeb change de page sans reconstruire la nav).
+    if (__role === 13 && !inEditor()) {
+      var __garde = function () {
+        try {
+          var fw = (window.wwLib && wwLib.getFrontWindow && wwLib.getFrontWindow()) || window;
+          var path = String((fw.location && fw.location.pathname) || '');
+          var ok = [P.client, P.ficheClient, P.voListe, P.vnListe, P.annuaire, P.tutos, P.auth].some(function (p) { return path.indexOf(p) !== -1; });
+          if (!ok && !/^\/(fr\/?)?$/.test(path)) goPage(P.client);
+        } catch (e) {}
+      };
+      __garde();
+      try { clearInterval(window.__odGardeAppels); } catch (e) {}
+      window.__odGardeAppels = setInterval(__garde, 1500);
     }
     refreshClient();
     refreshNotifs();
