@@ -1,5 +1,9 @@
 // ============================================================================
-//  FICHE CLIENT — SHELL — module One Data (OD.define)  v14
+//  FICHE CLIENT — SHELL — module One Data (OD.define)  v15
+//  v15 (03/11/2026) : accès « Appels entrants » (rôle 13) — bouton
+//  « Nouveau lead » en tête des actions : il ouvre la fenêtre du module
+//  lead-appel (API window.__odLeadAppel, v3) PRÉ-REMPLIE avec ce client.
+//  Pas de bouton BACS pour ce rôle (aucun lien BACS).
 //  v14 (22/10/2026) : bouton « B » — ouvre le compte du client dans BACS
 //  (client_compte_bacs), affiché dès que la fiche est reliée à un compte BACS.
 //  v13 (22/10/2026) : le bouton « Appeler » n'apparait qu'aux licences Connect
@@ -188,6 +192,18 @@ OD.define('fiche-shell', {
   }
 
   // Téléphonie incluse dans les licences Connect et Full (socle v29 : OD.peut).
+  function roleCourant() {
+    try { const w = (wwLib.getFrontWindow && wwLib.getFrontWindow()) || window; const u = w.oropraUser || window.oropraUser || {}; return Number(u.ID_Role != null ? u.ID_Role : u.id_role); }
+    catch (e) { return null; }
+  }
+  function appelsEntrants() { return roleCourant() === 13; }
+  // v15 : ouvre « Nouveau lead » (module lead-appel) pré-rempli avec ce client.
+  function ouvrirLeadAppel() {
+    let api = null;
+    try { const w = (wwLib.getFrontWindow && wwLib.getFrontWindow()) || window; api = w.__odLeadAppel || window.__odLeadAppel || null; } catch (e) { api = window.__odLeadAppel || null; }
+    if (api && typeof api.ouvrir === 'function') { api.ouvrir(state.client); return; }
+    try { alert('Le module « Nouveau lead » n\'est pas encore chargé : rechargez la page (F5).'); } catch (e) {}
+  }
   function peutAppeler() { return (typeof OD === 'undefined' || typeof OD.peut !== 'function' || OD.peut('appel')); }
 
   function callClient() {
@@ -259,6 +275,7 @@ OD.define('fiche-shell', {
 
   // ---------------------------------------------------------------- icônes
   const IC = {
+    plus: '<path d="M12 5v14M5 12h14"/>',
     user: '<path d="M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8z"/><path d="M4 21a8 8 0 0 1 16 0"/>',
     heart: '<path d="M12 21s-7-4.6-9.3-8.3C1 9.5 2.4 6 5.7 6c2 0 3.2 1.3 3.8 2.3l.5.9.5-.9C11.1 7.3 12.3 6 14.3 6 17.6 6 19 9.5 21.3 12.7 19 16.4 12 21 12 21z"/>',
     card: '<rect x="2.5" y="5" width="19" height="14" rx="2"/><path d="M2.5 9.5h19M6 13h5M6 16h3"/>',
@@ -298,6 +315,7 @@ OD.define('fiche-shell', {
 .fs-btn.mail{color:var(--dk);border-color:#d7dfe9}.fs-btn.mail:hover{background:#f2f5f9}
 .fs-btn.sms{color:var(--am);border-color:#f0dca6}.fs-btn.sms:hover{background:#fdf7e8}
 .fs-btn.rpv{color:var(--rd);border-color:#f2c4c4}.fs-btn.rpv:hover{background:#fdf1f1}
+.fs-btn.lead{background:var(--md);border-color:var(--md);color:#fff}.fs-btn.lead:hover{background:var(--dk);border-color:var(--dk)}
 .fs-btn.bacs{color:var(--dk);border-color:#c9d9ee}.fs-btn.bacs:hover{background:#eef4fc}
 .fs-btn .fs-b{display:inline-flex;align-items:center;justify-content:center;width:20px;height:20px;border-radius:6px;background:var(--dk);color:#fff;font-weight:900;font-size:12px;line-height:1}
 /* onglets */
@@ -342,12 +360,13 @@ OD.define('fiche-shell', {
         '<span>ID Client : ' + esc(c.IDVu) + '</span>' +
       '</div>' +
       '<div class="fs-actions">' +
+        (appelsEntrants() ? '<button class="fs-btn lead" data-btn="lead">' + svg(IC.plus) + 'Nouveau lead</button>' : '') +
         (peutAppeler() ? '<button class="fs-btn call" data-btn="call">' + svg(IC.phone) + 'Appeler</button>' : '') +
         '<button class="fs-btn wa" data-btn="wa">' + svg(IC.wa) + 'WhatsApp</button>' +
         '<button class="fs-btn mail" data-btn="mail">' + svg(IC.mail) + 'Email</button>' +
         '<button class="fs-btn sms" data-btn="sms">' + svg(IC.sms) + 'SMS</button>' +
         '<button class="fs-btn rpv" data-btn="rpv">' + svg(IC.rpv) + 'RPV</button>' +
-        (state.bacs && state.bacs.url ? '<button class="fs-btn bacs" data-btn="bacs" title="Ouvrir le compte client dans BACS"><span class="fs-b">B</span>BACS</button>' : '') +
+        (state.bacs && state.bacs.url && !appelsEntrants() ? '<button class="fs-btn bacs" data-btn="bacs" title="Ouvrir le compte client dans BACS"><span class="fs-b">B</span>BACS</button>' : '') +
       '</div></div>';
   }
   // Entreprise n'a de sens que pour un particulier -> masqué (et onglets resserrés)
@@ -395,7 +414,7 @@ OD.define('fiche-shell', {
   function bindHeader(root) {
     root.querySelectorAll('[data-btn]').forEach(b => b.addEventListener('click', () => {
       const k = b.getAttribute('data-btn');
-      if (k === 'bacs') ouvrirBacs(); else if (k === 'call') callClient(); else if (k === 'rpv') openRpv(); else if (k === 'sms') openSms(); else if (k === 'wa') openWa(); else if (k === 'mail') openMail(); else todo(k);
+      if (k === 'lead') ouvrirLeadAppel(); else if (k === 'bacs') ouvrirBacs(); else if (k === 'call') callClient(); else if (k === 'rpv') openRpv(); else if (k === 'sms') openSms(); else if (k === 'wa') openWa(); else if (k === 'mail') openMail(); else todo(k);
     }));
   }
 
