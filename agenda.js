@@ -1,4 +1,11 @@
 // ============================================================================
+//  v44 (03/11/2026) : retours des séances de coaching (suite).
+//    * « Autre créneau » s'appelle « Créneau libre », et c'est la nature
+//      proposée par défaut quand on clique dans la grille (type « Autre »
+//      présélectionné). Le RDV client reste à un clic.
+//    * Ouverture depuis la fiche client (onglet RDV, « Ajouter un RDV ») : la
+//      fiche pose window.__odAgendaCreer et ouvre l'agenda ; la même fenêtre
+//      s'ouvre aussitôt en RDV client, sur ce client, au prochain créneau.
 //  v43 (03/11/2026) : charge le module partagé sous l'étiquette
 //    oropra-bacs-client-v5 (l'étiquette v4 a été posée par erreur sur
 //    l'ancien code v3). Aucun autre changement que v42.
@@ -2095,7 +2102,7 @@ OD.define('agenda', {
         });
       } catch (e) {}
     }
-    getUserId().then(() => { renderCollab(true); refetch(); });
+    getUserId().then(() => { renderCollab(true); refetch(); ouvrirDemandeFiche(); });
     chargerRoles().then(() => {
       if (lectureSeule()) {
         try { calendar.setOption('editable', false); calendar.setOption('selectable', false); calendar.setOption('slotEventOverlap', false); } catch (e) {}
@@ -3262,9 +3269,25 @@ OD.define('agenda', {
   function plusJours(dstr, n) { const a = String(dstr || '').split('-').map(Number); const d = new Date(a[0], (a[1] || 1) - 1, (a[2] || 1) + n); return ymd(d); }
   function repDefaut(dstr) { return { on: false, jours: dstr ? [isoJour(dstr)] : [1], intervalle: 1, au: dstr ? plusJours(dstr, 27) : '' }; }
   const JOURS_REP = [[1, 'L', 'lundi'], [2, 'M', 'mardi'], [3, 'M', 'mercredi'], [4, 'J', 'jeudi'], [5, 'V', 'vendredi'], [6, 'S', 'samedi'], [7, 'D', 'dimanche']];
+  // v44 : demande d'ouverture posée par la fiche client (onglet RDV) — fraîche de moins de 2 min.
+  function ouvrirDemandeFiche() {
+    let dm = null;
+    try { const W = frontWin(); dm = W.__odAgendaCreer; W.__odAgendaCreer = null; } catch (e) {}
+    if (!dm || !dm.at || Date.now() - dm.at > 120000 || lectureSeule()) return;
+    setTimeout(() => {
+      const h = prochainCreneau(), j = agToday();
+      const start = (h >= '19:00' || h < '08:00') ? (h < '08:00' ? j + 'T08:00:00' : null) : j + 'T' + h + ':00';
+      if (start) openCreate({ startStr: start, start: null, end: null }, { mode: 'rdv' });
+      else {
+        const d = new Date(); d.setDate(d.getDate() + 1); if (d.getDay() === 0) d.setDate(d.getDate() + 1);
+        openCreate({ startStr: ymd(d) + 'T09:00:00', start: null, end: null }, { mode: 'rdv' });
+      }
+    }, 300);
+  }
   // v41 : prochain créneau libre aujourd'hui (quart d'heure suivant, +10 min de marge).
   function prochainCreneau() { const d = new Date(Date.now() + 10 * 60000); const m = Math.ceil(d.getMinutes() / 15) * 15; d.setMinutes(m, 0, 0); return String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0'); }
-  function openCreate(sel) {
+  function openCreate(sel, opts) {
+    opts = opts || {};
     // v41 : un clic sur un JOUR (vue Mois) n'a pas d'heure — on propose un créneau par défaut.
     if (sel && sel.startStr && !/T\d\d:\d\d/.test(sel.startStr)) {
       const j = sel.startStr.slice(0, 10);
@@ -3282,7 +3305,9 @@ OD.define('agenda', {
     // plage tirée à la souris (plus d'une case) garde sa longueur.
     let dur = DUREE_DEFAUT; if (sel.end && sel.start) { const d = Math.round((sel.end - sel.start) / 60000); if (d > 30) dur = d; }
     const proprio0 = vueSite() ? Number(CACHED_UID) : Number(currentCollabId());
-    cs = { editing: false, editId: null, idRpv: null, mode: 'rdv', date, time, dur, idClient: null, clientLabel: '', client: null, origine: ORIGINES[0], physique: true, rdvType: null, creneauType: null, bilatUser: null, bilatNom: '', comment: '', saving: false, err: '', invites: [], invitesInit: [], owner: proprio0, ownerInit: proprio0, rep: repDefaut(date) };
+    // v44 : depuis la grille, « Créneau libre » (type Autre) par défaut ; depuis la fiche client, RDV client.
+    const modeDefaut = opts.mode || 'creneau';
+    cs = { editing: false, editId: null, idRpv: null, mode: modeDefaut, date, time, dur, idClient: null, clientLabel: '', client: null, origine: ORIGINES[0], physique: true, rdvType: null, creneauType: modeDefaut === 'creneau' ? 7 : null, bilatUser: null, bilatNom: '', comment: '', saving: false, err: '', invites: [], invitesInit: [], owner: proprio0, ownerInit: proprio0, rep: repDefaut(date) };
     chargerInvitables().then(() => { if (cs) renderCreate(); });
     chargerMembresPour(siteCourant()).then(() => { if (cs) renderCreate(); });
     chargerAgendaBacs().then(() => { if (cs) { renderCreate(); suivreBacs(); } });
@@ -3385,7 +3410,7 @@ OD.define('agenda', {
     { cle: 'recep',     label: 'Réception / restit.', mode: 'creneau', type: 13 },
     { cle: 'bloque',    label: 'Pas de livraison', mode: 'creneau', type: 14 },
     { cle: 'absence',   label: 'Absence',          mode: 'creneau', type: 15 },
-    { cle: 'creneau',   label: 'Autre créneau',    mode: 'creneau' },
+    { cle: 'creneau',   label: 'Créneau libre',    mode: 'creneau' },
     { cle: 'bilat',     label: 'Bilatérale',       mode: 'bilat' },
   ];
   const TYPES_NATURE = { 4: 'livraison', 12: 'prepa', 13: 'recep', 14: 'bloque', 15: 'absence' };
