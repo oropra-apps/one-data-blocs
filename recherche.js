@@ -1,6 +1,13 @@
 // ============================================================================
-//  RECHERCHE GLOBALE (top nav) — module One Data (OD.define)  v2
+//  RECHERCHE GLOBALE (top nav) — module One Data (OD.define)  v3
 //
+//  v3 (03/11/2026) : retour des séances de coaching (FY640CW ne remontait que
+//  le véhicule, pas sa vente VO). Les affaires se trouvent par tous leurs
+//  critères — numéro, client, véhicule, VIN, immatriculation — et se rangent
+//  en trois catégories : Commandes, Simulations, Affaires (opportunités).
+//  Chacune montre le client, le véhicule, le statut BACS et le montant.
+//  Base : od_rech_indexer_affaires / recherche_globale_etendue (migration
+//  20261103235500_recherche_affaires_simulations_commandes).
 //  v2 (03/11/2026) : quand la catégorie Clients a d'autres résultats (nom très
 //  porté : 41 CARON, 46 ROLLAND), le lien « Voir tous les résultats dans la
 //  Base client » remplace « précisez la recherche ». La Base client
@@ -77,10 +84,12 @@ OD.define('recherche', {
       { k: 'vehicules',      lib: 'Véhicules clients', ic: 'key' },
       { k: 'vo',             lib: 'Stock VO',          ic: 'car' },
       { k: 'vn',             lib: 'Stock VN',          ic: 'carNew' },
+      { k: 'commandes',      lib: 'Commandes',         ic: 'doc' },
+      { k: 'simulations',    lib: 'Simulations',       ic: 'doc' },
       { k: 'affaires',       lib: 'Affaires',          ic: 'doc' },
       { k: 'collaborateurs', lib: 'Collaborateurs',    ic: 'team' }
     ];
-    const TYPE_DE_CAT = { clients: 'client', vehicules: 'vehicule', vo: 'vo', vn: 'vn', affaires: 'affaire', collaborateurs: 'collaborateur' };
+    const TYPE_DE_CAT = { clients: 'client', vehicules: 'vehicule', vo: 'vo', vn: 'vn', affaires: 'affaire', commandes: 'commande', simulations: 'simulation', collaborateurs: 'collaborateur' };
 
     const I = {
       search: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>',
@@ -292,11 +301,15 @@ OD.define('recherche', {
           if (euros(x.prix)) droite = esc(euros(x.prix));
           break;
         }
-        case 'affaire': {
+        case 'affaire': case 'simulation': case 'commande': {
           vis = '<span class="rch-vis">' + I.doc + '</span>';
-          const st = { win: ['Gagnée', 'rch-b-v'], lose: ['Perdue', 'rch-b-r'], propale: ['Proposition', 'rch-b-b'], bdc: ['Bon de commande', 'rch-b-b'], draft: ['Brouillon', 'rch-b-g'] }[x.status];
+          // v3 : le statut BACS d'abord (il dit où en est vraiment le dossier), sinon celui de One Data.
+          const SB = { 'Transmitted to TFR': ['Transmise TFR', 'rch-b-v'], 'Validated': ['Validée', 'rch-b-v'], 'Closed': ['Livrée', 'rch-b-v'],
+                       'Awaiting Approval': ['En attente d’approbation', 'rch-b-o'], 'Cancelled': ['Annulée', 'rch-b-r'], 'Canceled': ['Annulée', 'rch-b-r'] };
+          const st = SB[x.statut_bacs] || { win: ['Gagnée', 'rch-b-v'], lose: ['Perdue', 'rch-b-r'], propale: ['Proposition', 'rch-b-b'], bdc: ['Bon de commande', 'rch-b-b'], draft: [type === 'simulation' ? 'Simulation' : 'En cours', 'rch-b-g'] }[x.status];
           if (st) bad += badge(st[0], st[1]);
-          det = surligne([x.client, it.detail].filter(Boolean).join(' · '), q);
+          if (x.vn_vo) bad += badge(x.vn_vo, 'rch-b-g');
+          det = surligne([x.client, it.detail, x.immat, x.vin].filter(Boolean).join(' · '), q);
           if (euros(x.montant)) droite = esc(euros(x.montant));
           break;
         }
@@ -506,7 +519,8 @@ OD.define('recherche', {
       switch (type) {
         case 'client':        return ouvrirClient(it.cle);
         case 'vehicule':      return ouvrirClient(it.extra && it.extra.id_client);
-        case 'affaire':       return ouvrirClient(it.extra && it.extra.id_client);
+        case 'affaire': case 'simulation': case 'commande':
+                              return ouvrirClient(it.extra && it.extra.id_client);
         case 'vo':            await siteDuVehicule(it); return ouvrirVO(it);
         case 'vn':            await siteDuVehicule(it); return ouvrirVN(it);
         case 'collaborateur': return ouvrirAnnuaire(it.titre);
