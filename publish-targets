@@ -98,3 +98,8 @@ plateau       = teamcolin
 # base de Team Colin. Sur un autre tenant, la top nav v41 pose l'ancre mais
 # le module n'est pas dans son manifeste : rien ne s'affiche, rien ne casse.
 recherche     = teamcolin
+
+# Accès « Appels entrants » (03/11/2026) : bouton et fenêtre « Nouveau lead »
+# (rôle 13). Il appelle lead_appel_sites / lead_appel_creer, livrées par
+# 20261103150000_acces_appels_entrants.sql sur la seule base de Team Colin.
+lead-appel    = teamcolin
