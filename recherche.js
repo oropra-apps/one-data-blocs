@@ -1,6 +1,17 @@
 // ============================================================================
-//  RECHERCHE GLOBALE (top nav) — module One Data (OD.define)  v1
+//  RECHERCHE GLOBALE (top nav) — module One Data (OD.define)  v2
 //
+//  v2 (03/11/2026) : quand la catégorie Clients a d'autres résultats (nom très
+//  porté : 41 CARON, 46 ROLLAND), le lien « Voir tous les résultats dans la
+//  Base client » remplace « précisez la recherche ». La Base client
+//  (client-search v23) reçoit la saisie et affiche EXACTEMENT les fiches que
+//  la recherche a trouvées (jusqu'à 200), dans le même ordre : elle appelle
+//  recherche_globale_etendue au lieu de ses filtres par champ, qui ignorent
+//  accents, ordre des mots et fautes de frappe. Le lien vaut aussi en
+//  recherche approchée : la Base client refait la même recherche approchée.
+//  Transmission : sessionStorage « od_recherche_clients » {q, le} si l'on
+//  change de page, événement « od-recherche-clients » si la Base client est
+//  déjà affichée.
 //  v1 (02/11/2026) : champ de recherche au centre de la barre client/site de
 //  la top nav, résultats en listes catégorisées.
 //
@@ -26,6 +37,7 @@
 //    VN -> liste VN, onglet « Tous », filtrée sur le VIN, fiche ouverte si
 //          un seul résultat
 //    Collaborateur -> annuaire filtré sur son nom
+//    « Voir tous les résultats » (Clients) -> Base client, mêmes fiches (v2)
 //    Pour VO/VN, si le véhicule est sur un autre site du périmètre, le
 //    sélecteur de site y bascule d'abord (la liste VO suit le site courant).
 //
@@ -43,7 +55,7 @@ try { if (window.OD && OD.persistent && OD.persistent.add) OD.persistent.add('re
 
 OD.define('recherche', {
   mount(__anchor, ctx) {
-    const VER = 1;
+    const VER = 2;
     const W = (window.wwLib && wwLib.getFrontWindow && wwLib.getFrontWindow()) || window;
     const doc = __anchor.ownerDocument || document;
     const sb = (ctx && ctx.supabase) || (window.wwLib && wwLib.wwPlugins && wwLib.wwPlugins.supabase && wwLib.wwPlugins.supabase.instance);
@@ -325,7 +337,8 @@ OD.define('recherche', {
           if (bloc.plus) {
             // En recherche approchée, filtrer une liste avec le mot mal tapé
             // ne donnerait rien : pas de lien « voir tout ».
-            const lien = S.approche ? null : { vo: 'Voir tout dans le stock VO', vn: 'Voir tout dans le stock VN', collaborateurs: 'Voir tout dans l’annuaire' }[c.k];
+            const lien = c.k === 'clients' ? 'Voir tous les résultats dans la Base client'
+              : (S.approche ? null : { vo: 'Voir tout dans le stock VO', vn: 'Voir tout dans le stock VN', collaborateurs: 'Voir tout dans l’annuaire' }[c.k]);
             h += '<div class="rch-plus">D’autres résultats existent' + (lien ? ' — <a data-tout="' + c.k + '">' + lien + '</a>' : ' : précisez la recherche') + '</div>';
           }
           h += '</div>';
@@ -506,6 +519,21 @@ OD.define('recherche', {
       if (cat === 'vo') return ouvrirVO(null, q);
       if (cat === 'vn') return ouvrirVN(null, q);
       if (cat === 'collaborateurs') return ouvrirAnnuaire(q);
+      if (cat === 'clients') return ouvrirBaseClient(q);
+    }
+
+    // Base client : la saisie part par sessionStorage (la page va se monter) ET
+    // par événement (la page est peut-être déjà affichée : son module ne se
+    // remonte pas). client-search v23 consomme l'un ou l'autre, une seule fois.
+    function ouvrirBaseClient(q) {
+      if (!q) return;
+      const demande = { q: q, le: Date.now() };
+      try { W.sessionStorage.setItem('od_recherche_clients', JSON.stringify(demande)); } catch (e) { }
+      if (surPage('/client') && !surPage('/fiche-client')) {
+        try { W.dispatchEvent(new CustomEvent('od-recherche-clients', { detail: demande })); } catch (e) { }
+        return;
+      }
+      goPage('/client');
     }
 
     // ---------------------------------------------------------------- interactions
