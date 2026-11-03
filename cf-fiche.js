@@ -1,4 +1,9 @@
 // ============================================================================
+//  v10 (03/11/2026) : retour des séances de coaching. Le bouton
+//  « Consentements » dit d'un coup d'œil où en est le client : VERT quand
+//  toutes ses réponses sont connues (consenti ou refusé), ORANGE tant qu'une
+//  demande d'opt-in est en attente (ou qu'aucun consentement n'est connu). Au
+//  survol, le détail s'affiche sans clic ; le clic ouvre toujours la fenêtre.
 //  v9 (05/10/2026) : filet d'affichage. Une valeur stockee hors referentiel
 //  ("Other", une variante d'un import) ne retombe plus sur « Selectionner » :
 //  elle est ajoutee comme option, avec son libelle propre quand on sait la
@@ -745,6 +750,75 @@ function render() {
   }
 }
 
+// v10 : consentements chargés une fois par client, partagés par le bouton,
+// l'info-bulle de survol et la fenêtre.
+const CONSENT_CACHE = {};
+async function chargerConsentements(idvu) {
+  if (idvu == null) return [];
+  if (CONSENT_CACHE[idvu]) return CONSENT_CACHE[idvu];
+  let rows = [];
+  try {
+    const r = await ctx.supabase.from('client_consentement').select('*').eq('id_client', Number(idvu));
+    rows = r.data || [];
+  } catch (e) {}
+  CONSENT_CACHE[idvu] = rows;
+  return rows;
+}
+const CANAUX_CONSENT = [['emails', 'E-mails'], ['sms', 'SMS'], ['calls', 'Appels'], ['mailings', 'Courriers'], ['newsletters', 'Newsletters'], ['offers_events', 'Offres & événements'], ['reminders', 'Rappels'], ['market_research', 'Études de marché']];
+function etatConsent(row) {
+  if (!row) return ['—', '#c9d3e0'];
+  if (row.autorise) return ['Consenti', '#2f8f77'];
+  if (row.date_decision == null) return ['En attente', '#e6a817'];
+  return ['Refusé', '#c63a3a'];
+}
+// Défini = toutes les réponses de marque connues ; sinon en attente.
+function consentDefini(rows) {
+  const marques = rows.filter(x => x.marque);
+  return marques.length > 0 && marques.every(x => x.autorise || x.date_decision != null);
+}
+function htmlResumeConsent(rows) {
+  const marques = ['toyota', 'lexus'].filter(m => rows.some(x => x.marque === m));
+  if (!marques.length) return '<div style="color:#7a98c5">Aucun consentement connu dans BACS : demande d’opt-in à faire.</div>';
+  const tete = '<tr><td></td>' + marques.map(m => '<th style="text-align:left;font-size:10.5px;text-transform:uppercase;color:#7a98c5;padding:0 8px 4px">' + (m === 'toyota' ? 'Toyota' : 'Lexus') + '</th>').join('') + '</tr>';
+  const lignes = CANAUX_CONSENT.map(c => '<tr><td style="padding:3px 0;color:#5a7ba8">' + c[1] + '</td>' + marques.map(m => {
+    const e = etatConsent(rows.find(x => x.marque === m && x.canal === c[0]));
+    return '<td style="padding:3px 8px;font-weight:600;color:' + e[1] + '"><span style="display:inline-block;width:7px;height:7px;border-radius:50%;background:' + e[1] + ';margin-right:5px"></span>' + e[0] + '</td>';
+  }).join('') + '</tr>').join('');
+  return '<table style="border-collapse:collapse;font-size:12px">' + tete + lignes + '</table>';
+}
+async function peindreBoutonConsent() {
+  const root = getRoot(); if (!root) return;
+  const btns = root.querySelectorAll('[data-cf-action="show-consent"]'); if (!btns.length) return;
+  const idvu = state.client && state.client.IDVu;
+  const rows = await chargerConsentements(idvu);
+  const ok = consentDefini(rows);
+  btns.forEach(b => {
+    b.style.background = ok ? '#e6f4ef' : '#fdf3dc';
+    b.style.color = ok ? '#2f8f77' : '#a8740a';
+    b.style.border = '1.5px solid ' + (ok ? '#2f8f77' : '#e6a817');
+    b.style.fontWeight = '700';
+    b.textContent = ok ? 'Consentements ✓' : 'Consentements en attente';
+    if (b.__consentBulle) return;
+    b.__consentBulle = true;
+    let bulle = null;
+    b.addEventListener('mouseenter', async () => {
+      const r2 = await chargerConsentements(state.client && state.client.IDVu);
+      if (bulle) bulle.remove();
+      bulle = doc.createElement('div');
+      bulle.style.cssText = 'position:fixed;z-index:3500;background:#fff;border:1px solid #dce6f3;border-radius:12px;box-shadow:0 14px 34px rgba(31,74,133,.22);padding:12px 14px;font-family:inherit;color:#1c2b45;max-width:340px;pointer-events:none';
+      bulle.innerHTML = '<div style="font-weight:800;color:#1f4a87;font-size:12.5px;margin-bottom:6px">Consentements RGPD</div>' + htmlResumeConsent(r2);
+      doc.body.appendChild(bulle);
+      const rc = b.getBoundingClientRect(), h = bulle.offsetHeight, w = bulle.offsetWidth;
+      const vh = (doc.defaultView || window).innerHeight, vw = (doc.defaultView || window).innerWidth;
+      bulle.style.top = Math.max(8, (rc.bottom + 8 + h > vh) ? rc.top - h - 8 : rc.bottom + 8) + 'px';
+      bulle.style.left = Math.max(8, Math.min(rc.left, vw - w - 8)) + 'px';
+    });
+    const cacher = () => { if (bulle) { bulle.remove(); bulle = null; } };
+    b.addEventListener('mouseleave', cacher);
+    b.addEventListener('click', cacher);
+  });
+}
+
 async function openConsentModal() {
   const idvu = state.client && state.client.IDVu;
   if (idvu == null) return;
@@ -758,11 +832,7 @@ async function openConsentModal() {
   const fermer = function () { try { ov.remove(); } catch (e) {} };
   ov.addEventListener('mousedown', function (e) { if (e.target === ov) fermer(); });
 
-  let rows = [];
-  try {
-    const r = await ctx.supabase.from('client_consentement').select('*').eq('id_client', Number(idvu));
-    rows = r.data || [];
-  } catch (e) {}
+  const rows = await chargerConsentements(idvu);
 
   function find(marque, canal) { return rows.find(function (x) { return (x.marque || null) === marque && x.canal === canal; }); }
   function fdate(d) { if (!d || String(d).slice(0, 4) === '1900') return '—'; try { return new Date(d).toLocaleDateString('fr-FR'); } catch (e) { return '—'; } }
@@ -770,7 +840,7 @@ async function openConsentModal() {
     let lab, col;
     if (!row) { lab = '—'; col = '#c9d3e0'; }
     else if (row.autorise) { lab = 'Consenti'; col = '#2f8f77'; }
-    else if (row.date_decision == null) { lab = 'En attente'; col = '#9fb0c4'; }
+    else if (row.date_decision == null) { lab = 'En attente'; col = '#e6a817'; }
     else { lab = 'Refusé'; col = '#c63a3a'; }
     return '<span style="display:inline-flex;align-items:center;gap:6px;font-weight:600;font-size:12.5px;color:' + col + '"><span style="width:9px;height:9px;border-radius:50%;background:' + col + '"></span>' + lab + '</span>';
   }
@@ -813,6 +883,7 @@ function bindEvents() {
   if (!root) return;
   root.querySelectorAll('[data-cf-action="enter-edit"]').forEach(el => el.addEventListener('click', enterEdit));
   root.querySelectorAll('[data-cf-action="show-consent"]').forEach(el => el.addEventListener('click', openConsentModal));
+  peindreBoutonConsent();
   root.querySelectorAll('[data-cf-action="cancel-edit"]').forEach(el => el.addEventListener('click', cancelEdit));
   root.querySelectorAll('[data-cf-action="save-edit"]').forEach(el => el.addEventListener('click', saveEdit));
   root.querySelectorAll('[data-cf-action="dismiss-duplicate"]').forEach(el => el.addEventListener('click', dismissDuplicate));
