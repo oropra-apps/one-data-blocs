@@ -1,4 +1,17 @@
 // ============================================================================
+//  v23 (03/11/2026) : arrivée depuis la RECHERCHE GLOBALE de la top nav.
+//  Le lien « Voir tous les résultats dans la Base client » (recherche v2)
+//  dépose la saisie (sessionStorage « od_recherche_clients », ou événement
+//  « od-recherche-clients » si la page est déjà ouverte). La Base client
+//  affiche alors EXACTEMENT les fiches trouvées par la recherche — jusqu'à
+//  200, dans son ordre de pertinence, particuliers et sociétés mêlés — en
+//  appelant recherche_globale_etendue(q, 200, {client}). Ses propres filtres
+//  par champ (« NOM ilike ») n'auraient pas retrouvé la même liste : ils
+//  ignorent accents, ordre des mots, téléphone saisi avec espaces, fautes.
+//  Un bandeau rappelle la saisie ; « Revenir aux critères », Rechercher,
+//  Annuler, Entrée dans un champ ou le changement d'onglet en sortent.
+//  La pagination découpe la liste reçue (10 par page) et ne relit en base que
+//  les 10 fiches affichées.
 //  v22 (29/10/2026) : le champ « Véhicule » accepte aussi le numéro de
 //  commande BACS (P243119) ou la référence du bon (B-47523-3034609) : il
 //  renvoie le client de la commande (RPC client_recherche_vehicule). Sous le
@@ -134,6 +147,8 @@ OD.define('client-search', {
   if (state.searched === undefined) state.searched = false;
   if (state.error === undefined) state.error = null;
   if (state.modal === undefined) state.modal = null;
+  if (state.rg === undefined) state.rg = null;   // v23 : liste venue de la recherche globale
+  if (state.rg && !Array.isArray(state.rg.ids)) state.rg = null;   // chargement interrompu par une navigation
   window.__crs = state;
   (function bdcvnSeed() {
     const c = bdcvnCtx();
@@ -292,6 +307,26 @@ OD.define('client-search', {
     render();
     try {
       const supabase = ctx.supabase;
+      // v23 : liste venue de la recherche globale — on lit en base les seules
+      // fiches de la page affichée, puis on les remet dans l'ordre reçu.
+      if (state.rg && Array.isArray(state.rg.ids)) {
+        state.vehMatch = null;
+        const ids = state.rg.ids;
+        const start = (state.page - 1) * PAGE_SIZE;
+        const tranche = ids.slice(start, start + PAGE_SIZE);
+        let lignes = [];
+        if (tranche.length) {
+          const { data, error } = await supabase.from('CLIENT').select('*').in('IDVu', tranche);
+          if (error) throw error;
+          const parId = {};
+          (data || []).forEach(r => { parId[String(r.IDVu)] = r; });
+          lignes = tranche.map(id => parId[String(id)]).filter(Boolean);
+        }
+        state.results = lignes;
+        state.totalCount = ids.length;
+        state.error = null;
+        return;   // finally : loading + render
+      }
       const fv = state.filters[state.activeTab];
       state.vehMatch = fv.vehicule ? await resoudreVehicule(supabase, fv.vehicule) : null;
       if (state.vehMatch && !Object.keys(state.vehMatch).length) {
@@ -315,6 +350,7 @@ OD.define('client-search', {
   }
 
   function clearFilters() {
+    state.rg = null;
     state.filters[state.activeTab] = state.activeTab === 'particulier' ? emptyP() : emptyS();
     state.page = 1;
     state.results = [];
@@ -325,7 +361,8 @@ OD.define('client-search', {
   }
 
   function changeTab(tab) {
-    if (state.activeTab === tab) return;
+    if (state.activeTab === tab && !state.rg) return;
+    state.rg = null;
     state.activeTab = tab;
     state.page = 1;
     state.results = [];
@@ -830,6 +867,13 @@ OD.define('client-search', {
   #oropra-client-search .crs-modal-footer{padding-left:16px;padding-right:16px}
   #oropra-client-search .crs-tab{padding:12px 12px;font-size:13px}
 }
+  #oropra-client-search .crs-rg{display:flex;align-items:center;justify-content:space-between;gap:12px;background:#eef4fc;border:1px solid #d6e2f2;border-radius:10px;padding:10px 12px 10px 14px;margin-bottom:16px}
+  #oropra-client-search .crs-rg-txt{display:flex;align-items:flex-start;gap:9px;font-size:13px;color:#1F4A85;line-height:1.45;min-width:0}
+  #oropra-client-search .crs-rg-txt svg{width:16px;height:16px;flex:0 0 auto;margin-top:1px;color:#53bda7}
+  #oropra-client-search .crs-rg-txt b{font-weight:800}
+  #oropra-client-search .crs-rg-txt em{display:block;font-style:normal;font-size:12px;color:#7a98c5;margin-top:2px}
+  #oropra-client-search .crs-rg .crs-btn{flex:0 0 auto;white-space:nowrap}
+  @media (max-width:560px){#oropra-client-search .crs-rg{flex-direction:column;align-items:stretch}}
 </style>`;
 
   function fieldHtml(label, field, type, placeholder) {
@@ -843,8 +887,8 @@ OD.define('client-search', {
 
   function renderTabs() {
     return `<div class="crs-tabs">
-    <button class="crs-tab${state.activeTab === 'particulier' ? ' is-active' : ''}" data-crs-action="tab" data-tab="particulier">${ICON_P}<span>Particulier</span></button>
-    <button class="crs-tab${state.activeTab === 'societe' ? ' is-active' : ''}" data-crs-action="tab" data-tab="societe">${ICON_S}<span>Société</span></button>
+    <button class="crs-tab${state.activeTab === 'particulier' && !state.rg ? ' is-active' : ''}" data-crs-action="tab" data-tab="particulier">${ICON_P}<span>Particulier</span></button>
+    <button class="crs-tab${state.activeTab === 'societe' && !state.rg ? ' is-active' : ''}" data-crs-action="tab" data-tab="societe">${ICON_S}<span>Société</span></button>
   </div>`;
   }
 
@@ -896,6 +940,10 @@ OD.define('client-search', {
     if (state.loading) return '<div class="crs-loading">Chargement…</div>';
     if (state.error) return `<div class="crs-empty">Erreur : ${esc(state.error)}</div>`;
     if (!state.searched) return '';
+    if (!state.results.length && state.rg) {
+      return `<div class="crs-empty"><div>Aucun client ne correspond à « ${esc(state.rg.q)} ».</div>
+      <div style="margin-top:14px"><button class="crs-btn crs-btn-ghost" data-crs-action="rg-quit">Revenir aux critères</button></div></div>`;
+    }
     if (!state.results.length) {
       const label = state.activeTab === 'societe' ? 'une société' : 'un particulier';
       return `<div class="crs-empty">
@@ -903,11 +951,13 @@ OD.define('client-search', {
       <div style="margin-top:14px"><button class="crs-btn crs-btn-primary" data-crs-action="create">${ICON_PLUS}<span>Créer ${label}</span></button></div>
     </div>`;
     }
-    const isSoc = state.activeTab === 'societe';
+    const isSocOnglet = state.activeTab === 'societe';
     let h = '<div class="crs-table-wrap"><table class="crs-table"><thead><tr>';
     h += '<th>ID Client</th><th>Nom</th><th>Adresse</th><th>Email</th><th>Téléphone</th><th></th>';
     h += '</tr></thead><tbody>';
     for (const r of state.results) {
+      // v23 : en mode recherche globale, particuliers et sociétés sont mêlés
+      const isSoc = state.rg ? Number(r.idmultivu) === 1 : isSocOnglet;
       const fullName = isSoc ? [r.CIVILITE, r.NOM].filter(Boolean).join(' ') : [r.CIVILITE, r.NOM, r.PRENOM].filter(Boolean).join(' ');
       const cpVille = [r.code_postal, r.ville].filter(Boolean).join(' ') || r.CP_VILLE || '';
       const adresseLines = [r.ADRESSE, cpVille];
@@ -1083,6 +1133,66 @@ OD.define('client-search', {
   </div>`;
   }
 
+  // ---------------------------------------------------------------- v23
+  // Arrivée depuis la recherche globale de la top nav.
+  async function lancerRechercheGlobale(q) {
+    q = String(q || '').trim();
+    if (q.length < 2) return;
+    state.rg = { q: q, ids: null, plus: false, approche: false };
+    state.modal = null;
+    state.page = 1;
+    state.results = [];
+    state.totalCount = 0;
+    state.error = null;
+    state.searched = true;
+    state.loading = true;
+    render();
+    try {
+      const { data, error } = await ctx.supabase.rpc('recherche_globale_etendue', { p_q: q, p_limite: 200, p_types: ['client'] });
+      if (error) throw error;
+      if (!state.rg || state.rg.q !== q) return;          // une autre recherche a pris la main
+      if (data && data.erreur) throw new Error(data.erreur === 'non_authentifie' ? 'Session expirée : reconnectez-vous.' : data.erreur);
+      const bloc = (data && data.clients) || {};
+      state.rg.ids = (bloc.items || []).map(it => Number(it.cle)).filter(n => !isNaN(n));
+      state.rg.plus = !!bloc.plus;
+      state.rg.approche = !!(data && data.approche);
+    } catch (e) {
+      console.error('[crs] recherche globale', e);
+      state.rg = null;
+      state.loading = false;
+      state.error = e.message || String(e);
+      render();
+      return;
+    }
+    await runSearch();
+  }
+
+  function quitterRechercheGlobale() {
+    state.rg = null;
+    state.page = 1;
+    state.results = [];
+    state.totalCount = 0;
+    state.searched = false;
+    state.error = null;
+    render();
+  }
+
+  function rgBanner() {
+    const rg = state.rg;
+    if (!rg) return '';
+    const n = Array.isArray(rg.ids) ? rg.ids.length : null;
+    let compte = '';
+    if (n != null) compte = n === 0 ? 'aucun client' : (rg.plus ? 'les ' + n + ' plus pertinents' : n + ' client' + (n > 1 ? 's' : ''));
+    return '<div class="crs-rg">'
+      + '<div class="crs-rg-txt">' + ICON_SEARCH + '<span>Résultats de la recherche <b>« ' + esc(rg.q) + ' »</b>'
+      + (compte ? ' — ' + esc(compte) : '')
+      + (rg.approche ? '<em>Aucune correspondance exacte : voici les plus proches.</em>' : '')
+      + (rg.plus ? '<em>Précisez la recherche (prénom, téléphone…) pour voir les autres.</em>' : '')
+      + '</span></div>'
+      + '<button class="crs-btn crs-btn-ghost" data-crs-action="rg-quit">Revenir aux critères</button>'
+      + '</div>';
+  }
+
   function bdcvnBanner() {
     if (!bdcvnActive()) return '';
     return '<div style="background:#e9f7f3;border:1px solid #bfe7dd;color:#1f6f5c;'
@@ -1098,7 +1208,7 @@ OD.define('client-search', {
     const activeAttr = active && active.getAttribute ? (active.getAttribute('data-crs-field') || active.getAttribute('data-crs-mfield')) : null;
     const activeKind = active && active.getAttribute && active.getAttribute('data-crs-mfield') ? 'm' : 'f';
     const activeCursor = activeAttr && typeof active.selectionStart === 'number' ? active.selectionStart : null;
-    root.innerHTML = STYLE + bdcvnBanner() + renderTabs() + renderForm() + renderToolbar() + renderTable() + renderModal();
+    root.innerHTML = STYLE + bdcvnBanner() + rgBanner() + renderTabs() + renderForm() + renderToolbar() + renderTable() + renderModal();
     bindEvents();
     if (activeAttr) {
       const selector = activeKind === 'm' ? `[data-crs-mfield="${activeAttr}"]` : `input[data-crs-field="${activeAttr}"]`;
@@ -1113,11 +1223,12 @@ OD.define('client-search', {
     root.querySelectorAll('[data-crs-action="tab"]').forEach(el => el.addEventListener('click', () => changeTab(el.getAttribute('data-tab'))));
     root.querySelectorAll('input[data-crs-field]').forEach(el => {
       el.addEventListener('input', () => { state.filters[state.activeTab][el.getAttribute('data-crs-field')] = el.value; });
-      el.addEventListener('keydown', (e) => { if (e.key === 'Enter') { state.page = 1; runSearch(); } });
+      el.addEventListener('keydown', (e) => { if (e.key === 'Enter') { state.rg = null; state.page = 1; runSearch(); } });
     });
     root.querySelectorAll('[data-crs-action="toggle-more"]').forEach(el => el.addEventListener('click', () => { state.showMore = !state.showMore; render(); }));
     root.querySelectorAll('[data-crs-action="cancel"]').forEach(el => el.addEventListener('click', clearFilters));
-    root.querySelectorAll('[data-crs-action="search"]').forEach(el => el.addEventListener('click', () => { state.page = 1; runSearch(); }));
+    root.querySelectorAll('[data-crs-action="search"]').forEach(el => el.addEventListener('click', () => { state.rg = null; state.page = 1; runSearch(); }));
+    root.querySelectorAll('[data-crs-action="rg-quit"]').forEach(el => el.addEventListener('click', quitterRechercheGlobale));
     root.querySelectorAll('[data-crs-action="prev-page"]').forEach(el => el.addEventListener('click', () => changePage(state.page - 1)));
     root.querySelectorAll('[data-crs-action="next-page"]').forEach(el => el.addEventListener('click', () => changePage(state.page + 1)));
     root.querySelectorAll('[data-crs-action="page"]').forEach(el => el.addEventListener('click', () => changePage(Number(el.getAttribute('data-page')))));
@@ -1210,6 +1321,31 @@ OD.define('client-search', {
       render();
     }, 0);
   })();
+
+  // v23 : demande venue de la recherche globale (top nav). Consommée une seule
+  // fois, si elle a moins de dix minutes. L'écouteur d'événement est posé une
+  // fois pour la session et appelle toujours le DERNIER montage du module.
+  window.__crsRechercheGlobale = lancerRechercheGlobale;
+  (function depuisRechercheGlobale() {
+    let p = null;
+    try { p = JSON.parse(sessionStorage.getItem('od_recherche_clients') || 'null'); } catch (e) { }
+    try { sessionStorage.removeItem('od_recherche_clients'); } catch (e) { }
+    if (!p || !p.q || !p.le || (Date.now() - Number(p.le)) > 10 * 60 * 1000) return;
+    setTimeout(() => { lancerRechercheGlobale(p.q); }, 0);
+  })();
+  if (!window.__crsEcouteRecherche) {
+    window.__crsEcouteRecherche = true;
+    const surDemande = (ev) => {
+      const q = ev && ev.detail && ev.detail.q;
+      try { sessionStorage.removeItem('od_recherche_clients'); } catch (e) { }
+      if (q && typeof window.__crsRechercheGlobale === 'function') window.__crsRechercheGlobale(q);
+    };
+    try {
+      const w = (wwLib.getFrontWindow && wwLib.getFrontWindow()) || window;
+      w.addEventListener('od-recherche-clients', surDemande);
+      if (w !== window) window.addEventListener('od-recherche-clients', surDemande);
+    } catch (e) { window.addEventListener('od-recherche-clients', surDemande); }
+  }
 
   render();
   (function ensureRenderedCrs() {
