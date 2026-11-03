@@ -1,28 +1,32 @@
 /* =====================================================================
- * oropra-bacs-client.js — création d'un client SUIVIE dans One Data ET
- * dans BACS, partagée                                  v2 (22/10/2026)
+ * oropra-bacs-client.js — création d'un client SUIVIE dans BACS ET dans
+ * One Data, partagée                                   v3 (03/11/2026)
+ *
+ * v3 : BACS D'ABORD, ONE DATA ENSUITE. Constaté le 03/11 (client « Ztest »,
+ * portable faux) : la fiche One Data était créée, puis BACS refusait le
+ * compte (« N° de portable incohérent ») ; la fiche restait avec ses données
+ * fausses. Désormais :
+ *   1. un numéro de fiche est RÉSERVÉ (client_creer_bacs_preparer), sans
+ *      créer la fiche ;
+ *   2. BACS crée la demande, l'accepte, crée le compte et l'affaire : il
+ *      vérifie au passage le portable et l'e-mail ;
+ *   3. seulement si BACS accepte, la fiche One Data est créée avec le numéro
+ *      réservé et reliée au compte (client_creer_apres_bacs). Si BACS a
+ *      rattaché la saisie à un compte déjà connu de One Data, la fiche
+ *      existante est rendue : pas de doublon.
+ * Si BACS refuse : rien n'est créé dans One Data, le motif s'affiche en
+ * clair, la fenêtre de création reste ouverte pour corriger. Le nouvel essai
+ * reprend la même réservation et la demande déjà créée dans BACS (pas de
+ * seconde demande). La base termine d'elle-même une création que BACS a
+ * acceptée si la page s'est fermée entre-temps (toutes les 2 minutes).
+ * La demande de consentement n'est PAS lancée par la création (elle ne
+ * l'était pas non plus avant) : le panneau final le rappelle au vendeur.
  *
  * v2 : bouton « Enregistrer » VERROUILLÉ tant que BACS n'est pas ouvert sur
  * le poste — grisé, en rouge, libellé « Bacs doit être ouvert pour pouvoir
  * valider ». L'état est vérifié en continu tant que la fenêtre de création
  * est ouverte (toutes les 2,5 s quand BACS est fermé, 8 s quand il est
  * ouvert) : le bouton redevient normal dès que BACS répond.
- *
- * Un particulier créé par un vendeur doit exister dans BACS (règle du
- * 22/10/2026). La création se faisait en deux temps invisibles : la fiche
- * One Data, puis un geste mis en file que l'extension appliquait quand elle
- * passait. Le vendeur ne savait ni si BACS avait suivi, ni où trouver le
- * compte.
- *
- * Désormais, au clic sur « Enregistrer » :
- *   1. BACS doit être OUVERT sur le poste du vendeur (vérifié en direct par
- *      l'extension, et par la base) — sinon, erreur, et rien n'est créé ;
- *   2. un panneau d'avancement affiche la création One Data, puis la
- *      création BACS (demande, acceptation, compte, affaire), chacune avec
- *      son indicateur ;
- *   3. en fin de parcours, le bouton « B » ouvre le compte dans BACS.
- * Si BACS échoue après la création One Data, la fiche est gardée et le geste
- * reste en file : l'extension le rejouera d'elle-même (3 minutes plus tard).
  *
  * Expose window.oropraBacsClient :
  *   creer(supabase, { p_payload, p_id_site, p_id_user })
@@ -42,7 +46,7 @@
  * ===================================================================== */
 (function () {
   'use strict';
-  if (window.oropraBacsClient && window.oropraBacsClient.version >= 2) return;
+  if (window.oropraBacsClient && window.oropraBacsClient.version >= 3) return;
 
   var DELAI_BACS_MS = 250000;   // le pont laisse 4 min au geste (extension v2.4.33)
 
@@ -86,7 +90,19 @@
     if (err === 'delai_depasse') return 'BACS n’a pas répondu à temps.';
     if (err === 'bacs_non_ouvert') return 'L’onglet BACS a été fermé pendant la création.';
     if (err === 'bacs_non_pret') return 'L’onglet BACS ne répond plus.';
-    return String(err).replace(/^création de la demande refusée : CT030_LocalContactCreation\.createLocalContact : /, 'Demande refusée par BACS : ');
+    if (/déjà en cours/i.test(err)) return 'BACS termine encore la création précédente de ce client.';
+    // « création du compte refusée : CT006_AccountCreation.saveAccount : ❌ Exception: Le N° … »
+    var t = String(err)
+      .replace(/^[^:]*refusée\s*:\s*/i, '')
+      .replace(/^[A-Za-z0-9_]+\.[A-Za-z0-9_]+\s*:\s*/, '')
+      .replace(/❌\s*/g, '')
+      .replace(/^(?:System\.)?[A-Za-z]*Exception\s*:\s*/i, '')
+      .trim();
+    return 'BACS a refusé : ' + (t || String(err));
+  }
+  // Refus portant sur la saisie (portable, e-mail, nom…) : à corriger.
+  function refusSaisie(err) {
+    return /refusée/i.test(String(err || '')) && !/bascule|récolte/i.test(String(err || ''));
   }
 
   // ── Panneau d'avancement ────────────────────────────────────────────
@@ -124,14 +140,16 @@
     ov.innerHTML =
       '<div class="obc-box" role="dialog" aria-live="polite">' +
         '<div class="obc-t">Création du client</div>' +
-        '<div class="obc-s">One Data, puis BACS — ne fermez pas l’onglet BACS.</div>' +
-        '<div class="obc-step" data-e="od"><span class="obc-ic att"></span><div><div class="obc-l">Fiche One Data</div><div class="obc-d">En attente</div></div></div>' +
+        '<div class="obc-s">BACS d’abord (il vérifie le portable et l’e-mail), puis One Data — ne fermez pas l’onglet BACS.</div>' +
         '<div class="obc-step" data-e="bacs"><span class="obc-ic att"></span><div><div class="obc-l">Compte BACS</div><div class="obc-d">En attente</div></div></div>' +
+        '<div class="obc-step" data-e="od"><span class="obc-ic att"></span><div><div class="obc-l">Fiche One Data</div><div class="obc-d">En attente</div></div></div>' +
+        '<div class="obc-step" data-e="consent" hidden><span class="obc-ic att"></span><div><div class="obc-l">Consentement</div><div class="obc-d"></div></div></div>' +
         '<div class="obc-pied" hidden></div>' +
       '</div>';
     (d.body || d.documentElement).appendChild(ov);
     function etape(cle, etat, texte, ko) {
       var s = ov.querySelector('[data-e="' + cle + '"]'); if (!s) return;
+      s.hidden = false;
       var ic = s.querySelector('.obc-ic');
       ic.className = 'obc-ic ' + etat;
       ic.textContent = etat === 'ok' ? '✓' : etat === 'ko' ? '!' : etat === 'info' ? 'i' : '';
@@ -169,9 +187,15 @@
   }
 
   // ── La création ─────────────────────────────────────────────────────
+  // Réservation laissée par un essai refusé par BACS : le nouvel essai la
+  // reprend (même numéro, même demande BACS). La base vérifie qu'elle
+  // appartient au même vendeur et au même client (nom, prénom).
+  var reservation = null;   // { id, user }
+
   async function creer(sb, args) {
     var a = Object.assign({}, args || {});
     var payload = Object.assign({}, a.p_payload || {});
+    delete payload.__bacs_direct;
 
     // 1. Ce client part-il dans BACS ?
     var pf = null;
@@ -186,64 +210,80 @@
       return { data: null, error: { message: "BACS : votre compte One Data n'est pas relié à votre compte BACS, ce client ne pourrait pas y être créé. Demandez à l'administrateur de renseigner votre identifiant BACS." } };
     }
 
-    // 2. BACS ouvert CHEZ CE VENDEUR, vérifié en direct (l'extension bat aussi
-    //    son cœur au passage : la base le contrôle à son tour).
+    // 2. BACS ouvert CHEZ CE VENDEUR, vérifié en direct.
     var ping = await demander('ping', {}, 10000);
     if (!ping || !ping.ok) return { data: null, error: { message: messageFerme(ping && ping.erreur) } };
     if (ping.contexte === false) return { data: null, error: { message: messageFerme('bacs_non_pret') } };
 
-    // 3. Création One Data, puis BACS, sous les yeux du vendeur.
+    // 3. Réservation du numéro + geste BACS (rien n'est encore créé).
     var ui = panneau();
-    ui.etape('od', 'en', 'Création de la fiche…');
-    payload.__bacs_direct = true;
-    a.p_payload = payload;
-    var r = await sb.rpc('client_creer', a);
-    if (r.error || !r.data) {
+    ui.etape('bacs', 'en', 'Préparation…');
+    var prepArgs = { p_payload: payload, p_id_site: a.p_id_site, p_id_user: a.p_id_user,
+                     p_reservation: (reservation && reservation.user === a.p_id_user) ? reservation.id : null };
+    var rp2 = await sb.rpc('client_creer_bacs_preparer', prepArgs);
+    if (rp2.error || !rp2.data) {
       ui.fermer();
-      return r.error ? r : { data: null, error: { message: 'création : aucune fiche renvoyée' } };
+      return rp2.error ? rp2 : { data: null, error: { message: 'création : préparation sans réponse' } };
     }
-    var idClient = r.data.id_client;
-    ui.etape('od', 'ok', 'Fiche n° ' + idClient + ' créée');
-
-    var b = r.data.bacs || null;
-    if (!b || !b.ok || !b.id) {
-      var motif = (b && b.motif) || 'non demandée';
-      if (/déjà présent/i.test(motif)) {
-        var deja = await compte(sb, idClient);
-        ui.etape('bacs', 'ok', 'Client déjà présent dans BACS');
-        await ui.pied([
-          deja ? { html: '<span class="obc-b">B</span>Ouvrir dans BACS', action: function () { ouvrir(deja.url); } } : null,
-          { html: 'Continuer', pri: true, fin: true }
-        ].filter(Boolean));
-      } else {
-        ui.etape('bacs', 'ko', 'Création BACS non lancée : ' + motif, true);
-        await ui.pied([{ html: 'Continuer', pri: true, fin: true }]);
-      }
+    var prep = rp2.data;
+    if (prep.bacs === false) {                 // configuration changée entre-temps
       ui.fermer();
-      return r;
+      return sb.rpc('client_creer', a);
     }
+    reservation = { id: prep.reservation, user: a.p_id_user };
 
-    ui.etape('bacs', 'en', 'Demande de contact, acceptation, compte, affaire…');
-    var x = await demander('geste_executer', { geste_id: b.id }, DELAI_BACS_MS);
-    if (x && x.ok) {
-      var res = null; try { res = x.resultat ? JSON.parse(x.resultat) : null; } catch (e) { res = null; }
-      var acc = res && res.compte;
-      var txt = !acc ? 'Créé dans BACS'
-        : (res.rapprochement === 'creation' ? 'Compte créé dans BACS' : 'Rattaché au compte BACS existant')
-          + (res.affaire ? ' · affaire ouverte' : '');
-      ui.etape('bacs', 'ok', txt);
-      var url = urlCompte(acc);
-      await ui.pied([
-        url ? { html: '<span class="obc-b">B</span>Ouvrir dans BACS', action: function () { ouvrir(url); } } : null,
-        { html: 'Continuer', pri: true, fin: true }
-      ].filter(Boolean));
+    // 4. BACS : demande, acceptation, compte, affaire.
+    var res = null;
+    if (prep.deja_fait) {
+      ui.etape('bacs', 'ok', 'Déjà créé dans BACS lors de l’essai précédent');
     } else {
-      ui.etape('bacs', 'ko', messageBacs(x && (x.erreur || x.refus)) +
-        ' La fiche One Data est créée ; la création dans BACS sera retentée automatiquement tant que BACS reste ouvert.', true);
-      await ui.pied([{ html: 'Continuer', pri: true, fin: true }]);
+      ui.etape('bacs', 'en', 'Demande de contact, acceptation, compte, affaire…');
+      var x = await demander('geste_executer', { geste_id: prep.geste }, DELAI_BACS_MS);
+      try { res = x && x.resultat ? JSON.parse(x.resultat) : null; } catch (e) { res = null; }
+      if (!x || !x.ok) {
+        var err = x && (x.erreur || x.refus);
+        var msg = messageBacs(err);
+        var conseil = err === 'delai_depasse'
+          ? ' Si BACS termine malgré tout, la fiche sera créée d’elle-même dans les 2 minutes ; sinon, cliquez à nouveau sur Enregistrer.'
+          : refusSaisie(err)
+            ? ' Corrigez la saisie, puis cliquez à nouveau sur Enregistrer.'
+            : ' Vérifiez l’onglet BACS, puis cliquez à nouveau sur Enregistrer.';
+        ui.etape('bacs', 'ko', msg, true);
+        ui.etape('od', 'info', 'Non créée : One Data attend l’accord de BACS.');
+        await ui.pied([{ html: 'Corriger la saisie', pri: true, fin: true }]);
+        ui.fermer();
+        return { data: null, error: { message: msg + conseil } };
+      }
+      var acc0 = res && res.compte;
+      ui.etape('bacs', 'ok', !acc0 ? 'Créé dans BACS'
+        : (res.rapprochement === 'creation' ? 'Compte créé dans BACS' : 'Rattaché au compte BACS existant')
+          + (res.affaire ? ' · affaire ouverte' : ''));
     }
+
+    // 5. One Data, avec le numéro réservé.
+    ui.etape('od', 'en', 'Création de la fiche…');
+    var rf = await sb.rpc('client_creer_apres_bacs', { p_reservation: prep.reservation });
+    if (rf.error || !rf.data) {
+      var m2 = (rf.error && rf.error.message) || 'aucune fiche renvoyée';
+      ui.etape('od', 'ko', m2 + ' Le client existe dans BACS : la fiche sera créée d’elle-même dans les 2 minutes, ou cliquez à nouveau sur Enregistrer.', true);
+      await ui.pied([{ html: 'Fermer', pri: true, fin: true }]);
+      ui.fermer();
+      return rf.error ? rf : { data: null, error: { message: 'création : ' + m2 } };
+    }
+    reservation = null;
+    var f = rf.data;
+    ui.etape('od', 'ok', f.existant
+      ? 'Ce compte BACS correspond déjà à la fiche n° ' + f.id_client + ' : elle est reprise, aucun doublon créé'
+      : 'Fiche n° ' + f.id_client + ' créée');
+    ui.etape('consent', 'info', 'La demande de consentement n’est pas envoyée automatiquement : lancez-la depuis le compte dans BACS.');
+
+    var url = urlCompte(f.compte || (res && res.compte));
+    await ui.pied([
+      url ? { html: '<span class="obc-b">B</span>Ouvrir dans BACS', action: function () { ouvrir(url); } } : null,
+      { html: 'Continuer', pri: true, fin: true }
+    ].filter(Boolean));
     ui.fermer();
-    return r;
+    return { data: f, error: null };
   }
 
   // ── Verrou du bouton d'enregistrement (v2) ──────────────────────────
@@ -309,6 +349,6 @@
     })();
   }
 
-  window.oropraBacsClient = { version: 2, creer: creer, compte: compte, ouvrir: ouvrir, urlCompte: urlCompte,
+  window.oropraBacsClient = { version: 3, creer: creer, compte: compte, ouvrir: ouvrir, urlCompte: urlCompte,
                               surveiller: surveiller, appliquer: appliquer, bloque: bloque };
 })();
