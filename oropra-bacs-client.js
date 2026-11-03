@@ -1,9 +1,24 @@
 /* =====================================================================
  * oropra-bacs-client.js — création d'un client SUIVIE dans BACS ET dans
- * One Data, partagée                                   v4 (03/11/2026)
+ * One Data, partagée                                   v6 (04/11/2026)
  *
- * Publié sous l'étiquette oropra-bacs-client-v5 (l'étiquette v4 a été
- * posée par erreur sur l'ancien code v3) : le code est celui de la v4.
+ * v6 : CLIENT ENTREPRISE COMME DANS BACS (recon du 03/11).
+ *   · Une SOCIÉTÉ suit désormais le même parcours qu'un particulier : BACS
+ *     d'abord (compte Business Account, geste entreprise_creer), One Data
+ *     ensuite. Le panneau final rappelle de désigner l'interlocuteur : sans
+ *     lui, BACS n'ouvre aucune affaire. Actif quand la base le dit
+ *     (lead_collecte_config.societe_ecrire_bacs = oui) ; sinon, comme avant,
+ *     la société n'est créée que dans One Data.
+ *   · interlocuteur(supabase, args) : désigne un interlocuteur (RPC
+ *     interlocuteur_lier), puis le reporte dans BACS (Company_Link__c) avec
+ *     le même panneau d'avancement. retirer(supabase, idEntreprise),
+ *     renvoyer(supabase, idEntreprise, idSite), pousserSociete(supabase,
+ *     idSociete, idSite) : retrait, nouvel essai, société absente de BACS.
+ *   · Extension trop ancienne pour les sociétés (avant 3.4.0) : bouton
+ *     verrouillé « Extension BACS à mettre à jour », comme en v4.
+ *
+ * (L'étiquette v5 portait le code v4 : l'étiquette v4 avait été posée par
+ * erreur sur l'ancien code v3.)
  *
  * v4 : DEMANDE DE CONSENTEMENT et EXTENSION À JOUR.
  *   · En fin de création, le panneau propose « Envoyer la demande de
@@ -56,14 +71,14 @@
  *   appliquer(bouton, modal)   -> met le bouton d'enregistrement dans l'état
  *          voulu (verrouillé en rouge, ou normal)
  *
- * Sur un tenant sans écriture BACS, ou pour une société (parcours BACS pas
- * encore relevé), creer() se réduit à l'appel client_creer habituel.
+ * Sur un tenant sans écriture BACS (ou sans écriture des sociétés pour une
+ * société), creer() se réduit à l'appel client_creer habituel.
  * Charte One Data : bleus #1F4A85 / #2a5ea9, vert #53bda7, rouge #e24b4a,
  * Nunito Sans — jamais de noir.
  * ===================================================================== */
 (function () {
   'use strict';
-  if (window.oropraBacsClient && window.oropraBacsClient.version >= 4) return;
+  if (window.oropraBacsClient && window.oropraBacsClient.version >= 6) return;
 
   var DELAI_BACS_MS = 250000;   // le pont laisse 4 min au geste (extension v2.4.33)
 
@@ -149,7 +164,7 @@
     '.obc-b{display:inline-flex;align-items:center;justify-content:center;width:22px;height:22px;border-radius:6px;background:#fff;color:#1F4A85;font-weight:900;font-size:13px}' +
     '.obc-btn.sec .obc-b{background:#1F4A85;color:#fff}';
 
-  function panneau(seulConsent) {
+  function panneau(seulConsent, societe) {
     var d = fw().document || document;
     if (!d.getElementById('obc-css')) {
       var st = d.createElement('style'); st.id = 'obc-css'; st.textContent = CSS;
@@ -161,9 +176,10 @@
         (seulConsent
           ? '<div class="obc-t">Consentement du client</div>' +
             '<div class="obc-s">Demande envoyée par BACS au client, qui répond lui-même par SMS.</div>'
-          : '<div class="obc-t">Création du client</div>' +
-            '<div class="obc-s">BACS d’abord (il vérifie le portable et l’e-mail), puis One Data — ne fermez pas l’onglet BACS.</div>' +
-            '<div class="obc-step" data-e="bacs"><span class="obc-ic att"></span><div><div class="obc-l">Compte BACS</div><div class="obc-d">En attente</div></div></div>' +
+          : '<div class="obc-t">' + (societe ? 'Création de la société' : 'Création du client') + '</div>' +
+            '<div class="obc-s">' + (societe ? 'BACS d’abord, puis One Data — ne fermez pas l’onglet BACS.'
+                                             : 'BACS d’abord (il vérifie le portable et l’e-mail), puis One Data — ne fermez pas l’onglet BACS.') + '</div>' +
+            '<div class="obc-step" data-e="bacs"><span class="obc-ic att"></span><div><div class="obc-l">' + (societe ? 'Compte société BACS' : 'Compte BACS') + '</div><div class="obc-d">En attente</div></div></div>' +
             '<div class="obc-step" data-e="od"><span class="obc-ic att"></span><div><div class="obc-l">Fiche One Data</div><div class="obc-d">En attente</div></div></div>') +
         '<div class="obc-step" data-e="consent" hidden><span class="obc-ic att"></span><div><div class="obc-l">Consentement</div><div class="obc-d"></div></div></div>' +
         '<div class="obc-pied" hidden></div>' +
@@ -191,7 +207,7 @@
       });
     }
     function fermer() { try { ov.remove(); } catch (e) {} }
-    return { etape: etape, pied: pied, fermer: fermer };
+    return { etape: etape, pied: pied, fermer: fermer, ov: ov };
   }
 
   function ouvrir(url) {
@@ -226,10 +242,11 @@
       var rp = await sb.rpc('bacs_client_preflight', { p_payload: payload });
       if (!rp.error) pf = rp.data;
     } catch (e) { pf = null; }
-    if (!pf || !pf.ecrire || pf.pro || a.p_id_user == null) {
-      return sb.rpc('client_creer', a);   // tenant sans BACS, société, ou création système
+    if (!pf || !pf.ecrire || a.p_id_user == null || (pf.pro && pf.pro_bacs !== true)) {
+      return sb.rpc('client_creer', a);   // tenant sans BACS, société hors BACS, ou création système
     }
-    if (pf.extension_a_jour === false) {
+    var soc = !!pf.pro;
+    if (pf.extension_a_jour === false || (soc && pf.extension_societe === false)) {
       return { data: null, error: { message: MSG_EXT } };
     }
     if (pf.moi_bacs === false) {
@@ -242,7 +259,7 @@
     if (ping.contexte === false) return { data: null, error: { message: messageFerme('bacs_non_pret') } };
 
     // 3. Réservation du numéro + geste BACS (rien n'est encore créé).
-    var ui = panneau();
+    var ui = panneau(false, soc);
     ui.etape('bacs', 'en', 'Préparation…');
     var prepArgs = { p_payload: payload, p_id_site: a.p_id_site, p_id_user: a.p_id_user,
                      p_reservation: (reservation && reservation.user === a.p_id_user) ? reservation.id : null };
@@ -263,7 +280,7 @@
     if (prep.deja_fait) {
       ui.etape('bacs', 'ok', 'Déjà créé dans BACS lors de l’essai précédent');
     } else {
-      ui.etape('bacs', 'en', 'Demande de contact, acceptation, compte, affaire…');
+      ui.etape('bacs', 'en', soc ? 'Création du compte société…' : 'Demande de contact, acceptation, compte, affaire…');
       var x = await demander('geste_executer', { geste_id: prep.geste }, DELAI_BACS_MS);
       try { res = x && x.resultat ? JSON.parse(x.resultat) : null; } catch (e) { res = null; }
       if (!x || !x.ok) {
@@ -282,6 +299,7 @@
       }
       var acc0 = res && res.compte;
       ui.etape('bacs', 'ok', !acc0 ? 'Créé dans BACS'
+        : soc ? (res.rapprochement === 'creation' ? 'Société créée dans BACS' : 'Rattachée à la société BACS existante')
         : (res.rapprochement === 'creation' ? 'Compte créé dans BACS' : 'Rattaché au compte BACS existant')
           + (res.affaire ? ' · affaire ouverte' : ''));
     }
@@ -302,6 +320,16 @@
       ? 'Ce compte BACS correspond déjà à la fiche n° ' + f.id_client + ' : elle est reprise, aucun doublon créé'
       : 'Fiche n° ' + f.id_client + ' créée');
 
+    if (soc) {
+      // Comme dans BACS : la société d'abord, l'interlocuteur ensuite. Sans
+      // interlocuteur actif, BACS refuse d'ouvrir une affaire.
+      ui.etape('consent', 'info', 'Désignez maintenant son interlocuteur (onglet Entreprise de la fiche, « Ajouter un interlocuteur ») : sans lui, aucune affaire ne peut être ouverte dans BACS.', false, 'Interlocuteur');
+      var urlS = urlCompte(f.compte || (res && res.compte));
+      await ui.pied([urlS ? { html: '<span class="obc-b">B</span>Ouvrir dans BACS', action: function () { ouvrir(urlS); } } : null,
+                     { html: 'Continuer', pri: true, fin: 'continuer' }].filter(Boolean));
+      ui.fermer();
+      return { data: f, error: null };
+    }
     await etapeConsentement(ui, sb, f.id_client, a.p_id_site, urlCompte(f.compte || (res && res.compte)));
     ui.fermer();
     return { data: f, error: null };
@@ -440,7 +468,11 @@
       var pf = null;
       try { var r = await sb.rpc('bacs_client_preflight', { p_payload: {} }); if (!r.error) pf = r.data; } catch (e) { pf = null; }
       if (!estActif()) return;
-      if (!pf || !pf.ecrire || m.isSoc) { m.__bacs = { requis: false }; if (onChange) onChange(m.__bacs); return; }
+      if (!pf || !pf.ecrire) { m.__bacs = { requis: false }; if (onChange) onChange(m.__bacs); return; }
+      // v6 : une société n'exige BACS que si la base l'y écrit. Évalué à
+      // chaque tour : le vendeur peut passer de l'onglet particulier à
+      // l'onglet société dans la même fenêtre.
+      var horsBacs = function () { return !!(m.isSoc && pf.pro_bacs !== true); };
       var precedent = null;
       async function tour() {
         if (!estActif()) return;
@@ -448,14 +480,16 @@
         if (!estActif()) return;
         // Extension périmée : on relit l'état après chaque battement (le
         // vendeur redémarre Chrome, la nouvelle version se déclare).
-        if (pf.extension_a_jour === false && p && p.ok) {
+        if ((pf.extension_a_jour === false || pf.extension_societe === false) && p && p.ok) {
           try { var r2 = await sb.rpc('bacs_client_preflight', { p_payload: {} }); if (!r2.error && r2.data) pf = r2.data; } catch (e) {}
           if (!estActif()) return;
         }
-        var etat = { requis: true, ouvert: !!(p && p.ok && p.contexte !== false),
-                     moi_bacs: pf.moi_bacs !== false, a_jour: pf.extension_a_jour !== false, raison: p && p.erreur };
+        var etat = { requis: !horsBacs(), ouvert: !!(p && p.ok && p.contexte !== false),
+                     moi_bacs: pf.moi_bacs !== false,
+                     a_jour: pf.extension_a_jour !== false && !(m.isSoc && pf.extension_societe === false),
+                     raison: p && p.erreur };
         m.__bacs = etat;
-        if (!precedent || precedent.ouvert !== etat.ouvert || precedent.moi_bacs !== etat.moi_bacs || precedent.a_jour !== etat.a_jour) {
+        if (!precedent || precedent.requis !== etat.requis || precedent.ouvert !== etat.ouvert || precedent.moi_bacs !== etat.moi_bacs || precedent.a_jour !== etat.a_jour) {
           if (onChange) onChange(etat);
         }
         precedent = etat;
@@ -465,6 +499,94 @@
     })();
   }
 
-  window.oropraBacsClient = { version: 4, consentement: consentementSeul, creer: creer, compte: compte, ouvrir: ouvrir, urlCompte: urlCompte,
-                              surveiller: surveiller, appliquer: appliquer, bloque: bloque };
+
+  // ── v6 : INTERLOCUTEURS (Company_Link__c) ───────────────────────────
+  //  Le lien One Data est posé tout de suite par la base ; s'il doit partir
+  //  dans BACS, la base exige BACS ouvert chez l'utilisateur (sinon elle
+  //  refuse AVANT d'écrire), puis l'extension exécute le geste en direct.
+  async function prerequisBacs(sb) {
+    var pf = null;
+    try { var r = await sb.rpc('bacs_client_preflight', { p_payload: { idmultivu: 1 } }); if (!r.error) pf = r.data; } catch (e) { pf = null; }
+    if (!pf || !pf.ecrire || pf.pro_bacs !== true) return { bacs: false };
+    if (pf.extension_a_jour === false || pf.extension_societe === false) return { erreur: MSG_EXT };
+    if (pf.moi_bacs === false) return { erreur: "BACS : votre compte One Data n'est pas relié à votre compte BACS. Demandez à l'administrateur de renseigner votre identifiant BACS." };
+    var ping = await demander('ping', {}, 10000);
+    if (!ping || !ping.ok) return { erreur: messageFerme(ping && ping.erreur) };
+    if (ping.contexte === false) return { erreur: messageFerme('bacs_non_pret') };
+    return { bacs: true };
+  }
+
+  async function suivreGeste(gesteId, titre, libelleBacs, texteEnCours, texteOk) {
+    var box = panneau(true);
+    try {
+      var t = box.ov.querySelector('.obc-t'); if (t) t.textContent = titre;
+      var st = box.ov.querySelector('.obc-s'); if (st) st.textContent = 'Reporté dans BACS — ne fermez pas l’onglet BACS.';
+    } catch (e) {}
+    box.etape('consent', 'en', texteEnCours, false, libelleBacs);
+    var x = await demander('geste_executer', { geste_id: gesteId }, DELAI_BACS_MS);
+    if (x && x.ok) {
+      box.etape('consent', 'ok', texteOk, false, libelleBacs);
+      await new Promise(function (r) { setTimeout(r, 900); });
+      box.fermer();
+      return { ok: true, resultat: x.resultat || null };
+    }
+    var err = messageBacs(x && (x.erreur || x.refus));
+    box.etape('consent', 'ko', err + ' Le lien est gardé dans One Data : « Réessayer » le renverra dans BACS.', true, libelleBacs);
+    await box.pied([{ html: 'Fermer', pri: true, fin: true }]);
+    box.fermer();
+    return { ok: false, erreur: err };
+  }
+
+  // args : { p_id_societe, p_id_particulier, p_type, p_fonction, p_date_debut,
+  //          p_commentaire, p_id_user, p_id_site }
+  async function interlocuteur(sb, args) {
+    var a = Object.assign({}, args || {});
+    var pre = await prerequisBacs(sb);
+    if (pre.erreur) return { data: null, error: { message: pre.erreur } };
+    var r = await sb.rpc('interlocuteur_lier', a);
+    if (r.error || !r.data) return r;
+    if (!r.data.bacs || !r.data.geste) return { data: r.data, error: null };
+    var s = await suivreGeste(r.data.geste, 'Interlocuteur de la société', 'Interlocuteur BACS',
+      'Désignation dans BACS (création des comptes absents si besoin)…', 'Interlocuteur désigné dans BACS.');
+    return { data: Object.assign({}, r.data, { bacs_ok: s.ok, bacs_erreur: s.erreur || null }), error: null };
+  }
+
+  async function renvoyer(sb, idEntreprise, idSite) {
+    var pre = await prerequisBacs(sb);
+    if (pre.erreur) return { data: null, error: { message: pre.erreur } };
+    if (!pre.bacs) return { data: { bacs: false }, error: null };
+    var r = await sb.rpc('interlocuteur_renvoyer', { p_id_entreprise: Number(idEntreprise), p_id_site: idSite != null ? Number(idSite) : null });
+    if (r.error || !r.data) return r;
+    if (!r.data.geste) return { data: r.data, error: null };
+    var s = await suivreGeste(r.data.geste, 'Interlocuteur de la société', 'Interlocuteur BACS',
+      'Nouvel essai dans BACS…', 'Interlocuteur désigné dans BACS.');
+    return { data: Object.assign({}, r.data, { bacs_ok: s.ok, bacs_erreur: s.erreur || null }), error: null };
+  }
+
+  async function retirer(sb, idEntreprise) {
+    var pre = await prerequisBacs(sb);
+    if (pre.erreur) return { data: null, error: { message: pre.erreur } };
+    var r = await sb.rpc('interlocuteur_retirer', { p_id_entreprise: Number(idEntreprise) });
+    if (r.error || !r.data) return r;
+    if (!r.data.bacs || !r.data.geste) return { data: r.data, error: null };
+    var s = await suivreGeste(r.data.geste, 'Interlocuteur retiré', 'Interlocuteur BACS',
+      'Retrait dans BACS (le lien y passe inactif)…', 'Interlocuteur retiré dans BACS.');
+    return { data: Object.assign({}, r.data, { bacs_ok: s.ok, bacs_erreur: s.erreur || null }), error: null };
+  }
+
+  async function pousserSociete(sb, idSociete, idSite) {
+    var pre = await prerequisBacs(sb);
+    if (pre.erreur) return { data: null, error: { message: pre.erreur } };
+    if (!pre.bacs) return { data: { bacs: false }, error: null };
+    var r = await sb.rpc('societe_pousser_bacs', { p_id_societe: Number(idSociete), p_id_site: idSite != null ? Number(idSite) : null });
+    if (r.error || !r.data) return r;
+    if (!r.data.geste) return { data: r.data, error: null };
+    var s = await suivreGeste(r.data.geste, 'Société dans BACS', 'Compte société BACS',
+      'Création de la société dans BACS…', 'Société créée dans BACS.');
+    return { data: Object.assign({}, r.data, { bacs_ok: s.ok, bacs_erreur: s.erreur || null }), error: null };
+  }
+
+  window.oropraBacsClient = { version: 6, consentement: consentementSeul, creer: creer, compte: compte, ouvrir: ouvrir, urlCompte: urlCompte,
+                              surveiller: surveiller, appliquer: appliquer, bloque: bloque,
+                              interlocuteur: interlocuteur, renvoyer: renvoyer, retirer: retirer, pousserSociete: pousserSociete };
 })();

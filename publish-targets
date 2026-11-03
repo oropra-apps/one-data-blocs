@@ -103,3 +103,10 @@ recherche     = teamcolin
 # (rôle 13). Il appelle lead_appel_sites / lead_appel_creer, livrées par
 # 20261103150000_acces_appels_entrants.sql sur la seule base de Team Colin.
 lead-appel    = teamcolin
+
+# Onglet Entreprise v4 (04/11/2026) : interlocuteurs d'une société comme dans
+# BACS. Il appelle get_interlocuteurs_societe, interlocuteur_rechercher,
+# interlocuteur_lier, interlocuteur_retirer, interlocuteur_renvoyer et
+# societe_pousser_bacs, livrées par 20261104010000_entreprise_interlocuteurs_bacs.sql
+# sur la seule base de Team Colin. Le reste de la flotte reste sur la v3.
+entreprise    = teamcolin
