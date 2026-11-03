@@ -1,6 +1,13 @@
 // ============================================================================
-//  NOUVEAU LEAD — APPELS ENTRANTS — module One Data (OD.define 'lead-appel')  v2
+//  NOUVEAU LEAD — APPELS ENTRANTS — module One Data (OD.define 'lead-appel')  v3
 //
+//  v3 (03/11/2026) : deux portes d'entrée.
+//    · bouton « Nouveau lead » de la FICHE CLIENT (fiche-shell v15) : la
+//      fenêtre s'ouvre pré-remplie avec ce client (API window.__odLeadAppel
+//      .ouvrir(client)) ;
+//    · bouton « Nouveau lead » de la TOP NAV : formulaire VIERGE, pour un
+//      appelant inconnu de la base (il n'est plus pré-rempli avec le client
+//      sélectionné).
 //  v2 (03/11/2026) : fenêtre au niveau du « Nouveau lead » de la Vroom Team.
 //    · client sélectionné dans la Base client : formulaire PRÉ-REMPLI d'office
 //      (civilité, prénom, nom, entreprise, portable, e-mail), « Autre client »
@@ -33,7 +40,7 @@ try { if (window.OD && OD.persistent && OD.persistent.add) OD.persistent.add('le
 
 OD.define('lead-appel', {
   mount(__anchor, ctx) {
-    const VER = 2;
+    const VER = 3;
     const W = (window.wwLib && wwLib.getFrontWindow && wwLib.getFrontWindow()) || window;
     const doc = __anchor.ownerDocument || document;
     const sb = (ctx && ctx.supabase) || (window.wwLib && wwLib.wwPlugins && wwLib.wwPlugins.supabase && wwLib.wwPlugins.supabase.instance);
@@ -54,12 +61,6 @@ OD.define('lead-appel', {
       if (inEditor()) { if (uid) { try { wwLib.wwApp.goTo(uid); return; } catch (e) { } try { wwLib.goTo(uid); } catch (e) { } } return; }
       try { wwLib.goTo(LANG_PREFIX + path); return; } catch (e) { }
       try { W.location.href = LANG_PREFIX + path; } catch (e) { }
-    }
-    function clientCourant() {
-      let c = null;
-      try { c = wwLib.wwVariable.getValue(VAR_CLIENT); } catch (e) { }
-      if (!c) { try { c = W.__odSelectedClient || null; } catch (e) { } }
-      return c && c.IDVu != null ? c : null;
     }
 
     // ---------------------------------------------------------------- style
@@ -119,7 +120,11 @@ OD.define('lead-appel', {
     __anchor.innerHTML = '<button type="button" class="lap-btn" title="Créer un lead pour une concession">' +
       '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>' +
       '<span>Nouveau lead</span></button>';
-    __anchor.querySelector('.lap-btn').addEventListener('click', ouvrir);
+    __anchor.querySelector('.lap-btn').addEventListener('click', function () { ouvrir(null); });
+    // API pour la fiche client (fiche-shell v15) : ouvrir(client) pré-remplit.
+    const API = { version: VER, ouvrir: function (c) { return ouvrir(c || null); } };
+    try { W.__odLeadAppel = API; } catch (e) { }
+    try { window.__odLeadAppel = API; } catch (e) { }
 
     // ---------------------------------------------------------------- fenêtre
     let ov = null, S = null, sites = null;
@@ -142,7 +147,7 @@ OD.define('lead-appel', {
     function siteCourant() { return (sites || []).filter(function (s) { return String(s.id_site) === String(S.id_site); })[0] || null; }
     function nomSite(s) { return propre(String(s || '').replace(/\s+-\s+(TOYOTA|LEXUS)$/i, '')); }
 
-    async function ouvrir() {
+    async function ouvrir(client) {
       if (ov) return;
       S = vierge();
       ov = doc.createElement('div'); ov.className = 'lap-ov';
@@ -152,8 +157,9 @@ OD.define('lead-appel', {
       ov.addEventListener('input', surSaisie);
       ov.addEventListener('change', surChange);
       doc.addEventListener('keydown', surTouche);
-      // Client sélectionné dans la Base client (barre client) : formulaire pré-rempli.
-      const cc = clientCourant();
+      // Ouverte depuis une fiche client : formulaire pré-rempli avec ce client.
+      // Depuis la top nav : formulaire vierge (appelant inconnu).
+      const cc = client && client.IDVu != null ? client : null;
       if (cc) {
         let c = cc;
         if ((c.NOM == null || c.TEl_MOB === undefined) && sb) {
@@ -240,7 +246,7 @@ OD.define('lead-appel', {
       h += '<div class="lap-b">';
       if (S.err) h += '<div class="lap-err">' + esc(S.err) + '</div>';
       if (S.client) {
-        h += '<div class="lap-cli"><span>Client de la Base client : <b>' + esc([S.client.PRENOM, S.client.NOM].filter(Boolean).join(' ')) + '</b> — formulaire pré-rempli</span>' +
+        h += '<div class="lap-cli"><span>Client : <b>' + esc([S.client.PRENOM, S.client.NOM].filter(Boolean).join(' ')) + '</b> — formulaire pré-rempli</span>' +
           '<button type="button" data-a="vider">Autre client</button></div>';
       }
       if (S.doublons && S.doublons.length) {
