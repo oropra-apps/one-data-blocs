@@ -1,4 +1,7 @@
 // ============================================================================
+//  v42 (04/11/2026) : HISTORIQUE DU VÉHICULE — la barre « Achat du VO »
+//    porte le prix d'achat en colonne Total, pour les chefs des ventes et leur
+//    hiérarchie (la base ne le rend qu'à eux).
 //  v41 (04/11/2026) : FICHE VO — le prix d'achat (et les frais de remise en
 //    état réels quand ils sont connus) s'affiche dans « Stock · Achat » pour
 //    les chefs des ventes et leur hiérarchie. La base ne le rend qu'à eux
@@ -2090,7 +2093,10 @@ OD.define('vo-liste', {
     var achat = st.achat ? String(st.achat).slice(0, 10) : null, achatFait = !achat;
     var achatLigne = function () {
       achatFait = true;
-      return '<tr class="hv-achat"><td colspan="5"><div class="hv-achat-l">Achat du VO · ' + hvEsc(hvDate(achat)) + '</div></td></tr>';
+      // Prix d'achat : rendu par la base aux seuls chefs des ventes et à leur hiérarchie.
+      var pa = st.paAchat != null && st.paAchat !== '' ? hvNum(st.paAchat) : null;
+      return '<tr class="hv-achat"><td colspan="' + (pa != null ? 4 : 5) + '"><div class="hv-achat-l">Achat du VO · ' + hvEsc(hvDate(achat)) + (pa != null ? ' · prix d\'achat' : '') + '</div></td>'
+        + (pa != null ? '<td class="c-num c-tot" style="color:#2f8a76">' + hvEur(pa) + '</td>' : '') + '</tr>';
     };
     // bandeau d'annee : emis une fois par annee, y compris pour l'annee de l'achat
     // quand aucune facture ne la porte (la barre se place alors sous son annee).
@@ -2137,8 +2143,9 @@ OD.define('vo-liste', {
         } else {
           st.apv = h.data || [];
           st.achat = (st.row && st.row.D_ACHAT) || null;
+          st.paAchat = (st.row && st.row.PA_HT_TTC != null) ? st.row.PA_HT_TTC : null;
           if (!st.achat) {
-            try { var sa = await client.from('v_liste_vo').select('D_ACHAT').eq('VIN', vin).limit(1); st.achat = (sa.data && sa.data[0] && sa.data[0].D_ACHAT) || null; } catch (e2) { st.achat = null; }
+            try { var sa = await client.from('v_liste_vo').select('D_ACHAT,PA_HT_TTC').eq('VIN', vin).limit(1); st.achat = (sa.data && sa.data[0] && sa.data[0].D_ACHAT) || null; st.paAchat = (sa.data && sa.data[0] && sa.data[0].PA_HT_TTC != null) ? sa.data[0].PA_HT_TTC : st.paAchat; } catch (e2) { st.achat = null; }
           }
           st.apvDet = null;
           if (!d.error && Array.isArray(d.data)) {
