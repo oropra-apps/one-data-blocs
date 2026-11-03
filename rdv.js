@@ -140,7 +140,7 @@ OD.define('rdv', {
     if(p.type) meta.push('<span class="rv-tag">'+esc(p.type)+'</span>');
     if(p.duree) meta.push('<span class="rv-mut">'+esc(p.duree)+'</span>');
     if(p.vin) meta.push('<span class="rv-mut mono">VIN '+esc(p.vin)+'</span>');
-    if(p.resultat) meta.push('<span class="rv-res">'+esc(p.resultat)+'</span>');
+    if(p.resultat) meta.push('<span class="rv-res">'+esc(p.resultat==='Choc'?'RDV':p.resultat)+'</span>');
     const hasCycle = p.id_cycle_com!=null && p.id_cycle_com!=='';
     return '<div class="rv-card'+(hasCycle?' clk':'')+'"'+(hasCycle?(' data-rvcycle="'+esc(p.id_cycle_com)+':'+esc(p.id_client)+'"'):'')+'>'+
       dateBox+
@@ -440,7 +440,7 @@ function RC_card(item){
     const chipColors={ 'Abandon':{bg:'#fee2e2',color:'#9B1C1C',border:'#fca5a5'},'Marketing':{bg:'#ede9fe',color:'#5b21b6',border:'#c4b5fd'},'Choc':{bg:'#fef3c7',color:'#92400e',border:'#fcd34d'},'Commande':{bg:'#d1fae5',color:'#065f46',border:'#6ee7b7'},'Relance':{bg:'#dbeafe',color:'#1e40af',border:'#93c5fd'} };
     const chip=chipColors[resultat]||{bg:'#f3f4f6',color:'#374151',border:'#d1d5db'};
     headerMiddle='<div style="display:flex;flex-wrap:wrap;gap:5px;align-items:center;flex:1;min-width:0;">'+
-      (resultat?'<span style="background:'+chip.bg+';color:'+chip.color+';border:1px solid '+chip.border+';border-radius:999px;padding:2px 10px;font-size:12px;font-weight:500;white-space:nowrap;">'+esc(resultat)+'</span>':'')+
+      (resultat?'<span style="background:'+chip.bg+';color:'+chip.color+';border:1px solid '+chip.border+';border-radius:999px;padding:2px 10px;font-size:12px;font-weight:500;white-space:nowrap;">'+esc((resultat==='Choc'?'RDV':resultat))+'</span>':'')+
       (canalContact?'<span style="background:#f3f4f6;color:#6b7280;border:1px solid #e5e7eb;border-radius:999px;padding:2px 10px;font-size:12px;white-space:nowrap;">'+esc(canalContact)+'</span>':'')+
       (dtActivation?'<span style="background:#eff6ff;color:#2a5ea9;border:1px solid #bfdbfe;border-radius:999px;padding:2px 10px;font-size:12px;white-space:nowrap;">'+formatRdv(dtActivation)+'</span>':'')+'</div>';
     const sid='rv_'+uid; const showToggle=commentaire.length>80; const resume=truncate(commentaire,80);
