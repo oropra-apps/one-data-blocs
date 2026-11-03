@@ -1,6 +1,10 @@
 // ============================================================================
-//  RECHERCHE GLOBALE (top nav) — module One Data (OD.define)  v3
+//  RECHERCHE GLOBALE (top nav) — module One Data (OD.define)  v4
 //
+//  v4 (03/11/2026) : la ligne des raccourcis clavier en bas de la liste
+//  disparaît (le clavier marche toujours) ; les Commandes passent en tête ;
+//  les lignes d'affaires (commandes, simulations, affaires) sont plus aérées,
+//  le montant décollé du texte.
 //  v3 (03/11/2026) : retour des séances de coaching (FY640CW ne remontait que
 //  le véhicule, pas sa vente VO). Les affaires se trouvent par tous leurs
 //  critères — numéro, client, véhicule, VIN, immatriculation — et se rangent
@@ -80,11 +84,11 @@ OD.define('recherche', {
     const DEBOUNCE = 180;
 
     const CATS = [
+      { k: 'commandes',      lib: 'Commandes',         ic: 'doc' },
       { k: 'clients',        lib: 'Clients',           ic: 'person' },
       { k: 'vehicules',      lib: 'Véhicules clients', ic: 'key' },
       { k: 'vo',             lib: 'Stock VO',          ic: 'car' },
       { k: 'vn',             lib: 'Stock VN',          ic: 'carNew' },
-      { k: 'commandes',      lib: 'Commandes',         ic: 'doc' },
       { k: 'simulations',    lib: 'Simulations',       ic: 'doc' },
       { k: 'affaires',       lib: 'Affaires',          ic: 'doc' },
       { k: 'collaborateurs', lib: 'Collaborateurs',    ic: 'team' }
@@ -211,6 +215,10 @@ OD.define('recherche', {
 #od-recherche .rch-vide{padding:26px 16px 22px;text-align:center;color:#7a98c5;font-size:13.5px}
 #od-recherche .rch-vide b{color:#1F4A85}
 #od-recherche .rch-vide small{display:block;margin-top:6px;color:#9bb3d1;font-size:12px}
+#od-recherche .rch-it.rch-aere{padding:11px 12px;gap:14px}
+#od-recherche .rch-it.rch-aere .rch-t{line-height:1.45;flex-wrap:wrap;row-gap:4px}
+#od-recherche .rch-it.rch-aere .rch-d{line-height:1.5;margin-top:4px}
+#od-recherche .rch-it.rch-aere .rch-droite{padding-left:16px;min-width:84px}
 #od-recherche .rch-pied{display:flex;gap:14px;justify-content:center;padding:8px 10px 4px;margin-top:4px;border-top:1px solid #f0f4fa;font-size:11px;color:#9bb3d1}
 #od-recherche .rch-pied b{font-weight:700;color:#7a98c5}
 @media (max-width:760px){
@@ -317,7 +325,8 @@ OD.define('recherche', {
           vis = '<span class="rch-vis">' + I.team + '</span>';
           break;
       }
-      return '<a class="rch-it' + (idx === S.sel ? ' rch-sel' : '') + '" role="option" data-i="' + idx + '">' + vis +
+      const aere = (type === 'commande' || type === 'simulation' || type === 'affaire') ? ' rch-aere' : '';
+      return '<a class="rch-it' + aere + (idx === S.sel ? ' rch-sel' : '') + '" role="option" data-i="' + idx + '">' + vis +
         '<span class="rch-corps"><span class="rch-t"><span>' + titre + '</span>' + bad + '</span>' +
         (det ? '<span class="rch-d">' + det + '</span>' : '') + '</span>' +
         (droite ? '<span class="rch-droite">' + droite + '</span>' : '') + '</a>';
@@ -364,7 +373,6 @@ OD.define('recherche', {
               '<small>Essayez un nom, une immatriculation, les derniers caractères d’un VIN ou un numéro de téléphone.</small></div>';
         }
       }
-      if (h && idx) h += '<div class="rch-pied"><span><b>↑ ↓</b> parcourir</span><span><b>Entrée</b> ouvrir</span><span><b>Échap</b> fermer</span></div>';
       p.innerHTML = h;
       p.classList.toggle('rch-a-contenu', !!h);
       const sel = p.querySelector('.rch-sel');
