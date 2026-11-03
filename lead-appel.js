@@ -1,6 +1,12 @@
 // ============================================================================
-//  NOUVEAU LEAD — APPELS ENTRANTS — module One Data (OD.define 'lead-appel')  v3
+//  NOUVEAU LEAD — APPELS ENTRANTS — module One Data (OD.define 'lead-appel')  v4
 //
+//  v4 (03/11/2026) : « Modèle souhaité » devient la liste des modèles de la
+//    marque choisie (Toyota ou Lexus, référentiel msg_modele_vehicule via
+//    lead_appel_modeles), avec « Autre modèle… » en saisie libre. Une fiche
+//    client dont le prénom et le nom sont dans le même champ (« Antoine
+//    Raguet » en NOM, prénom vide) est séparée : mot en capitales = nom,
+//    sinon premier mot = prénom, le reste = nom.
 //  v3 (03/11/2026) : deux portes d'entrée.
 //    · bouton « Nouveau lead » de la FICHE CLIENT (fiche-shell v15) : la
 //      fenêtre s'ouvre pré-remplie avec ce client (API window.__odLeadAppel
@@ -40,7 +46,7 @@ try { if (window.OD && OD.persistent && OD.persistent.add) OD.persistent.add('le
 
 OD.define('lead-appel', {
   mount(__anchor, ctx) {
-    const VER = 3;
+    const VER = 4;
     const W = (window.wwLib && wwLib.getFrontWindow && wwLib.getFrontWindow()) || window;
     const doc = __anchor.ownerDocument || document;
     const sb = (ctx && ctx.supabase) || (window.wwLib && wwLib.wwPlugins && wwLib.wwPlugins.supabase && wwLib.wwPlugins.supabase.instance);
@@ -127,7 +133,20 @@ OD.define('lead-appel', {
     try { window.__odLeadAppel = API; } catch (e) { }
 
     // ---------------------------------------------------------------- fenêtre
-    let ov = null, S = null, sites = null;
+    let ov = null, S = null, sites = null, modeles = null;
+    const AUTRE = '__autre__';
+    function modelesDe(marque) { return (modeles || []).filter(function (m) { return m.marque === marque; }).map(function (m) { return m.modele; }); }
+    function champModele() {
+      const liste_ = modelesDe(S.marque);
+      if (!liste_.length && modeles == null) return champ('modele', 'Modèle souhaité', 'text', 'Chargement des modèles…');
+      const connu = !S.modele || liste_.indexOf(S.modele) !== -1;
+      const autre = S.modeleAutre || !connu;
+      let h = '<label class="lap-q">Modèle souhaité<select data-k="modele_choix"><option value="">— Choisir un modèle ' + esc(S.marque) + ' —</option>' +
+        liste_.map(function (m) { return '<option value="' + esc(m) + '"' + (!autre && S.modele === m ? ' selected' : '') + '>' + esc(m) + '</option>'; }).join('') +
+        '<option value="' + AUTRE + '"' + (autre ? ' selected' : '') + '>Autre modèle…</option></select></label>';
+      if (autre) h += '<input data-k="modele" type="text" value="' + esc(S.modele) + '" placeholder="Modèle, autre marque…" style="margin-top:6px;font:600 14px \'Nunito Sans\',system-ui,sans-serif;color:#1F4A85;border:1.5px solid #e3edf9;border-radius:10px;padding:9px 11px;width:100%;box-sizing:border-box">';
+      return '<div>' + h + '</div>';
+    }
     const vendeursParSite = {};
     const NATURES = [['VN', 'Véhicule neuf'], ['VO', 'Occasion'], ['Entreprise', 'Entreprise'], ['APV', 'Après-vente']];
     const TYPES = ['Essai', 'Info', 'Offre', 'Rendez-vous'];
@@ -142,6 +161,19 @@ OD.define('lead-appel', {
       S.civilite = /^(mme|mlle|madame|mademoiselle)/i.test(String(c.CIVILITE || '')) ? 'Mme' : 'M.';
       S.prenom = c.PRENOM || ''; S.nom = c.NOM || '';
       if (Number(c.idmultivu) === 1) { S.entreprise = c.NOM || ''; S.nature = 'Entreprise'; }
+      else if (!String(S.prenom).trim()) {
+        // Prénom et nom saisis ensemble dans NOM : on les sépare.
+        const mots = String(S.nom).trim().split(/\s+/);
+        if (mots.length >= 2) {
+          const caps = mots.filter(function (m) { return /[A-ZÀ-Ý]/.test(m) && m === m.toUpperCase(); });
+          if (caps.length && caps.length < mots.length) {
+            S.nom = caps.join(' ');
+            S.prenom = mots.filter(function (m) { return caps.indexOf(m) === -1; }).join(' ');
+          } else {
+            S.prenom = mots[0]; S.nom = mots.slice(1).join(' ');
+          }
+        }
+      }
       S.telephone = c.TEl_MOB || c.TEL_FIXE || ''; S.email = c.EMAIL || '';
     }
     function siteCourant() { return (sites || []).filter(function (s) { return String(s.id_site) === String(S.id_site); })[0] || null; }
@@ -172,6 +204,7 @@ OD.define('lead-appel', {
       }
       peindre();
       if (!sites) {
+        if (!modeles) { sb.rpc('lead_appel_modeles').then(function (r) { modeles = (r && r.data) || []; peindre(); }, function () { modeles = []; peindre(); }); }
         try { const r = await sb.rpc('lead_appel_concessions'); if (r.error) throw r.error; sites = r.data || []; }
         catch (e) { sites = []; S.err = (e && e.message) || 'Concessions indisponibles.'; }
       }
@@ -189,6 +222,7 @@ OD.define('lead-appel', {
       S.id_site = Number(id); S.id_vendeur = ''; S.err = null; S.doublons = null;
       const s = siteCourant();
       if (s) S.marque = /lexus/i.test(s.reseau || '') ? 'Lexus' : 'Toyota';
+      if (S.modele && !S.modeleAutre && modeles && modelesDe(S.marque).indexOf(S.modele) === -1) S.modele = '';
       peindre();
       if (!vendeursParSite[S.id_site]) {
         try { const r = await sb.rpc('lead_appel_vendeurs', { p_id_site: S.id_site }); vendeursParSite[S.id_site] = (r && r.data) || []; }
@@ -268,7 +302,7 @@ OD.define('lead-appel', {
           return '<button type="button" data-a="nature" data-id="' + n[0] + '" class="' + (S.nature === n[0] ? 'on' : '') + '">' + esc(n[1]) + '</button>';
         }).join('') + '</div>' +
         '<div class="lap-g2" style="margin-bottom:10px">' + liste('type_demande', 'Type de demande *', TYPES) + liste('marque', 'Marque *', ['Toyota', 'Lexus']) + '</div>' +
-        '<div class="lap-g2" style="margin-bottom:10px">' + champ('modele', 'Modèle souhaité', 'text', 'Yaris Cross, C-HR, NX…') + champ('rappel', 'Rappel', 'datetime-local') + '</div>' +
+        '<div class="lap-g2" style="margin-bottom:10px">' + champModele() + champ('rappel', 'Rappel', 'datetime-local') + '</div>' +
         '<label class="lap-q">Qualification pour le vendeur<textarea data-k="commentaire" placeholder="Projet, échéance, reprise, financement, disponibilités du client">' + esc(S.commentaire) + '</textarea></label></div>';
 
       h += '<div class="lap-sec"><h3>Concession *</h3>';
@@ -309,6 +343,12 @@ OD.define('lead-appel', {
       if (!k) return;
       S[k] = e.target.value;
       if (k === 'id_vendeur') peindre();   // libellé du bouton
+      if (k === 'modele_choix') {
+        delete S.modele_choix;
+        if (e.target.value === AUTRE) { S.modeleAutre = true; S.modele = ''; peindre(); const f = ov && ov.querySelector('input[data-k="modele"]'); if (f) try { f.focus(); } catch (x) { } }
+        else { S.modeleAutre = false; S.modele = e.target.value; }
+      }
+      if (k === 'marque') { if (S.modele && modelesDe(S.marque).indexOf(S.modele) === -1 && !S.modeleAutre) S.modele = ''; peindre(); }
     }
 
     async function surClic(e) {
