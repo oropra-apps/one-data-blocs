@@ -1,4 +1,16 @@
 // ============================================================================
+//  v40 (03/11/2026) : BAISSES DE PRIX. Chaque baisse du prix public dans
+//    Planet VO² est signalée pendant 15 jours (public.vo_baisses_prix, alimentée
+//    par l'historique od_bronze.pvo_prix_historique) :
+//    * ligne de la liste : liseré vert à gauche et fond vert très pâle (repérage
+//      au défilement), ancien prix barré, bandeau « Baisse de prix · −x € TTC ·
+//      depuis y jours » ;
+//    * fiche VO : même bandeau sous le prix, ancien prix barré ;
+//    * filtre « Prix en baisse » (avec compteur) à côté des types VO / VD, et
+//      tri « Baisse de prix récente ».
+//    Une nouvelle baisse relance les 15 jours ; une hausse efface le bandeau ;
+//    au 15e jour tout disparaît. La liste n'attend pas ces données (chargées à
+//    côté) ; base sans la fonction : rien ne s'affiche, aucune erreur.
 //  v39 (03/11/2026) : charge le module partagé sous l'étiquette
 //    oropra-bacs-client-v5 (l'étiquette v4 a été posée par erreur sur
 //    l'ancien code v3). Aucun autre changement que v38.
@@ -289,7 +301,8 @@ OD.define('vo-liste', {
       carrosserie: null, carburant: null, boite: null,
       canaux: ['particulier'],         // v27 : canal Planet VO², particuliers par défaut
       types: null,                     // v30 : VO / VD (null = tous)
-      statuts: ['EN_STOCK']            // v32 : statut Planet VO², en stock par défaut
+      statuts: ['EN_STOCK'],           // v32 : statut Planet VO², en stock par défaut
+      baisse: null                     // v40 : true = prix en baisse seulement
     }
   };
   function defaultPerPage() { return S.perPage || 20; }
@@ -545,6 +558,8 @@ OD.define('vo-liste', {
       + '.vf-sub{font-size:13px;color:#9bb3d1;font-weight:600;margin-top:3px}'
       + '.vf-head-right{display:flex;align-items:center;gap:8px;flex-wrap:wrap;min-width:0}'
       + '.vf-price{font-size:24px;font-weight:800;color:#1F4A85}'
+      + '.vf-prix-av{margin-left:8px;font-size:14px;font-weight:700;color:#7a98c5}'
+      + '.vf-baisse{display:inline-flex;align-items:center;gap:6px;padding:6px 12px;border-radius:999px;background:#53bda7;color:#fff;font-size:13px;font-weight:700;white-space:nowrap}.vf-baisse b{font-weight:800;text-transform:uppercase;letter-spacing:.5px;font-size:11.5px}.vf-baisse svg{width:15px;height:15px}'
       + '.vf-status{padding:6px 14px;border-radius:999px;font-size:12px;font-weight:700}'
       + '.vf-status.dispo{background:#eaf7f3;color:#0f6e56;border:1px solid #9ad9c5}'
       + '.vf-status.cm{background:#fcebeb;color:#a32d2d;border:1px solid #f5a5a5}'
@@ -642,7 +657,8 @@ OD.define('vo-liste', {
       + '<div><div class="vf-title">' + marque + ' ' + version + '</div>'
       + '<div class="vf-sub">' + noVo + (noImmat ? ' · ' + noImmat : '') + ' · ' + esc(vin) + (site ? ' · ' + site : '') + '</div></div>'
       + '<div class="vf-head-right">'
-      + '<div class="vf-price">' + esc(prix) + '</div>'
+      + '<div class="vf-price">' + esc(prix) + (baisseDe(row) ? '<s class="vf-prix-av">' + esc(eur(baisseDe(row).prix_avant)) + '</s>' : '') + '</div>'
+      + (baisseDe(row) ? '<span class="vf-baisse" title="' + esc(baisseTitre(baisseDe(row))) + '">' + IC_BAISSE + '<b>Baisse de prix</b> −' + esc(eur(baisseDe(row).baisse)) + ' TTC · ' + esc(baisseDepuis(baisseDe(row))) + '</span>' : '')
       + '<span class="vf-status ' + (isDisp ? 'dispo' : 'cm') + '">' + (isDisp ? 'Disponible à la vente' : 'Contremarqué') + '</span>'
       + '<button type="button" class="vf-pdf" id="vf-pdf" title="Fiche vitrine de ce VO (PDF)">' + IC.pdf + 'Fiche vitrine</button>'
       + '<button type="button" class="vf-like" id="vf-like">' + (odCreaPropaleSync() ? 'Like / P.Com' : 'Like') + '</button>'
@@ -2164,6 +2180,8 @@ OD.define('vo-liste', {
       S.histo = {}; (hq.data || []).forEach(function (x) { S.histo[x.vin] = x.nb; });
       majPictosHisto();
     }).catch(function (e) { console.warn('[vo] vo_historique_nb', e); S.histo = null; });
+    // v40 : baisses de prix (15 jours) — la liste ne les attend pas.
+    chargerBaisses(c);
     // v19 : tri sur le VIN (sans tri, les pages pouvaient se recouvrir ou omettre
     // des vehicules) ; 1re page avec le total, les suivantes en parallele.
     var cols = S.cols || COLS;
@@ -2213,6 +2231,7 @@ OD.define('vo-liste', {
   // ─────────────────────────────────────────────────────────── filtrage / tri
   function passFilters(r) {
     var f = S.f;
+    if (f.baisse && !baisseDe(r)) return false;   // v40
     if (f.reseau && r.RESEAU !== f.reseau) return false;
     if (f.affaire && r.AFFAIRE !== f.affaire) return false;
     if (f.site && r.SITE !== f.site) return false;
@@ -3363,6 +3382,8 @@ OD.define('vo-liste', {
       S.histo = {}; (hq.data || []).forEach(function (x) { S.histo[x.vin] = x.nb; });
       majPictosHisto();
     }).catch(function (e) { console.warn('[vo] vo_historique_nb', e); S.histo = null; });
+    // v40 : baisses de prix (15 jours) — la liste ne les attend pas.
+    chargerBaisses(c);
     // v19 : tri sur le VIN (sans tri, les pages pouvaient se recouvrir ou omettre
     // des vehicules) ; 1re page avec le total, les suivantes en parallele.
     var cols = S.cols || COLS;
@@ -3437,6 +3458,7 @@ OD.define('vo-liste', {
   // ─────────────────────────────────────────────────────────── filtrage / tri
   function passFilters(r) {
     var f = S.f;
+    if (f.baisse && !baisseDe(r)) return false;   // v40
     if (f.reseau && r.RESEAU !== f.reseau) return false;
     if (f.affaire && r.AFFAIRE !== f.affaire) return false;
     if (f.site && r.SITE !== f.site) return false;
@@ -3538,6 +3560,7 @@ OD.define('vo-liste', {
       case 'DESIGN': return designation(r).toLowerCase();
       case 'GAR': return num(r.CODE_GARANTIE) == null ? -1 : num(r.CODE_GARANTIE);
       case 'COMMENT': return String(r.PVO_COMMENTAIRE_LE || '');
+      case 'BAISSE': { var bz = baisseDe(r); return bz ? new Date(bz.baisse_le).getTime() || 0 : -1; }   // v40
       default: return String(r[key] || '').toLowerCase();
     }
   }
@@ -3548,7 +3571,7 @@ OD.define('vo-liste', {
     return arr;
   }
   function distinct(field, base) { var set = {}; (base || S.raw).forEach(function (r) { if (notEmpty(r[field])) set[r[field]] = 1; }); return Object.keys(set).sort(function (a, b) { return a.localeCompare(b, 'fr'); }); }
-  function activeFilterCount() { var f = S.f, n = 0; for (var k in f) if (f[k] != null && k !== 'canaux' && k !== 'types' && k !== 'statuts') n++; return n; }
+  function activeFilterCount() { var f = S.f, n = 0; for (var k in f) if (f[k] != null && k !== 'canaux' && k !== 'types' && k !== 'statuts' && k !== 'baisse') n++; return n; }
 
   // ─────────────────────────────────────────────────────────── sélection
   function selVins() { return Object.keys(S.sel).filter(function (v) { return S.sel[v]; }); }
@@ -3630,6 +3653,12 @@ OD.define('vo-liste', {
     + '.vl-canaux{display:flex;flex-wrap:wrap;gap:7px;margin:12px 4px 0}'
     + '.vl-can{display:inline-flex;align-items:center;gap:6px;border:1.5px solid #d6e2f2;background:#fff;color:#2a5ea9;font:inherit;font-size:12.5px;font-weight:700;padding:6px 11px;border-radius:20px;cursor:pointer;transition:all .15s}'
     + '.vl-can:hover{border-color:#53bda7}.vl-can.on{background:#2a5ea9;border-color:#2a5ea9;color:#fff}'
+    + '.vl-can-baisse svg{width:14px;height:14px}.vl-can-baisse{border-color:#53bda7;color:#1b7f6a}.vl-can-baisse.on{background:#53bda7;border-color:#53bda7;color:#fff}'
+    + '.vl-row.baisse{background:#f1fbf8;box-shadow:inset 4px 0 0 #53bda7}.vl-row.baisse:hover{background:#e8f8f3}.vl-row.baisse.sel{background:#e6f4f6}'
+    + '.vl-prix-av{display:inline-block;margin-left:8px;font-size:12.5px;font-weight:700;color:#7a98c5;text-decoration-thickness:1.5px}'
+    + '.vl-baisse{display:inline-flex;flex-direction:column;gap:1px;margin-top:6px;padding:5px 9px;border-radius:9px;background:#53bda7;color:#fff;line-height:1.25;max-width:100%}'
+    + '.vl-baisse-t{display:inline-flex;align-items:center;gap:5px;font-size:10.5px;font-weight:800;letter-spacing:.6px;text-transform:uppercase}.vl-baisse-t svg{width:13px;height:13px;flex-shrink:0}'
+    + '.vl-baisse-m{font-size:14px;font-weight:800}.vl-baisse-j{font-size:11px;font-weight:600;opacity:.92}'
     + '.vl-can i{font-style:normal;font-size:11px;font-weight:800;opacity:.75}'
     + '.vl-can-lab{font-size:11px;font-weight:800;letter-spacing:.05em;text-transform:uppercase;color:#7a98c5;align-self:center;margin-right:2px}'
     + '.vl-typ-lab{margin-left:14px}'
@@ -3947,7 +3976,7 @@ OD.define('vo-liste', {
         + '<div class="vl-lbl">Commentaire PVO²' + (age != null && com ? ' · ' + esc(depuisTxt(age)) : '') + (neuf ? '<span class="vl-new">nouveau</span>' : '') + '</div>'
         + '<div class="vl-ctxt">' + (com ? esc(com) : 'Aucun commentaire') + '</div></div>'
       : '<div class="vl-com"></div>';
-    return '<div class="vl-row' + (sel ? ' sel' : '') + '" data-vin="' + esc(r.VIN) + '">'
+    return '<div class="vl-row' + (sel ? ' sel' : '') + (baisseDe(r) ? ' baisse' : '') + '" data-vin="' + esc(r.VIN) + '">'
       + '<div class="vl-chk"><input type="checkbox" class="vo-chk vo-rowchk" data-vin="' + esc(r.VIN) + '"' + (sel ? ' checked' : '') + '></div>'
       + '<div class="vl-img"><div class="vl-ph"' + (hasPhoto(r) ? ' data-act="photos" data-vin="' + esc(r.VIN) + '" title="Diaporama"' : '') + '>' + ph
       + (n ? '<span class="vl-nb">' + IC.camera + n + '</span>' : '') + '</div></div>'
@@ -3959,7 +3988,8 @@ OD.define('vo-liste', {
       + '<div class="vl-site">' + esc(r.SITE || '-') + '</div>'
       + '</div>'
       + '<div class="vl-st">' + badge
-      + '<div class="vl-prix">' + esc(priceTxt(r)) + '</div>'
+      + '<div class="vl-prix">' + esc(priceTxt(r)) + (baisseDe(r) ? '<s class="vl-prix-av">' + esc(eur(baisseDe(r).prix_avant)) + '</s>' : '') + '</div>'
+      + (baisseDe(r) ? baisseLigneHtml(baisseDe(r)) : '')
       + (S.showPA ? '<div class="vl-pa">PA ' + esc(eur(r.PA_HT_TTC)) + '</div>' : '')
       + (notEmpty(r.ORIGINEACHAT_Codifie) ? '<div class="vl-m">Origine : <b>' + esc(r.ORIGINEACHAT_Codifie) + '</b></div>' : '')
       + (notEmpty(r.LABEL_Codifie) ? '<div class="vl-m">Label : <b>' + esc(r.LABEL_Codifie) + '</b></div>' : '')
@@ -3978,7 +4008,7 @@ OD.define('vo-liste', {
   }
   var TRIS = [
     ['NBJ', 'Jours en stock'], ['PVENTE', 'Prix'], ['KMS', 'Kilométrage'], ['D_1MEC', 'Mise en circulation'],
-    ['NUMERO_POLICE', 'N° de police'], ['DESIGN', 'Modèle'], ['COMMENT', 'Commentaire PVO² modifié'], ['SITE', 'Site']
+    ['NUMERO_POLICE', 'N° de police'], ['DESIGN', 'Modèle'], ['COMMENT', 'Commentaire PVO² modifié'], ['BAISSE', 'Baisse de prix récente'], ['SITE', 'Site']
   ];
   function enteteListe() {
     var opts = TRIS.map(function (t) { return '<option value="' + t[0] + '"' + (S.sortKey === t[0] ? ' selected' : '') + '>' + esc(t[1]) + '</option>'; }).join('');
@@ -4019,7 +4049,7 @@ OD.define('vo-liste', {
     }).join('') + '</div>';
   }
   function canauxHtml() {
-    if (!S.pvoActif) { var t0 = typesHtml(); return statutsHtml() + (t0 ? '<div class="vl-canaux">' + t0 + '</div>' : ''); }
+    if (!S.pvoActif) { var t0 = typesHtml() + baisseBtnHtml(); return statutsHtml() + (t0 ? '<div class="vl-canaux">' + t0 + '</div>' : ''); }
     var sel = S.f.canaux || [];
     // compte : tous les autres filtres appliqués, sauf le canal
     var memo = S.f.canaux; S.f.canaux = null;
@@ -4030,7 +4060,47 @@ OD.define('vo-liste', {
       // v31 : « Hors PVO² » n'a plus de sens quand le stock VO vient de Planet VO² : masqué s'il est vide.
       if (c.k === 'hors' && !n) return '';
       return '<button type="button" class="vl-can' + (sel.indexOf(c.k) !== -1 ? ' on' : '') + '" data-canal="' + c.k + '">' + esc(c.t) + ' <i>' + n + '</i></button>';
-    }).join('') + typesHtml() + '</div>';
+    }).join('') + typesHtml() + baisseBtnHtml() + '</div>';
+  }
+
+  // ─────────────────────────────────────────────────────────── v40 : baisses de prix
+  var BAISSE_JOURS = 15;
+  var IC_BAISSE = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 7 9 13 13 9 21 17"/><polyline points="15 17 21 17 21 11"/></svg>';
+  function chargerBaisses(c) {
+    if (!c || typeof c.rpc !== 'function') return;
+    c.rpc('vo_baisses_prix', { p_jours: BAISSE_JOURS }).then(function (q) {
+      if (q.error) throw q.error;
+      var m = {}; (q.data || []).forEach(function (x) { if (x && x.vin && num(x.baisse) > 0) m[x.vin] = x; });
+      S.baisses = m;
+      if (!S.loading && !S.error) renderContent();
+    }).catch(function (e) { console.warn('[vo] vo_baisses_prix', e && (e.message || e)); S.baisses = null; });
+  }
+  function baisseDe(r) {
+    var vin = r && (typeof r === 'string' ? r : r.VIN);
+    var b = vin && S.baisses ? S.baisses[vin] : null;
+    return b && num(b.baisse) > 0 ? b : null;
+  }
+  function baisseDepuis(b) {
+    var j = num(b.jours); if (j == null || j < 0) j = 0;
+    return j === 0 ? "aujourd'hui" : 'depuis ' + j + ' jour' + (j > 1 ? 's' : '');
+  }
+  function baisseTitre(b) {
+    var d = b.baisse_le ? new Date(b.baisse_le) : null;
+    return 'Prix passé de ' + eur(b.prix_avant) + ' à ' + eur(b.prix) + (d && !isNaN(d) ? ' le ' + d.toLocaleDateString('fr-FR') : '');
+  }
+  function baisseLigneHtml(b) {
+    return '<div class="vl-baisse" title="' + esc(baisseTitre(b)) + '">'
+      + '<span class="vl-baisse-t">' + IC_BAISSE + 'Baisse de prix</span>'
+      + '<span class="vl-baisse-m">−' + esc(eur(b.baisse)) + ' TTC</span>'
+      + '<span class="vl-baisse-j">' + esc(baisseDepuis(b)) + '</span></div>';
+  }
+  function baisseBtnHtml() {
+    if (!S.baisses) return '';
+    var memo = S.f.baisse; S.f.baisse = null;
+    var n = S.raw.filter(passFilters).filter(function (r) { return baisseDe(r); }).length;
+    S.f.baisse = memo;
+    if (!n && !S.f.baisse) return '';
+    return '<span class="vl-can-lab vl-typ-lab">Prix</span><button type="button" class="vl-can vl-can-baisse' + (S.f.baisse ? ' on' : '') + '" data-baisse="1" title="Baisses de prix des ' + BAISSE_JOURS + ' derniers jours">' + IC_BAISSE + 'Prix en baisse <i>' + n + '</i></button>';
   }
 
   // ─────────────────────────────────────────────────────────── pager / selbar
@@ -4392,6 +4462,10 @@ OD.define('vo-liste', {
         if (i === -1) cur.push(k); else cur.splice(i, 1);
         S.f.statuts = cur.length ? cur : null; S.page = 1; renderContent();
       });
+    });
+    // v40 : prix en baisse
+    host.querySelectorAll('[data-baisse]').forEach(function (el) {
+      el.addEventListener('click', function () { S.f.baisse = S.f.baisse ? null : true; S.page = 1; renderContent(); });
     });
     // v30 : VO / VD
     host.querySelectorAll('[data-type]').forEach(function (el) {
