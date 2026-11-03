@@ -1,4 +1,9 @@
 // RDV — module One Data (OD.define) v1 (Lot B)
+// v6 (03/11/2026) : bouton « Ajouter un RDV » (retour des séances de coaching).
+//   Il ouvre l'agenda (page d'accueil) et la fenêtre de saisie de l'agenda
+//   s'ouvre aussitôt en RDV client, sur ce client, au prochain créneau
+//   (window.__odAgendaCreer, lu par agenda v44). Une seule fenêtre de saisie
+//   pour tout One Data : mêmes règles, même envoi vers BACS.
 /* ============================================================================
    ONGLET RDV — Timeline des rendez-vous d'un client (fiche client)
    - RPC get_rdv_client(p_id_client)
@@ -175,7 +180,8 @@ OD.define('rdv', {
       if(!rows.length){ list = '<div class="rv-empty">Aucun rendez-vous pour ce filtre.</div>'; }
       else { list = '<div class="rv-timeline">'+rows.map(RV_card).join('')+'</div>'; }
       body = '<div class="rv-head"><div class="rv-title">Rendez-vous</div>'+
-             '<div class="rv-sub">'+rows.length+' RDV'+(rows.length!==c.tous?(' sur '+c.tous):'')+'</div></div>'+
+             '<div class="rv-sub">'+rows.length+' RDV'+(rows.length!==c.tous?(' sur '+c.tous):'')+'</div>'+
+             '<button type="button" class="rv-add" data-rvadd="1">+ Ajouter un RDV</button></div>'+
              filters + list;
     }
     root.innerHTML = RV_STYLE + body;
@@ -185,6 +191,8 @@ OD.define('rdv', {
   const RV_STYLE = '<style>'+
   '#rdv-root{font-family:"Nunito Sans",sans-serif;color:#2c2c2a;padding:0 4px}'+
   '#rdv-root .rv-head{display:flex;align-items:baseline;gap:10px;margin-bottom:10px}'+
+  '#rdv-root .rv-add{margin-left:auto;align-self:center;font:inherit;font-size:13px;font-weight:800;color:#fff;background:#2a5ea9;border:none;border-radius:9px;padding:8px 14px;cursor:pointer}'+
+  '#rdv-root .rv-add:hover{background:#1f4a85}'+
   '#rdv-root .rv-title{font-size:17px;font-weight:800;color:#2a5ea9}'+
   '#rdv-root .rv-sub{font-size:13px;color:#888780}'+
   '#rdv-root .rv-load,#rdv-root .rv-err,#rdv-root .rv-empty{padding:26px;text-align:center;color:#888780;font-size:14px}'+
@@ -564,6 +572,15 @@ const RC_STYLE = '<style>'+
   function RV_route(e){
     if(e.target.closest('#real-contacts-ov')){ RC_route(e); return; }
     const root = e.target.closest('#rdv-root'); if(!root) return;
+    if(e.target.closest('[data-rvadd]')){
+      // v6 : la fenêtre de l'agenda, en RDV client, sur le client affiché (variable client de la fiche).
+      const W = (wwLib.getFrontWindow && wwLib.getFrontWindow()) || window;
+      try { W.__odAgendaCreer = { at: Date.now(), mode: 'rdv' }; } catch (x) {}
+      if (odInEditor()) { try { wwLib.wwApp.goTo('/fr/accueil'); return; } catch (x) {} }
+      try { wwLib.goTo('/fr/accueil'); return; } catch (x) {}
+      try { W.location.href = '/fr/accueil'; } catch (x) {}
+      return;
+    }
     const chipEl = e.target.closest('[data-rvchip]');
     if(chipEl){ S.filter = chipEl.getAttribute('data-rvchip'); RV_writeCache(); RV_render(); return; }
     const card = e.target.closest('[data-rvcycle]');
