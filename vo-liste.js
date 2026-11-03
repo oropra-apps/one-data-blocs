@@ -1,4 +1,9 @@
 // ============================================================================
+//  v41 (04/11/2026) : FICHE VO — le prix d'achat (et les frais de remise en
+//    état réels quand ils sont connus) s'affiche dans « Stock · Achat » pour
+//    les chefs des ventes et leur hiérarchie. La base ne le rend qu'à eux
+//    (od_voit_prix_achat, migration du 04/11) : pour les autres, la ligne
+//    n'apparaît pas.
 //  v40 (03/11/2026) : BAISSES DE PRIX. Chaque baisse du prix public dans
 //    Planet VO² est signalée pendant 15 jours (public.vo_baisses_prix, alimentée
 //    par l'historique od_bronze.pvo_prix_historique) :
@@ -1755,6 +1760,9 @@ OD.define('vo-liste', {
       vfRow('Garantie', esc(garantieTxt(row))) +
       vfRow('1ère MEC', esc(fmtDateFR(row.D_1MEC))) +
       vfRow('Date achat', esc(fmtDateFR(row.D_ACHAT))) +
+      // Prix d'achat : la base ne le rend qu'aux chefs des ventes et à leur hiérarchie (od_voit_prix_achat).
+      (row.PA_HT_TTC != null && row.PA_HT_TTC !== '' ? vfRow('Prix d\'achat', '<b style="color:#1F4A85">' + esc(eur(row.PA_HT_TTC)) + '</b>') : '') +
+      (row.MT_FREVO_R != null && row.MT_FREVO_R !== '' && Number(row.MT_FREVO_R) !== 0 ? vfRow('Frais de remise en état', esc(eur(row.MT_FREVO_R))) : '') +
       vfRow('Destination', dest) +
       vfRow('Prêt à la vente', row.PRET_A_LA_VENTE === 'O' ? 'Oui' : 'Non') +
       vfRow('TVA', esc(row.TVA || '-'))
@@ -3146,6 +3154,9 @@ OD.define('vo-liste', {
       vfRow('Garantie', esc(garantieTxt(row))) +
       vfRow('1ère MEC', esc(fmtDateFR(row.D_1MEC))) +
       vfRow('Date achat', esc(fmtDateFR(row.D_ACHAT))) +
+      // Prix d'achat : la base ne le rend qu'aux chefs des ventes et à leur hiérarchie (od_voit_prix_achat).
+      (row.PA_HT_TTC != null && row.PA_HT_TTC !== '' ? vfRow('Prix d\'achat', '<b style="color:#1F4A85">' + esc(eur(row.PA_HT_TTC)) + '</b>') : '') +
+      (row.MT_FREVO_R != null && row.MT_FREVO_R !== '' && Number(row.MT_FREVO_R) !== 0 ? vfRow('Frais de remise en état', esc(eur(row.MT_FREVO_R))) : '') +
       vfRow('Destination', dest) +
       vfRow('Prêt à la vente', row.PRET_A_LA_VENTE === 'O' ? 'Oui' : 'Non') +
       vfRow('TVA', esc(row.TVA || '-'))
