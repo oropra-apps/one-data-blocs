@@ -1,4 +1,8 @@
 // ============================================================================
+//  v40 (03/11/2026) : création d'un client — BACS D'ABORD, One Data ensuite
+//    (module partagé oropra-bacs-client v3). BACS vérifie le portable et
+//    l'e-mail ; s'il refuse, aucune fiche n'est créée dans One Data et la
+//    fenêtre reste ouverte pour corriger. Aucun autre changement.
 //  v39 (02/11/2026) : CRÉNEAUX RÉCURRENTS. À la création d'un créneau (pas
 //  de livraison, préparation, absence…), « Se répète » : les jours cochés,
 //  toutes les 1 à 4 semaines, de l'heure de début à l'heure de fin, jusqu'à
@@ -2385,7 +2389,7 @@ OD.define('agenda', {
         // de toute façon que BACS soit ouvert chez le vendeur.
         const _bc = await (window.__odBacsClientPret || (window.__odBacsClientPret = new Promise(function (ok) {
               if (window.oropraBacsClient) return ok(window.oropraBacsClient);
-              var sc = document.createElement('script'); sc.src = 'https://cdn.jsdelivr.net/gh/oropra-apps/one-data-blocs@oropra-bacs-client-v2/oropra-bacs-client.js'; sc.async = true;
+              var sc = document.createElement('script'); sc.src = 'https://cdn.jsdelivr.net/gh/oropra-apps/one-data-blocs@oropra-bacs-client-v3/oropra-bacs-client.js'; sc.async = true;
               sc.onload = function () { ok(window.oropraBacsClient || null); };
               sc.onerror = function () { window.__odBacsClientPret = null; ok(null); };
               document.head.appendChild(sc);
@@ -2683,7 +2687,7 @@ OD.define('agenda', {
         if (_m.__bacsSuivi) return;
         (window.__odBacsClientPret || (window.__odBacsClientPret = new Promise(function (ok) {
           if (window.oropraBacsClient) return ok(window.oropraBacsClient);
-          var sc = document.createElement('script'); sc.src = 'https://cdn.jsdelivr.net/gh/oropra-apps/one-data-blocs@oropra-bacs-client-v2/oropra-bacs-client.js'; sc.async = true;
+          var sc = document.createElement('script'); sc.src = 'https://cdn.jsdelivr.net/gh/oropra-apps/one-data-blocs@oropra-bacs-client-v3/oropra-bacs-client.js'; sc.async = true;
           sc.onload = function () { ok(window.oropraBacsClient || null); };
           sc.onerror = function () { window.__odBacsClientPret = null; ok(null); };
           document.head.appendChild(sc);
