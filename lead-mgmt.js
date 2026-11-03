@@ -9,6 +9,10 @@
 //    avec ses leads en attente. Une seule concession pour la marque : elle
 //    est choisie d'office. Bouton « Créer et envoyer à la concession » /
 //    « … au vendeur ».
+//    Orienter un lead existant : le site du lead d'abord (choisi d'office),
+//    puis les autres concessions pilotes, puis celles où le client a déjà un
+//    dossier, puis les autres (plateau_sites) ; « Attribution » affiche la
+//    règle réelle du site choisi au lieu de « Tour de rôle du site ».
 //  v93 (02/11/2026) : tuiles au design One Data (fond bleu très pâle, sans
 //    bordure ni ombre, coins 8 px, chiffres en bleu, aucun rouge ni beige).
 //    Liseré bleu à gauche au survol, seulement sur une tuile cliquable ;
@@ -1213,11 +1217,12 @@
         if (!D.sites) h += '<p class="hint">Chargement des sites…</p>';
         else if (!D.sites.length) h += '<p class="hint">Aucun site de vente trouvé pour cette marque.</p>';
         else {
-          var montrer = D.tousSites ? D.sites : D.sites.filter(function (s, i) { return s.rang < 3 || i < 3 || Number(s.id_site) === Number(D.site); });
+          var montrer = D.tousSites ? D.sites : D.sites.filter(function (s, i) { return s.rang < 4 || i < 3 || Number(s.id_site) === Number(D.site); });
           h += '<div class="sites">' + montrer.map(function (s) {
             return '<label class="site-o"><input type="radio" name="q-site" value="' + s.id_site + '"' + (Number(D.site) === Number(s.id_site) ? ' checked' : '') + '><span><b>' + esc(siteNom(s.site)) + '</b><small>' + esc(s.raison) + '</small></span><em>' + plural(Number(s.en_attente) || 0, 'lead', 'leads') + ' en attente</em></label>';
           }).join('') + '</div>' + (!D.tousSites && montrer.length < D.sites.length ? '<button type="button" class="btn sm ghost" data-a="tous-sites">Voir les ' + D.sites.length + ' sites</button>' : '');
-          h += '<label class="q vend"><span>Vendeur</span><select id="q-vendeur"><option value="">Tour de rôle du site</option>'
+          var siteQ = D.sites.filter(function (s) { return Number(s.id_site) === Number(D.site); })[0] || {};
+          h += '<label class="q vend"><span>Attribution</span><select id="q-vendeur"><option value="">' + esc(siteQ.mode_libelle || 'Pool de la concession (règle d\'attribution du site)') + '</option>'
             + (D.vendeurs || []).map(function (v) { return '<option value="' + v.id_user + '">' + esc(propre(v.nom)) + (Number(v.en_attente) ? ' · ' + v.en_attente + ' en attente' : '') + '</option>'; }).join('')
             + '</select></label>';
         }
