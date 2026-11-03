@@ -115,7 +115,7 @@ OD.define('historique', {
       '<div style="display:flex;align-items:flex-start;justify-content:space-between;gap:8px;">' +
         '<div style="display:flex;flex-direction:column;gap:5px;min-width:0;">' +
           '<div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">' +
-            (item.resultat?'<span style="background:'+chip.bg+';color:'+chip.color+';border:1px solid '+chip.border+';border-radius:999px;padding:2px 10px;font-size:12px;font-weight:600;">'+esc(item.resultat)+'</span>':'') +
+            (item.resultat?'<span style="background:'+chip.bg+';color:'+chip.color+';border:1px solid '+chip.border+';border-radius:999px;padding:2px 10px;font-size:12px;font-weight:600;">'+esc(item.resultat==='Choc'?'RDV':item.resultat)+'</span>':'') +
             '<span style="font-size:11px;color:#9ca3af;">N\u00b0 '+esc(item.id_cycle_com)+'</span></div>' +
           '<div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;"><span style="font-size:11px;color:#6b7280;">\ud83d\udcc5 '+fmtD(item.date_ouverture)+' \u2192 '+fmtD(item.date_fermeture)+'</span><span style="font-size:11px;color:'+dureeColor+';font-weight:500;">'+duree+'</span></div>' +
           (item.agent_principal?'<span style="font-size:11px;color:#374151;font-weight:500;">\ud83d\udc64 '+esc(item.agent_principal)+'</span>':'') +
