@@ -2,6 +2,9 @@
  * oropra-bacs-client.js — création d'un client SUIVIE dans BACS ET dans
  * One Data, partagée                                   v4 (03/11/2026)
  *
+ * Publié sous l'étiquette oropra-bacs-client-v5 (l'étiquette v4 a été
+ * posée par erreur sur l'ancien code v3) : le code est celui de la v4.
+ *
  * v4 : DEMANDE DE CONSENTEMENT et EXTENSION À JOUR.
  *   · En fin de création, le panneau propose « Envoyer la demande de
  *     consentement » (Toyota ou Lexus selon le site) : comme le bouton de
