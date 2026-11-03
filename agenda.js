@@ -1,4 +1,18 @@
 // ============================================================================
+//  v41 (03/11/2026) : retours des séances de coaching.
+//    * L'entrée d'agenda en dit plus : le client, puis le type de RDV, le
+//      véhicule et son immatriculation, puis le commentaire ; l'infobulle donne
+//      type (ou « sans client »), véhicule, immatriculation, VIN, téléphone et
+//      toujours le commentaire (get_calendar_events : extra.vehicule, immat, tel).
+//    * Un événement PASSÉ s'ouvre et se modifie : on peut le déplacer (glisser
+//      ou fenêtre), changer son type, son commentaire, ses invités. Créer dans
+//      le passé reste interdit, et un événement à venir ne se tire pas dans le
+//      passé. Un rendez-vous client passé non conclu ouvre toujours le compte
+//      rendu, dont le lien « Le déplacer » ouvre maintenant la fenêtre.
+//    * Un clic sur un jour (vue Mois, en-tête de jour) propose un créneau par
+//      défaut : le prochain quart d'heure libre aujourd'hui, 9 h un autre jour.
+//      Avant, un clic sur aujourd'hui en vue Mois tombait à 00:00 et était
+//      refusé comme « dans le passé ».
 //  v40 (03/11/2026) : création d'un client — BACS D'ABORD, One Data ensuite
 //    (module partagé oropra-bacs-client v3). BACS vérifie le portable et
 //    l'e-mail ; s'il refuse, aucune fiche n'est créée dans One Data et la
@@ -366,7 +380,7 @@ OD.define('agenda', {
       start: toFc(e.event_start_time), end: toFc(e.event_end_time), allDay: !!e.is_event_all_day,
       backgroundColor: tint(c, estNeutre(e) ? 0.18 : 0.14), borderColor: tint(c, estNeutre(e) ? 0.45 : 0.14),
       textColor: estNeutre(e) ? '#5B6475' : '#1F4A85',
-      editable: (!estNeutre(e) && !!e.can_edit && (e.source_type === 'rdv' || e.source_type === 'bilat') && !isPastSlot(e.event_start_time)),
+      editable: (!estNeutre(e) && !!e.can_edit && (e.source_type === 'rdv' || e.source_type === 'bilat')),
       extendedProps: Object.assign({ _accent: c }, e),
     };
   }
@@ -382,7 +396,7 @@ OD.define('agenda', {
       start: toFc(e.event_start_time), end: toFc(e.event_end_time), allDay: false,
       backgroundColor: f === 'livraison' && !vendeurLivre ? tint(c, 0.20) : tint(c, 0.10), borderColor: tint(c, 0.5), textColor: '#1F4A85',
       classNames: vendeurLivre ? ['ag-livr-vendeur'] : [],
-      editable: !lectureSeule() && (!!e.can_edit && e.source_type === 'rdv' && !isPastSlot(e.event_start_time)),
+      editable: !lectureSeule() && (!!e.can_edit && e.source_type === 'rdv'),
       extendedProps: Object.assign({ _accent: c }, e),
     };
   }
@@ -401,7 +415,7 @@ OD.define('agenda', {
       start: journee ? String(e.event_start_time || '').slice(0, 10) : toFc(e.event_start_time),
       end: journee ? null : toFc(e.event_end_time), allDay: journee,
       backgroundColor: tint(c, 0.16), borderColor: tint(c, 0.16), textColor: '#1F4A85',
-      editable: (!!e.can_edit && (e.source_type === 'rdv' || e.source_type === 'bilat') && !isPastSlot(e.event_start_time)),
+      editable: (!!e.can_edit && (e.source_type === 'rdv' || e.source_type === 'bilat')),
       extendedProps: Object.assign({ _accent: c }, e),
     };
   }
@@ -802,7 +816,6 @@ OD.define('agenda', {
     if (!e || e._provisoire || e._groupe) return null;
     if (estNeutre(e)) return 'Activité BACS : elle se déplace dans BACS.';
     if (e.source_type === 'rpv') return 'Rapport vendeur : il ne se déplace pas dans l\u2019agenda.';
-    if (isPastSlot(e.event_start_time)) return 'Événement passé : il ne se déplace plus.';
     if (e.source_type === 'bilat' && !e.can_edit) return 'Bilatérale : seul le manager qui l\u2019a posée peut la déplacer.';
     if (e.source_type === 'rdv' && !e.can_edit) return 'RDV de ' + ((e.extra && e.extra.proprietaire) || 'un collègue') + ' : seul son propriétaire peut le déplacer.';
     return null;
@@ -1025,7 +1038,7 @@ OD.define('agenda', {
     }
     if (comm) h += '<div><div class="alv-l">' + (estLiv ? 'Commentaire BACS' : 'Commentaire') + '</div><div class="alv-cm">' + esc(comm) + '</div></div>';
     h += '</div><div class="alv-f">'
-      + (!ro && p.can_edit && !isPastSlot(p.event_start_time) ? '<button type="button" class="pri" data-edit>Modifier le rendez-vous</button>' : '')
+      + (!ro && p.can_edit ? '<button type="button" class="pri" data-edit>Modifier le rendez-vous</button>' : '')
       + (!ro && p.can_edit && isPastSlot(p.event_start_time) && Number(p.id_client) > 0 ? '<button type="button" class="pri" data-edit>Compte rendu</button>' : '')
       + '<button type="button" data-print>Imprimer la fiche</button><button type="button" data-x>Fermer</button></div></div>';
     ov = d.createElement('div'); ov.id = 'agenda-livr-ov'; ov.innerHTML = h;
@@ -1600,6 +1613,9 @@ OD.define('agenda', {
 #agenda-root .fc .fc-event.ag-aconclure .fc-event-main{color:#7a5207 !important;font-weight:800 !important}
 /* La pastille vit dans le flux du titre : jamais decoupee, jamais dependante
    de la largeur du creneau. */
+#agenda-root .fc .ag-det{font-size:10.5px;font-weight:500;opacity:.85;line-height:1.25;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+#agenda-root .fc .ag-det.ag-com{font-style:italic;font-weight:400}
+#agenda-root .fc .fc-timegrid-event-short .ag-det{display:none}
 #agenda-root .fc .ag-aconclure-mk{display:inline-block;margin-right:4px;
   width:13px;height:13px;border-radius:50%;background:#d2941f;color:#fff;
   font:800 10px/13px system-ui,sans-serif;text-align:center;vertical-align:-1px;
@@ -1799,11 +1815,13 @@ OD.define('agenda', {
     const qui = (p.source_type === 'rdv' && xx.proprietaire) ? ('Agenda de ' + xx.proprietaire) : '';
     const pose = xx.pose_par ? ('Posé par ' + xx.pose_par) : '';
     t.innerHTML = '<div class="agt-card"><div class="agt-title"><span class="agt-dot" style="background:' + accent + '"></span><span>' + esc(main) + '</span></div>'
-      + (sub ? '<div class="agt-type">' + esc(sub) + '</div>' : '')
+      + (sub ? '<div class="agt-type">' + esc(sub) + (cn ? '' : ' · sans client') + '</div>' : '')
       + (qui || pose ? '<div class="agt-type">' + esc([qui, pose].filter(Boolean).join(' · ')) + '</div>' : '')
-      + (xx.vin ? '<div class="agt-type">VIN ' + esc(xx.vin) + '</div>' : '')
+      + (xx.vehicule ? '<div class="agt-type">🚗 ' + esc(xx.vehicule) + '</div>' : '')
+      + (xx.vin || xx.immat ? '<div class="agt-type">' + esc([xx.immat, xx.vin ? 'VIN ' + xx.vin : ''].filter(Boolean).join(' · ')) + '</div>' : '')
+      + (xx.tel ? '<div class="agt-type">📞 ' + esc(xx.tel) + '</div>' : '')
       + '<div class="agt-time">' + esc(range) + '</div>'
-      + (desc ? '<div class="agt-desc">' + esc(desc) + '</div>' : '') + '</div>';
+      + '<div class="agt-desc">' + (desc ? esc(desc) : '<i>Pas de commentaire</i>') + '</div></div>';
     t.style.display = 'block';
     const r = el.getBoundingClientRect(); const tr = t.getBoundingClientRect();
     const vw = frontWin().innerWidth || window.innerWidth;
@@ -1954,6 +1972,26 @@ OD.define('agenda', {
         .concat(vueLivr() && livInfo(arg.event.extendedProps).livre_par === 'vendeur' && familleEvt(arg.event.extendedProps) === 'livraison' ? ['ag-livr-vendeur'] : []),
       eventDidMount: (info) => {
         const c = info.event.extendedProps._accent; if (c) { info.el.style.borderLeft = '3px solid ' + c; }
+        // v41 : sous le titre, le type de RDV (s'il n'est pas déjà le titre), le
+        // véhicule et son immatriculation, puis le commentaire.
+        try {
+          const xp0 = info.event.extendedProps || {};
+          if (xp0.source_type === 'rdv' && !xp0._groupe) {
+            const x0 = xp0.extra || {};
+            const aClient = !!clientName(xp0);
+            const l1 = [aClient ? xp0.title : '', x0.vehicule, x0.immat].filter(Boolean).join(' · ');
+            const l2 = String(xp0.description || '').replace(/\s+/g, ' ').trim();
+            const hote = info.el.querySelector('.fc-event-title-container') || info.el.querySelector('.fc-list-event-title');
+            if (hote && !hote.querySelector('.ag-det')) {
+              [l1, l2].forEach((t, i) => {
+                if (!t) return;
+                const sd = document.createElement('div'); sd.className = 'ag-det' + (i ? ' ag-com' : '');
+                sd.textContent = t.length > 90 ? t.slice(0, 88) + '…' : t;
+                hote.appendChild(sd);
+              });
+            }
+          }
+        } catch (e) {}
         // v32 : pastille « BACS » tant qu'un geste n'est pas écrit dans BACS.
         try {
           const xp = info.event.extendedProps || {};
@@ -2911,6 +2949,7 @@ OD.define('agenda', {
               || ('Client ' + (p.id_client != null ? p.id_client : '')),
       type: ev.title || '', quand: ev.startStr || p.event_start_time || '',
       deja: !!p.status,                 // status = TRAITE, pose par get_calendar_events
+      __ev: ev,
       preuve: null, chargement: true,
       issue: 'vu', deg: null, relance: null, motif: CR_MOTIFS[0],
       comment: '', saving: false, err: '', avis: ''
@@ -3115,9 +3154,12 @@ OD.define('agenda', {
     if (g('cr-deplacer')) g('cr-deplacer').addEventListener('click', () => {
       // Deplacer, c'est l'affaire de l'agenda : on referme et on laisse la main
       // au glisser-deposer, qui sait deja le faire.
+      // v41 : ouvre la fenêtre de modification (date, heure, type, commentaire).
+      const evCr = crs && crs.__ev;
       closeCR();
-      showAgError('Déplacez le rendez-vous directement dans l’agenda.',
-                  'Faites-le glisser sur son nouveau créneau : il garde son identité et redevient à venir.');
+      if (evCr) openEdit(evCr, true);
+      else showAgError('Déplacez le rendez-vous directement dans l’agenda.',
+                       'Faites-le glisser sur son nouveau créneau : il garde son identité et redevient à venir.');
     });
     if (g('cr-save')) g('cr-save').addEventListener('click', crSave);
     // Le lecteur audio, repris de la fiche client.
@@ -3213,7 +3255,18 @@ OD.define('agenda', {
   function plusJours(dstr, n) { const a = String(dstr || '').split('-').map(Number); const d = new Date(a[0], (a[1] || 1) - 1, (a[2] || 1) + n); return ymd(d); }
   function repDefaut(dstr) { return { on: false, jours: dstr ? [isoJour(dstr)] : [1], intervalle: 1, au: dstr ? plusJours(dstr, 27) : '' }; }
   const JOURS_REP = [[1, 'L', 'lundi'], [2, 'M', 'mardi'], [3, 'M', 'mercredi'], [4, 'J', 'jeudi'], [5, 'V', 'vendredi'], [6, 'S', 'samedi'], [7, 'D', 'dimanche']];
+  // v41 : prochain créneau libre aujourd'hui (quart d'heure suivant, +10 min de marge).
+  function prochainCreneau() { const d = new Date(Date.now() + 10 * 60000); const m = Math.ceil(d.getMinutes() / 15) * 15; d.setMinutes(m, 0, 0); return String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0'); }
   function openCreate(sel) {
+    // v41 : un clic sur un JOUR (vue Mois) n'a pas d'heure — on propose un créneau par défaut.
+    if (sel && sel.startStr && !/T\d\d:\d\d/.test(sel.startStr)) {
+      const j = sel.startStr.slice(0, 10);
+      if (j < agToday()) { try { calendar && calendar.unselect(); } catch (e) {} hideTip(); showAgError('Impossible de placer un \u00e9v\u00e9nement dans le pass\u00e9.', 'Choisis un jour \u00e0 partir d\u2019aujourd\u2019hui.'); return; }
+      let h = j === agToday() ? prochainCreneau() : '09:00';
+      if (j === agToday() && h < '08:00') h = '08:00';
+      if (j === agToday() && h >= '23:45') { showAgError('La journée est terminée.', 'Choisis un autre jour.'); return; }
+      sel = { startStr: j + 'T' + h + ':00', start: null, end: null };
+    }
     if (isPastSlot(sel.startStr || '')) { try { calendar && calendar.unselect(); } catch (e) {} hideTip(); showAgError('Impossible de placer un \u00e9v\u00e9nement dans le pass\u00e9.', 'Choisis un cr\u00e9neau \u00e0 partir de maintenant.'); return; }
     const startStr = sel.startStr || '';
     const date = startStr.slice(0, 10) || '';
@@ -3233,7 +3286,7 @@ OD.define('agenda', {
     renderCreate();
   }
   // Ouverture en \u00c9DITION depuis un clic sur un event existant.
-  function openEdit(ev) {
+  function openEdit(ev, forcer) {
     const p = ev.extendedProps || {};
     const st = String(p.source_type || '');
     if (st === 'bilat' && !p.can_edit) return;            // bilat\u00e9rale : lecture seule c\u00f4t\u00e9 vendeur
@@ -3246,10 +3299,11 @@ OD.define('agenda', {
     // ouvre desormais le COMPTE RENDU — a venir on modifie, passe on conclut.
     // Un creneau sans client n'a rien a conclure. Une bilaterale passee
     // ouvre sa fiche de realisation (v21) : avant, le clic restait muet.
-    if (isPastSlot(ev.startStr || '') || isPastSlot(p.event_start_time || '')) {
-      if (st === 'rdv' && Number(p.id_client) > 0) { openCompteRendu(ev); }
-      else if (st === 'bilat') { openBilatPassee(ev); }
-      return;
+    // v41 : un rendez-vous passé AVEC client et pas encore conclu ouvre le
+    // compte rendu ; tout autre événement passé s'ouvre en modification.
+    if (!forcer && (isPastSlot(ev.startStr || '') || isPastSlot(p.event_start_time || ''))) {
+      if (st === 'rdv' && resteAConclure(p)) { openCompteRendu(ev); return; }
+      if (st === 'bilat') { openBilatPassee(ev); return; }
     }
     if (st !== 'rdv' && st !== 'bilat') return;            // rpv : non \u00e9ditable ici
     // v28 : RDV d'un collègue où l'on est invité — lecture seule.
@@ -3569,7 +3623,8 @@ OD.define('agenda', {
       s.invites = (s.invites || []).concat([Number(CACHED_UID)]);
     }
     const startStr = s.date + ' ' + s.time + ':00';
-    if (isPastSlot(startStr)) { s.err = 'Date dans le pass\u00e9 : choisis un cr\u00e9neau \u00e0 partir de maintenant.'; return renderCreate(); }
+    // v41 : la création reste interdite dans le passé ; un événement déjà passé se modifie et se repositionne.
+    if (isPastSlot(startStr) && !(s.editing && isPastSlot(s.startInit || ''))) { s.err = 'Date dans le pass\u00e9 : choisis un cr\u00e9neau \u00e0 partir de maintenant.'; return renderCreate(); }
     const endStr = endStrFrom(s.date, s.time, s.dur);
     const dur = fmtDuree(s.dur);
     try {
@@ -3721,7 +3776,9 @@ OD.define('agenda', {
     const mins = (ev.end && ev.start) ? Math.max(15, Math.round((ev.end - ev.start) / 60000)) : 30;
     const date = (ev.startStr || '').slice(0, 10); const time = (ev.startStr || '').slice(11, 16);
     const startStr = date + ' ' + time + ':00';
-    if (isPastSlot(startStr)) { try { arg.revert(); } catch (x) {} showAgError('D\u00e9placement impossible', 'On ne peut pas d\u00e9placer un \u00e9v\u00e9nement dans le pass\u00e9.'); return; }
+    // v41 : un événement déjà passé se repositionne librement ; un événement à venir ne se tire pas dans le passé.
+    const etaitPasse = isPastSlot(p.event_start_time || '') || isPastSlot((arg.oldEvent && arg.oldEvent.startStr) || '');
+    if (isPastSlot(startStr) && !etaitPasse) { try { arg.revert(); } catch (x) {} showAgError('D\u00e9placement impossible', 'On ne peut pas d\u00e9placer un \u00e9v\u00e9nement \u00e0 venir dans le pass\u00e9.'); return; }
     const endStr = endStrFrom(date, time, mins);
     const dur = fmtDuree(mins);
     try {
