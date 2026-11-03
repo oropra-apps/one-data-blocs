@@ -1,4 +1,10 @@
 // ============================================================================
+//  v78 (04/11/2026) : création d'une SOCIÉTÉ comme dans BACS — module partagé
+//    oropra-bacs-client v6 : la société est créée dans BACS d'abord (compte
+//    Business Account), puis dans One Data ; le panneau final rappelle de lui
+//    désigner un interlocuteur (onglet Entreprise de la fiche). Actif quand
+//    la base l'active (societe_ecrire_bacs) ; sinon comportement inchangé.
+//    Aucun autre changement.
 //  v77 (04/11/2026) : HISTORIQUE DU VÉHICULE — la barre « Achat du VO »
 //    porte le prix d'achat, pour les chefs des ventes et leur hiérarchie.
 //  v76 (04/11/2026) : FICHE VO — le prix d'achat (et les frais de remise en
@@ -2332,7 +2338,7 @@ OD.define('kanban', {
         // de toute façon que BACS soit ouvert chez le vendeur.
         const _bc = await (window.__odBacsClientPret || (window.__odBacsClientPret = new Promise(function (ok) {
               if (window.oropraBacsClient) return ok(window.oropraBacsClient);
-              var sc = document.createElement('script'); sc.src = 'https://cdn.jsdelivr.net/gh/oropra-apps/one-data-blocs@oropra-bacs-client-v5/oropra-bacs-client.js'; sc.async = true;
+              var sc = document.createElement('script'); sc.src = 'https://cdn.jsdelivr.net/gh/oropra-apps/one-data-blocs@oropra-bacs-client-v6/oropra-bacs-client.js'; sc.async = true;
               sc.onload = function () { ok(window.oropraBacsClient || null); };
               sc.onerror = function () { window.__odBacsClientPret = null; ok(null); };
               document.head.appendChild(sc);
@@ -2708,7 +2714,7 @@ OD.define('kanban', {
         if (_m.__bacsSuivi) return;
         (window.__odBacsClientPret || (window.__odBacsClientPret = new Promise(function (ok) {
           if (window.oropraBacsClient) return ok(window.oropraBacsClient);
-          var sc = document.createElement('script'); sc.src = 'https://cdn.jsdelivr.net/gh/oropra-apps/one-data-blocs@oropra-bacs-client-v5/oropra-bacs-client.js'; sc.async = true;
+          var sc = document.createElement('script'); sc.src = 'https://cdn.jsdelivr.net/gh/oropra-apps/one-data-blocs@oropra-bacs-client-v6/oropra-bacs-client.js'; sc.async = true;
           sc.onload = function () { ok(window.oropraBacsClient || null); };
           sc.onerror = function () { window.__odBacsClientPret = null; ok(null); };
           document.head.appendChild(sc);
