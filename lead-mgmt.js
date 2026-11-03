@@ -1,6 +1,14 @@
 // ============================================================================
 //  LEAD MANAGEMENT — module One Data (OD.define 'lead-mgmt')
-//  VERSION TEAM COLIN (v93) — déploiement CIBLÉ (publish-targets :
+//  VERSION TEAM COLIN (v94) — déploiement CIBLÉ (publish-targets :
+//  v94 (03/11/2026) : « Nouveau lead » de la Vroom Team aligné sur celui des
+//    Appels entrants : seules les CONCESSIONS PILOTES sont proposées (réglage
+//    appel_entrant_sites, contrôlé aussi par plateau_lead_creer), chacune avec
+//    sa règle d'attribution ; le choix « Pool de la concession » (règle réelle
+//    du site : libre-service, automatique, chef des ventes) ou un vendeur
+//    avec ses leads en attente. Une seule concession pour la marque : elle
+//    est choisie d'office. Bouton « Créer et envoyer à la concession » /
+//    « … au vendeur ».
 //  v93 (02/11/2026) : tuiles au design One Data (fond bleu très pâle, sans
 //    bordure ni ombre, coins 8 px, chiffres en bleu, aucun rouge ni beige).
 //    Liseré bleu à gauche au survol, seulement sur une tuile cliquable ;
@@ -1297,6 +1305,7 @@
         try { S.sitesCreation = await rpc('plateau_sites_creation') || []; } catch (e) { S.sitesCreation = []; toast(messageErreur(e), true); }
         if (S.dr && S.dr.mode === 'creer') renderCreer();
       }
+      if (siteUniqueCreer()) { renderCreer(); chargerVendeursCreer(); }
     }
     function renderCreer() {
       var D = S.dr, f = D.form || {};
@@ -1334,12 +1343,13 @@
       h += '<section><h3>Concession *</h3>';
       var ss = (S.sitesCreation || []).filter(function (s) { return String(s.marque || '').toUpperCase() === String(f.marque || '').toUpperCase(); });
       if (!S.sitesCreation) h += '<p class="hint">Chargement des concessions…</p>';
-      else if (!ss.length) h += '<p class="hint">Aucune concession ' + esc(f.marque || '') + ' trouvée.</p>';
+      else if (!ss.length) h += '<p class="hint">Aucune concession pilote ' + esc(f.marque || '') + ' : la Vroom Team ne crée des leads que pour les concessions pilotes.</p>';
       else {
         h += '<div class="sites">' + ss.map(function (s) {
-          return '<label class="site-o"><input type="radio" name="c-site" value="' + s.id_site + '"' + (String(f.id_site) === String(s.id_site) ? ' checked' : '') + '><span><b>' + esc(siteNom(s.site)) + '</b><small>' + plural(Number(s.vendeurs) || 0, 'vendeur', 'vendeurs') + (s.file_bacs ? '' : ' · file BACS inconnue : choisir un vendeur') + '</small></span><em>' + plural(Number(s.en_attente) || 0, 'lead', 'leads') + ' en attente</em></label>';
+          return '<label class="site-o"><input type="radio" name="c-site" value="' + s.id_site + '"' + (String(f.id_site) === String(s.id_site) ? ' checked' : '') + '><span><b>' + esc(siteNom(s.site)) + '</b><small>' + plural(Number(s.vendeurs) || 0, 'vendeur', 'vendeurs') + (s.mode_attribution === 'libre' ? ' · Pool libre-service' : s.mode_attribution === 'auto' ? ' · attribution automatique' : s.mode_attribution === 'manuel' ? ' · attribution par le chef des ventes' : '') + (s.file_bacs ? '' : ' · file BACS inconnue : choisir un vendeur') + '</small></span><em>' + plural(Number(s.en_attente) || 0, 'lead', 'leads') + ' en attente</em></label>';
         }).join('') + '</div>';
-        if (f.id_site) h += '<label class="q vend"><span>Vendeur</span><select id="c-vend"><option value="">Tour de rôle de la concession</option>'
+        var siteC = ss.filter(function (s) { return String(s.id_site) === String(f.id_site); })[0] || {};
+        if (f.id_site) h += '<label class="q vend"><span>Attribution</span><select id="c-vend"><option value="">' + esc(siteC.mode_libelle || 'Pool de la concession (règle d\'attribution du site)') + '</option>'
           + (D.vendeurs || []).map(function (v) { return '<option value="' + v.id_user + '"' + (String(f.id_vendeur) === String(v.id_user) ? ' selected' : '') + '>' + esc(propre(v.nom)) + (Number(v.en_attente) ? ' · ' + v.en_attente + ' en attente' : '') + '</option>'; }).join('') + '</select></label>';
       }
       h += '</section>';
@@ -1351,10 +1361,18 @@
       }
       h += '</div><footer class="dr-f"><div class="row">'
         + (D.doublons && D.doublons.length ? '<button type="button" class="btn pri" data-a="creer-forcer"' + dis() + '>Créer quand même</button>'
-          : '<button type="button" class="btn pri" data-a="creer-envoyer"' + dis() + '>Créer et envoyer au vendeur</button>')
+          : '<button type="button" class="btn pri" data-a="creer-envoyer"' + dis() + '>' + (f.id_vendeur ? 'Créer et envoyer au vendeur' : 'Créer et envoyer à la concession') + '</button>')
         + '<button type="button" class="btn" data-a="close">Annuler</button></div>'
         + '<div class="row pied"><span class="hint">' + (bloque() ? 'Bloqué : ouvrez BACS dans un onglet de ce navigateur.' : 'Votre onglet BACS passe sur la concession le temps de la création, puis revient.') + '</span></div></footer>';
       var top = $drawer.scrollTop; $drawer.innerHTML = h; $drawer.scrollTop = top;
+    }
+    // v94 : une seule concession pilote pour la marque -> choisie d'office.
+    function siteUniqueCreer() {
+      var D = S.dr; if (!D || D.mode !== 'creer' || !S.sitesCreation) return false;
+      var f = D.form || {};
+      var ss = S.sitesCreation.filter(function (s) { return String(s.marque || '').toUpperCase() === String(f.marque || '').toUpperCase(); });
+      if (ss.length === 1 && String(f.id_site) !== String(ss[0].id_site)) { f.id_site = String(ss[0].id_site); f.id_vendeur = null; return true; }
+      return false;
     }
     function memoCreer() { if (S.dr && S.dr.mode === 'creer' && S.dr.etape !== 'suivi') S.dr.form = lireCreer(); }
     async function chargerVendeursCreer() {
@@ -1782,9 +1800,11 @@
         var d = $drawer.querySelector('#r-date'); if (d) d.hidden = t.value !== 'autre';
       } else if (S.dr && S.dr.mode === 'creer' && (t.name === 'c-site' || t.id === 'c-marque')) {   // v81
         memoCreer();
-        if (t.id === 'c-marque') { S.dr.form.id_site = null; S.dr.form.id_vendeur = null; }
+        if (t.id === 'c-marque') { S.dr.form.id_site = null; S.dr.form.id_vendeur = null; siteUniqueCreer(); }
         S.dr.vendeurs = []; S.dr.doublons = null; renderCreer();
-        if (t.name === 'c-site') await chargerVendeursCreer();
+        if (t.name === 'c-site' || S.dr.form.id_site) await chargerVendeursCreer();
+      } else if (S.dr && S.dr.mode === 'creer' && t.id === 'c-vend') {   // v94 : libellé du bouton
+        memoCreer(); renderCreer();
       } else if (S.dr && S.dr.mode === 'creer' && /^c-(tel|mail|prenom|nom)$/.test(t.id)) {
         memoCreer(); if (S.dr.doublons) { S.dr.doublons = null; renderCreer(); }
       } else if (S.dr && S.dr.mode === 'corriger' && t.id === 'k-statut') {
