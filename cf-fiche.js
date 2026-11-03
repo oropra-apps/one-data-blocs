@@ -8,6 +8,10 @@
 //      partagé oropra-bacs-client (v5), sinon la raison (pas de portable, pas
 //      de compte BACS, extension à mettre à jour). Bloctel, Stop com et NPAI
 //      sur la même bande. Synthèse serveur : client_consentement_synthese.
+//    · Une marque pas encore « consenti » : à l'ouverture, le compte BACS est
+//      RELU (client_consentement_relire, au plus toutes les 30 min) pour que
+//      la réponse du client — même donnée dans BACS — redescende ; la fiche
+//      se met à jour d'elle-même (relecture exécutée par l'extension 3.3.4).
 //    · FICHE en lecture : des valeurs lisibles (plus de cases grisées),
 //      téléphone et e-mail cliquables, adresse sur une ligne, cartes en deux
 //      colonnes ; une carte entièrement vide se réduit à « Non renseigné ».
@@ -859,9 +863,16 @@ function render() {
 // v11 : synthèse par marque (client_consentement_synthese) + détail ligne à
 // ligne (client_consentement), chargés une fois par client.
 const CONSENT_CACHE = {};
-async function chargerConsent(idvu, forcer) {
-  if (idvu == null) return null;
-  if (!forcer && CONSENT_CACHE[idvu]) return CONSENT_CACHE[idvu];
+const CONSENT_EN_COURS = {};
+function chargerConsent(idvu, forcer) {
+  if (idvu == null) return Promise.resolve(null);
+  if (!forcer && CONSENT_CACHE[idvu]) return Promise.resolve(CONSENT_CACHE[idvu]);
+  if (!forcer && CONSENT_EN_COURS[idvu]) return CONSENT_EN_COURS[idvu];
+  const p = lireConsent(idvu).finally(() => { if (CONSENT_EN_COURS[idvu] === p) delete CONSENT_EN_COURS[idvu]; });
+  CONSENT_EN_COURS[idvu] = p;
+  return p;
+}
+async function lireConsent(idvu) {
   const res = { synth: null, rows: [] };
   try {
     const [a, b] = await Promise.all([
@@ -918,7 +929,9 @@ async function peindreConsent(forcer) {
   if (!z || !state.client || String(state.client.IDVu) !== String(idvu)) return;
   const s = data && data.synth;
   const c = state.client;
+  const relit = s && s.relecture && s.relecture.le && (Date.now() - new Date(s.relecture.le).getTime()) < 10 * 60000;
   let h = '<div class="cs-h"><h3>Consentements RGPD</h3><small>' +
+    (relit ? '<span class="cf-spinner" style="vertical-align:-2px;margin-right:5px"></span>Relecture du compte BACS en cours · ' : '') +
     (s && s.maj ? 'Reflétés de BACS · à jour au ' + esc(dateHeureFr(s.maj)) : 'Reflétés de BACS') +
     ' · <button type="button" class="cs-lien" data-cs-detail>Voir le détail</button></small></div>';
   if (!s) h += '<div class="cs-charge">Consentements indisponibles pour le moment.</div>';
@@ -945,6 +958,36 @@ async function peindreConsent(forcer) {
   z.querySelectorAll('[data-cf-field]').forEach(lierChamp);
   const det = z.querySelector('[data-cs-detail]'); if (det) det.addEventListener('click', openConsentModal);
   z.querySelectorAll('[data-cs-demander]').forEach(b => b.addEventListener('click', () => demanderConsent(b.getAttribute('data-cs-site'))));
+  relireSiBesoin(idvu, s);
+}
+
+// v11 : une marque pas encore « consenti » -> le compte BACS est relu (geste
+// compte_relire, extension 3.3.4), au plus une fois toutes les 30 min par
+// client ; la fiche se met à jour quand la réponse redescend.
+const RELU = {};
+let suiviRelecture = null;
+async function relireSiBesoin(idvu, s) {
+  if (idvu == null || !s || s.sans_bacs || !s.compte || RELU[idvu]) return;
+  if (!(s.marques || []).some(m => m.statut !== 'consenti')) return;
+  RELU[idvu] = true;
+  let r = null;
+  try { const x = await ctx.supabase.rpc('client_consentement_relire', { p_id_client: Number(idvu) }); r = x && x.data; } catch (e) {}
+  if (!r || !(r.programmee || r.motif === 'recente')) return;
+  if (r.programmee) peindreConsent(true);
+  suivreRelecture(idvu, s.maj);
+}
+function suivreRelecture(idvu, majAvant) {
+  if (suiviRelecture) clearInterval(suiviRelecture);
+  let tours = 0;
+  suiviRelecture = setInterval(async () => {
+    tours++;
+    if (!state.client || String(state.client.IDVu) !== String(idvu) || tours > 12) { clearInterval(suiviRelecture); suiviRelecture = null; return; }
+    const d = await chargerConsent(idvu, true);
+    const s2 = d && d.synth;
+    const fini = !s2 || !s2.relecture || (s2.maj && s2.maj !== majAvant);
+    if (fini) { clearInterval(suiviRelecture); suiviRelecture = null; }
+    if (fini || tours === 1) peindreConsent();
+  }, 20000);
 }
 
 function chargerBacsClient() {
