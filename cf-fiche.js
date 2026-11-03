@@ -1,4 +1,20 @@
 // ============================================================================
+//  v11 (03/11/2026) : nouveau design de la fiche, bloc consentements refait.
+//    · CONSENTEMENTS en bas de fiche, dépliés (sans survol ni clic), une carte PAR MARQUE (Toyota, Lexus) :
+//      état global en couleur (consenti / en attente / refusé / partiel /
+//      inconnu), date de la réponse ou de la dernière demande envoyée, les 8
+//      canaux en pastilles ; bouton « Demander le consentement » (ou
+//      « Relancer ») quand c'est possible — SMS envoyé par BACS via le module
+//      partagé oropra-bacs-client (v5), sinon la raison (pas de portable, pas
+//      de compte BACS, extension à mettre à jour). Bloctel, Stop com et NPAI
+//      sur la même bande. Synthèse serveur : client_consentement_synthese.
+//    · FICHE en lecture : des valeurs lisibles (plus de cases grisées),
+//      téléphone et e-mail cliquables, adresse sur une ligne, cartes en deux
+//      colonnes ; une carte entièrement vide se réduit à « Non renseigné ».
+//      « Modifier la fiche » en haut ; en modification, les champs reviennent.
+//    · Fenêtre de détail refaite : une colonne par marque, date de chaque
+//      réponse, Bloctel et dates RGPD, lien vers le compte BACS.
+//    Logique d'enregistrement, doublons, adresse BAN et SIRENE : inchangées.
 //  v10 (03/11/2026) : retour des séances de coaching. Le bouton
 //  « Consentements » dit d'un coup d'œil où en est le client : VERT quand
 //  toutes ses réponses sont connues (consenti ou refusé), ORANGE tant qu'une
@@ -474,115 +490,207 @@ const ICON_CHECK = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" 
 const ICON_WARN = '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12" y2="17"/></svg>';
 const ICON_P = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/></svg>';
 
+const ICON_CONS_OK = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>';
+const ICON_CONS_ATT = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><polyline points="12 7 12 12 15 14"/></svg>';
+const ICON_CONS_KO = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"><line x1="6" y1="6" x2="18" y2="18"/><line x1="18" y1="6" x2="6" y2="18"/></svg>';
+const ICON_CONS_NUL = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"><line x1="7" y1="12" x2="17" y2="12"/></svg>';
+const ICON_SMS = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>';
+
 const STYLE = `<style>
-#oropra-client-fiche{font-family:"Nunito Sans",system-ui,sans-serif;color:#2a5ea9}
+#oropra-client-fiche{font-family:"Nunito Sans",system-ui,sans-serif;color:#1F4A85}
 #oropra-client-fiche *{box-sizing:border-box}
-#oropra-client-fiche .cf-section{margin-bottom:22px;border:1px solid #e3edf9;border-radius:8px;padding:18px 20px}
-#oropra-client-fiche .cf-section-title{font-size:11px;text-transform:uppercase;letter-spacing:.4px;color:#7a98c5;margin:0 0 12px;font-weight:600}
-#oropra-client-fiche .cf-grid{display:grid;grid-template-columns:1fr 1fr 1fr;gap:14px 16px}
-#oropra-client-fiche .cf-grid .full{grid-column:1 / -1}
-#oropra-client-fiche .cf-grid .two{grid-column:span 2}
-#oropra-client-fiche .cf-field{display:flex;flex-direction:column}
-#oropra-client-fiche .cf-label{font-size:11px;color:#7a98c5;margin-bottom:4px;text-transform:uppercase;letter-spacing:.4px;font-weight:500}
-#oropra-client-fiche .cf-required{color:#c63a3a;margin-left:2px}
-#oropra-client-fiche .cf-input{border:1px solid #d9e3f2;border-radius:6px;padding:11px 13px;font-size:13px;color:#2a5ea9;outline:none;background:#fff;font-family:inherit;width:100%}
+/* barre d'actions */
+#oropra-client-fiche .cf-bar{display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:14px;flex-wrap:wrap}
+#oropra-client-fiche .cf-bar-meta{font-size:12px;color:#7a98c5}
+#oropra-client-fiche .cf-bar-meta b{color:#5a7ba8;font-weight:700}
+#oropra-client-fiche .cf-bar-actions{display:flex;gap:8px}
+/* cartes */
+#oropra-client-fiche .cf-cols{display:grid;grid-template-columns:1fr 1fr;gap:16px;align-items:start}
+#oropra-client-fiche .cf-section{background:#fff;border:1px solid #e3edf9;border-radius:14px;padding:16px 18px}
+#oropra-client-fiche .cf-section.full{grid-column:1 / -1}
+#oropra-client-fiche .cf-section-title{display:flex;align-items:center;justify-content:space-between;gap:8px;font-size:11.5px;text-transform:uppercase;letter-spacing:.06em;color:#7a98c5;margin:0 0 12px;font-weight:800}
+#oropra-client-fiche .cf-section.vide .cf-section-title{margin:0}
+#oropra-client-fiche .cf-section-vide{font-size:12.5px;color:#9fb3d1;font-weight:600;text-transform:none;letter-spacing:0}
+#oropra-client-fiche .cf-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px 16px}
+#oropra-client-fiche .cf-grid .full,#oropra-client-fiche .cf-grid .two{grid-column:1 / -1}
+#oropra-client-fiche .cf-field{display:flex;flex-direction:column;min-width:0}
+#oropra-client-fiche .cf-label{font-size:11px;color:#7a98c5;margin-bottom:3px;font-weight:700}
+#oropra-client-fiche .cf-required{color:#e24b4a;margin-left:2px}
+#oropra-client-fiche .cf-val{font-size:14px;font-weight:700;color:#1F4A85;line-height:1.35;overflow-wrap:anywhere;min-height:19px}
+#oropra-client-fiche .cf-val a{color:#2a5ea9;text-decoration:none}
+#oropra-client-fiche .cf-val a:hover{text-decoration:underline}
+#oropra-client-fiche .cf-val.multi{white-space:pre-wrap;font-weight:600;font-size:13.5px}
+#oropra-client-fiche .cf-vide{color:#c4d2e7;font-weight:600}
+#oropra-client-fiche .cf-ok-mini{display:inline-block;font-size:11px;font-weight:800;color:#2f8f77;background:#e9f7f3;border-radius:6px;padding:1px 6px;margin-left:6px;vertical-align:1px}
+#oropra-client-fiche .cf-input{border:1.5px solid #d9e3f2;border-radius:9px;padding:9px 11px;font-size:13.5px;font-weight:600;color:#1F4A85;outline:none;background:#fff;font-family:inherit;width:100%}
 #oropra-client-fiche .cf-input:focus{border-color:#2a5ea9}
-#oropra-client-fiche .cf-input::placeholder{color:#7a98c5}
-#oropra-client-fiche .cf-input[disabled]{background:#f7faff;color:#2a5ea9;opacity:1;cursor:default;border-color:#eaf0f9}
-#oropra-client-fiche textarea.cf-input{resize:vertical;min-height:64px;font-family:inherit}
+#oropra-client-fiche .cf-input::placeholder{color:#9fb3d1}
+#oropra-client-fiche textarea.cf-input{resize:vertical;min-height:70px}
 #oropra-client-fiche select.cf-input{cursor:pointer;background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%237a98c5' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><polyline points='6 9 12 15 18 9'/></svg>");background-repeat:no-repeat;background-position:right 10px center;background-size:14px;appearance:none;padding-right:32px}
-#oropra-client-fiche select.cf-input[disabled]{cursor:default}
-#oropra-client-fiche .cf-checkbox{display:flex;align-items:center;gap:8px;font-size:13px;color:#2a5ea9;cursor:pointer;padding:11px 0}
-#oropra-client-fiche .cf-checkbox.is-stop-com{color:#2a5ea9}
-#oropra-client-fiche .cf-checkbox.is-stop-com input{accent-color:#2a5ea9}
-#oropra-client-fiche .cf-checkbox.is-stop-com.is-checked,
-#oropra-client-fiche .cf-checkbox.is-stop-com:has(input:checked){color:#c63a3a}
-#oropra-client-fiche .cf-checkbox.is-stop-com.is-checked input,
-#oropra-client-fiche .cf-checkbox.is-stop-com:has(input:checked) input{accent-color:#c63a3a}
+#oropra-client-fiche .cf-checkbox{display:flex;align-items:center;gap:8px;font-size:13.5px;font-weight:700;color:#1F4A85;cursor:pointer;padding:9px 0}
+#oropra-client-fiche .cf-checkbox input{accent-color:#e24b4a;width:16px;height:16px}
 #oropra-client-fiche .cf-footer{display:flex;justify-content:flex-end;gap:8px;margin-top:16px}
-#oropra-client-fiche .cf-btn{padding:9px 18px;border-radius:6px;font-size:13px;font-weight:500;cursor:pointer;border:1px solid transparent;outline:none;font-family:inherit;display:inline-flex;align-items:center;gap:6px;text-transform:uppercase;letter-spacing:.3px}
-#oropra-client-fiche .cf-btn-primary{background:#53bda7;color:#fff;border-color:#53bda7}
-#oropra-client-fiche .cf-btn-primary:hover{background:#45a791;border-color:#45a791}
-#oropra-client-fiche .cf-btn-primary:disabled{background:#a9d9cd;border-color:#a9d9cd;cursor:not-allowed}
-#oropra-client-fiche .cf-btn-ghost{background:transparent;color:#2a5ea9;border-color:#2a5ea9}
+#oropra-client-fiche .cf-btn{padding:9px 16px;border-radius:9px;font-size:13px;font-weight:800;cursor:pointer;border:1.5px solid transparent;outline:none;font-family:inherit;display:inline-flex;align-items:center;gap:6px}
+#oropra-client-fiche .cf-btn-primary{background:#2a5ea9;color:#fff;border-color:#2a5ea9}
+#oropra-client-fiche .cf-btn-primary:hover{background:#1F4A85;border-color:#1F4A85}
+#oropra-client-fiche .cf-btn-primary:disabled{opacity:.6;cursor:wait}
+#oropra-client-fiche .cf-btn-save{background:#53bda7;border-color:#53bda7}
+#oropra-client-fiche .cf-btn-save:hover{background:#45a791;border-color:#45a791}
+#oropra-client-fiche .cf-btn-ghost{background:#fff;color:#2a5ea9;border-color:#d9e3f2}
 #oropra-client-fiche .cf-btn-ghost:hover{background:#f2f6fc}
-#oropra-client-fiche .cf-error{color:#c63a3a;font-size:13px;padding:11px 14px;background:#fdf0f0;border-radius:6px;margin-bottom:16px;border:1px solid #f5d0d0}
-#oropra-client-fiche .cf-duplicate{background:#fff7e6;border:1px solid #f5c785;border-radius:8px;padding:16px;margin-bottom:18px;display:flex;flex-direction:column;gap:12px}
-#oropra-client-fiche .cf-duplicate-head{display:flex;gap:10px;align-items:flex-start;color:#a85c0e}
-#oropra-client-fiche .cf-duplicate-title{font-size:13px;font-weight:600;margin-bottom:6px}
-#oropra-client-fiche .cf-duplicate-client{color:#2a5ea9;font-size:13px;line-height:1.5}
-#oropra-client-fiche .cf-duplicate-client strong{display:block;margin-bottom:2px}
-#oropra-client-fiche .cf-duplicate-actions{display:flex;gap:8px;justify-content:flex-end}
-#oropra-client-fiche .cf-duplicate-sub{font-size:12px;color:#8a6a3a;margin-top:2px}
-#oropra-client-fiche .cf-dup-card{background:#fff;border:1px solid #f0d9b5;border-radius:6px;padding:10px 12px;display:flex;flex-direction:column;gap:6px}
+#oropra-client-fiche .cf-error{color:#c43c3b;font-size:13px;font-weight:700;padding:11px 14px;background:#fdf1f1;border-radius:10px;margin-bottom:14px;border:1px solid #f5d0d0}
+/* consentements */
+#oropra-client-fiche .cs{background:#fff;border:1px solid #e3edf9;border-radius:14px;padding:16px 18px;margin-top:16px}
+#oropra-client-fiche .cs-h{display:flex;justify-content:space-between;align-items:baseline;gap:10px;flex-wrap:wrap;margin-bottom:12px}
+#oropra-client-fiche .cs-h h3{margin:0;font-size:15px;font-weight:800;color:#1F4A85}
+#oropra-client-fiche .cs-h small{font-size:12px;color:#7a98c5;font-weight:600}
+#oropra-client-fiche .cs-lien{border:none;background:none;color:#2a5ea9;font:800 12.5px "Nunito Sans",system-ui,sans-serif;cursor:pointer;padding:0}
+#oropra-client-fiche .cs-marques{display:grid;grid-template-columns:1fr 1fr;gap:14px;align-items:start}
+#oropra-client-fiche .cs-m{border:1.5px solid #e3edf9;border-radius:12px;overflow:hidden;display:flex;flex-direction:column}
+#oropra-client-fiche .cs-m-h{display:flex;align-items:center;gap:12px;padding:12px 14px}
+#oropra-client-fiche .cs-m-ic{flex:none;width:38px;height:38px;border-radius:50%;display:flex;align-items:center;justify-content:center;color:#fff}
+#oropra-client-fiche .cs-m-ic svg{width:20px;height:20px}
+#oropra-client-fiche .cs-m-nom{font-size:12px;font-weight:900;letter-spacing:.14em;text-transform:uppercase}
+#oropra-client-fiche .cs-m-stat{font-size:15px;font-weight:800;line-height:1.25}
+#oropra-client-fiche .cs-m-sub{font-size:12px;font-weight:600;color:#5a7ba8;margin-top:1px}
+#oropra-client-fiche .cs-m.ok{border-color:#a9dfd2}
+#oropra-client-fiche .cs-m.ok .cs-m-h{background:#eef9f6}
+#oropra-client-fiche .cs-m.ok .cs-m-ic{background:#53bda7}
+#oropra-client-fiche .cs-m.ok .cs-m-nom,#oropra-client-fiche .cs-m.ok .cs-m-stat{color:#2f8f77}
+#oropra-client-fiche .cs-m.att{border-color:#f1d79b}
+#oropra-client-fiche .cs-m.att .cs-m-h{background:#fdf6e4}
+#oropra-client-fiche .cs-m.att .cs-m-ic{background:#e6a817}
+#oropra-client-fiche .cs-m.att .cs-m-nom,#oropra-client-fiche .cs-m.att .cs-m-stat{color:#a8740a}
+#oropra-client-fiche .cs-m.ko{border-color:#f2c4c4}
+#oropra-client-fiche .cs-m.ko .cs-m-h{background:#fdf1f1}
+#oropra-client-fiche .cs-m.ko .cs-m-ic{background:#e24b4a}
+#oropra-client-fiche .cs-m.ko .cs-m-nom,#oropra-client-fiche .cs-m.ko .cs-m-stat{color:#c43c3b}
+#oropra-client-fiche .cs-m.mix{border-color:#c9daf0}
+#oropra-client-fiche .cs-m.mix .cs-m-h{background:#f2f6fc}
+#oropra-client-fiche .cs-m.mix .cs-m-ic{background:#2a5ea9}
+#oropra-client-fiche .cs-m.mix .cs-m-nom,#oropra-client-fiche .cs-m.mix .cs-m-stat{color:#1F4A85}
+#oropra-client-fiche .cs-m.nul .cs-m-h{background:#f7faff}
+#oropra-client-fiche .cs-m.nul .cs-m-ic{background:#c4d2e7}
+#oropra-client-fiche .cs-m.nul .cs-m-nom,#oropra-client-fiche .cs-m.nul .cs-m-stat{color:#7a98c5}
+#oropra-client-fiche .cs-canaux{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;padding:10px 12px 12px}
+#oropra-client-fiche .cs-c{display:flex;align-items:center;gap:6px;border-radius:8px;padding:6px 8px;font-size:12px;font-weight:700;min-width:0}
+#oropra-client-fiche .cs-c span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+#oropra-client-fiche .cs-c svg{flex:none;width:13px;height:13px}
+#oropra-client-fiche .cs-c.consenti{background:#e9f7f3;color:#2f8f77}
+#oropra-client-fiche .cs-c.attente{background:#fdf5e1;color:#a8740a}
+#oropra-client-fiche .cs-c.refuse{background:#fdf1f1;color:#c43c3b}
+#oropra-client-fiche .cs-c.inconnu{background:#f4f7fc;color:#9fb3d1}
+#oropra-client-fiche .cs-act{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;border-top:1px solid #eef3fa;padding:10px 12px;margin-top:auto}
+#oropra-client-fiche .cs-act p{margin:0;font-size:12px;color:#7a98c5;font-weight:600;flex:1;min-width:160px}
+#oropra-client-fiche .cs-act .cf-btn{padding:7px 12px;font-size:12.5px}
+#oropra-client-fiche .cs-pied{display:flex;flex-wrap:wrap;gap:8px;margin-top:12px}
+#oropra-client-fiche .cs-pill{display:inline-flex;align-items:center;gap:6px;border-radius:999px;padding:5px 11px;font-size:12px;font-weight:700;background:#f2f6fc;color:#5a7ba8}
+#oropra-client-fiche .cs-pill b{font-weight:800;color:#1F4A85}
+#oropra-client-fiche .cs-pill.rouge{background:#fdf1f1;color:#c43c3b}
+#oropra-client-fiche .cs-pill.rouge b{color:#c43c3b}
+#oropra-client-fiche .cs-pill.vert b{color:#2f8f77}
+#oropra-client-fiche .cs-edit{display:grid;grid-template-columns:1fr 1fr;gap:12px 16px;margin-top:12px;padding-top:12px;border-top:1px solid #eef3fa}
+#oropra-client-fiche .cs-charge{font-size:13px;color:#7a98c5;font-weight:600;padding:8px 0}
+/* doublons */
+#oropra-client-fiche .cf-duplicate{background:#fff8e8;border:1.5px solid #f3dca6;border-radius:12px;padding:16px;margin-bottom:16px;display:flex;flex-direction:column;gap:12px}
+#oropra-client-fiche .cf-duplicate-head{display:flex;gap:10px;align-items:flex-start;color:#a8740a}
+#oropra-client-fiche .cf-duplicate-title{font-size:14px;font-weight:800;margin-bottom:4px;color:#1F4A85}
+#oropra-client-fiche .cf-duplicate-sub{font-size:12.5px;color:#a8740a}
+#oropra-client-fiche .cf-dup-card{background:#fff;border:1px solid #f0d9b5;border-radius:10px;padding:10px 12px;display:flex;flex-direction:column;gap:6px}
 #oropra-client-fiche .cf-dup-card-head{display:flex;justify-content:space-between;align-items:center;gap:10px}
-#oropra-client-fiche .cf-dup-card-head strong{font-size:14px;color:#1f2937}
-#oropra-client-fiche .cf-dup-score{font-family:ui-monospace,Menlo,monospace;font-size:12px;font-weight:600;color:#a85c0e;border:1px solid #e8b877;border-radius:4px;padding:1px 7px;white-space:nowrap}
-#oropra-client-fiche .cf-dup-card-body{font-size:12.5px;color:#6b7280}
-#oropra-client-fiche .cf-dup-veh{color:#2a5ea9;font-weight:500}
+#oropra-client-fiche .cf-dup-card-head strong{font-size:14px;color:#1F4A85}
+#oropra-client-fiche .cf-dup-score{font-size:12px;font-weight:800;color:#a8740a;border:1px solid #e8b877;border-radius:6px;padding:1px 7px;white-space:nowrap}
+#oropra-client-fiche .cf-dup-card-body{font-size:12.5px;color:#5a7ba8}
+#oropra-client-fiche .cf-dup-veh{color:#2a5ea9;font-weight:700}
 #oropra-client-fiche .cf-dup-tags{display:flex;flex-wrap:wrap;gap:5px}
-#oropra-client-fiche .cf-dup-tag{font-size:11px;background:#fdf3e3;color:#a85c0e;border-radius:3px;padding:2px 7px}
-#oropra-client-fiche .cf-dup-open{align-self:flex-start;font-size:12px;padding:4px 10px}
+#oropra-client-fiche .cf-dup-tag{font-size:11px;font-weight:700;background:#fdf3e3;color:#a8740a;border-radius:5px;padding:2px 7px}
+#oropra-client-fiche .cf-dup-open{align-self:flex-start;font-size:12px;padding:5px 10px}
+#oropra-client-fiche .cf-duplicate-actions{display:flex;gap:8px;justify-content:flex-end}
+/* autocomplétion */
 #oropra-client-fiche .cf-autocomplete-wrap{position:relative}
-#oropra-client-fiche .cf-suggestions{position:absolute;top:calc(100% + 4px);left:0;right:0;background:#fff;border:1px solid #d9e3f2;border-radius:6px;box-shadow:0 6px 20px rgba(42,94,169,.12);z-index:10;max-height:280px;overflow-y:auto}
-#oropra-client-fiche .cf-suggestion{padding:10px 12px;cursor:pointer;font-size:13px;color:#2a5ea9;border-bottom:1px solid #f0f4fa}
+#oropra-client-fiche .cf-suggestions{position:absolute;top:calc(100% + 4px);left:0;right:0;background:#fff;border:1px solid #d9e3f2;border-radius:10px;box-shadow:0 10px 28px rgba(31,74,133,.16);z-index:10;max-height:280px;overflow-y:auto}
+#oropra-client-fiche .cf-suggestion{padding:10px 12px;cursor:pointer;font-size:13px;color:#1F4A85;border-bottom:1px solid #f0f4fa}
 #oropra-client-fiche .cf-suggestion:last-child{border-bottom:none}
 #oropra-client-fiche .cf-suggestion:hover{background:#f2f6fc}
-#oropra-client-fiche .cf-suggestion.is-inactive{font-style:italic;color:#c4d2e7}
-#oropra-client-fiche .cf-suggestion.is-inactive .cf-suggestion-sub{color:#c4d2e7}
+#oropra-client-fiche .cf-suggestion.is-inactive,#oropra-client-fiche .cf-suggestion.is-inactive .cf-suggestion-sub{font-style:italic;color:#c4d2e7}
 #oropra-client-fiche .cf-suggestion-sub{font-size:11px;color:#7a98c5;margin-top:2px}
-#oropra-client-fiche .cf-field-status{font-size:11px;color:#53bda7;margin-top:4px;display:inline-flex;align-items:center;gap:4px}
+#oropra-client-fiche .cf-field-status{font-size:11.5px;font-weight:700;color:#2f8f77;margin-top:4px;display:inline-flex;align-items:center;gap:4px}
 #oropra-client-fiche .cf-spinner{display:inline-block;width:12px;height:12px;border:2px solid #e3edf9;border-top-color:#53bda7;border-radius:50%;animation:cf-spin .8s linear infinite}
 @keyframes cf-spin{to{transform:rotate(360deg)}}
-#oropra-client-fiche .cf-empty{padding:48px 16px;text-align:center;color:#8aa3c3;font-size:13px}
-/* ============ RESPONSIVE ============ */
-@media (max-width:880px){
-  #oropra-client-fiche .cf-grid{grid-template-columns:1fr 1fr}
-  #oropra-client-fiche .cf-section{padding:16px 16px}
+#oropra-client-fiche .cf-empty{padding:48px 16px;text-align:center;color:#7a98c5;font-size:13px}
+@media (max-width:900px){
+  #oropra-client-fiche .cf-cols,#oropra-client-fiche .cs-marques{grid-template-columns:1fr}
 }
 @media (max-width:560px){
-  #oropra-client-fiche .cf-grid{grid-template-columns:1fr}
-  #oropra-client-fiche .cf-grid .two{grid-column:auto}
-  #oropra-client-fiche .cf-section{padding:14px 13px;margin-bottom:16px}
-  #oropra-client-fiche .cf-footer{flex-wrap:wrap}
-  #oropra-client-fiche .cf-footer .cf-btn{flex:1;justify-content:center}
-  #oropra-client-fiche .cf-duplicate-actions{flex-wrap:wrap}
-  #oropra-client-fiche .cf-duplicate-actions .cf-btn{flex:1;justify-content:center}
+  #oropra-client-fiche .cf-grid,#oropra-client-fiche .cs-edit{grid-template-columns:1fr}
+  #oropra-client-fiche .cs-canaux{grid-template-columns:1fr 1fr}
+  #oropra-client-fiche .cf-section,#oropra-client-fiche .cs{padding:14px}
+  #oropra-client-fiche .cf-footer .cf-btn,#oropra-client-fiche .cf-duplicate-actions .cf-btn{flex:1;justify-content:center}
 }
 </style>`;
+
+// ---------------------------------------------------------------- affichage
+function telLisible(t) {
+  const d = cleanDigits(t);
+  if (/^0\d{9}$/.test(d)) return d.replace(/(\d{2})(?=\d)/g, '$1 ');
+  if (/^33\d{9}$/.test(d)) return '+33 ' + d.slice(2).replace(/(\d)(\d{2})(\d{2})(\d{2})(\d{2})/, '$1 $2 $3 $4 $5');
+  return String(t);
+}
+function dateFr(v) {
+  if (!v || String(v).slice(0, 4) === '1900') return '';
+  const s = String(v);
+  if (/^\d{4}-\d{2}-\d{2}$/.test(s)) { const p = s.split('-'); return p[2] + '/' + p[1] + '/' + p[0]; }
+  const d = new Date(s); if (isNaN(d.getTime())) return s;
+  return d.toLocaleDateString('fr-FR');
+}
+function dateHeureFr(v) {
+  if (!v) return '';
+  const d = new Date(v); if (isNaN(d.getTime())) return String(v);
+  return d.toLocaleDateString('fr-FR') + ' à ' + d.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' }).replace(':', 'h');
+}
+function vide(v) { return v == null || String(v).trim() === ''; }
+function valeurLue(field, type, opts, v) {
+  if (type === 'checkbox') return v ? 'Oui' : 'Non';
+  if (vide(v)) return '<span class="cf-vide">—</span>';
+  if (type === 'select') {
+    const o = (opts.options || []).find(x => String(x.value) === String(v));
+    return esc(o ? o.label : v);
+  }
+  if (field === 'TEl_MOB' || field === 'TEL_FIXE') return `<a href="tel:${esc(cleanDigits(v))}">${esc(telLisible(v))}</a>`;
+  if (field === 'EMAIL') return `<a href="mailto:${esc(v)}">${esc(v)}</a>`;
+  if (type === 'date') return esc(dateFr(v));
+  if (type === 'number' && /^\d+$/.test(String(v))) return esc(Number(v).toLocaleString('fr-FR'));
+  return esc(v);
+}
 
 function fieldInput(label, field, type, opts) {
   opts = opts || {};
   const val = state.client[field];
   const v = val == null ? '' : val;
   const editable = state.mode === 'edit';
-  const reqMark = opts.required && editable ? ' <span class="cf-required">*</span>' : '';
   const cls = opts.gridClass ? `cf-field ${opts.gridClass}` : 'cf-field';
-  const dis = editable ? '' : ' disabled';
+  if (!editable) {
+    return `<div class="${cls}"><span class="cf-label">${esc(label)}</span><div class="cf-val${type === 'textarea' ? ' multi' : ''}">${valeurLue(field, type, opts, val)}</div></div>`;
+  }
+  const reqMark = opts.required ? ' <span class="cf-required">*</span>' : '';
   let inputHtml;
   if (type === 'textarea') {
-    inputHtml = `<textarea class="cf-input" data-cf-field="${esc(field)}" rows="3"${dis}>${esc(v)}</textarea>`;
+    inputHtml = `<textarea class="cf-input" data-cf-field="${esc(field)}" rows="3">${esc(v)}</textarea>`;
   } else if (type === 'select') {
-    // Filet d'affichage (05/10/2026) : une valeur deja en base qui ne figure
-    // pas dans la liste faisait retomber le select sur « Selectionner », et la
-    // donnee disparaissait de l'ecran sans prevenir. On l'ajoute en option, avec
-    // le libelle propre quand on sait la reconnaitre (casse, accents, point final),
-    // sinon telle quelle. Rien n'est ecrit : l'utilisateur voit et corrige s'il veut.
-    let _listeOD = (opts.options || []).slice();
-    if (v != null && String(v) !== '' && !_listeOD.some(function (o) { return String(o.value) === String(v); })) {
-      var _cleOD = function (s) { return String(s == null ? '' : s).toLowerCase()
-        .normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]/g, ''); };
-      var _procheOD = _listeOD.filter(function (o) { return _cleOD(o.value) === _cleOD(v) || _cleOD(o.label) === _cleOD(v); })[0];
-      _listeOD = _listeOD.concat([{ value: v, label: _procheOD ? _procheOD.label : String(v) }]);
+    // Filet d'affichage (v9) : une valeur hors référentiel reste visible.
+    let liste = (opts.options || []).slice();
+    if (v != null && String(v) !== '' && !liste.some(o => String(o.value) === String(v))) {
+      const cle = s => String(s == null ? '' : s).toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^a-z0-9]/g, '');
+      const proche = liste.filter(o => cle(o.value) === cle(v) || cle(o.label) === cle(v))[0];
+      liste = liste.concat([{ value: v, label: proche ? proche.label : String(v) }]);
     }
-    const options = _listeOD.map(o => `<option value="${esc(o.value)}"${String(o.value) === String(v) ? ' selected' : ''}>${esc(o.label)}</option>`).join('');
+    const options = liste.map(o => `<option value="${esc(o.value)}"${String(o.value) === String(v) ? ' selected' : ''}>${esc(o.label)}</option>`).join('');
     const ph = opts.noPlaceholder ? '' : '<option value="">— Sélectionner —</option>';
-    inputHtml = `<select class="cf-input" data-cf-field="${esc(field)}"${dis}>${ph}${options}</select>`;
+    inputHtml = `<select class="cf-input" data-cf-field="${esc(field)}">${ph}${options}</select>`;
   } else if (type === 'checkbox') {
-    const stopCls = field === 'STOP_COM' ? ` is-stop-com${v ? ' is-checked' : ''}` : '';
-    return `<div class="${cls}"><label class="cf-checkbox${stopCls}"><input type="checkbox" data-cf-field="${esc(field)}"${v ? ' checked' : ''}${dis}/> <span>${esc(label)}</span></label></div>`;
+    return `<div class="${cls}"><span class="cf-label">${esc(label)}</span><label class="cf-checkbox"><input type="checkbox" data-cf-field="${esc(field)}"${v ? ' checked' : ''}/> <span>${esc(opts.texte || label)}</span></label></div>`;
   } else {
-    inputHtml = `<input class="cf-input" type="${type || 'text'}" data-cf-field="${esc(field)}" value="${esc(v)}"${dis}/>`;
+    inputHtml = `<input class="cf-input" type="${type || 'text'}" data-cf-field="${esc(field)}" value="${esc(v)}"/>`;
   }
   return `<div class="${cls}"><label class="cf-label">${esc(label)}${reqMark}</label>${inputHtml}</div>`;
 }
@@ -609,13 +717,18 @@ function renderSiretField() {
 }
 
 function renderAddressField() {
-  if (state.mode === 'view') return fieldInput('Adresse', 'ADRESSE', 'text', { gridClass: 'full' });
+  if (state.mode === 'view') {
+    const c = state.client;
+    const ligne = [c.ADRESSE, [c.code_postal, c.ville].filter(Boolean).join(' ')].filter(x => !vide(x)).join(', ');
+    const ok = c.adresse_status === 'verified' ? '<span class="cf-ok-mini">✓ vérifiée</span>' : '';
+    return `<div class="cf-field full"><span class="cf-label">Adresse</span><div class="cf-val">${ligne ? esc(ligne) + ok : '<span class="cf-vide">—</span>'}</div></div>`;
+  }
   const verified = state.client.adresse_status === 'verified';
   let h = '<div class="cf-field full"><label class="cf-label">Adresse</label>';
   h += '<div class="cf-autocomplete-wrap">';
   h += `<input class="cf-input" type="text" data-cf-field="__addressQuery" value="${esc(state.addressQuery || state.client.ADRESSE || '')}" placeholder="Tapez une adresse" autocomplete="off"/>`;
   if (state.addressLoading) h += '<div class="cf-field-status"><span class="cf-spinner"></span> Recherche…</div>';
-  else if (verified) h += `<div class="cf-field-status">✓ Adresse vérifiée (${esc(state.client.adresse_source || '')})</div>`;
+  else if (verified) h += `<div class="cf-field-status">✓ Adresse vérifiée${state.client.adresse_source ? ' (' + esc(state.client.adresse_source) + ')' : ''}</div>`;
   if (state.addressSuggestions && state.addressSuggestions.length) {
     h += '<div class="cf-suggestions">';
     state.addressSuggestions.forEach((s, i) => {
@@ -632,7 +745,6 @@ function renderDuplicateBlock() {
   const cands = state.duplicate.candidats || [];
   if (!cands.length) return '';
   const pluriel = cands.length > 1;
-
   const cartes = cands.map(c => {
     const a = c.apercu || {};
     const nom = [a.civilite, a.nom, a.societe ? '' : a.prenom].filter(Boolean).join(' ');
@@ -642,20 +754,14 @@ function renderDuplicateBlock() {
       .join('');
     const lieu = [a.code_postal, a.ville].filter(Boolean).join(' ');
     const contact = [a.mobile, a.email].filter(Boolean).join(' · ');
-    const veh = a.vehicules > 0
-      ? `<span class="cf-dup-veh">${esc(a.vehicules)} véhicule${a.vehicules > 1 ? 's' : ''}</span>`
-      : '';
+    const veh = a.vehicules > 0 ? `<span class="cf-dup-veh">${esc(a.vehicules)} véhicule${a.vehicules > 1 ? 's' : ''}</span>` : '';
     return `<div class="cf-dup-card">
-      <div class="cf-dup-card-head">
-        <strong>${esc(nom)}</strong>
-        <span class="cf-dup-score">${esc(c.score)}/100</span>
-      </div>
+      <div class="cf-dup-card-head"><strong>${esc(nom)}</strong><span class="cf-dup-score">${esc(c.score)}/100</span></div>
       <div class="cf-dup-card-body">${esc(lieu)}${lieu && contact ? ' — ' : ''}${esc(contact)} ${veh}</div>
       <div class="cf-dup-tags">${signaux}</div>
       <button class="cf-btn cf-btn-ghost cf-dup-open" data-cf-action="view-duplicate" data-cf-idvu="${esc(c.id_client)}">${ICON_P}<span>Ouvrir cette fiche</span></button>
     </div>`;
   }).join('');
-
   return `<div class="cf-duplicate">
     <div class="cf-duplicate-head">${ICON_WARN}<div>
       <div class="cf-duplicate-title">${pluriel ? 'Ces clients existent' : 'Ce client existe'} peut-être déjà</div>
@@ -664,9 +770,25 @@ function renderDuplicateBlock() {
     ${cartes}
     <div class="cf-duplicate-actions">
       <button class="cf-btn cf-btn-ghost" data-cf-action="dismiss-duplicate">Modifier ma saisie</button>
-      <button class="cf-btn cf-btn-primary" data-cf-action="save-anyway"${state.saving ? ' disabled' : ''}>Enregistrer quand même</button>
+      <button class="cf-btn cf-btn-primary cf-btn-save" data-cf-action="save-anyway"${state.saving ? ' disabled' : ''}>Enregistrer quand même</button>
     </div>
   </div>`;
+}
+
+// Une carte : en lecture, si tous ses champs sont vides, elle se réduit à
+// une ligne « Non renseigné » (le vendeur ne lit pas des cases vides).
+function carte(titre, champs, html, opts) {
+  opts = opts || {};
+  const c = state.client;
+  const toutVide = state.mode === 'view' && champs.length && champs.every(f => vide(c[f]));
+  if (toutVide) return `<div class="cf-section vide${opts.full ? ' full' : ''}"><div class="cf-section-title">${esc(titre)}<span class="cf-section-vide">Non renseigné</span></div></div>`;
+  return `<div class="cf-section${opts.full ? ' full' : ''}"><div class="cf-section-title">${esc(titre)}</div><div class="cf-grid">${html}</div></div>`;
+}
+
+function boutonsActions() {
+  if (state.mode === 'view') return `<button class="cf-btn cf-btn-primary" data-cf-action="enter-edit">${ICON_EDIT}<span>Modifier la fiche</span></button>`;
+  return `<button class="cf-btn cf-btn-ghost" data-cf-action="cancel-edit">Annuler</button>` +
+    `<button class="cf-btn cf-btn-primary cf-btn-save" data-cf-action="save-edit"${state.saving ? ' disabled' : ''}>${state.saving ? '<span class="cf-spinner"></span>' : ICON_CHECK}<span>${state.saving ? 'Enregistrement…' : 'Enregistrer'}</span></button>`;
 }
 
 function render() {
@@ -679,70 +801,53 @@ function render() {
   const activeCursor = activeAttr && typeof active.selectionStart === 'number' ? active.selectionStart : null;
 
   const soc = isSoc();
+  const c = state.client;
   let body = '';
+
+  const meta = [];
+  if (c.CreationDate) meta.push('Créée le <b>' + esc(dateFr(c.CreationDate)) + '</b>');
+  if (c.UpdateDate) meta.push('modifiée le <b>' + esc(dateFr(c.UpdateDate)) + '</b>');
+  body += `<div class="cf-bar"><div class="cf-bar-meta">${state.mode === 'edit' ? '<b>Modification de la fiche</b>' : meta.join(' · ')}</div><div class="cf-bar-actions">${boutonsActions()}</div></div>`;
+
   body += renderDuplicateBlock();
   if (state.error && !state.duplicate) body += `<div class="cf-error">${esc(state.error)}</div>`;
 
-  body += '<div class="cf-section"><div class="cf-section-title">Identité</div><div class="cf-grid">';
+  body += '<div class="cf-cols">';
   if (soc) {
-    body += fieldInput('Type', 'CIVILITE', 'select', { options: typesS.map(t => ({ value: t.libelle_court, label: `${t.libelle_court} — ${t.libelle}` })) });
-    body += renderSiretField();
-    body += fieldInput('Raison sociale', 'NOM', 'text', { gridClass: 'full', required: true });
+    body += carte('Identité', [], fieldInput('Type', 'CIVILITE', 'select', { options: typesS.map(t => ({ value: t.libelle_court, label: `${t.libelle_court} — ${t.libelle}` })) }) +
+      renderSiretField() + fieldInput('Raison sociale', 'NOM', 'text', { gridClass: 'full', required: true }));
   } else {
-    body += fieldInput('Civilité', 'CIVILITE', 'select', { options: civilitesP.map(c => ({ value: c.libelle_court, label: c.libelle })), required: true });
-    body += fieldInput('Nom', 'NOM', 'text', { required: true });
-    body += fieldInput('Prénom', 'PRENOM', 'text', { required: true });
-    body += fieldInput('Date de naissance', 'BIRTHDAY', 'date');
+    body += carte('Identité', [],
+      fieldInput('Civilité', 'CIVILITE', 'select', { options: civilitesP.map(x => ({ value: x.libelle_court, label: x.libelle })), required: true }) +
+      fieldInput('Date de naissance', 'BIRTHDAY', 'date') +
+      fieldInput('Prénom', 'PRENOM', 'text', { required: true }) +
+      fieldInput('Nom', 'NOM', 'text', { required: true }));
   }
-  body += '</div></div>';
-
-  body += '<div class="cf-section"><div class="cf-section-title">Contact</div><div class="cf-grid">';
-  body += fieldInput('Téléphone portable', 'TEl_MOB', 'text', { required: !soc });
-  body += fieldInput('Téléphone fixe', 'TEL_FIXE');
-  body += fieldInput('Email', 'EMAIL', 'text', { required: !soc });
-  body += '</div></div>';
-
-  body += '<div class="cf-section"><div class="cf-section-title">Adresse</div><div class="cf-grid">';
-  body += renderAddressField();
-  body += fieldInput('Code postal', 'code_postal');
-  body += fieldInput('Ville', 'ville', 'text', { gridClass: 'two' });
-  body += '</div></div>';
-
+  body += carte('Contact', [],
+    fieldInput('Portable', 'TEl_MOB', 'text', { required: !soc }) +
+    fieldInput('Fixe', 'TEL_FIXE') +
+    fieldInput('E-mail', 'EMAIL', 'text', { required: !soc, gridClass: 'full' }));
+  body += carte('Adresse', ['ADRESSE', 'code_postal', 'ville'],
+    renderAddressField() + (state.mode === 'edit' ? fieldInput('Code postal', 'code_postal') + fieldInput('Ville', 'ville') : ''));
   if (!soc) {
-    body += '<div class="cf-section"><div class="cf-section-title">Préférences</div><div class="cf-grid">';
-    body += fieldInput('Stop com', 'STOP_COM', 'checkbox');
-    body += '<div class="cf-field" style="display:flex;align-items:center"><button type="button" class="cf-btn cf-btn-ghost" data-cf-action="show-consent" style="padding:7px 12px">Consentements</button></div>';
-    body += fieldInput('NPAI', 'NPAI', 'select', { options: npaiOptions.map(o => ({ value: o, label: o })), noPlaceholder: true });
-    body += '</div></div>';
-    body += '<div class="cf-section"><div class="cf-section-title">Profil</div><div class="cf-grid">';
-    body += fieldInput('CSP', 'CSP');
-    body += fieldInput('Profession', 'PROFESSION');
-    body += fieldInput('Loisir', 'LOISIR');
-    body += '</div></div>';
-    body += '<div class="cf-section"><div class="cf-section-title">Véhicule</div><div class="cf-grid">';
-    body += fieldInput('Marque', 'MARQUE_CLIENT_VEHICULE');
-    body += fieldInput('Modèle', 'MODELE_CLIENT_VEHICULE');
-    body += fieldInput('Année', 'ANNEE_CLIENT_VEHICULE', 'number');
-    body += fieldInput('KMs', 'KM_CLIENT_VEHICULE', 'number');
-    body += fieldInput('KMs par an', 'KM_MOY', 'number');
-    body += '</div></div>';
+    body += carte('Profil', ['CSP', 'PROFESSION', 'LOISIR'],
+      fieldInput('CSP', 'CSP') + fieldInput('Profession', 'PROFESSION') + fieldInput('Loisir', 'LOISIR', 'text', { gridClass: 'full' }));
+    body += carte('Véhicule actuel (déclaré)', ['MARQUE_CLIENT_VEHICULE', 'MODELE_CLIENT_VEHICULE', 'ANNEE_CLIENT_VEHICULE', 'KM_CLIENT_VEHICULE', 'KM_MOY'],
+      fieldInput('Marque', 'MARQUE_CLIENT_VEHICULE') + fieldInput('Modèle', 'MODELE_CLIENT_VEHICULE') +
+      fieldInput('Année', 'ANNEE_CLIENT_VEHICULE', 'number') + fieldInput('Kilométrage', 'KM_CLIENT_VEHICULE', 'number') +
+      fieldInput('Km par an', 'KM_MOY', 'number'));
   }
-
-  body += '<div class="cf-section"><div class="cf-section-title">Commentaires</div><div class="cf-grid">';
-  body += fieldInput('Commentaires', 'COMMENTAIRE', 'textarea', { gridClass: 'full' });
-  body += '</div></div>';
-
-  body += '<div class="cf-footer">';
-  if (state.mode === 'view') {
-    body += `<button class="cf-btn cf-btn-primary" data-cf-action="enter-edit">${ICON_EDIT}<span>Modifier</span></button>`;
-  } else {
-    body += `<button class="cf-btn cf-btn-ghost" data-cf-action="cancel-edit">Annuler</button>`;
-    body += `<button class="cf-btn cf-btn-primary" data-cf-action="save-edit"${state.saving ? ' disabled' : ''}>${state.saving ? '<span class="cf-spinner"></span>' : ICON_CHECK}<span>${state.saving ? 'Enregistrement…' : 'Enregistrer'}</span></button>`;
-  }
+  body += carte('Commentaires', ['COMMENTAIRE'], fieldInput('Commentaires', 'COMMENTAIRE', 'textarea', { gridClass: 'full' }), { full: soc });
   body += '</div>';
+
+  // Consentements : en bas de fiche, toujours dépliés (rempli par peindreConsent).
+  body += '<div class="cs" id="cf-consent"><div class="cs-charge">Chargement des consentements…</div></div>';
+
+  if (state.mode === 'edit') body += `<div class="cf-footer">${boutonsActions()}</div>`;
 
   root.innerHTML = STYLE + body;
   bindEvents();
+  peindreConsent();
 
   if (activeAttr) {
     const next = root.querySelector(`[data-cf-field="${activeAttr}"]`);
@@ -750,73 +855,126 @@ function render() {
   }
 }
 
-// v10 : consentements chargés une fois par client, partagés par le bouton,
-// l'info-bulle de survol et la fenêtre.
+// ---------------------------------------------------------------- consentements
+// v11 : synthèse par marque (client_consentement_synthese) + détail ligne à
+// ligne (client_consentement), chargés une fois par client.
 const CONSENT_CACHE = {};
-async function chargerConsentements(idvu) {
-  if (idvu == null) return [];
-  if (CONSENT_CACHE[idvu]) return CONSENT_CACHE[idvu];
-  let rows = [];
+async function chargerConsent(idvu, forcer) {
+  if (idvu == null) return null;
+  if (!forcer && CONSENT_CACHE[idvu]) return CONSENT_CACHE[idvu];
+  const res = { synth: null, rows: [] };
   try {
-    const r = await ctx.supabase.from('client_consentement').select('*').eq('id_client', Number(idvu));
-    rows = r.data || [];
+    const [a, b] = await Promise.all([
+      ctx.supabase.rpc('client_consentement_synthese', { p_id_client: Number(idvu) }),
+      ctx.supabase.from('client_consentement').select('*').eq('id_client', Number(idvu))
+    ]);
+    res.synth = (a && !a.error && a.data) || null;
+    res.rows = (b && b.data) || [];
   } catch (e) {}
-  CONSENT_CACHE[idvu] = rows;
-  return rows;
+  CONSENT_CACHE[idvu] = res;
+  return res;
 }
-const CANAUX_CONSENT = [['emails', 'E-mails'], ['sms', 'SMS'], ['calls', 'Appels'], ['mailings', 'Courriers'], ['newsletters', 'Newsletters'], ['offers_events', 'Offres & événements'], ['reminders', 'Rappels'], ['market_research', 'Études de marché']];
-function etatConsent(row) {
-  if (!row) return ['—', '#c9d3e0'];
-  if (row.autorise) return ['Consenti', '#2f8f77'];
-  if (row.date_decision == null) return ['En attente', '#e6a817'];
-  return ['Refusé', '#c63a3a'];
+const CANAUX_CONSENT = [['emails', 'E-mails'], ['sms', 'SMS'], ['calls', 'Appels'], ['mailings', 'Courriers'], ['newsletters', 'Newsletters'], ['offers_events', 'Offres & évén.'], ['reminders', 'Rappels'], ['market_research', 'Études']];
+const CANAUX_LONG = { offers_events: 'Offres & événements', market_research: 'Études de marché' };
+function iconeEtat(e) { return e === 'consenti' ? ICON_CONS_OK : e === 'attente' ? ICON_CONS_ATT : e === 'refuse' ? ICON_CONS_KO : ICON_CONS_NUL; }
+function libEtat(e) { return e === 'consenti' ? 'Consenti' : e === 'attente' ? 'En attente' : e === 'refuse' ? 'Refusé' : 'Inconnu'; }
+
+function carteMarque(m, synth) {
+  const cls = { consenti: 'ok', attente: 'att', refuse: 'ko', partiel: 'mix', aucun: 'nul' }[m.statut] || 'nul';
+  const ic = { consenti: ICON_CONS_OK, attente: ICON_CONS_ATT, refuse: ICON_CONS_KO, partiel: ICON_CONS_OK, aucun: ICON_CONS_NUL }[m.statut] || ICON_CONS_NUL;
+  let stat, sub;
+  if (m.statut === 'consenti') { stat = 'Consenti sur les ' + m.total + ' canaux'; sub = m.date_decision ? 'Réponse du client le ' + dateFr(m.date_decision) : 'Réponse du client enregistrée'; }
+  else if (m.statut === 'refuse') { stat = 'Refusé sur tous les canaux'; sub = m.date_decision ? 'Réponse du client le ' + dateFr(m.date_decision) : ''; }
+  else if (m.statut === 'partiel') { stat = 'Consenti sur ' + m.consenti + ' canal' + (m.consenti > 1 ? 'aux' : '') + ' sur ' + m.total; sub = [m.refuse ? m.refuse + ' refusé' + (m.refuse > 1 ? 's' : '') : '', m.attente ? m.attente + ' sans réponse' : '', m.date_decision ? 'réponse du ' + dateFr(m.date_decision) : ''].filter(Boolean).join(' · '); }
+  else if (m.statut === 'attente') { stat = 'En attente de réponse'; sub = m.demande_le ? 'Demande envoyée le ' + dateHeureFr(m.demande_le) : 'Aucune demande envoyée depuis One Data'; }
+  else { stat = 'Aucun consentement connu'; sub = 'Rien dans BACS pour ' + m.libelle; }
+
+  const canaux = CANAUX_CONSENT.map(c => {
+    const e = (m.canaux || {})[c[0]] || 'inconnu';
+    return `<div class="cs-c ${e}" title="${esc((CANAUX_LONG[c[0]] || c[1]) + ' : ' + libEtat(e))}">${iconeEtat(e)}<span>${esc(c[1])}</span></div>`;
+  }).join('');
+
+  let act = '';
+  if (m.statut !== 'consenti' && !synth.sans_bacs) {
+    let note = '';
+    if (m.possible) note = m.demande_le ? 'Relancer : le client reçoit un nouveau SMS.' : 'Le client reçoit un SMS et choisit lui-même.';
+    else if (m.motif === 'sans_portable') note = 'Pas de portable : la demande part par SMS.';
+    else if (m.motif === 'compte_absent') note = 'Pas encore de compte BACS pour ce client.';
+    else if (m.motif === 'extension') note = 'Demande depuis One Data : extension BACS 3.3.4 requise. Sinon, bouton « Demande du Consentement ' + m.libelle + ' » dans BACS.';
+    act = `<div class="cs-act"><p>${esc(note)}</p>` +
+      (m.possible ? `<button type="button" class="cf-btn cf-btn-primary" data-cs-demander="${esc(m.marque)}" data-cs-site="${esc(m.id_site)}">${ICON_SMS}<span>${m.demande_le ? 'Relancer la demande' : 'Demander le consentement'}</span></button>` : '') +
+      `</div>`;
+  }
+  return `<div class="cs-m ${cls}">
+    <div class="cs-m-h"><div class="cs-m-ic">${ic}</div><div><div class="cs-m-nom">${esc(m.libelle)}</div><div class="cs-m-stat">${esc(stat)}</div>${sub ? `<div class="cs-m-sub">${esc(sub)}</div>` : ''}</div></div>
+    <div class="cs-canaux">${canaux}</div>${act}</div>`;
 }
-// Défini = toutes les réponses de marque connues ; sinon en attente.
-function consentDefini(rows) {
-  const marques = rows.filter(x => x.marque);
-  return marques.length > 0 && marques.every(x => x.autorise || x.date_decision != null);
-}
-function htmlResumeConsent(rows) {
-  const marques = ['toyota', 'lexus'].filter(m => rows.some(x => x.marque === m));
-  if (!marques.length) return '<div style="color:#7a98c5">Aucun consentement connu dans BACS : demande d’opt-in à faire.</div>';
-  const tete = '<tr><td></td>' + marques.map(m => '<th style="text-align:left;font-size:10.5px;text-transform:uppercase;color:#7a98c5;padding:0 8px 4px">' + (m === 'toyota' ? 'Toyota' : 'Lexus') + '</th>').join('') + '</tr>';
-  const lignes = CANAUX_CONSENT.map(c => '<tr><td style="padding:3px 0;color:#5a7ba8">' + c[1] + '</td>' + marques.map(m => {
-    const e = etatConsent(rows.find(x => x.marque === m && x.canal === c[0]));
-    return '<td style="padding:3px 8px;font-weight:600;color:' + e[1] + '"><span style="display:inline-block;width:7px;height:7px;border-radius:50%;background:' + e[1] + ';margin-right:5px"></span>' + e[0] + '</td>';
-  }).join('') + '</tr>').join('');
-  return '<table style="border-collapse:collapse;font-size:12px">' + tete + lignes + '</table>';
-}
-async function peindreBoutonConsent() {
+
+async function peindreConsent(forcer) {
   const root = getRoot(); if (!root) return;
-  const btns = root.querySelectorAll('[data-cf-action="show-consent"]'); if (!btns.length) return;
   const idvu = state.client && state.client.IDVu;
-  const rows = await chargerConsentements(idvu);
-  const ok = consentDefini(rows);
-  btns.forEach(b => {
-    b.style.background = ok ? '#e6f4ef' : '#fdf3dc';
-    b.style.color = ok ? '#2f8f77' : '#a8740a';
-    b.style.border = '1.5px solid ' + (ok ? '#2f8f77' : '#e6a817');
-    b.style.fontWeight = '700';
-    b.textContent = ok ? 'Consentements ✓' : 'Consentements en attente';
-    if (b.__consentBulle) return;
-    b.__consentBulle = true;
-    let bulle = null;
-    b.addEventListener('mouseenter', async () => {
-      const r2 = await chargerConsentements(state.client && state.client.IDVu);
-      if (bulle) bulle.remove();
-      bulle = doc.createElement('div');
-      bulle.style.cssText = 'position:fixed;z-index:3500;background:#fff;border:1px solid #dce6f3;border-radius:12px;box-shadow:0 14px 34px rgba(31,74,133,.22);padding:12px 14px;font-family:inherit;color:#1c2b45;max-width:340px;pointer-events:none';
-      bulle.innerHTML = '<div style="font-weight:800;color:#1f4a87;font-size:12.5px;margin-bottom:6px">Consentements RGPD</div>' + htmlResumeConsent(r2);
-      doc.body.appendChild(bulle);
-      const rc = b.getBoundingClientRect(), h = bulle.offsetHeight, w = bulle.offsetWidth;
-      const vh = (doc.defaultView || window).innerHeight, vw = (doc.defaultView || window).innerWidth;
-      bulle.style.top = Math.max(8, (rc.bottom + 8 + h > vh) ? rc.top - h - 8 : rc.bottom + 8) + 'px';
-      bulle.style.left = Math.max(8, Math.min(rc.left, vw - w - 8)) + 'px';
-    });
-    const cacher = () => { if (bulle) { bulle.remove(); bulle = null; } };
-    b.addEventListener('mouseleave', cacher);
-    b.addEventListener('click', cacher);
+  const data = (!forcer && CONSENT_CACHE[idvu]) || await chargerConsent(idvu, forcer);
+  const z = root.querySelector('#cf-consent');
+  if (!z || !state.client || String(state.client.IDVu) !== String(idvu)) return;
+  const s = data && data.synth;
+  const c = state.client;
+  let h = '<div class="cs-h"><h3>Consentements RGPD</h3><small>' +
+    (s && s.maj ? 'Reflétés de BACS · à jour au ' + esc(dateHeureFr(s.maj)) : 'Reflétés de BACS') +
+    ' · <button type="button" class="cs-lien" data-cs-detail>Voir le détail</button></small></div>';
+  if (!s) h += '<div class="cs-charge">Consentements indisponibles pour le moment.</div>';
+  else h += '<div class="cs-marques">' + (s.marques || []).map(m => carteMarque(m, s)).join('') + '</div>';
+
+  // Autres freins à la prise de contact, sur la même ligne.
+  const pills = [];
+  if (s && s.bloctel) {
+    pills.push(`<span class="cs-pill${s.bloctel.mobile ? ' rouge' : ' vert'}">Bloctel mobile <b>${s.bloctel.mobile ? 'inscrit' : 'libre'}</b></span>`);
+    pills.push(`<span class="cs-pill${s.bloctel.fixe ? ' rouge' : ' vert'}">Bloctel fixe <b>${s.bloctel.fixe ? 'inscrit' : 'libre'}</b></span>`);
+  }
+  if (!isSoc()) {
+    pills.push(`<span class="cs-pill${c.STOP_COM ? ' rouge' : ' vert'}">Stop com <b>${c.STOP_COM ? 'OUI — ne plus solliciter' : 'non'}</b></span>`);
+    const npai = c.NPAI || 'Aucun';
+    pills.push(`<span class="cs-pill${npai !== 'Aucun' ? ' rouge' : ' vert'}">NPAI <b>${esc(npai)}</b></span>`);
+  }
+  if (pills.length) h += '<div class="cs-pied">' + pills.join('') + '</div>';
+  if (state.mode === 'edit' && !isSoc()) {
+    h += '<div class="cs-edit">' +
+      fieldInput('Stop com', 'STOP_COM', 'checkbox', { texte: 'Le client ne veut plus être sollicité' }) +
+      fieldInput('NPAI', 'NPAI', 'select', { options: npaiOptions.map(o => ({ value: o, label: o })), noPlaceholder: true }) + '</div>';
+  }
+  z.innerHTML = h;
+  z.querySelectorAll('[data-cf-field]').forEach(lierChamp);
+  const det = z.querySelector('[data-cs-detail]'); if (det) det.addEventListener('click', openConsentModal);
+  z.querySelectorAll('[data-cs-demander]').forEach(b => b.addEventListener('click', () => demanderConsent(b.getAttribute('data-cs-site'))));
+}
+
+function chargerBacsClient() {
+  const W = (wwLib.getFrontWindow && wwLib.getFrontWindow()) || window;
+  return new Promise(ok => {
+    if (W.oropraBacsClient) return ok(W.oropraBacsClient);
+    const d = W.document || doc;
+    const sc = d.createElement('script');
+    sc.src = 'https://cdn.jsdelivr.net/gh/oropra-apps/one-data-blocs@oropra-bacs-client-v5/oropra-bacs-client.js'; sc.async = true;
+    sc.onload = () => ok(W.oropraBacsClient || null);
+    sc.onerror = () => ok(null);
+    (d.head || d.documentElement).appendChild(sc);
   });
+}
+async function demanderConsent(idSite) {
+  const idvu = state.client && state.client.IDVu;
+  if (idvu == null) return;
+  const obc = await chargerBacsClient();
+  if (!obc || !obc.consentement || (obc.version || 0) < 4) {
+    alerteInline('Module BACS indisponible : rechargez la page (Ctrl+F5) et réessayez.');
+    return;
+  }
+  try { await obc.consentement(ctx.supabase, idvu, idSite ? Number(idSite) : null); } catch (e) {}
+  peindreConsent(true);
+}
+function alerteInline(msg) {
+  const z = getRoot() && getRoot().querySelector('#cf-consent');
+  if (!z) return;
+  const d = doc.createElement('div'); d.className = 'cf-error'; d.style.margin = '10px 0 0'; d.textContent = msg;
+  z.appendChild(d);
 }
 
 async function openConsentModal() {
@@ -824,66 +982,66 @@ async function openConsentModal() {
   if (idvu == null) return;
   const cl = state.client || {};
   const ov = doc.createElement('div');
-  ov.style.cssText = 'position:fixed;inset:0;z-index:3000;display:flex;align-items:flex-start;justify-content:center;padding:24px;background:rgba(31,74,133,.45);overflow-y:auto';
+  ov.style.cssText = 'position:fixed;inset:0;z-index:3000;display:flex;align-items:flex-start;justify-content:center;padding:24px 16px;background:rgba(31,74,133,.45);overflow-y:auto;font-family:"Nunito Sans",system-ui,sans-serif';
   const modal = doc.createElement('div');
-  modal.style.cssText = 'background:#fff;border-radius:16px;width:100%;max-width:640px;box-shadow:0 30px 80px rgba(31,74,133,.35);margin:auto;position:relative;padding:22px;font-family:inherit;color:#1c2b45';
+  modal.style.cssText = 'background:#fff;border-radius:16px;width:100%;max-width:720px;box-shadow:0 30px 80px rgba(31,74,133,.35);margin:auto;position:relative;padding:22px;color:#1F4A85';
   modal.innerHTML = '<div style="color:#7a98c5;padding:24px;text-align:center">Chargement des consentements…</div>';
   ov.appendChild(modal); doc.body.appendChild(ov);
-  const fermer = function () { try { ov.remove(); } catch (e) {} };
-  ov.addEventListener('mousedown', function (e) { if (e.target === ov) fermer(); });
+  const fermer = () => { try { ov.remove(); } catch (e) {} doc.removeEventListener('keydown', echap); };
+  const echap = e => { if (e.key === 'Escape') fermer(); };
+  doc.addEventListener('keydown', echap);
+  ov.addEventListener('mousedown', e => { if (e.target === ov) fermer(); });
 
-  const rows = await chargerConsentements(idvu);
+  const data = await chargerConsent(idvu);
+  const rows = (data && data.rows) || [];
+  const s = (data && data.synth) || { marques: [] };
+  const find = (marque, canal) => rows.find(x => (x.marque || null) === marque && x.canal === canal);
+  const COUL = { consenti: '#2f8f77', attente: '#a8740a', refuse: '#c43c3b', inconnu: '#9fb3d1' };
+  const etat = r => !r ? 'inconnu' : r.autorise ? 'consenti' : r.date_decision == null ? 'attente' : 'refuse';
 
-  function find(marque, canal) { return rows.find(function (x) { return (x.marque || null) === marque && x.canal === canal; }); }
-  function fdate(d) { if (!d || String(d).slice(0, 4) === '1900') return '—'; try { return new Date(d).toLocaleDateString('fr-FR'); } catch (e) { return '—'; } }
-  function pastille(row) {
-    let lab, col;
-    if (!row) { lab = '—'; col = '#c9d3e0'; }
-    else if (row.autorise) { lab = 'Consenti'; col = '#2f8f77'; }
-    else if (row.date_decision == null) { lab = 'En attente'; col = '#e6a817'; }
-    else { lab = 'Refusé'; col = '#c63a3a'; }
-    return '<span style="display:inline-flex;align-items:center;gap:6px;font-weight:600;font-size:12.5px;color:' + col + '"><span style="width:9px;height:9px;border-radius:50%;background:' + col + '"></span>' + lab + '</span>';
-  }
-  function bloctel(row) { return row && row.autorise ? '<span style="color:#c63a3a;font-weight:700">Inscrit</span>' : '<span style="color:#2f8f77;font-weight:600">Libre</span>'; }
-
-  const canaux = [['emails', 'E-mails'], ['sms', 'SMS'], ['calls', 'Appels'], ['mailings', 'Courriers'], ['newsletters', 'Newsletters'], ['offers_events', 'Offres & événements'], ['reminders', 'Rappels'], ['market_research', 'Études de marché']];
-  const trs = canaux.map(function (c) {
-    return '<tr><td style="padding:7px 0;color:#5a7ba8;font-size:13px">' + c[1] + '</td>'
-      + '<td style="padding:7px 10px">' + pastille(find('toyota', c[0])) + '</td>'
-      + '<td style="padding:7px 10px">' + pastille(find('lexus', c[0])) + '</td></tr>';
-  }).join('');
-
-  const majs = rows.map(function (x) { return x.maj; }).filter(Boolean).sort();
-  const majMax = majs.length ? fdate(majs[majs.length - 1]) : '—';
+  const blocMarque = m => {
+    const lignes = CANAUX_CONSENT.map(c => {
+      const r = find(m.marque, c[0]); const e = etat(r);
+      return `<tr><td style="padding:6px 0;color:#5a7ba8;font-size:13px;font-weight:600">${esc(CANAUX_LONG[c[0]] || c[1])}</td>` +
+        `<td style="padding:6px 8px;color:${COUL[e]};font-weight:800;font-size:12.5px;white-space:nowrap">${libEtat(e)}</td>` +
+        `<td style="padding:6px 0;color:#7a98c5;font-size:12px;text-align:right;white-space:nowrap">${r && r.date_decision ? esc(dateFr(r.date_decision)) : ''}</td></tr>`;
+    }).join('');
+    return `<div style="border:1.5px solid #e3edf9;border-radius:12px;padding:12px 14px">
+      <div style="font-size:12px;font-weight:900;letter-spacing:.14em;text-transform:uppercase;color:#1F4A85;margin-bottom:2px">${esc(m.libelle)}</div>
+      <div style="font-size:12px;color:#7a98c5;font-weight:600;margin-bottom:8px">${m.demande_le ? 'Dernière demande envoyée le ' + esc(dateHeureFr(m.demande_le)) : 'Aucune demande envoyée depuis One Data'}</div>
+      <table style="width:100%;border-collapse:collapse">${lignes}</table></div>`;
+  };
+  const champ = (lib, val) => `<div><div style="font-size:11px;font-weight:700;color:#7a98c5">${lib}</div><div style="font-weight:800;margin-top:2px;font-size:13px">${val || '—'}</div></div>`;
+  const bl = r => r && r.autorise ? '<span style="color:#c43c3b">Inscrit</span>' : '<span style="color:#2f8f77">Libre</span>';
 
   modal.innerHTML =
-    '<button type="button" data-consent-close style="position:absolute;top:-12px;right:-12px;width:34px;height:34px;border-radius:50%;border:1.5px solid #e2eaf5;background:#fff;cursor:pointer;color:#7a98c5;font-size:16px;line-height:1;display:flex;align-items:center;justify-content:center;box-shadow:0 2px 8px rgba(31,74,133,.25)">✕</button>'
-    + '<div style="font-weight:800;color:#1f4a87;font-size:16px">Consentements RGPD</div>'
-    + '<div style="color:#9fb0c4;font-size:12px;margin:2px 0 16px">Reflétés de BACS — à jour au ' + majMax + '</div>'
-    + '<div style="display:flex;gap:26px;margin-bottom:16px;padding-bottom:14px;border-bottom:1px solid #eef3fa">'
-    + '<div><div style="font-size:10.5px;text-transform:uppercase;color:#7a98c5;letter-spacing:.04em">Bloctel fixe</div><div style="margin-top:3px">' + bloctel(find(null, 'bloctel_phone')) + '</div></div>'
-    + '<div><div style="font-size:10.5px;text-transform:uppercase;color:#7a98c5;letter-spacing:.04em">Bloctel mobile</div><div style="margin-top:3px">' + bloctel(find(null, 'bloctel_cell')) + '</div></div>'
+    '<button type="button" data-consent-close aria-label="Fermer" style="position:absolute;top:14px;right:14px;width:34px;height:34px;border-radius:9px;border:none;background:#f2f6fc;cursor:pointer;color:#2a5ea9;font-size:18px;line-height:1">×</button>'
+    + '<div style="font-weight:800;font-size:17px">Consentements RGPD — détail</div>'
+    + '<div style="color:#7a98c5;font-size:12.5px;font-weight:600;margin:2px 0 16px">Reflétés de BACS' + (s.maj ? ' · à jour au ' + esc(dateHeureFr(s.maj)) : '') + '</div>'
+    + '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:12px">' + (s.marques || []).map(blocMarque).join('') + '</div>'
+    + '<div style="display:flex;flex-wrap:wrap;gap:22px;margin-top:16px;padding-top:14px;border-top:1px solid #eef3fa">'
+    + champ('Bloctel mobile', bl(find(null, 'bloctel_cell'))) + champ('Bloctel fixe', bl(find(null, 'bloctel_phone')))
+    + champ('Maj Bloctel', esc(dateFr(cl.bloctel_maj_date))) + champ('Rétention', esc(dateFr(cl.rgpd_retention_date))) + champ('Anonymisation', esc(dateFr(cl.rgpd_anonymisation_date)))
     + '</div>'
-    + '<table style="width:100%;border-collapse:collapse">'
-    + '<tr><td></td><th style="text-align:left;font-size:11px;text-transform:uppercase;color:#7a98c5;padding-bottom:6px">Toyota</th><th style="text-align:left;font-size:11px;text-transform:uppercase;color:#7a98c5;padding-bottom:6px">Lexus</th></tr>'
-    + trs
-    + '</table>'
-    + '<div style="display:flex;gap:26px;margin-top:16px;padding-top:14px;border-top:1px solid #eef3fa;font-size:12.5px">'
-    + '<div><div style="font-size:10.5px;text-transform:uppercase;color:#7a98c5">Rétention</div><div style="font-weight:600;margin-top:2px">' + fdate(cl.rgpd_retention_date) + '</div></div>'
-    + '<div><div style="font-size:10.5px;text-transform:uppercase;color:#7a98c5">Anonymisation</div><div style="font-weight:600;margin-top:2px">' + fdate(cl.rgpd_anonymisation_date) + '</div></div>'
-    + '<div><div style="font-size:10.5px;text-transform:uppercase;color:#7a98c5">Maj Bloctel</div><div style="font-weight:600;margin-top:2px">' + fdate(cl.bloctel_maj_date) + '</div></div>'
-    + '</div>'
-    + '<div style="font-size:11px;color:#9fb0c4;margin-top:14px;line-height:1.5">« En attente » : le client n’a pas encore répondu à la demande d’opt-in — ce n’est pas un refus. Consentements gérés dans BACS.</div>';
+    + '<div style="font-size:12px;color:#7a98c5;margin-top:14px;line-height:1.5;font-weight:600">« En attente » : le client n’a pas encore répondu à la demande d’opt-in — ce n’est pas un refus. Les consentements Toyota et Lexus sont distincts : un accord donné à une marque ne vaut pas pour l’autre.</div>'
+    + (s.url ? `<div style="margin-top:14px;text-align:right"><a href="${esc(s.url)}" target="_blank" rel="noopener" style="color:#2a5ea9;font-weight:800;font-size:13px;text-decoration:none">Ouvrir le compte dans BACS ↗</a></div>` : '');
   const cbtn = modal.querySelector('[data-consent-close]');
   if (cbtn) cbtn.addEventListener('click', fermer);
+}
+
+function lierChamp(el) {
+  const field = el.getAttribute('data-cf-field');
+  if (field === '__addressQuery') { el.addEventListener('input', () => onAddressInput(el.value)); return; }
+  if (field === '__siretQuery')   { el.addEventListener('input', () => onSiretInput(el.value));   return; }
+  if (el.tagName === 'SELECT') el.addEventListener('change', () => updateClientField(field, el.value));
+  else if (el.type === 'checkbox') el.addEventListener('change', () => updateClientField(field, el.checked));
+  else el.addEventListener('input', () => updateClientField(field, el.value));
 }
 
 function bindEvents() {
   const root = getRoot();
   if (!root) return;
   root.querySelectorAll('[data-cf-action="enter-edit"]').forEach(el => el.addEventListener('click', enterEdit));
-  root.querySelectorAll('[data-cf-action="show-consent"]').forEach(el => el.addEventListener('click', openConsentModal));
-  peindreBoutonConsent();
   root.querySelectorAll('[data-cf-action="cancel-edit"]').forEach(el => el.addEventListener('click', cancelEdit));
   root.querySelectorAll('[data-cf-action="save-edit"]').forEach(el => el.addEventListener('click', saveEdit));
   root.querySelectorAll('[data-cf-action="dismiss-duplicate"]').forEach(el => el.addEventListener('click', dismissDuplicate));
@@ -897,24 +1055,16 @@ function bindEvents() {
     const idx = Number(el.getAttribute('data-idx'));
     if (state.siretSuggestions[idx]) applySiretSuggestion(state.siretSuggestions[idx]);
   }));
-  root.querySelectorAll('[data-cf-field]').forEach(el => {
-    const field = el.getAttribute('data-cf-field');
-    if (field === '__addressQuery') { el.addEventListener('input', () => onAddressInput(el.value)); return; }
-    if (field === '__siretQuery')   { el.addEventListener('input', () => onSiretInput(el.value));   return; }
-    if (el.tagName === 'SELECT') el.addEventListener('change', () => updateClientField(field, el.value));
-    else if (el.type === 'checkbox') el.addEventListener('change', () => updateClientField(field, el.checked));
-    else el.addEventListener('input', () => updateClientField(field, el.value));
-  });
+  root.querySelectorAll('.cf-cols [data-cf-field]').forEach(lierChamp);
 }
 
 if (!window.__cfListenerBound) {
-  window.addEventListener('oropra-client-selected', () => { loadClient(); render(); });
+  window.addEventListener('oropra-client-selected', () => { Object.keys(CONSENT_CACHE).forEach(k => delete CONSENT_CACHE[k]); loadClient(); render(); });
   window.__cfListenerBound = true;
 }
 
 loadClient();
 render();
-// ensureRenderedCf retiré (loader)
 
 }
 });
