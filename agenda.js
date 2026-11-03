@@ -1,4 +1,7 @@
 // ============================================================================
+//  v43 (03/11/2026) : charge le module partagé sous l'étiquette
+//    oropra-bacs-client-v5 (l'étiquette v4 a été posée par erreur sur
+//    l'ancien code v3). Aucun autre changement que v42.
 //  v42 (03/11/2026) : création d'un client — DEMANDE DE CONSENTEMENT en fin
 //    de création (SMS envoyé par BACS au client, qui répond lui-même) et
 //    message clair quand l'extension BACS n'est pas à jour (module partagé
@@ -2431,7 +2434,7 @@ OD.define('agenda', {
         // de toute façon que BACS soit ouvert chez le vendeur.
         const _bc = await (window.__odBacsClientPret || (window.__odBacsClientPret = new Promise(function (ok) {
               if (window.oropraBacsClient) return ok(window.oropraBacsClient);
-              var sc = document.createElement('script'); sc.src = 'https://cdn.jsdelivr.net/gh/oropra-apps/one-data-blocs@oropra-bacs-client-v4/oropra-bacs-client.js'; sc.async = true;
+              var sc = document.createElement('script'); sc.src = 'https://cdn.jsdelivr.net/gh/oropra-apps/one-data-blocs@oropra-bacs-client-v5/oropra-bacs-client.js'; sc.async = true;
               sc.onload = function () { ok(window.oropraBacsClient || null); };
               sc.onerror = function () { window.__odBacsClientPret = null; ok(null); };
               document.head.appendChild(sc);
@@ -2729,7 +2732,7 @@ OD.define('agenda', {
         if (_m.__bacsSuivi) return;
         (window.__odBacsClientPret || (window.__odBacsClientPret = new Promise(function (ok) {
           if (window.oropraBacsClient) return ok(window.oropraBacsClient);
-          var sc = document.createElement('script'); sc.src = 'https://cdn.jsdelivr.net/gh/oropra-apps/one-data-blocs@oropra-bacs-client-v4/oropra-bacs-client.js'; sc.async = true;
+          var sc = document.createElement('script'); sc.src = 'https://cdn.jsdelivr.net/gh/oropra-apps/one-data-blocs@oropra-bacs-client-v5/oropra-bacs-client.js'; sc.async = true;
           sc.onload = function () { ok(window.oropraBacsClient || null); };
           sc.onerror = function () { window.__odBacsClientPret = null; ok(null); };
           document.head.appendChild(sc);
