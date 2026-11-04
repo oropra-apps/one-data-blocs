@@ -1,4 +1,11 @@
 // ============================================================================
+//  v48 (04/11/2026) : infobulle vraiment utilisable.
+//    * En allant de l'événement vers l'infobulle, la souris passait sur
+//      d'autres événements dont l'infobulle remplaçait aussitôt la première :
+//      une infobulle ouverte ne cède plus la place qu'après un court arrêt
+//      sur un autre événement (et jamais si la souris arrive dessus).
+//    * Le téléphone appelle par le 3CX du vendeur (comme « Appeler » de la
+//      fiche) ; le texte se sélectionne et se copie.
 //  v47 (04/11/2026) : retours terrain.
 //    * Fenêtre d'un RDV client existant : deux boutons « SMS de
 //      confirmation » et « E-mail de confirmation ». Ils ouvrent les fenêtres
@@ -1612,7 +1619,7 @@ OD.define('agenda', {
 #agenda-root .fc .fc-list-event:hover td{background:#f2f6fc}
 #agenda-root .fc .fc-list-day-cushion{background:#fbfcfe}
 #agenda-root .fc .fc-list-event-dot{border-radius:3px}
-#agenda-tip{position:fixed;z-index:2000;pointer-events:auto;display:none;max-width:300px}
+#agenda-tip{position:fixed;z-index:2000;pointer-events:auto;display:none;max-width:300px;user-select:text;-webkit-user-select:text;cursor:auto}
 #agenda-tip a.agt-lien{color:#2a5ea9;text-decoration:none;border-bottom:1px solid transparent;cursor:pointer}
 #agenda-tip a.agt-lien:hover{border-bottom-color:currentColor}
 #agenda-tip .agt-tel{font-size:11px;font-weight:700;margin-top:4px;padding-left:15px}
@@ -1868,25 +1875,53 @@ OD.define('agenda', {
   function ensureTip() { const d = frontDoc(); if (tipEl && tipEl.isConnected) return tipEl; tipEl = d.createElement('div'); tipEl.id = 'agenda-tip'; (d.body || d.documentElement).appendChild(tipEl); return tipEl; }
   function hhmm(x) { return x ? String(x.getUTCHours()).padStart(2, '0') + ':' + String(x.getUTCMinutes()).padStart(2, '0') : ''; }
   function hhmmStr(s) { return (typeof s === 'string' && s.length >= 16) ? s.slice(11, 16) : ''; }
-  let tipTimer = null, tipCle = null;
+  let tipTimer = null, tipCle = null, tipIntention = null;
   const telCache = {};
   function annulerMasquage() { if (tipTimer) { clearTimeout(tipTimer); tipTimer = null; } }
   function masquerBientot(ms) { annulerMasquage(); tipTimer = setTimeout(() => { tipTimer = null; hideTip(); }, ms || 300); }
   function lienTel(tel) {
     const t = String(tel || '').trim(); if (!t) return '';
-    return '<div class="agt-tel">📞 <a class="agt-lien" href="tel:' + esc(t.replace(/[^0-9+]/g, '')) + '">' + esc(t) + '</a></div>';
+    return '<div class="agt-tel">📞 <a class="agt-lien" href="tel:' + esc(t.replace(/[^0-9+]/g, '')) + '" data-agt-tel="' + esc(t) + '" title="Appeler">' + esc(t) + '</a></div>';
   }
+  // Appel depuis un numéro affiché : par le 3CX du vendeur (OD3CX, module
+  // phone3cx) quand il est là ; sinon le lien tel: classique.
+  function appelerNumero(num, nom, idvu) {
+    let to = String(num || '').replace(/[^0-9+]/g, '');
+    if (!to) return false;
+    if (to[0] === '0') to = '+33' + to.slice(1);
+    const cands = [];
+    try { cands.push(wwLib.getFrontWindow && wwLib.getFrontWindow()); } catch (e) {}
+    cands.push(window);
+    try { cands.push(window.parent); } catch (e) {}
+    try { cands.push(window.top); } catch (e) {}
+    for (const w of cands) {
+      try {
+        if (w && w.OD3CX && typeof w.OD3CX.appeler === 'function') {
+          w.OD3CX.appeler(to, { nom: nom || num, idvu: Number(idvu) > 0 ? Number(idvu) : null });
+          return true;
+        }
+      } catch (e) {}
+    }
+    return false;
+  }
+
   function showTip(el, ev) {
     annulerMasquage();
     const t = ensureTip(); const p = ev.extendedProps || {};
     if (!t.__agtLie) {
       t.__agtLie = true;
-      t.addEventListener('mouseenter', annulerMasquage);
+      t.addEventListener('mouseenter', () => { annulerMasquage(); if (tipIntention) { clearTimeout(tipIntention); tipIntention = null; } });
       t.addEventListener('mouseleave', () => masquerBientot(200));
       t.addEventListener('click', (e) => {
         const a = e.target.closest('[data-agt-client]');
         if (a) { e.preventDefault(); const id = a.getAttribute('data-agt-client'); hideTip(); ouvrirFicheClient(id); return; }
-        if (e.target.closest('a[href^="tel:"]')) setTimeout(hideTip, 50);
+        const tl = e.target.closest('a[data-agt-tel]');
+        if (tl) {
+          const nomCli = (t.querySelector('[data-agt-client]') || {}).textContent || '';
+          const idCli = (t.querySelector('[data-agt-client]') || { getAttribute: () => null }).getAttribute('data-agt-client');
+          if (appelerNumero(tl.getAttribute('data-agt-tel'), nomCli, idCli)) e.preventDefault();
+          setTimeout(hideTip, 50);
+        }
       });
     }
     const cn = clientName(p); const main = cn || ev.title || '';
@@ -2160,7 +2195,15 @@ OD.define('agenda', {
         // Pas d'infobulle sur écran tactile : le tap déclenche mouseenter sans
         // jamais de mouseleave, l'infobulle restait collée par-dessus le popup.
         if (touch) return;
-        info.el.addEventListener('mouseenter', () => showTip(info.el, info.event));
+        // Infobulle déjà ouverte : on ne la remplace qu'après un arrêt de 350 ms
+        // sur cet événement (la souris qui la rejoint ne fait que passer).
+        info.el.addEventListener('mouseenter', () => {
+          if (tipIntention) { clearTimeout(tipIntention); tipIntention = null; }
+          const ouverte = tipEl && tipEl.style.display === 'block';
+          if (!ouverte) { showTip(info.el, info.event); return; }
+          tipIntention = setTimeout(() => { tipIntention = null; showTip(info.el, info.event); }, 350);
+        });
+        info.el.addEventListener('mouseleave', () => { if (tipIntention) { clearTimeout(tipIntention); tipIntention = null; } });
         info.el.addEventListener('mouseleave', () => masquerBientot(300));
       },
       eventClick: (arg) => {
