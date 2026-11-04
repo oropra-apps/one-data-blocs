@@ -1,4 +1,13 @@
-// ENTREPRISE — module One Data (OD.define) v5 (04/11/2026)
+// ENTREPRISE — module One Data (OD.define) v6 (04/11/2026)
+//
+// v6 : retours vendeurs.
+//   · Création d'un interlocuteur depuis une société : portable, fixe et e-mail
+//     repris par défaut de la fiche société (le vendeur vient souvent de les
+//     saisir), modifiables ; le rôle (et fonction, commentaire) se choisit dans
+//     la même fenêtre, comme pour une personne déjà connue ; un seul bouton
+//     « Créer et désigner l'interlocuteur ».
+//   · Bandeau « Société présente dans BACS » retiré (le bouton BACS de l'en-tête
+//     ouvre déjà la fiche) ; l'alerte « Société absente de BACS » reste.
 //
 // v5 : la confirmation du retrait (« Retirer … des interlocuteurs ? ») ne passe
 //   plus par la boîte native du navigateur, qui pouvait être bloquée sans rien
@@ -444,6 +453,16 @@ function openInterlocuteur() {
     create: null, saving: false, error: null
   };
   render();
+  chargerCoordSociete();
+}
+// Coordonnées de la société : proposées par défaut à l'interlocuteur créé.
+async function chargerCoordSociete() {
+  if (state.socCoord && state.socCoord.id === state.idClient) return;
+  try {
+    const r = await supa().from('CLIENT').select('TEl_MOB, TEL_FIXE, EMAIL').eq('IDVu', state.idClient).maybeSingle();
+    const d = (r && r.data) || {};
+    state.socCoord = { id: state.idClient, mob: cleanDigits(d.TEl_MOB || ''), fixe: cleanDigits(d.TEL_FIXE || ''), email: String(d.EMAIL || '').trim().toLowerCase() };
+  } catch (e) { state.socCoord = { id: state.idClient, mob: '', fixe: '', email: '' }; }
 }
 function closeInterlocuteur() { state.imodal = null; render(); }
 
@@ -482,13 +501,24 @@ function pickInterlocuteur(row) {
   m.results = []; m.create = null;
   render();
 }
-function openICreate() {
+async function openICreate() {
   const m = state.imodal; if (!m) return;
+  await chargerCoordSociete();
+  const sc = (state.socCoord && state.socCoord.id === state.idClient) ? state.socCoord : { mob: '', fixe: '', email: '' };
+  const estMob = (t) => /^0[67]\d{8}$/.test(t || '');
+  // Numéro de la société : un 06/07 va en portable, un autre numéro en fixe.
+  const socMob = estMob(sc.mob) ? sc.mob : (estMob(sc.fixe) ? sc.fixe : '');
+  const socFixe = [sc.fixe, sc.mob].find(t => t && !estMob(t)) || '';
   const mots = (m.q || '').trim().split(/\s+/).filter(Boolean);
   const aDesChiffres = /\d/.test(m.q || '');
+  const tape = aDesChiffres ? cleanDigits(m.q) : '';
   m.create = {
     data: { CIVILITE: CIVILITES_P[0], PRENOM: !aDesChiffres && mots.length > 1 ? mots.slice(1).join(' ') : '',
-            NOM: !aDesChiffres && mots.length ? mots[0] : '', TEl_MOB: aDesChiffres ? cleanDigits(m.q) : '', EMAIL: '' },
+            NOM: !aDesChiffres && mots.length ? mots[0] : '',
+            TEl_MOB: tape && estMob(tape) ? tape : socMob,
+            TEL_FIXE: tape && !estMob(tape) ? tape : socFixe,
+            EMAIL: sc.email || '' },
+    reprisSociete: !!(socMob || socFixe || sc.email),
     saving: false, error: null, duplicate: null, dupAck: false
   };
   m.results = [];
@@ -501,27 +531,28 @@ function cancelICreate() { if (state.imodal) { state.imodal.create = null; rende
 async function saveICreate() {
   const m = state.imodal; if (!m || !m.create) return;
   const c = m.create, d = c.data;
-  const nom = String(d.NOM || '').trim(), mob = cleanDigits(d.TEl_MOB), email = String(d.EMAIL || '').trim().toLowerCase();
-  if (!nom) { c.error = 'Le nom est obligatoire.'; render(); return; }
-  if (mob && !/^0[67]\d{8}$/.test(mob)) { c.error = 'Le portable doit comporter 10 chiffres et commencer par 06 ou 07.'; render(); return; }
-  if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(email)) { c.error = "L'adresse e-mail n'est pas valide."; render(); return; }
-  if (!mob && !email) { c.error = 'Un portable ou un e-mail est nécessaire pour joindre l’interlocuteur.'; render(); return; }
+  const nom = String(d.NOM || '').trim(), mob = cleanDigits(d.TEl_MOB), fixe = cleanDigits(d.TEL_FIXE || ''), email = String(d.EMAIL || '').trim().toLowerCase();
+  if (!nom) { c.error = 'Le nom est obligatoire.'; render(); return false; }
+  if (mob && !/^0[67]\d{8}$/.test(mob)) { c.error = 'Le portable doit comporter 10 chiffres et commencer par 06 ou 07.'; render(); return false; }
+  if (fixe && !/^0\d{9}$/.test(fixe)) { c.error = 'Le téléphone fixe doit comporter 10 chiffres.'; render(); return false; }
+  if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(email)) { c.error = "L'adresse e-mail n'est pas valide."; render(); return false; }
+  if (!mob && !email && !fixe) { c.error = 'Un téléphone ou un e-mail est nécessaire pour joindre l’interlocuteur.'; render(); return false; }
   if (!c.dupAck) {
     await chargerDoublons();
     const od = window.oropraDoublons;
     if (od) {
       const dup = await od.check(supa(), { NOM: nom, PRENOM: d.PRENOM, TEl_MOB: mob, EMAIL: email }, {});
-      if (dup) { c.duplicate = dup; render(); return; }
+      if (dup) { c.duplicate = dup; render(); return false; }
     }
   }
   const idSite = siteCourant();
-  if (idSite == null) { c.error = 'Aucun site sélectionné (choisissez un site en haut à droite).'; render(); return; }
+  if (idSite == null) { c.error = 'Aucun site sélectionné (choisissez un site en haut à droite).'; render(); return false; }
   c.saving = true; c.error = null; render();
   try {
     const now = new Date().toISOString();
     const payload = {
       idmultivu: 0, CIVILITE: d.CIVILITE || null, NOM: nom.toUpperCase(), PRENOM: String(d.PRENOM || '').trim().toUpperCase() || null,
-      TEl_MOB: mob || null, EMAIL: email || null, CreationDate: now, UpdateDate: now,
+      TEl_MOB: mob || null, TEL_FIXE: fixe || null, EMAIL: email || null, CreationDate: now, UpdateDate: now,
       ID_VENDEUR_CREATION: viewerId != null ? String(viewerId) : null,
       ID_VENDEUR_UPDATE: viewerId != null ? String(viewerId) : null
     };
@@ -536,14 +567,22 @@ async function saveICreate() {
     m.selected = { id: Number(ins.IDVu), nom: personneName(ins), sub: 'Nouvelle fiche n° ' + ins.IDVu, dans_bacs: false };
     m.create = null;
     render();
+    return true;
   } catch (e) {
     c.saving = false; c.error = errMsg(e); render();
+    return false;
   }
 }
 
 async function saveInterlocuteur() {
-  const m = state.imodal; if (!m || !m.selected) return;
+  const m = state.imodal; if (!m) return;
   if (!m.form.type) { m.error = 'Le rôle est obligatoire.'; render(); return; }
+  if (m.create) {
+    m.error = null;
+    if (!(await saveICreate())) return;   // erreur ou doublon affiché : le vendeur décide
+    if (state.imodal !== m) return;
+  }
+  if (!m.selected) return;
   m.saving = true; m.error = null; render();
   try {
     const r = await lier(state.idClient, m.selected.id, m.form);
@@ -631,6 +670,8 @@ ${R} .er-chip-name{font-weight:700;font-size:13px;color:#0f6e56}
 ${R} .er-chip-sub{font-size:11px;color:#3a8a76;margin-top:1px}
 ${R} .er-chip-x{background:none;border:none;color:#0f6e56;cursor:pointer;font-size:12px;font-weight:600}
 ${R} .er-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px 14px}
+${R} .er-newcard{border:1px solid #9ad9c5;border-radius:8px;padding:12px 14px;display:flex;flex-direction:column;gap:12px}
+${R} .er-newcard-h{display:flex;align-items:flex-start;justify-content:space-between;gap:10px}
 ${R} .er-f{display:flex;flex-direction:column;gap:4px}
 ${R} .er-f-full{grid-column:1 / -1}
 ${R} .er-f label{font-size:11px;text-transform:uppercase;letter-spacing:.4px;color:#7a98c5;font-weight:600}
@@ -695,9 +736,6 @@ function renderSociete() {
   if (state.bacs && state.bacs.actif && !state.bacs.compte) {
     h += `<div class="er-alert"><span><b>Société absente de BACS.</b> Créez-la dans BACS pour y désigner ses interlocuteurs et y ouvrir des affaires.</span>
           <button class="er-btn er-btn-ghost er-btn-mini" data-pousser-societe="1"><span class="er-b">B</span> Créer dans BACS</button></div>`;
-  } else if (state.bacs && state.bacs.compte && state.bacs.url) {
-    h += `<div class="er-info"><span class="er-b">B</span><span>Société présente dans BACS.</span>
-          <button class="er-btn er-btn-ghost er-btn-mini" data-ouvrir-bacs="1">Ouvrir dans BACS</button></div>`;
   }
   if (!state.loading && state.list && !state.list.length && !state.error) {
     h += `<div class="er-alert"><span><b>Aucun interlocuteur désigné.</b> Comme dans BACS, une affaire ne peut être ouverte pour une société qu'une fois son interlocuteur désigné.</span></div>`;
@@ -745,7 +783,7 @@ function renderIModal() {
       b += '</div>';
     }
   }
-  if (m.selected && !m.create) {
+  if (m.selected || m.create) {
     b += '<div class="er-step">2 · Rôle dans la société</div>';
     b += '<div class="er-grid">';
     b += `<div class="er-f"><label>Rôle <span class="er-req">*</span></label><select class="er-select" data-if="type">${TYPES.map(t => `<option value="${esc(t)}"${m.form.type === t ? ' selected' : ''}>${esc(t)}</option>`).join('')}</select></div>`;
@@ -754,9 +792,10 @@ function renderIModal() {
     b += '</div>';
     if (state.bacs && state.bacs.actif) b += `<div class="er-hint"><span class="er-b">B</span> L'interlocuteur sera aussi désigné dans BACS${state.bacs.compte ? '' : ' (la société y sera créée au passage)'}.</div>`;
   }
-  const can = m.selected && !m.create;
+  const can = !!(m.selected || m.create);
+  const occupe = m.saving || (m.create && m.create.saving);
   let f = `<button class="er-btn er-btn-ghost" data-i-close="1">Annuler</button>`;
-  f += `<button class="er-btn er-btn-primary" data-i-save="1"${(!can || m.saving) ? ' disabled' : ''}>${m.saving ? I.spin : I.link} <span>Désigner l'interlocuteur</span></button>`;
+  f += `<button class="er-btn er-btn-primary" data-i-save="1"${(!can || occupe) ? ' disabled' : ''}>${occupe ? I.spin : (m.create ? I.plus : I.link)} <span>${m.create ? 'Créer et désigner l\'interlocuteur' : 'Désigner l\'interlocuteur'}</span></button>`;
   return `<div class="er-overlay" data-i-overlay="1"><div class="er-modal">
     <div class="er-modal-h"><div class="er-modal-t">Ajouter un interlocuteur</div><button class="er-ic" data-i-close="1" aria-label="Fermer">${I.x}</button></div>
     <div class="er-modal-b">${b}</div>
@@ -768,18 +807,20 @@ function renderICreate(c) {
   let h = '';
   if (c.error) h += `<div class="er-err">${esc(c.error)}</div>`;
   if (c.duplicate && window.oropraDoublons) h += window.oropraDoublons.html(c.duplicate, 'er', { saving: c.saving, libelleForce: 'Créer quand même' });
+  h += `<div class="er-newcard"><div class="er-newcard-h"><div><div class="er-chip-name">Nouveau particulier</div>
+    <div class="er-chip-sub">Créé dans One Data${state.bacs && state.bacs.actif ? ' et dans BACS' : ''} au moment de la désignation</div></div>
+    <button class="er-chip-x" data-ic-cancel="1">Rechercher plutôt</button></div>`;
   h += '<div class="er-grid">';
   h += `<div class="er-f"><label>Civilité</label><select class="er-select" data-ic="CIVILITE">${CIVILITES_P.map(t => `<option value="${esc(t)}"${c.data.CIVILITE === t ? ' selected' : ''}>${esc(t)}</option>`).join('')}</select></div>`;
   h += '<div class="er-f"></div>';
   h += `<div class="er-f"><label>Nom <span class="er-req">*</span></label><input class="er-input" data-ic="NOM" value="${esc(c.data.NOM)}" autocomplete="off"></div>`;
   h += `<div class="er-f"><label>Prénom</label><input class="er-input" data-ic="PRENOM" value="${esc(c.data.PRENOM)}" autocomplete="off"></div>`;
   h += `<div class="er-f"><label>Portable</label><input class="er-input" data-ic="TEl_MOB" value="${esc(c.data.TEl_MOB)}" placeholder="06…" autocomplete="off"></div>`;
+  h += `<div class="er-f"><label>Fixe</label><input class="er-input" data-ic="TEL_FIXE" value="${esc(c.data.TEL_FIXE || '')}" placeholder="01…" autocomplete="off"></div>`;
   h += `<div class="er-f"><label>E-mail</label><input class="er-input" data-ic="EMAIL" value="${esc(c.data.EMAIL)}" autocomplete="off"></div>`;
   h += '</div>';
-  h += `<div style="display:flex;gap:8px;justify-content:flex-end;margin-top:4px">
-    <button class="er-btn er-btn-ghost" data-ic-cancel="1">${I.back} Retour</button>
-    <button class="er-btn er-btn-primary" data-ic-save="1"${c.saving ? ' disabled' : ''}>${c.saving ? I.spin : I.plus} <span>Créer et sélectionner</span></button>
-  </div>`;
+  if (c.reprisSociete) h += `<div class="er-hint" style="margin-top:8px">Téléphone et e-mail repris de la société : modifiez-les si l'interlocuteur a les siens.</div>`;
+  h += '</div>';
   return h;
 }
 
@@ -953,7 +994,7 @@ function bindEvents() {
     if (state.modal && state.modal.create) { state.modal.create.duplicate = null; render(); }
   });
   on('[data-od-action="dup-force"]', 'click', function () {
-    if (state.imodal && state.imodal.create) { state.imodal.create.dupAck = true; state.imodal.create.duplicate = null; saveICreate(); return; }
+    if (state.imodal && state.imodal.create) { state.imodal.create.dupAck = true; state.imodal.create.duplicate = null; saveInterlocuteur(); return; }
     if (state.modal && state.modal.create) { state.modal.create.dupAck = true; state.modal.create.duplicate = null; saveCreate(); }
   });
   on('[data-od-action="dup-open"]', 'click', function (e) {
