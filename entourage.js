@@ -1,4 +1,11 @@
-// ENTOURAGE — module One Data (OD.define) v3 (04/11/2026)
+// ENTOURAGE — module One Data (OD.define) v4 (04/11/2026)
+//
+// v4 : RELANCE AUTOMATIQUE. À l'ouverture de l'onglet, les reports vers BACS
+//   restés en attente pour cet utilisateur sur ce client (ajout ou retrait
+//   dont la page n'a pas pu demander l'exécution) partent d'eux-mêmes, l'un
+//   après l'autre (entourage_gestes_en_attente, migration 20261104225500).
+//   Une seule tentative par affichage de la fiche : un refus BACS s'affiche
+//   et le bouton « Relancer » reste disponible.
 //
 // v3 : le report dans BACS s'exécute VRAIMENT. Les gestes d'entourage sont
 //   « directs » : la base les met en file sans jamais les relancer seule, c'est
@@ -106,6 +113,26 @@ OD.define('entourage', {
       const t = String(err).replace(/^[^:]*refusée\s*:\s*/i, '').replace(/^[A-Za-z0-9_]+\.[A-Za-z0-9_]+\s*:\s*/, '').replace(/❌\s*/g, '').trim();
       return 'BACS a refusé : ' + (t || String(err));
     }
+    // v4 : reports en attente de cet utilisateur sur ce client -> relancés
+    // automatiquement, un par un, une seule fois par affichage de la fiche.
+    const dejaRelances = new Set();
+    let relanceEnCours = false;
+    async function relancerEnAttente(id) {
+      if (relanceEnCours || !state.bacsActif) return;
+      relanceEnCours = true;
+      try {
+        const r = await supa().rpc('entourage_gestes_en_attente', { p_id_client: id });
+        if (r.error || !Array.isArray(r.data)) return;
+        for (const g of r.data) {
+          if (state.id !== id) return;
+          if (dejaRelances.has(g.geste) || state.envoi[g.id_lien]) continue;
+          dejaRelances.add(g.geste);
+          await executerGeste(g.geste, g.id_lien,
+            g.type === 'entourage_retirer' ? 'Retrait reporté dans BACS.' : 'Reporté dans BACS.');
+        }
+      } catch (e) { console.warn('[entourage] relance', errMsg(e)); }
+      finally { relanceEnCours = false; }
+    }
     async function executerGeste(gesteId, idLien, texteOk) {
       if (gesteId == null) return;
       state.envoi[idLien] = true;
@@ -130,6 +157,7 @@ OD.define('entourage', {
         if (r.error) throw r.error;
         if (state.id !== id) return;
         state.list = r.data || []; state.error = null;
+        relancerEnAttente(id);
       } catch (e) { state.error = errMsg(e); state.list = state.list || []; }
       finally { state.loading = false; if (!state.modal) render(); }
     }
@@ -146,6 +174,7 @@ OD.define('entourage', {
         if (!r.error && r.data && r.data.demande) suivreLecture(id);
       } catch (e) {}
       if (!state.modal) render();
+      relancerEnAttente(id);   // v4 : bacsActif est connu à présent
     }
     // La récolte lit l'entourage BACS de ce client : on suit la lecture (la base
     // répond « déjà lu » dès qu'elle est faite), puis la liste se recharge.
