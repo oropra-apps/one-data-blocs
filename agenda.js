@@ -1,4 +1,14 @@
 // ============================================================================
+//  v47 (04/11/2026) : retours terrain.
+//    * Fenêtre d'un RDV client existant : deux boutons « SMS de
+//      confirmation » et « E-mail de confirmation ». Ils ouvrent les fenêtres
+//      SMS / e-mail habituelles, pré-remplies (date, heure, adresse de la
+//      concession, signature du vendeur) ; le vendeur relit et envoie.
+//    * Livraisons : VN en vert, VO en orange (charte One Data). Un VD est un
+//      VO. Le genre est lu dans l'objet BACS (« Livraison VO · … »), sinon
+//      dans la commande rattachée (PROPALE_BDC.VN_VO), sinon dans le
+//      commentaire ; à défaut, vert. Les livraisons portent 🚚 dans l'agenda
+//      personnel, pour ne pas les confondre avec les RDV client (orange).
 //  v46 (04/11/2026) : retour vendeurs — l'infobulle de survol devient
 //    utilisable : elle reste ouverte quand la souris passe de l'événement à
 //    l'infobulle (délai de fermeture), le nom du client ouvre sa fiche client,
@@ -282,7 +292,8 @@ OD.define('agenda', {
       client:    '#e8833a',   // RDV client : orange
       relance:   '#9aa3ad',   // relances : gris
       bilat:     '#1F4A85',   // bilatérales : bleu foncé (charte One Data, v25 — le violet n'en fait pas partie)
-      livraison: '#53bda7',   // livraisons : vert
+      livraison: '#53bda7',   // livraisons VN : vert
+      livraisonVo: '#e8833a', // v46 : livraisons VO (et VD) : orange
       creneau:   '#2a5ea9',   // créneaux : bleu
       bacs:      '#aab2bd',   // v29 : RDV BACS neutres (il n'y en a plus depuis le 02/11/2026)
       prepa:     '#b45f1a',   // v34 : préparation VN (agenda du préparateur)
@@ -372,8 +383,27 @@ OD.define('agenda', {
   // qui le filtre. Une seule décision, donc aucune divergence possible entre
   // la légende et le calendrier.
   function strongColor(e) {
-    return CFG.colors[familleEvt(e)] || CFG.colors.creneau;
+    const f = familleEvt(e);
+    if (f === 'livraison') return couleurLivr(e);
+    return CFG.colors[f] || CFG.colors.creneau;
   }
+  // v46 : une livraison est-elle un VO (un VD est un VO) ? L'objet BACS
+  // (« Livraison VO · … ») prime : c'est l'événement lui-même. Puis la
+  // commande rattachée, puis le commentaire libre. À défaut : VN.
+  const RX_VO = /(^|[^A-Za-z0-9])(VO|VD|occasion)([^A-Za-z0-9]|$)/i;
+  const RX_VN = /(^|[^A-Za-z0-9])VN([^A-Za-z0-9]|$)/i;
+  function estLivraisonVo(e) {
+    if (!e) return false;
+    const desc = String(e.description || '');
+    const sujet = desc.split(' · ')[0];
+    if (RX_VO.test(sujet)) return true;
+    if (RX_VN.test(sujet)) return false;
+    const vv = String(((e.extra && e.extra.livraison) || {}).vn_vo || '').toUpperCase().trim();
+    if (/^(VO|VD)/.test(vv)) return true;
+    if (vv === 'VN') return false;
+    return RX_VO.test(desc) && !RX_VN.test(desc);
+  }
+  function couleurLivr(e) { return estLivraisonVo(e) ? CFG.colors.livraisonVo : CFG.colors.livraison; }
   function tint(hex, a) { const h = hex.replace('#', ''); const n = parseInt(h, 16); return 'rgba(' + ((n >> 16) & 255) + ',' + ((n >> 8) & 255) + ',' + (n & 255) + ',' + a + ')'; }
   const toFc = (ts) => (ts ? String(ts).replace(' ', 'T') : null);
 
@@ -400,8 +430,9 @@ OD.define('agenda', {
   function mapEvent(e) {
     if (vueSite()) return mapEventSite(e);
     const c = strongColor(e);
+    const estLivr = familleEvt(e) === 'livraison' && !estNeutre(e);
     return {
-      id: e.uid, title: composeTitle(e),
+      id: e.uid, title: (estLivr ? '🚚 ' : '') + composeTitle(e),
       start: toFc(e.event_start_time), end: toFc(e.event_end_time), allDay: !!e.is_event_all_day,
       backgroundColor: tint(c, estNeutre(e) ? 0.18 : 0.14), borderColor: tint(c, estNeutre(e) ? 0.45 : 0.14),
       textColor: estNeutre(e) ? '#5B6475' : '#1F4A85',
@@ -414,7 +445,7 @@ OD.define('agenda', {
   function mapEventLivr(e) {
     const f = familleEvt(e), li = livInfo(e);
     const vendeurLivre = f === 'livraison' && li.livre_par === 'vendeur';
-    const c = f === 'livraison' ? (vendeurLivre ? '#7f9cc4' : CFG.colors.livraison) : (CFG.colors[f] || CFG.colors.creneau);
+    const c = f === 'livraison' ? (vendeurLivre ? '#7f9cc4' : couleurLivr(e)) : (CFG.colors[f] || CFG.colors.creneau);
     const qui = f === 'livraison' ? (li.vendeur ? prenomDe(li.vendeur) : '') : prenomDe(e.extra && e.extra.proprietaire);
     return {
       id: e.uid, title: (PICTO[f] ? PICTO[f] + ' ' : '') + composeTitle(e) + (qui ? ' · ' + qui : ''),
@@ -483,7 +514,8 @@ OD.define('agenda', {
     Object.keys(paquets).forEach(k => {
       const lot = paquets[k];
       if (lot.length < SEUIL_GROUPE) { lot.forEach(ev => autres.push(ev)); return; }
-      const c = CFG.colors.livraison;
+      const toutesVo = lot.every(ev => estLivraisonVo(ev.extendedProps || {}));
+      const c = toutesVo ? CFG.colors.livraisonVo : CFG.colors.livraison;
       const fin = lot.map(ev => String(ev.end || ev.start || '')).sort().pop();
       autres.push({
         id: 'grp-livr-' + k, title: '🚚 ' + lot.length + ' livraisons',
@@ -507,7 +539,7 @@ OD.define('agenda', {
     const titre = lot.length + ' livraisons' + (jour ? ' · ' + jour.toLocaleDateString('fr-FR', { weekday: 'short', day: '2-digit', month: '2-digit' }) + ' ' + quand.slice(11, 16).replace(':', 'h') : '');
     ov.innerHTML = '<div class="agm"><div class="agm-head"><span class="agm-title">' + esc(titre) + '</span><button class="agm-x" id="agm-x">×</button></div>'
       + '<div class="agm-body"><div class="agm-grp-list">'
-      + lot.map((ev, i) => '<button type="button" class="agm-grp-it" data-i="' + i + '"><i style="background:' + CFG.colors.livraison + '"></i><span>' + esc(ev.title || 'Livraison') + '</span><b>›</b></button>').join('')
+      + lot.map((ev, i) => '<button type="button" class="agm-grp-it" data-i="' + i + '"><i style="background:' + couleurLivr(ev.extendedProps || {}) + '"></i><span>' + esc(ev.title || 'Livraison') + '</span><b>›</b></button>').join('')
       + '</div></div></div>';
     d.getElementById('agm-x').addEventListener('click', closeCreate);
     ov.querySelectorAll('.agm-grp-it').forEach(b => b.addEventListener('click', () => {
@@ -824,7 +856,7 @@ OD.define('agenda', {
     { cle: 'client',    label: 'RDV client'  },
     { cle: 'relance',   label: 'Relances'    },
     { cle: 'bilat',     label: 'Bilatérales' },
-    { cle: 'livraison', label: 'Livraisons'  },
+    { cle: 'livraison', label: 'Livraisons VN / VO' },
     { cle: 'prepa',     label: 'Préparations' },
     { cle: 'recep',     label: 'Réceptions / restitutions' },
     { cle: 'bloque',    label: 'Pas de livraison' },
@@ -882,7 +914,9 @@ OD.define('agenda', {
       const c = CFG.colors[ty.cle];
       return '<button type="button" class="agf-chip' + (on ? ' is-on' : '') + '" data-cle="' + ty.cle + '"' +
         ' style="' + (on ? 'border-color:' + c + ';background:' + tint(c, 0.12) + ';color:' + c : '') + '">' +
-        '<i style="background:' + c + '"></i>' + esc(ty.label) + '</button>';
+        '<i style="background:' + c + '"></i>'
+        + (ty.cle === 'livraison' ? '<i style="background:' + CFG.colors.livraisonVo + '"></i>' : '')
+        + esc(ty.label) + '</button>';
     }).join('') +
     // Un raccourci pour revenir à l'état complet : sans lui, l'utilisateur
     // qui a tout décoché doit recliquer cinq fois.
@@ -1760,6 +1794,10 @@ OD.define('agenda', {
 #agenda-ov .agm-sync.ko{color:#a32d2d;background:#fdf1f1;border-color:#f2c4c4}
 #agenda-ov .agm-sync.ko .pt{background:#e24b4a}
 #agenda-ov .agm-cli-ro{padding:10px 12px;border:1.5px solid #e2eaf5;border-radius:10px;background:#f7f9fc;color:#1F4A85;font-weight:700;font-size:13px}
+#agenda-ov .agm-conf{gap:8px;flex-wrap:wrap}
+#agenda-ov .agm-conf-b{flex:1;min-width:150px;display:inline-flex;align-items:center;justify-content:center;gap:7px;border:1.5px solid #e2eaf5;background:#fff;color:#2a5ea9;border-radius:9px;padding:9px 10px;font-family:inherit;font-size:13px;font-weight:700;cursor:pointer;transition:all .12s}
+#agenda-ov .agm-conf-b:hover{border-color:#2a5ea9;background:#eef4fc}
+#agenda-ov .agm-conf-b[disabled]{opacity:.55;cursor:default}
 #agenda-ov .agm-confirm{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
 #agenda-ov .agm-confirm-txt{flex:1;min-width:140px;color:#a32d2d;font-weight:800;font-size:13px}
 #agenda-ov .agm-cancel{border:1.5px solid #e2eaf5;border-radius:10px;padding:11px 16px;background:#fff;color:#5f5e5a;font-family:inherit;font-weight:700;font-size:13px;cursor:pointer}
@@ -3426,7 +3464,8 @@ OD.define('agenda', {
       idBacs: (p.extra && p.extra.id_bacs) || null, sync: null, serieId: (p.extra && p.extra.serie_id) || null, startInit: String(p.event_start_time || '').slice(0, 19),
       owner: (st === 'rdv' && p.id_user != null) ? Number(p.id_user) : null,
       ownerInit: (st === 'rdv' && p.id_user != null) ? Number(p.id_user) : null,
-      ownerNom: (p.extra && p.extra.proprietaire) || ''
+      ownerNom: (p.extra && p.extra.proprietaire) || '',
+      idSite: (p.id_site != null ? Number(p.id_site) : null)
     };
     chargerInvitables().then(() => { if (cs) renderCreate(); });
     if (st === 'rdv') chargerMembresPour(p.id_site != null ? Number(p.id_site) : siteCourant()).then(() => { if (cs) renderCreate(); });
@@ -3527,6 +3566,17 @@ OD.define('agenda', {
       else if (cs.idClient != null) cli = '<div class="agm-cli-sel" id="agm-cli-box"><span class="agm-cli-name">' + esc(cs.clientLabel || ('Client ' + cs.idClient)) + '</span><button type="button" class="agm-cli-change" id="agm-cli-change">Changer</button></div>';
       else cli = '<button type="button" class="agm-cli-pick" id="agm-cli-pick"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg><span>Choisir un client</span></button>';
       quoi += '<div class="agm-cell"><div class="agm-lbl">Client</div>' + cli + '</div>';
+      // v46 : confirmer le rendez-vous au client, par SMS ou par e-mail.
+      if (ed && cs.idClient != null && Number(cs.idClient) > 0 && !isPastSlot((cs.date || '') + ' ' + (cs.time || ''))) {
+        quoi += '<div class="agm-cell"><div class="agm-lbl">Confirmer au client</div><div class="agm-row agm-conf">'
+          + '<button type="button" class="agm-conf-b" id="agm-conf-sms"' + (cs.confCharge ? ' disabled' : '') + '>'
+          + '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4.5h16a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1H8l-4 3.5v-3.5H4a1 1 0 0 1-1-1v-9a1 1 0 0 1 1-1z"/></svg>'
+          + '<span>SMS de confirmation</span></button>'
+          + '<button type="button" class="agm-conf-b" id="agm-conf-mail"' + (cs.confCharge ? ' disabled' : '') + '>'
+          + '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2.5" y="4.5" width="19" height="15" rx="2"/><path d="m3 6 9 6.5L21 6"/></svg>'
+          + '<span>E-mail de confirmation</span></button>'
+          + '</div><div class="agm-hint">Le message reprend la date et l’heure affichées ici ; vous le relisez avant l’envoi.</div></div>';
+      }
       if (ed) {
         const types = rdvTypesCache || [];
         quoi += '<div class="agm-cell"><div class="agm-lbl">Type de RDV</div><select class="agm-sel agm-w" id="agm-rtype"><option value="">— choisir —</option>' + types.map(t => '<option value="' + t.id + '"' + (String(t.id) === String(cs.rdvType) ? ' selected' : '') + '>' + esc(t.label) + '</option>').join('') + '</select></div>';
@@ -3669,6 +3719,8 @@ OD.define('agenda', {
     if (g('agm-del-yes')) g('agm-del-yes').addEventListener('click', () => performDelete(false));
     if (g('agm-del-serie')) g('agm-del-serie').addEventListener('click', () => performDelete(true));
     if (g('agm-save')) g('agm-save').addEventListener('click', doSave);
+    if (g('agm-conf-sms')) g('agm-conf-sms').addEventListener('click', () => confirmerRdv('sms'));
+    if (g('agm-conf-mail')) g('agm-conf-mail').addEventListener('click', () => confirmerRdv('mail'));
     if (g('agm-real-now')) g('agm-real-now').addEventListener('click', () => { if (cs && cs.editId != null) goBilaterale(cs.editId, true); });
     if (g('agm-start-now')) g('agm-start-now').addEventListener('click', demarrerBilatMaintenant);
     if (g('agm-bvend')) g('agm-bvend').addEventListener('change', () => { syncInputs(); });
@@ -3700,6 +3752,69 @@ OD.define('agenda', {
       e.stopPropagation(); syncInputs();
       const v = Number(b.getAttribute('data-inv-del')); cs.invites = (cs.invites || []).filter(x => Number(x) !== v); renderCreate();
     }));
+  }
+  // v46 : confirmation du RDV au client. Les fenêtres SMS et e-mail sont des
+  // modules persistants (montés sur toutes les pages) : on les trouve sur la
+  // fenêtre du front, ou au-dessus quand WeWeb isole l'embed.
+  function uiGlobal(nom) {
+    const cands = [];
+    try { cands.push(frontWin()); } catch (e) {}
+    cands.push(window);
+    try { cands.push(window.parent); } catch (e) {}
+    try { cands.push(window.top); } catch (e) {}
+    for (const w of cands) { try { if (w && w[nom] && typeof w[nom].open === 'function') return w[nom]; } catch (e) {} }
+    return null;
+  }
+  function heureLisible(t) { const m = String(t || '').match(/^(\d{1,2}):(\d{2})/); if (!m) return ''; return Number(m[1]) + 'h' + (m[2] === '00' ? '' : m[2]); }
+  async function confirmerRdv(canal) {
+    syncInputs();
+    const s = cs; if (!s || s.idClient == null) return;
+    s.confCharge = true; renderCreate();
+    let cli = null, site = null;
+    try {
+      const c = sb();
+      const [rc, rs] = await Promise.all([
+        c.from('CLIENT').select('"IDVu","CIVILITE","NOM","PRENOM","TEl_MOB","TEL_FIXE","EMAIL","idmultivu"').eq('IDVu', Number(s.idClient)).maybeSingle(),
+        s.idSite != null ? c.from('SITE').select('"SITE","Adresse","CodePostal","VILLE","Telephone"').eq('ID_SITE', Number(s.idSite)).maybeSingle() : Promise.resolve({ data: null })
+      ]);
+      cli = rc && rc.data; site = rs && rs.data;
+    } catch (e) { console.warn('[agenda] confirmation : lecture client / site', e && e.message); }
+    if (cs !== s) return;
+    s.confCharge = false; renderCreate();
+    if (!cli) { toast('Fiche client introuvable : impossible de préparer le message.'); return; }
+
+    const soc = cli.idmultivu === 1 || cli.idmultivu === '1';
+    const salut = soc ? 'Bonjour,' : 'Bonjour ' + [cli.CIVILITE, cli.NOM].filter(Boolean).join(' ').trim() + ',';
+    const jour = s.date ? new Date(s.date + 'T12:00:00').toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long' }) : '';
+    const h = heureLisible(s.time);
+    const tel = Number(s.rdvType) === 10;
+    const adresse = site && site.Adresse ? [site.Adresse, [site.CodePostal, site.VILLE].filter(Boolean).join(' ')].filter(Boolean).join(', ') : '';
+    const vendeur = (s.ownerNom || (s.owner != null ? nomPersonne(s.owner) : '') || viewerName() || '').trim();
+    const telSite = site && site.Telephone ? String(site.Telephone).trim() : '';
+
+    const phrase = tel
+      ? 'je vous confirme notre rendez-vous téléphonique du ' + jour + ' à ' + h + ' : je vous appellerai à ce moment-là.'
+      : 'je vous confirme notre rendez-vous du ' + jour + ' à ' + h + (adresse ? ' à la concession, ' + adresse : '') + '.';
+
+    if (canal === 'sms') {
+      if (!String(cli.TEl_MOB || '').replace(/\D/g, '')) { toast('Pas de numéro de portable sur la fiche : le SMS ne peut pas partir.'); return; }
+      const ui = uiGlobal('__SMS_UI__');
+      if (!ui) { toast('La fenêtre SMS n’est pas disponible sur cette page.'); return; }
+      const texte = salut + ' ' + phrase + ' En cas d’empêchement, répondez simplement à ce message.' + (vendeur ? ' ' + vendeur : '');
+      ui.open({ client: cli, text: texte });
+      return;
+    }
+    const ui = uiGlobal('__EMAIL_UI__');
+    if (!ui) { toast('La fenêtre e-mail n’est pas disponible sur cette page.'); return; }
+    if (!cli.EMAIL) toast('Pas d’adresse e-mail sur la fiche : saisissez le destinataire.');
+    const para = (t) => '<p style="margin:0 0 12px">' + esc(t) + '</p>';
+    const corps = para(salut)
+      + para(phrase.charAt(0).toUpperCase() + phrase.slice(1))
+      + para('En cas d’empêchement, il suffit de répondre à ce message' + (telSite ? ' ou de nous appeler au ' + telSite : '') + '.')
+      + para('À très bientôt,');
+    ui.open({ mode: 'new', client: cli,
+      subject: 'Confirmation de votre rendez-vous ' + (tel ? 'téléphonique ' : '') + 'du ' + jour + ' à ' + h,
+      body: corps });
   }
   async function doSave() {
     syncInputs();
