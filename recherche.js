@@ -1,6 +1,11 @@
 // ============================================================================
-//  RECHERCHE GLOBALE (top nav) — module One Data (OD.define)  v4
+//  RECHERCHE GLOBALE (top nav) — module One Data (OD.define)  v5
 //
+//  v5 (04/11/2026) : « Chercher dans BACS ». Quand One Data ne trouve ni
+//  client ni véhicule, un bouton confie la recherche à la VM BACS (RPC
+//  bacs_recherche_demander / bacs_recherche_suivre) : comptes et cartes grises
+//  BACS trouvés sont rapatriés (fiche client + véhicules) et proposés dans la
+//  liste, en général en moins d'une minute.
 //  v4 (03/11/2026) : la ligne des raccourcis clavier en bas de la liste
 //  disparaît (le clavier marche toujours) ; les Commandes passent en tête ;
 //  les lignes d'affaires (commandes, simulations, affaires) sont plus aérées,
@@ -113,7 +118,7 @@ OD.define('recherche', {
     // les résultats.
     const S = W.__odRech || (W.__odRech = {
       q: '', ouvert: false, charge: false, erreur: null, res: null, approche: false,
-      sel: -1, seq: 0, timer: null
+      sel: -1, seq: 0, timer: null, bacs: null
     });
 
     // ---------------------------------------------------------------- helpers
@@ -209,6 +214,16 @@ OD.define('recherche', {
 #od-recherche .rch-b-g{background:#f1f4f9;color:#7a98c5}
 #od-recherche .rch-droite{flex:0 0 auto;text-align:right;font-size:13px;font-weight:800;color:#53bda7;white-space:nowrap}
 #od-recherche .rch-droite small{display:block;font-size:11px;font-weight:600;color:#9bb3d1}
+#od-recherche .rch-bacs{margin:6px 10px 10px;padding:11px 13px;border:1px dashed #cfdcef;border-radius:11px;background:#f7f9fc;font-size:12.5px;color:#5a72a0}
+#od-recherche .rch-bacs b{color:#1F4A85}
+#od-recherche .rch-bacs-b{border:none;background:#2a5ea9;color:#fff;border-radius:8px;padding:7px 12px;font:inherit;font-size:12.5px;font-weight:800;cursor:pointer;margin-top:7px}
+#od-recherche .rch-bacs-b:hover{background:#1F4A85}
+#od-recherche .rch-bacs-c{display:flex;align-items:center;gap:10px;margin-top:7px;padding:8px 10px;background:#fff;border:1px solid #e8eef7;border-radius:9px;cursor:pointer}
+#od-recherche .rch-bacs-c:hover{border-color:#acc5e4;background:#eef4fc}
+#od-recherche .rch-bacs-c span{flex:1 1 auto;min-width:0}
+#od-recherche .rch-bacs-c small{display:block;color:#7a98c5}
+#od-recherche .rch-bacs-c em{font-style:normal;font-weight:800;color:#2a5ea9;white-space:nowrap}
+#od-recherche .rch-bacs-ko{color:#c0524f}
 #od-recherche .rch-plus{padding:3px 10px 6px 57px;font-size:11.5px;color:#9bb3d1}
 #od-recherche .rch-plus a{color:#2a5ea9;font-weight:700;cursor:pointer;text-decoration:none}
 #od-recherche .rch-plus a:hover{text-decoration:underline}
@@ -373,10 +388,61 @@ OD.define('recherche', {
               '<small>Essayez un nom, une immatriculation, les derniers caractères d’un VIN ou un numéro de téléphone.</small></div>';
         }
       }
+      if (q.length >= 4 && !S.charge && !S.erreur && S.res) {
+        const r0 = S.res, rien = function (k) { return !(r0[k] && r0[k].items && r0[k].items.length); };
+        if (rien('clients') && rien('vehicules')) h += blocBacs(q);
+      }
       p.innerHTML = h;
       p.classList.toggle('rch-a-contenu', !!h);
       const sel = p.querySelector('.rch-sel');
       if (sel && sel.scrollIntoView) { try { sel.scrollIntoView({ block: 'nearest' }); } catch (e) { } }
+    }
+
+    // ---------------------------------------------------------------- BACS (v5)
+    function blocBacs(q) {
+      const b = S.bacs && S.bacs.q === q ? S.bacs : null;
+      if (!b) return '<div class="rch-bacs">Pas de client ni de véhicule à ce nom dans One Data.<br><button class="rch-bacs-b" data-bacs="1">Chercher dans BACS</button></div>';
+      if (b.erreur) return '<div class="rch-bacs"><span class="rch-bacs-ko">' + esc(b.erreur) + '</span><br><button class="rch-bacs-b" data-bacs="1">Réessayer</button></div>';
+      const cl = (b.res && b.res.clients) || [];
+      let h = '<div class="rch-bacs">';
+      if (cl.length) {
+        h += '<b>Trouvé dans BACS</b> — fiche rapatriée dans One Data :';
+        cl.forEach(function (c) {
+          const v = (c.vehicules || []).map(function (x) { return x.immat; }).filter(Boolean).join(', ');
+          h += '<div class="rch-bacs-c" data-bacs-client="' + esc(c.idvu) + '"><span><b>' + esc(c.nom || 'Client') + '</b><small>' + esc([c.ville, v].filter(Boolean).join(' · ')) + '</small></span><em>Ouvrir ›</em></div>';
+        });
+      }
+      const st = b.res && b.res.statut;
+      const attendus = (b.res && b.res.attendus) || 0;
+      if (!b.fini) h += (cl.length ? '<br>' : '') + 'Recherche dans BACS en cours' + (st === 'fait' && attendus > cl.length ? ' : rapatriement de la fiche' : '') + '… <small>en général moins d’une minute</small>';
+      else if (!cl.length) h += st === 'rien' ? 'Introuvable aussi dans BACS.' : (st === 'erreur' ? '<span class="rch-bacs-ko">' + esc((b.res && b.res.erreur) || 'La recherche BACS a échoué.') + '</span>' : 'La fiche n’a pas pu être rapatriée pour l’instant.');
+      return h + '</div>';
+    }
+    async function chercherBacs() {
+      const q = (S.q || '').trim();
+      if (!sb || q.length < 4) return;
+      const b = S.bacs = { q: q, id: null, res: null, fini: false, erreur: null, debut: Date.now() };
+      peindre();
+      try {
+        const r = await sb.rpc('bacs_recherche_demander', { p_terme: q });
+        if (r.error) throw r.error;
+        b.id = r.data && r.data.id;
+      } catch (e) { b.erreur = String((e && e.message) || e).replace(/^.*?: /, ''); peindre(); return; }
+      (async function suivre() {
+        while (S.bacs === b && !b.fini) {
+          await new Promise(function (ok) { setTimeout(ok, 4000); });
+          if (S.bacs !== b) return;
+          try {
+            const r = await sb.rpc('bacs_recherche_suivre', { p_id: b.id });
+            if (!r.error && r.data) b.res = r.data;
+          } catch (e) { }
+          const st = b.res && b.res.statut, nb = (b.res && b.res.clients || []).length, att = (b.res && b.res.attendus) || 0;
+          const age = Date.now() - b.debut;
+          if (st === 'rien' || st === 'erreur' || (st === 'fait' && nb >= att) || age > 150000) b.fini = true;
+          if (b.fini && nb) { try { chercher(); } catch (e) { } }
+          if (S.ouvert && (S.q || '').trim() === b.q) peindre();
+        }
+      })();
     }
 
     // ---------------------------------------------------------------- requête
@@ -598,6 +664,10 @@ OD.define('recherche', {
       p.addEventListener('mousedown', function (e) {
         const tout = e.target.closest && e.target.closest('[data-tout]');
         if (tout) { e.preventDefault(); voirTout(tout.getAttribute('data-tout')); return; }
+        const bb = e.target.closest && e.target.closest('[data-bacs]');
+        if (bb) { e.preventDefault(); chercherBacs(); return; }
+        const bc = e.target.closest && e.target.closest('[data-bacs-client]');
+        if (bc) { e.preventDefault(); ouvrirClient(bc.getAttribute('data-bacs-client')); return; }
         const a = e.target.closest && e.target.closest('.rch-it');
         if (!a) { e.preventDefault(); return; }
         e.preventDefault();
