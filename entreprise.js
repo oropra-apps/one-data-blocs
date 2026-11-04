@@ -1,4 +1,8 @@
-// ENTREPRISE — module One Data (OD.define) v4 (04/11/2026)
+// ENTREPRISE — module One Data (OD.define) v5 (04/11/2026)
+//
+// v5 : la confirmation du retrait (« Retirer … des interlocuteurs ? ») ne passe
+//   plus par la boîte native du navigateur, qui pouvait être bloquée sans rien
+//   afficher (le clic ne faisait alors rien) : fenêtre One Data à la place.
 //
 // v4 : CLIENT ENTREPRISE COMME DANS BACS (recon du 03/11/2026).
 //   Dans BACS, la société se crée d'abord, puis on lui désigne un
@@ -372,8 +376,30 @@ async function lier(idSociete, idParticulier, form) {
   return supa().rpc('interlocuteur_lier', args);
 }
 
+// Confirmation dans la page (la boîte native confirm() peut être bloquée par le
+// navigateur et renvoyer « non » sans rien afficher).
+function confirmer(texte, ok) {
+  return new Promise((resolve) => {
+    const root = getRoot(); if (!root) return resolve(false);
+    const ov = doc.createElement('div');
+    ov.className = 'er-overlay';
+    ov.innerHTML = '<div class="er-modal" style="max-width:440px">'
+      + '<div class="er-modal-h"><div class="er-modal-t">Confirmation</div></div>'
+      + '<div class="er-modal-b"><div style="font-size:13.5px;color:#1F4A85;line-height:1.5">' + esc(texte) + '</div></div>'
+      + '<div class="er-modal-f"><button class="er-btn er-btn-ghost" data-c="non">Annuler</button>'
+      + '<button class="er-btn er-btn-primary" data-c="oui">' + esc(ok || 'Confirmer') + '</button></div></div>';
+    const fin = (v) => { try { ov.remove(); } catch (e) {} resolve(v); };
+    ov.addEventListener('click', (e) => {
+      const b = e.target.closest('[data-c]');
+      if (b) return fin(b.getAttribute('data-c') === 'oui');
+      if (e.target === ov) fin(false);
+    });
+    root.appendChild(ov);
+  });
+}
+
 async function doDetach(idEntreprise, libelle) {
-  if (!fw().confirm(libelle || 'Retirer ce rattachement ?')) return;
+  if (!(await confirmer(libelle || 'Retirer ce rattachement ?', 'Retirer'))) return;
   try {
     const bc = await chargerBacsClient();
     const r = bc && bc.retirer ? await bc.retirer(supa(), idEntreprise)
