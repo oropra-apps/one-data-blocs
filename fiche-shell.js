@@ -1,5 +1,8 @@
 // ============================================================================
-//  FICHE CLIENT — SHELL — module One Data (OD.define)  v16
+//  FICHE CLIENT — SHELL — module One Data (OD.define)  v17
+//  v17 (04/11/2026) : onglet « Entourage » (module entourage v1) sur la fiche
+//  d'un particulier : conjoint, enfants, parents, parrain… comme la rubrique
+//  Entourage de BACS. Absent sur une société.
 //  v16 (04/11/2026) : l'onglet Entreprise s'affiche aussi sur une société, sous
 //  le nom « Interlocuteurs » : il liste les particuliers rattachés (module
 //  entreprise v4) et permet d'en ajouter, comme dans BACS.
@@ -47,15 +50,16 @@ OD.define('fiche-shell', {
     { key: 'vehicules',  label: 'Véhicules',          icon: 'car',   mount: 'oropra-vehicules-root' },
     { key: 'pcom',       label: 'P. Commerciales',    icon: 'doc',   mount: 'pcom-root' },
     { key: 'entreprise', label: 'Entreprise',         icon: 'build', mount: 'oropra-entreprise-rattachement' },
+    { key: 'entourage',  label: 'Entourage',          icon: 'fam',   mount: 'oropra-entourage' },
     { key: 'historique', label: 'Historique client',  icon: 'hist',  mount: 'oropra-historique-root' }
   ];
   // modules déjà disponibles (les autres afficheront un placeholder pour l'instant)
-  const READY = { fiche: true, likes: true, contacts: true, vehicules: true, rdv: true, pcom: true, entreprise: true, historique: true };
+  const READY = { fiche: true, likes: true, contacts: true, vehicules: true, rdv: true, pcom: true, entreprise: true, entourage: true, historique: true };
 
   const state = { tab: 'fiche', client: null, idvu: null };
     // Onglets migrés en module OD.define -> montés par le loader dans une ancre.
     // (les autres gardent leur div par id, remplie par l'ancien bloc on-page-load)
-    const MOD = { fiche: 'cf-fiche', likes: 'likes', contacts: 'contacts', rdv: 'rdv', vehicules: 'vehicules', pcom: 'pcom', entreprise: 'entreprise', historique: 'historique' };
+    const MOD = { fiche: 'cf-fiche', likes: 'likes', contacts: 'contacts', rdv: 'rdv', vehicules: 'vehicules', pcom: 'pcom', entreprise: 'entreprise', entourage: 'entourage', historique: 'historique' };
 
   // ---------------------------------------------------------------- helpers
   function esc(s) { if (s == null) return ''; return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;'); }
@@ -285,6 +289,7 @@ OD.define('fiche-shell', {
     cal: '<rect x="3.5" y="4.5" width="17" height="16" rx="2"/><path d="M3.5 9h17M8 3v3M16 3v3"/>',
     car: '<path d="M5 16.5h14M6.5 16.5v2M17.5 16.5v2"/><path d="M4 16.5l1.5-5A2 2 0 0 1 7.4 10h9.2a2 2 0 0 1 1.9 1.5l1.5 5"/><circle cx="7.5" cy="16.5" r="1.6"/><circle cx="16.5" cy="16.5" r="1.6"/>',
     doc: '<path d="M6 2.5h8l4 4v15a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1v-18a1 1 0 0 1 1-1z"/><path d="M14 2.5v4h4M8.5 13h7M8.5 16.5h7"/>',
+    fam: '<circle cx="9" cy="8" r="3.5"/><path d="M2.5 20c0-3.5 3-5.5 6.5-5.5s6.5 2 6.5 5.5"/><circle cx="17" cy="9" r="2.5"/><path d="M17 14c2.6 0 4.5 1.5 4.5 4"/>',
     build: '<rect x="4" y="3" width="16" height="18" rx="1.5"/><path d="M9 8h.01M15 8h.01M9 12h.01M15 12h.01M9 16h6"/>',
     hist: '<path d="M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8z"/><path d="M4 21a8 8 0 0 1 13-6.2"/><path d="M20 16v3h-3"/>',
     phone: '<path d="M22 16.9v3a2 2 0 0 1-2.2 2 19.8 19.8 0 0 1-8.6-3.1 19.5 19.5 0 0 1-6-6 19.8 19.8 0 0 1-3.1-8.7A2 2 0 0 1 4.1 2h3a2 2 0 0 1 2 1.7c.1 1 .4 1.9.7 2.8a2 2 0 0 1-.5 2.1L8.1 9.9a16 16 0 0 0 6 6l1.3-1.2a2 2 0 0 1 2.1-.5c.9.3 1.8.6 2.8.7a2 2 0 0 1 1.7 2z"/>',
@@ -374,7 +379,8 @@ OD.define('fiche-shell', {
   }
   // Onglet Entreprise : sur une société, il devient « Interlocuteurs ».
   function visibleTabs() {
-    return TABS.map(t => (t.key === 'entreprise' && isSoc(state.client)) ? Object.assign({}, t, { label: 'Interlocuteurs' }) : t);
+    return TABS.filter(t => !(t.key === 'entourage' && isSoc(state.client)))
+      .map(t => (t.key === 'entreprise' && isSoc(state.client)) ? Object.assign({}, t, { label: 'Interlocuteurs' }) : t);
   }
   function tabsHtml() {
     return '<div class="fs-card fs-tabs-wrap"><div class="fs-tabs">' +
