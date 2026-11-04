@@ -1,5 +1,9 @@
 // ============================================================================
-//  DASHBOARD — module One Data (OD.define)   v55 — PROFIL TEAM COLIN
+//  DASHBOARD — module One Data (OD.define)   v56 — PROFIL TEAM COLIN
+//
+//  v56 (04/11/2026) : retour vendeurs — dans les listes dépliées (à relancer,
+//    livraisons, sans financement…), le nom du client ouvre sa fiche client.
+//    dashboard_tc_liste renvoie désormais id_client pour tous ses blocs.
 //
 //  v55 (02/11/2026) : design One Data aligné sur Activité et Performances :
 //    textes en bleus (jamais de noir), aucun rouge (l'orange signale ce qui
@@ -238,6 +242,9 @@ OD.define('dashboard', {
 #dash-root .dtel{font-family:var(--mono);font-weight:600;color:var(--m-bleu);
   text-decoration:none;border-bottom:1px solid transparent}
 #dash-root .dtel:hover{border-bottom-color:currentColor}
+#dash-root .dcli{font:inherit;color:var(--m-bleu);background:none;border:0;padding:0;cursor:pointer;text-align:left;
+  font-weight:600;border-bottom:1px solid transparent}
+#dash-root .dcli:hover{border-bottom-color:currentColor}
 #dash-root .dnote{font-size:11.5px;color:var(--ink-3);margin-top:8px;line-height:1.5}
 #dash-root .dperim{background:var(--card);border:1px solid var(--line);
   border-radius:11px;box-shadow:var(--ombre);overflow:hidden;position:sticky;top:12px}
@@ -1470,7 +1477,9 @@ OD.define('dashboard', {
         const j = await res.json();
         const lignes = (j && j.lignes) || [];
         const avecVendeur = famille() !== 'vendeur';
-        const cols = [{ t: 'Client', v: l => esc(l.client || '—') }];
+        const cols = [{ t: 'Client', v: l => (Number(l.id_client) > 0)
+          ? '<button type="button" class="dcli" data-client="' + esc(l.id_client) + '" title="Ouvrir la fiche client">' + esc(l.client || '—') + '</button>'
+          : esc(l.client || '—') }];
         if (avecVendeur) cols.push({ t: 'Vendeur', v: l => esc(l.vendeur || '—') });
         cols.push({ t: 'Véhicule', v: l => l.vehicule ? '<span title="' + esc(l.vehicule) + '">' + esc(l.vehicule.length > 48 ? l.vehicule.slice(0, 46) + '…' : l.vehicule) + '</span>' : null });
         cols.push({ t: 'Ancienneté', v: l => l.age == null ? null : (fmt(l.age) + ' j') });
@@ -1488,6 +1497,20 @@ OD.define('dashboard', {
         const c = cible();
         if (c) c.innerHTML = '<p class="dnote">La liste n’a pas pu être chargée.</p>';
       }
+    }
+
+    // Fiche client : variable « client sélectionné » lue par toute la fiche,
+    // puis navigation vers la page (même chemin que lead-mgmt).
+    function ouvrirFicheClient(id) {
+      const n = Number(id); if (!(n > 0)) return;
+      const FW = (window.wwLib && wwLib.getFrontWindow && wwLib.getFrontWindow()) || window;
+      try { wwLib.wwVariable.updateValue('55490583-c88b-4748-916e-4d203db07742', { IDVu: n }); } catch (e) { }
+      try { FW.__odFicheTab = 0; } catch (e) { }
+      let editeur = false;
+      try { editeur = window.self !== window.top; } catch (e) { editeur = true; }
+      if (editeur) { try { wwLib.wwApp.goTo('259f1951-a2d4-4b90-ac83-0b3febe1d4ec'); return; } catch (e) { } }
+      try { wwLib.goTo('/fr/fiche-client'); return; } catch (e) { }
+      try { FW.location.href = '/fr/fiche-client?idvu=' + n; } catch (e) { }
     }
 
     function ouvrirLead(id) {
@@ -1510,6 +1533,9 @@ OD.define('dashboard', {
       if (fer && r.contains(fer)) { fermer(); return; }
 
       // « Ouvrir » un lead : la page Lead management l'ouvre à son arrivée.
+      const oc = ev.target.closest('.dcli');
+      if (oc && r.contains(oc)) { ouvrirFicheClient(oc.getAttribute('data-client')); return; }
+
       const ol = ev.target.closest('.dlead');
       if (ol && r.contains(ol)) { ouvrirLead(ol.getAttribute('data-lead')); return; }
 
