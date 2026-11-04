@@ -1,6 +1,13 @@
 // ============================================================================
 //  LEAD MANAGEMENT — module One Data (OD.define 'lead-mgmt')
-//  VERSION TEAM COLIN (v95) — déploiement CIBLÉ (publish-targets :
+//  VERSION TEAM COLIN (v96) — déploiement CIBLÉ (publish-targets :
+//  v96 (04/11/2026) : heures d'ouverture côté Vroom Team. Ses délais
+//    (attente avant prise, « hors délai » des leads frais, temps de
+//    transmission au site) comptent sur ses heures (lun-sam, réglage
+//    plateau_heures, 8 h-20 h) ; le délai du site après transmission compte
+//    sur les heures du site. Une « Demande client (1h) » reçue samedi soir
+//    reste dans le chrono le lundi matin (fraîcheur en heures BACS :
+//    lun-sam 9 h-12 h 30 / 14 h-19 h, calendrier des échéances BACS).
 //  v95 (04/11/2026) : tous les comptes à rebours des leads (Pool, accueil,
 //    fiche, relais, retour au Pool) comptent en HEURES D'OUVERTURE : lundi au
 //    samedi, 8 h 30-12 h 30 et 14 h-19 h, heure de Paris, comme la réactivité
@@ -388,6 +395,8 @@
   }
   // v95 : minutes en heures d'ouverture (lun-sam 08:30-12:30, 14:00-19:00, Paris).
   var OUV = [[510, 750], [840, 1140]];
+  var OUV_BACS = [[540, 750], [840, 1140]];   // v96 : calendrier des échéances BACS
+  var OUV_VROOM = [[480, 1200]];               // v96 : Vroom Team (plateau_heures 08-20)
   var __fmtP = null;
   function partsP(ms) {
     if (!__fmtP) __fmtP = new Intl.DateTimeFormat('en-GB', { timeZone: 'Europe/Paris', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit', hourCycle: 'h23' });
@@ -401,25 +410,25 @@
     var off2 = Date.UTC(q.y, q.mo - 1, q.d, q.h, q.mi, q.s) - r;
     return off2 === off ? r : g - off2;
   }
-  function plagesJour(y, mo, d) {   // plages ouvrées [début, fin] en ms d'un jour de Paris
+  function plagesJour(y, mo, d, pl) {   // plages ouvrées [début, fin] en ms d'un jour de Paris
     var dow = new Date(Date.UTC(y, mo - 1, d)).getUTCDay();
     if (dow === 0) return [];
-    return OUV.map(function (p) { return [msP(y, mo, d, p[0]), msP(y, mo, d, p[1])]; });
+    return (pl || OUV).map(function (p) { return [msP(y, mo, d, p[0]), msP(y, mo, d, p[1])]; });
   }
-  function ouvrees(a, b) {          // minutes ouvrées entre deux instants (ms)
+  function ouvrees(a, b, pl) {      // minutes ouvrées entre deux instants (ms)
     if (a == null || b == null || isNaN(a) || isNaN(b) || b <= a) return 0;
     var p = partsP(a), t = 0, j = Date.UTC(p.y, p.mo - 1, p.d);
     for (var k = 0; k < 93; k++) {
-      var dd = new Date(j + k * 86400000), pl = plagesJour(dd.getUTCFullYear(), dd.getUTCMonth() + 1, dd.getUTCDate());
-      if (pl.length && pl[0][0] >= b) break;
-      pl.forEach(function (x) { t += Math.max(0, Math.min(b, x[1]) - Math.max(a, x[0])); });
+      var dd = new Date(j + k * 86400000), pj = plagesJour(dd.getUTCFullYear(), dd.getUTCMonth() + 1, dd.getUTCDate(), pl);
+      if (pj.length && pj[0][0] >= b) break;
+      pj.forEach(function (x) { t += Math.max(0, Math.min(b, x[1]) - Math.max(a, x[0])); });
     }
     return t / 60000;
   }
-  function finOuvree(a, m) {        // instant atteint après m minutes ouvrées à partir de a (ms)
+  function finOuvree(a, m, plg) {   // instant atteint après m minutes ouvrées à partir de a (ms)
     var p = partsP(a), j = Date.UTC(p.y, p.mo - 1, p.d), r = m * 60000;
     for (var k = 0; k < 93; k++) {
-      var dd = new Date(j + k * 86400000), pl = plagesJour(dd.getUTCFullYear(), dd.getUTCMonth() + 1, dd.getUTCDate());
+      var dd = new Date(j + k * 86400000), pl = plagesJour(dd.getUTCFullYear(), dd.getUTCMonth() + 1, dd.getUTCDate(), plg);
       for (var i = 0; i < pl.length; i++) {
         var deb = Math.max(a, pl[i][0]), dur = pl[i][1] - deb;
         if (dur <= 0) continue;
@@ -430,6 +439,12 @@
     return a + m * 60000;
   }
   function minsO(v) { return v ? ouvrees(ts(v), Date.now()) : 0; }
+  function minsV(v) { return v ? ouvrees(ts(v), Date.now(), OUV_VROOM) : 0; }
+  function minsB(v) { return v ? ouvrees(ts(v), Date.now(), OUV_BACS) : 0; }
+  function tmV(v, sla, cap) {
+    var m = minsV(v);
+    return '<span class="tm ' + niv(m, sla) + '"><b>' + duree(m) + '</b><small>' + esc(cap || ('SLA ' + slaTxt(sla))) + '</small></span>';
+  }
   function ouvert() { var n = Date.now(), p = partsP(n); return plagesJour(p.y, p.mo, p.d).some(function (x) { return n >= x[0] && n < x[1]; }); }
   function tmO(v, sla, cap) {
     var m = minsO(v);
@@ -652,7 +667,7 @@
       return null;
     }
     function univCls(l) { var u = univ(l); return u === 'VN' ? ' vt-vn' : u === 'VO' ? ' vt-vo' : ''; }
-    function frais(l) { return mins(l.recu_le) < 1440; }
+    function frais(l) { return mins(l.recu_le) < 1440 || minsB(l.recu_le) < 510; }
     // v77 : le chef du plateau revient à sa supervision depuis le poste opérateur.
     function aSupervision() { try { return /poste-operateur/i.test(FW.location.hash || '') && S.superviseur === true; } catch (e) { return false; } }
     // v77 : type de traitement BACS. ch1 = « Demande client (1h) » pas encore
@@ -859,7 +874,7 @@
           d: demande(l) + (l.site ? ' · ' + siteNom(l.site) : ''), a: [['Prendre', 'prendre', l.sf_lead_id]] });
       });
       // 3. Hors délai dans la piscine.
-      var hd = libres.filter(function (l) { return frais(l) && mins(l.recu_le) >= (l.sla_min || 120); })
+      var hd = libres.filter(function (l) { return frais(l) && minsV(l.recu_le) >= (l.sla_min || 120); })
         .sort(function (a, b) { return ts(a.recu_le) - ts(b.recu_le); });
       if (hd.length) out.push({ id: 'hd-' + hd.length + '-' + hd[0].sf_lead_id, niv: 'crit', k: 'Hors délai', t: hd[0].recu_le,
         titre: plural(hd.length, 'lead frais hors délai', 'leads frais hors délai') + ' dans le Pool',
@@ -891,7 +906,7 @@
         var ls = parSite[s];
         out.push({ id: 'bloque-' + s + '-' + ls.length, niv: 'vr', k: 'Relais bloqué', t: ls[0].transfere_le || ls[0].derniere_action_le,
           titre: siteNom(s) + ' n\'a pas pris ' + (ls.length > 1 ? ls.length + ' transferts' : 'un transfert'),
-          d: ls.slice(0, 4).map(function (l) { return nomLead(l) + ' (' + duree(mins(l.transfere_le || l.derniere_action_le)) + ')'; }).join(', ') + '. SLA du site : 2 h.',
+          d: ls.slice(0, 4).map(function (l) { return nomLead(l) + ' (' + duree(minsO(l.transfere_le || l.derniere_action_le)) + ')'; }).join(', ') + '. SLA du site : 2 h.',
           a: [['Relancer le chef', 'relancer', ls.map(function (l) { return l.sf_lead_id; }).join(',')]] });
       });
       // 6. Les collègues au travail.
@@ -934,7 +949,7 @@
     function renderSituation() {
       var k = S.kpis || {};
       var libres = libresTous(), fr = libres.filter(frais), vieux = libres.length - fr.length;
-      var hd = fr.filter(function (l) { return (l.statut_eff === 'A affecter' || l.statut_eff === 'Nouveau') && mins(l.recu_le) >= (l.sla_min || 120); });
+      var hd = fr.filter(function (l) { return (l.statut_eff === 'A affecter' || l.statut_eff === 'Nouveau') && minsV(l.recu_le) >= (l.sla_min || 120); });
       var nom = propre([user && user.prenom, user && user.nom].filter(Boolean).join(' ')) || (user && user.nomComplet) || '';
       var c1 = chronoLibres(), c1ok = c1.filter(function (l) { return reste(l) > 0; });
       var p = (c1.length ? '<b class="t-crit">' + plural(c1.length, 'lead « Demande client (1h) »', 'leads « Demande client (1h) »') + '</b> à prendre'
@@ -966,7 +981,7 @@
     function nbDus() { return rappelsDus().length; }
     function onglets() {
       var fr = vus(libresTous()).filter(frais);
-      var hd = chronoLibres().length > 0 || fr.some(function (l) { return (l.statut_eff === 'A affecter' || l.statut_eff === 'Nouveau') && mins(l.recu_le) >= (l.sla_min || 120); });
+      var hd = chronoLibres().length > 0 || fr.some(function (l) { return (l.statut_eff === 'A affecter' || l.statut_eff === 'Nouveau') && minsV(l.recu_le) >= (l.sla_min || 120); });
       var tr = vus(S.transferts);
       return [['piscine', 'Pool BACS', fr.length, hd, 'v'],
               ['rappels', 'Rappels dus', nbDus(), nbDus() > 0, 'r'],
@@ -1058,7 +1073,7 @@
       ls.forEach(function (l) {
         var gauche = S.stock || !frais(l)
           ? '<span class="tm crit"><b>' + duree(mins(l.recu_le)) + '</b><small>reçu le ' + jour(l.recu_le) + '</small></span>'
-          : tm(l.recu_le, l.sla_min || 120);
+          : tmV(l.recu_le, l.sla_min || 120);
         h += ligneLead(l, gauche, S.stock || l.statut_eff === 'Accepté' ? 'Rappeler' : 'Prendre');
       });
       return h + '</div><p class="foot">Prendre réserve le lead à votre nom ' + (k.verrou_minutes || 5) + ' min.' + (S.stock ? ' Stock : leads acceptés il y a plus de 14 jours, sans suite.' : '') + '</p>';
@@ -1241,9 +1256,9 @@
         + '<h2>' + esc(nomLead(l)) + '</h2><p class="dr-s">' + esc([l.ville, l.site ? 'site BACS : ' + siteNom(l.site) : null].filter(Boolean).join(' · ')) + '</p>' + demandeHautVr(l, fb) + '</div>'
         + '<button type="button" class="x" data-a="close" aria-label="Fermer"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg></button></header><div class="dr-b">';
       // Délais
-      h += '<section><h3>Délai</h3><div class="delais"><div><span>Depuis la réception BACS</span>' + (actif && l.statut_eff !== 'Accepté' && !l.rappel_le ? tm(l.recu_le, l.sla_min) : '<span class="tm neutre"><b>' + duree(mins(l.recu_le)) + '</b><small>reçu le ' + esc(quand(l.recu_le)) + '</small></span>') + '</div>';
+      h += '<section><h3>Délai</h3><div class="delais"><div><span>Depuis la réception BACS</span>' + (actif && l.statut_eff !== 'Accepté' && !l.rappel_le ? tmV(l.recu_le, l.sla_min) : '<span class="tm neutre"><b>' + duree(mins(l.recu_le)) + '</b><small>reçu le ' + esc(quand(l.recu_le)) + '</small></span>') + '</div>';
       if (l.rappel_le && actif) { var due = ts(l.rappel_le) - Date.now(); h += '<div><span>Rappel prévu</span><span class="tm ' + (due <= 0 ? 'crit' : 'ok') + '"><b>' + esc(quand(l.rappel_le)) + '</b><small>' + (due <= 0 ? 'retard ' + duree(-due / 60000) : 'dans ' + duree(due / 60000)) + '</small></span></div>'; }
-      if (l.transfere_le) h += '<div><span>Sur le site</span>' + (l.od_contact_le ? '<span class="tm ok"><b>' + duree((ts(l.od_contact_le) - ts(l.transfere_le)) / 60000) + '</b><small>avant contact</small></span>' : tm(l.transfere_le, SLA_SITE, 'sans contact · SLA 2 h')) + '</div>';
+      if (l.transfere_le) h += '<div><span>Sur le site</span>' + (l.od_contact_le ? '<span class="tm ok"><b>' + duree(ouvrees(ts(l.transfere_le), ts(l.od_contact_le))) + '</b><small>avant contact</small></span>' : tmO(l.transfere_le, SLA_SITE, 'sans contact · SLA 2 h')) + '</div>';
       if (mien) h += '<div><span>Réservé à votre nom</span><span class="tm ok"><b>jusqu\'à ' + hh(l.verrou_jusqu) + '</b><small>prolongé tant que la fiche est ouverte</small></span></div>';
       h += '</div></section>';
       // Contact
@@ -3940,7 +3955,7 @@
       // colonne 3 : délais et gestes
       var del = '';
       if (l.zone !== 'plateau') {
-        if (l.transfere_le) del += '<div><span>Vroom Team</span><span class="tm ok"><b>transmis en ' + duree((ts(l.transfere_le) - ts(l.recu_le)) / 60000) + '</b><small>après réception</small></span></div>';
+        if (l.transfere_le) del += '<div><span>Vroom Team</span><span class="tm ok"><b>transmis en ' + duree(ouvrees(ts(l.recu_le), ts(l.transfere_le), OUV_VROOM)) + '</b><small>après réception</small></span></div>';
         del += '<div><span>Sur le site</span>' + (mins(l.arrive_le) >= 1440 ? '<span class="tm crit"><b>' + duree(mins(l.arrive_le)) + '</b><small>arrivé le ' + esc(quand(l.arrive_le)) + '</small></span>' : tmO(l.arrive_le, l.sla_site || 60, 'sans contact · SLA ' + slaTxt(l.sla_site || 60))) + '</div>';
         if (l.zone === 'vendeur' && l.attribue_le) del += '<div><span>Chez ' + esc(prenom(l.vendeur_nom)) + ' depuis</span>' + tmO(l.attribue_le, 30, l.tentatives ? plural(l.tentatives, 'tentative') : 'sans appel') + '</div>';
       }
