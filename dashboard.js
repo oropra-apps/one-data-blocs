@@ -1,5 +1,9 @@
 // ============================================================================
-//  DASHBOARD — module One Data (OD.define)   v56 — PROFIL TEAM COLIN
+//  DASHBOARD — module One Data (OD.define)   v57 — PROFIL TEAM COLIN
+//
+//  v57 (04/11/2026) : dans les listes dépliées, le téléphone appelle par le
+//    3CX du vendeur (comme le bouton « Appeler » de la fiche) ; le lien tel:
+//    ne servait à rien sur un poste sans application d'appel.
 //
 //  v56 (04/11/2026) : retour vendeurs — dans les listes dépliées (à relancer,
 //    livraisons, sans financement…), le nom du client ouvre sa fiche client.
@@ -1484,7 +1488,7 @@ OD.define('dashboard', {
         cols.push({ t: 'Véhicule', v: l => l.vehicule ? '<span title="' + esc(l.vehicule) + '">' + esc(l.vehicule.length > 48 ? l.vehicule.slice(0, 46) + '…' : l.vehicule) + '</span>' : null });
         cols.push({ t: 'Ancienneté', v: l => l.age == null ? null : (fmt(l.age) + ' j') });
         cols.push({ t: 'Téléphone', v: l => l.tel
-          ? '<a class="dtel" href="tel:' + esc(String(l.tel).replace(/\s/g, '')) + '">' + esc(l.tel) + '</a>'
+          ? '<a class="dtel" href="tel:' + esc(String(l.tel).replace(/\s/g, '')) + '" data-tel="' + esc(l.tel) + '" data-nom="' + esc(l.client || '') + '" data-client="' + esc(l.id_client || '') + '" title="Appeler">' + esc(l.tel) + '</a>'
           : null });
         if (t.liste === 'leads_jamais') cols.push({ t: '', v: l => l.id_lead
           ? '<button type="button" class="dlead" data-lead="' + esc(l.id_lead) + '">Ouvrir</button>' : null });
@@ -1501,6 +1505,28 @@ OD.define('dashboard', {
 
     // Fiche client : variable « client sélectionné » lue par toute la fiche,
     // puis navigation vers la page (même chemin que lead-mgmt).
+    // Appel depuis un numéro affiché : par le 3CX du vendeur (OD3CX, module
+    // phone3cx) quand il est là ; sinon le lien tel: classique.
+    function appelerNumero(num, nom, idvu) {
+      let to = String(num || '').replace(/[^0-9+]/g, '');
+      if (!to) return false;
+      if (to[0] === '0') to = '+33' + to.slice(1);
+      const cands = [];
+      try { cands.push(wwLib.getFrontWindow && wwLib.getFrontWindow()); } catch (e) {}
+      cands.push(window);
+      try { cands.push(window.parent); } catch (e) {}
+      try { cands.push(window.top); } catch (e) {}
+      for (const w of cands) {
+        try {
+          if (w && w.OD3CX && typeof w.OD3CX.appeler === 'function') {
+            w.OD3CX.appeler(to, { nom: nom || num, idvu: Number(idvu) > 0 ? Number(idvu) : null });
+            return true;
+          }
+        } catch (e) {}
+      }
+      return false;
+    }
+
     function ouvrirFicheClient(id) {
       const n = Number(id); if (!(n > 0)) return;
       const FW = (window.wwLib && wwLib.getFrontWindow && wwLib.getFrontWindow()) || window;
@@ -1533,6 +1559,12 @@ OD.define('dashboard', {
       if (fer && r.contains(fer)) { fermer(); return; }
 
       // « Ouvrir » un lead : la page Lead management l'ouvre à son arrivée.
+      const tl = ev.target.closest('a.dtel');
+      if (tl && r.contains(tl)) {
+        if (appelerNumero(tl.getAttribute('data-tel'), tl.getAttribute('data-nom'), tl.getAttribute('data-client'))) ev.preventDefault();
+        return;
+      }
+
       const oc = ev.target.closest('.dcli');
       if (oc && r.contains(oc)) { ouvrirFicheClient(oc.getAttribute('data-client')); return; }
 
