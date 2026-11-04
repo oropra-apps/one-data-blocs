@@ -1,5 +1,8 @@
 // ============================================================================
-//  FICHE CLIENT — SHELL — module One Data (OD.define)  v15
+//  FICHE CLIENT — SHELL — module One Data (OD.define)  v16
+//  v16 (04/11/2026) : l'onglet Entreprise s'affiche aussi sur une société, sous
+//  le nom « Interlocuteurs » : il liste les particuliers rattachés (module
+//  entreprise v4) et permet d'en ajouter, comme dans BACS.
 //  v15 (03/11/2026) : accès « Appels entrants » (rôle 13) — bouton
 //  « Nouveau lead » en tête des actions : il ouvre la fenêtre du module
 //  lead-appel (API window.__odLeadAppel, v3) PRÉ-REMPLIE avec ce client.
@@ -369,9 +372,10 @@ OD.define('fiche-shell', {
         (state.bacs && state.bacs.url && !appelsEntrants() ? '<button class="fs-btn bacs" data-btn="bacs" title="Ouvrir le compte client dans BACS"><span class="fs-b">B</span>BACS</button>' : '') +
       '</div></div>';
   }
-  // Entreprise n'a de sens que pour un particulier -> masqué (et onglets resserrés)
-  // quand le client est une société.
-  function visibleTabs() { return TABS.filter(t => !(t.key === 'entreprise' && isSoc(state.client))); }
+  // Onglet Entreprise : sur une société, il devient « Interlocuteurs ».
+  function visibleTabs() {
+    return TABS.map(t => (t.key === 'entreprise' && isSoc(state.client)) ? Object.assign({}, t, { label: 'Interlocuteurs' }) : t);
+  }
   function tabsHtml() {
     return '<div class="fs-card fs-tabs-wrap"><div class="fs-tabs">' +
       visibleTabs().map(t => '<button class="fs-tab' + (state.tab === t.key ? ' on' : '') + '" data-tab="' + t.key + '">' + svg(IC[t.icon]) + esc(t.label) + '</button>').join('') +
@@ -475,7 +479,7 @@ OD.define('fiche-shell', {
     render();
     if (urlIdvu != null) cleanUrl();
     // surveille le changement de client (navigation via historique / recherche).
-    // Re-rendu complet : en-tête + jeu d'onglets (Entreprise masqué si société) +
+    // Re-rendu complet : en-tête + jeu d'onglets (Interlocuteurs si société) +
     // panneaux recréés -> chaque module d'onglet se re-monte via son observateur.
     if (window.__fsWatch) clearInterval(window.__fsWatch);
     window.__fsWatch = setInterval(async () => {

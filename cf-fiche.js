@@ -1,4 +1,7 @@
 // ============================================================================
+//  v12 (04/11/2026) : pas de bloc Consentements RGPD sur une société (les
+//    consentements portent sur des personnes : ceux des interlocuteurs sont
+//    sur leur propre fiche). Aucune relecture BACS lancée pour une société.
 //  v11 (03/11/2026) : nouveau design de la fiche, bloc consentements refait.
 //    · CONSENTEMENTS en bas de fiche, dépliés (sans survol ni clic), une carte PAR MARQUE (Toyota, Lexus) :
 //      état global en couleur (consenti / en attente / refusé / partiel /
@@ -845,13 +848,13 @@ function render() {
   body += '</div>';
 
   // Consentements : en bas de fiche, toujours dépliés (rempli par peindreConsent).
-  body += '<div class="cs" id="cf-consent"><div class="cs-charge">Chargement des consentements…</div></div>';
+  if (!soc) body += '<div class="cs" id="cf-consent"><div class="cs-charge">Chargement des consentements…</div></div>';
 
   if (state.mode === 'edit') body += `<div class="cf-footer">${boutonsActions()}</div>`;
 
   root.innerHTML = STYLE + body;
   bindEvents();
-  peindreConsent();
+  if (!soc) peindreConsent();
 
   if (activeAttr) {
     const next = root.querySelector(`[data-cf-field="${activeAttr}"]`);
