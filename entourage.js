@@ -1,4 +1,15 @@
-// ENTOURAGE — module One Data (OD.define) v2 (04/11/2026)
+// ENTOURAGE — module One Data (OD.define) v3 (04/11/2026)
+//
+// v3 : le report dans BACS s'exécute VRAIMENT. Les gestes d'entourage sont
+//   « directs » : la base les met en file sans jamais les relancer seule, c'est
+//   la page qui doit demander à l'extension de les exécuter (geste_executer),
+//   comme le fait le module partagé pour les interlocuteurs de société. La v2
+//   ne le demandait pas : le lien restait « En cours » indéfiniment.
+//   · Ajout, « Reporter dans BACS » et retrait : le geste part aussitôt dans
+//     l'onglet BACS du vendeur ; le résultat (fait, refus BACS, BACS fermé)
+//     s'affiche en clair.
+//   · « En cours » sans envoi actif propose « Relancer » : la base rend le
+//     geste déjà en attente (migration 20261104224500), jamais un doublon.
 //
 // v2 : le bandeau « Lecture de l'entourage BACS » suit la lecture réelle
 //   (interrogée toutes les 20 s) et disparaît dès qu'elle est faite ; au-delà
@@ -65,7 +76,48 @@ OD.define('entourage', {
     function roleLib(v) { const r = ROLES.find(x => x[0] === v); return r ? r[1] : (v === 'Financed' ? 'Financé' : (v || 'Autre')); }
 
     const state = { id: null, list: null, loading: false, error: null, modal: null, notice: null,
-                    bacsActif: false, lecture: null, nomClient: '' };
+                    bacsActif: false, lecture: null, nomClient: '', envoi: {} };
+
+    // v3 : canal page -> extension -> onglet BACS, posé par le socle (OD.bacs) ;
+    // repli autonome sur le même contrat de messages.
+    const DELAI_BACS_MS = 250000;
+    function demanderBacs(action, params, delaiMs) {
+      const w = fw();
+      const g = (w.OD && w.OD.bacs) || (window.OD && window.OD.bacs) || null;
+      if (g && typeof g.demander === 'function') return g.demander(action, params, delaiMs);
+      return new Promise((resolve) => {
+        const id = 'oeg_' + Date.now() + '_' + Math.random().toString(16).slice(2);
+        let t = null;
+        function fin(r) { try { w.removeEventListener('message', ecoute); } catch (e) {} clearTimeout(t); resolve(r); }
+        function ecoute(e) { const m = e.data; if (m && m.__od_bacs_result && m.id === id) fin(m); }
+        w.addEventListener('message', ecoute);
+        t = setTimeout(() => fin({ ok: false, erreur: 'delai_depasse' }), delaiMs || 25000);
+        try { w.postMessage({ __od_bacs: true, id: id, action: action, params: params || {} }, '*'); }
+        catch (e) { fin({ ok: false, erreur: 'extension_absente' }); }
+      });
+    }
+    function messageBacs(err) {
+      if (!err) return 'BACS n’a pas répondu.';
+      if (err === 'extension_absente' || err === 'extension_indisponible') return 'L’extension One Data – BACS n’est pas active sur ce navigateur.';
+      if (err === 'bacs_non_ouvert') return 'BACS n’est pas ouvert : ouvrez BACS dans un onglet de ce navigateur, connectez-vous, puis relancez.';
+      if (err === 'bacs_non_pret') return 'L’onglet BACS ne répond pas encore : laissez-le finir de charger, puis relancez.';
+      if (err === 'delai_depasse') return 'BACS n’a pas répondu à temps.';
+      if (err === 'extension_perimee' || /^geste en_attente$/.test(err)) return 'Votre extension « One Data – BACS » n’est pas à jour : fermez complètement Chrome, rouvrez-le, puis relancez.';
+      const t = String(err).replace(/^[^:]*refusée\s*:\s*/i, '').replace(/^[A-Za-z0-9_]+\.[A-Za-z0-9_]+\s*:\s*/, '').replace(/❌\s*/g, '').trim();
+      return 'BACS a refusé : ' + (t || String(err));
+    }
+    async function executerGeste(gesteId, idLien, texteOk) {
+      if (gesteId == null) return;
+      state.envoi[idLien] = true;
+      state.notice = { texte: 'Report dans BACS… ne fermez pas l’onglet BACS.', ton: 'info' }; render();
+      let x = null;
+      try { x = await demanderBacs('geste_executer', { geste_id: Number(gesteId) }, DELAI_BACS_MS); }
+      catch (e) { x = { ok: false, erreur: errMsg(e) }; }
+      delete state.envoi[idLien];
+      if (x && x.ok) notifier(texteOk || 'Reporté dans BACS.', 'ok');
+      else notifier(messageBacs(x && (x.erreur || x.refus)) + ' Le lien est gardé dans One Data.', 'alerte');
+      await charger(true);
+    }
 
     // ------------------------------------------------------------ données
     async function charger(silencieux) {
@@ -168,7 +220,8 @@ OD.define('entourage', {
       try {
         const r = await supa().rpc('entourage_retirer', { p_id: Number(id) });
         if (r.error) throw r.error;
-        notifier(r.data && r.data.bacs ? 'Retiré de l’entourage, dans One Data et dans BACS.' : 'Retiré de l’entourage.', 'ok');
+        if (r.data && r.data.bacs && r.data.geste) { await charger(true); await executerGeste(r.data.geste, id, 'Retiré de l’entourage, dans One Data et dans BACS.'); return; }
+        notifier('Retiré de l’entourage.', 'ok');
         await charger(true);
       } catch (e) { notifier(errMsg(e), 'alerte'); }
     }
@@ -176,9 +229,10 @@ OD.define('entourage', {
       try {
         const r = await supa().rpc('entourage_renvoyer', { p_id: Number(id), p_id_site: siteCourant() });
         if (r.error) throw r.error;
-        if (r.data && r.data.bacs === false) notifier('Le report de l’entourage dans BACS n’est pas encore ouvert.', 'info');
-        else notifier('Envoi dans BACS demandé.', 'ok');
+        if (r.data && r.data.bacs === false) { notifier('Le report de l’entourage dans BACS n’est pas encore ouvert.', 'info'); await charger(true); return; }
+        if (r.data && r.data.deja) { notifier('Ce lien est déjà dans BACS.', 'ok'); await charger(true); return; }
         await charger(true);
+        if (r.data && r.data.geste) await executerGeste(r.data.geste, id, 'Reporté dans BACS.');
       } catch (e) { notifier(errMsg(e), 'alerte'); }
     }
 
@@ -280,8 +334,9 @@ OD.define('entourage', {
                                                           p_principal: !!m.principal, p_id_site: siteCourant() });
         if (r.error) throw r.error;
         state.modal = null;
-        notifier(r.data && r.data.bacs ? 'Ajouté à l’entourage. Report dans BACS en cours.' : 'Ajouté à l’entourage.', 'ok');
         await charger(true);
+        if (r.data && r.data.bacs && r.data.geste) await executerGeste(r.data.geste, r.data.id, 'Ajouté à l’entourage, dans One Data et dans BACS.');
+        else notifier('Ajouté à l’entourage.', 'ok');
       } catch (e) { m.saving = false; m.error = errMsg(e); render(); }
     }
 
@@ -389,7 +444,11 @@ ${R} .eg-tag.non{border-color:#e3e9f2;color:#9fb3cf}
       if (r.bacs_etat === 'echec') return `<span class="eg-sync ko" title="${esc(r.bacs_erreur || '')}"><span class="eg-b">B</span>Non reporté</span>
         <button class="eg-btn eg-btn-ghost eg-btn-mini" data-renvoyer="${r.id}">${I.retry} Réessayer</button>`;
       if (r.dans_bacs) return '<span class="eg-sync ok"><span class="eg-b">B</span>Dans BACS</span>';
-      if (r.bacs_etat === 'a_envoyer') return '<span class="eg-sync att"><span class="eg-b">B</span>En cours</span>';
+      if (r.bacs_etat === 'a_envoyer') {
+        if (state.envoi[r.id]) return '<span class="eg-sync att"><span class="eg-b">B</span>Envoi dans BACS…</span>';
+        return '<span class="eg-sync att"><span class="eg-b">B</span>En attente</span>'
+          + (state.bacsActif ? `<button class="eg-btn eg-btn-ghost eg-btn-mini" data-renvoyer="${r.id}">${I.retry} Relancer</button>` : '');
+      }
       if (state.bacsActif) return `<button class="eg-btn eg-btn-ghost eg-btn-mini" data-renvoyer="${r.id}"><span class="eg-b">B</span> Reporter dans BACS</button>`;
       return '';
     }
