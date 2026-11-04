@@ -1,5 +1,13 @@
 // ============================================================================
-//  NOTIFICATIONS — module One Data (OD.define)   v10 — PROFIL TEAM COLIN
+//  NOTIFICATIONS — module One Data (OD.define)   v11 — PROFIL TEAM COLIN
+//
+//  v11 (04/11/2026) : INCONNUS, retours terrain.
+//   * Classés du plus ANCIEN au plus récent (le plus vieux attend le plus).
+//   * Chaque appel inconnu dit qui a décroché (« Décroché par Mina Tang »,
+//     « par poste 205 ») ou « Personne n'a décroché ».
+//   * « Classer sans suite » propose « Sans intérêt ».
+//   Prérequis SQL : migration 20261104190000_notif_inconnus_decroche_sans_interet
+//   (notif_lire : decroche_par, manque ; notif_classer : motif sans_interet).
 //
 //  v10 (02/11/2026) : « Expéditeur non client » posait une question obscure
 //  (« ne rien exclure » seul choix sur un appel). La question n'apparaît plus
@@ -948,7 +956,8 @@ OD.define('notifications', {
       rpv:    [['test', 'Test'],
                ['deja_traite', 'Déjà traité hors One Data'],
                ['abandon', 'Client injoignable ou projet abandonné']],
-      orphan: [['test', 'Test'],
+      orphan: [['sans_interet', 'Sans intérêt'],
+               ['test', 'Test'],
                ['perso_demarchage', 'Personnel ou démarchage'],
                ['non_client', 'Expéditeur non client']]
     };
@@ -1028,7 +1037,13 @@ OD.define('notifications', {
                           : tel ? 'aucune fiche ne porte ce numéro' : 'impossible de savoir qui c’était') + '</p>'
         + '<div class="fil">' + pastillesCanaux([i.media], false)
         +   '<span class="ev">Dernier : ' + esc(quandLisible(i.last_contact)) + '</span>'
-        +   (i.site ? '<span class="ev">Reçu sur ' + esc(i.site) + '</span>' : '') + '</div>'
+        +   (i.site ? '<span class="ev">Reçu sur ' + esc(i.site) + '</span>' : '')
+        // v11 : qui a décroché le dernier appel (ou personne).
+        +   (media === 'VOIP' && (i.manque === true || i.manque === 'true')
+              ? '<span class="ev manq">Personne n’a décroché</span>'
+              : (media === 'VOIP' && i.decroche_par
+                  ? '<span class="ev">Décroché par <b>' + esc(i.decroche_par) + '</b></span>' : ''))
+        + '</div>'
         + (i.apercu ? '<p class="extrait' + (estMedia(i.apercu) ? ' media' : '') + '">'
             + esc(libelleApercu(i.apercu)) + '</p>' : '')
         + (state.classOuvert === 'orphan:' + i.interlocuteur
@@ -1353,11 +1368,13 @@ OD.define('notifications', {
       if (sec === 'perimetre') return tableauEquipe(j.perimetre || [], 'affaire');
 
       if (sec === 'inconnus') {
-        const l = (j.inconnus || []);
+        // v11 : du plus ancien au plus récent — le plus vieux attend le plus.
+        const l = (j.inconnus || []).slice().sort((a, b) =>
+          String(a.last_contact || '').localeCompare(String(b.last_contact || '')));
         if (!l.length) return vide('inconnus');
         return '<p class="dnote" style="font-size:12px;color:var(--ink-3);margin:0 0 10px">'
-          + 'Triés par <b>nombre de rappels</b> : quelqu’un qui appelle trois fois veut '
-          + 'vraiment quelque chose.</p>'
+          + 'Du <b>plus ancien</b> au plus récent : celui qui attend depuis le plus '
+          + 'longtemps est en haut.</p>'
           + '<div class="pile">' + l.map(carteInconnu).join('') + '</div>';
       }
 
