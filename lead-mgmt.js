@@ -1,6 +1,12 @@
 // ============================================================================
 //  LEAD MANAGEMENT — module One Data (OD.define 'lead-mgmt')
-//  VERSION TEAM COLIN (v96) — déploiement CIBLÉ (publish-targets :
+//  VERSION TEAM COLIN (v97) — déploiement CIBLÉ (publish-targets :
+//  v97 (04/11/2026) : Vroom Team — encart « Client » dans la fiche du lead :
+//    le client One Data retrouvé par le téléphone (nom, ville, véhicules,
+//    accès à sa fiche). Quand le numéro est inconnu de One Data, One Data
+//    lance seul une recherche dans BACS (VM) et l'encart l'indique ; la
+//    fiche et le parc arrivent sans action de l'agent (plateau_file2 :
+//    client_tel, recherche_bacs).
 //  v96 (04/11/2026) : heures d'ouverture côté Vroom Team. Ses délais
 //    (attente avant prise, « hors délai » des leads frais, temps de
 //    transmission au site) comptent sur ses heures (lun-sam, réglage
@@ -1239,6 +1245,31 @@
           : (l.campagne ? '<p class="dem-m">' + esc(l.campagne) + '</p>' : ''))
         + '</div>';
     }
+    // v97 : le client derrière le numéro (One Data, ou rapatrié de BACS)
+    function sectionClientVr(l) {
+      if (!l.telephone) return '';
+      var c = l.client_tel, rb = l.recherche_bacs;
+      if (c && c.idvu) {
+        var vs = (c.vehicules || []).slice(0, 4);
+        return '<section><h3>Client</h3><div class="clvr"><b>' + esc(propre(c.nom || 'Client')) + '</b>' + (c.ville ? '<small>' + esc(c.ville) + '</small>' : '')
+          + (vs.length ? '<ul>' + vs.map(function (v) { return '<li><em>' + esc(v.immat || '—') + '</em>' + esc(v.vehicule || '') + '</li>'; }).join('') + '</ul>'
+                       : '<p class="hint">Aucun véhicule connu.</p>')
+          + '<button type="button" class="btn sm ghost" data-a="fiche-vr" data-id="' + c.idvu + '">Ouvrir la fiche client</button></div></section>';
+      }
+      if (rb === 'a_faire' || rb === 'en_cours') return '<section><h3>Client</h3><p class="hint clvr-att">Numéro inconnu de One Data : recherche dans BACS en cours, la fiche s\'affichera ici d\'elle-même.</p></section>';
+      if (rb === 'rien') return '<section><h3>Client</h3><p class="hint">Inconnu de One Data et de BACS : nouveau client.</p></section>';
+      if (rb === 'erreur') return '<section><h3>Client</h3><p class="hint">Numéro inconnu de One Data ; la recherche dans BACS n\'a pas abouti.</p></section>';
+      return '<section><h3>Client</h3><p class="hint">Numéro inconnu de One Data.</p></section>';
+    }
+    function ficheClientVr(idClient) {
+      if (!idClient) return;
+      try { wwLib.wwVariable.updateValue('55490583-c88b-4748-916e-4d203db07742', { IDVu: Number(idClient) }); } catch (e) {}
+      try { FW.__odFicheTab = 0; } catch (e) {}
+      var edit = false; try { edit = (window.self !== window.top) || /-editor\.weweb\.io|weweb\.io/i.test(location.hostname); } catch (e) { edit = true; }
+      if (edit) { try { wwLib.wwApp.goTo('259f1951-a2d4-4b90-ac83-0b3febe1d4ec'); return; } catch (e) {} }
+      try { wwLib.goTo('/fr/fiche-client'); return; } catch (e) {}
+      try { FW.location.href = '/fr/fiche-client'; } catch (e) {}
+    }
     function renderDrawer() {
       var D = S.dr; if (!D) return;
       if (D.mode === 'creer') return renderCreer();     // v81
@@ -1266,6 +1297,7 @@
         + (l.email ? '<p class="mail">' + esc(l.email) + '</p>' : '')
         + '<div class="canaux">' + [['Appeler', 'appel', 'call', IC.phone], ['WhatsApp', 'wa', 'wa', IC.wa], ['Email', 'mail', 'mail', IC.mail], ['SMS', 'sms', 'sms', IC.sms]].filter(function (c) { return c[1] !== 'appel' || __lmPeutAppeler(); }).map(function (c) {
             return '<button type="button" class="fs-btn ' + c[2] + '" data-a="canal" data-id="' + c[1] + '"' + ((c[1] === 'mail' ? !l.email : !l.telephone) ? ' disabled' : '') + '>' + svgIc(c[3]) + c[0] + '</button>'; }).join('') + '</div></section>';
+      h += sectionClientVr(l);
       // Demande
       var oui = function (v) { return v === 'true' || v === true ? 'Oui' : v === 'false' || v === false ? 'Non' : v; };
       var dl = [['Type', fb.type_demande], ['Modèle', fb.modele], ['Marque', fb.marque], ['Échéance', fb.echeance], ['Reprise', oui(fb.reprise)],
@@ -1839,6 +1871,7 @@
         // Panneau
         case 'close': return fermerDrawer();
         case 'copier': try { await (FW.navigator || navigator).clipboard.writeText(id); toast('Numéro copié'); } catch (e) { toast(id); } return;
+        case 'fiche-vr': return ficheClientVr(id);
         case 'canal': return canal(id);
         case 'tous-sites': if (S.dr) { S.dr.tousSites = true; renderDrawerPreserve(); } return;
         case 'issue': if (S.dr) { S.dr.issue = id; renderDrawerPreserve(); } return;
@@ -5127,6 +5160,12 @@
 .lmtc-ov .dl dt{color:var(--ink-3);font-weight:600}
 .lmtc-ov .dl dd{margin:0;font-weight:700;color:var(--ink)}
 .lmtc-ov .tel{display:flex;flex-wrap:wrap;gap:10px;align-items:center}
+.lmtc-ov .clvr{display:flex;flex-direction:column;gap:4px;align-items:flex-start}
+.lmtc-ov .clvr>b{font-size:14px;font-weight:800;color:var(--bleu-dk)}
+.lmtc-ov .clvr>small{font-size:12px;color:var(--mut);font-weight:600}
+.lmtc-ov .clvr ul{list-style:none;margin:4px 0;padding:0;display:flex;flex-direction:column;gap:3px;font-size:13px;color:var(--ink-2)}
+.lmtc-ov .clvr li em{font-style:normal;font-weight:800;font-variant-numeric:tabular-nums;color:var(--ink);margin-right:8px}
+.lmtc-ov .clvr-att{color:var(--bleu-dk)}
 .lmtc-ov .tel b{font-size:17px;font-weight:800;color:var(--bleu-dk);font-variant-numeric:tabular-nums;user-select:all}
 .lmtc-ov .mail{font-size:13px;color:var(--mut);font-weight:600;word-break:break-all}
 .lmtc-ov .quote{font-size:13px;color:var(--ink-2);border-left:2px solid var(--line-2);padding-left:10px;white-space:pre-line;font-style:italic}
