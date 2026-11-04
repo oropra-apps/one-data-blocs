@@ -1,4 +1,9 @@
-// ENTOURAGE — module One Data (OD.define) v1 (04/11/2026)
+// ENTOURAGE — module One Data (OD.define) v2 (04/11/2026)
+//
+// v2 : le bandeau « Lecture de l'entourage BACS » suit la lecture réelle
+//   (interrogée toutes les 20 s) et disparaît dès qu'elle est faite ; au-delà
+//   de 10 minutes, il le dit sans tourner indéfiniment. Le téléphone d'un
+//   proche appelle par le 3CX du vendeur.
 //
 // Onglet « Entourage » de la fiche d'un particulier : la rubrique Entourage
 // de BACS (Relationship__c) — conjoint, enfants, parents, amis, collègues,
@@ -86,14 +91,50 @@ OD.define('entourage', {
       // Lecture prioritaire de l'entourage BACS de ce client (au plus une fois par jour).
       try {
         const r = await supa().rpc('entourage_relire', { p_id_client: id });
-        if (!r.error && r.data && r.data.demande) {
-          state.lecture = Date.now(); render();
-          [60000, 150000, 300000].forEach(ms => setTimeout(() => {
-            if (state.id === id) { charger(true).then(() => { if (Date.now() - (state.lecture || 0) > 290000) { state.lecture = null; render(); } }); }
-          }, ms));
-        }
+        if (!r.error && r.data && r.data.demande) suivreLecture(id);
       } catch (e) {}
       if (!state.modal) render();
+    }
+    // La récolte lit l'entourage BACS de ce client : on suit la lecture (la base
+    // répond « déjà lu » dès qu'elle est faite), puis la liste se recharge.
+    let suivi = null;
+    function suivreLecture(id) {
+      if (suivi) clearInterval(suivi);
+      state.lecture = { depuis: Date.now(), attente: false }; render();
+      suivi = setInterval(async () => {
+        if (state.id !== id || !__anchor.isConnected) { clearInterval(suivi); suivi = null; return; }
+        let fini = false;
+        try {
+          const r = await supa().rpc('entourage_relire', { p_id_client: id });
+          fini = !r.error && r.data && r.data.demande === false;
+        } catch (e) {}
+        if (fini) {
+          clearInterval(suivi); suivi = null; state.lecture = null;
+          await charger(true);
+        } else if (Date.now() - state.lecture.depuis > 600000) {
+          clearInterval(suivi); suivi = null;
+          state.lecture = { depuis: state.lecture.depuis, attente: true }; render();
+        }
+      }, 20000);
+    }
+    function appelerNumero(num, nom, idvu) {
+      let to = String(num || '').replace(/[^0-9+]/g, '');
+      if (!to) return false;
+      if (to[0] === '0') to = '+33' + to.slice(1);
+      const cands = [];
+      try { cands.push(wwLib.getFrontWindow && wwLib.getFrontWindow()); } catch (e) {}
+      cands.push(window);
+      try { cands.push(window.parent); } catch (e) {}
+      try { cands.push(window.top); } catch (e) {}
+      for (const w of cands) {
+        try {
+          if (w && w.OD3CX && typeof w.OD3CX.appeler === 'function') {
+            w.OD3CX.appeler(to, { nom: nom || num, idvu: Number(idvu) > 0 ? Number(idvu) : null });
+            return true;
+          }
+        } catch (e) {}
+      }
+      return false;
     }
     function notifier(texte, ton) {
       state.notice = { texte: texte, ton: ton || 'info' }; render();
@@ -357,14 +398,15 @@ ${R} .eg-tag.non{border-color:#e3e9f2;color:#9fb3cf}
       let h = `<div class="eg-head"><div class="eg-head-t">Entourage${n ? ' <span class="eg-count">' + n + '</span>' : ''}</div>`
         + `<button class="eg-btn eg-btn-primary" data-ouvrir="1">${I.plus} Ajouter un proche</button></div>`;
       if (state.notice) h += `<div class="${state.notice.ton === 'alerte' ? 'eg-alert' : 'eg-info' + (state.notice.ton === 'ok' ? ' ok' : '')}">${esc(state.notice.texte)}</div>`;
-      if (state.lecture) h += `<div class="eg-info">${I.spin}<span>Lecture de l’entourage enregistré dans BACS pour ce client : la liste se complète d’elle-même dans quelques minutes.</span></div>`;
+      if (state.lecture && !state.lecture.attente) h += `<div class="eg-info">${I.spin}<span>Lecture de l’entourage enregistré dans BACS pour ce client : la liste se complète d’elle-même dans quelques minutes.</span></div>`;
+      if (state.lecture && state.lecture.attente) h += '<div class="eg-info"><span>La lecture de l’entourage BACS de ce client n’a pas encore été faite (la récolte est occupée). Revenez sur cet onglet un peu plus tard.</span></div>';
       if (state.loading || state.list === null) return h + '<div class="eg-empty">Chargement…</div>';
       if (state.error) return h + `<div class="eg-empty">Erreur : ${esc(state.error)}</div>`;
       if (!n) return h + '<div class="eg-empty">Aucun proche enregistré.<br>Conjoint, enfants, parents, parrain… ajoutez-les avec « Ajouter un proche ».</div>';
       h += '<div class="eg-list">';
       for (const r of state.list) {
         const nom = nomPersonne(r) || ('Fiche n° ' + r.id_proche);
-        const tel = r.tel ? `<a href="tel:${esc(String(r.tel).replace(/[^0-9+]/g, ''))}">${esc(r.tel)}</a>` : '';
+        const tel = r.tel ? `<a href="tel:${esc(String(r.tel).replace(/[^0-9+]/g, ''))}" data-tel="${esc(r.tel)}" data-nom="${esc(nom)}" data-id="${esc(r.id_proche)}" title="Appeler">${esc(r.tel)}</a>` : '';
         const sub = [tel, r.email ? esc(r.email) : '', r.ville ? esc(r.ville) : ''].filter(Boolean).join(' · ');
         h += `<div class="eg-row">
           <span class="eg-row-ic">${I.user}</span>
@@ -441,6 +483,7 @@ ${R} .eg-tag.non{border-color:#e3e9f2;color:#9fb3cf}
       on('[data-ouvrir]', 'click', ouvrirModale);
       on('[data-fermer]', 'click', fermerModale);
       on('[data-overlay]', 'click', (e) => { if (e.target === e.currentTarget) fermerModale(); });
+      on('a[data-tel]', 'click', (e) => { const a = e.currentTarget; if (appelerNumero(a.getAttribute('data-tel'), a.getAttribute('data-nom'), a.getAttribute('data-id'))) e.preventDefault(); });
       on('[data-fiche]', 'click', (e) => ouvrirFiche(e.currentTarget.getAttribute('data-fiche')));
       on('[data-retirer]', 'click', (e) => retirer(e.currentTarget.getAttribute('data-retirer'), e.currentTarget.getAttribute('data-nom')));
       on('[data-renvoyer]', 'click', (e) => renvoyer(e.currentTarget.getAttribute('data-renvoyer')));
@@ -477,7 +520,7 @@ ${R} .eg-tag.non{border-color:#e3e9f2;color:#9fb3cf}
     const iv = setInterval(() => {
       if (!__anchor.isConnected) { clearInterval(iv); return; }
       const id = currentIdvu();
-      if (id !== last) { last = id; state.list = null; state.modal = null; state.notice = null; state.lecture = null; charger().then(chargerContexte); }
+      if (id !== last) { last = id; state.list = null; state.modal = null; state.notice = null; state.lecture = null; if (suivi) { clearInterval(suivi); suivi = null; } charger().then(chargerContexte); }
     }, 600);
   }
 });
