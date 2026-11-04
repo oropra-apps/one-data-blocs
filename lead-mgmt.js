@@ -1,6 +1,12 @@
 // ============================================================================
 //  LEAD MANAGEMENT — module One Data (OD.define 'lead-mgmt')
-//  VERSION TEAM COLIN (v94) — déploiement CIBLÉ (publish-targets :
+//  VERSION TEAM COLIN (v95) — déploiement CIBLÉ (publish-targets :
+//  v95 (04/11/2026) : tous les comptes à rebours des leads (Pool, accueil,
+//    fiche, relais, retour au Pool) comptent en HEURES D'OUVERTURE : lundi au
+//    samedi, 8 h 30-12 h 30 et 14 h-19 h, heure de Paris, comme la réactivité
+//    en base (od_minutes_ouvrees). Un lead arrivé à 22 h n'est plus « hors
+//    délai » à l'ouverture ; « À rappeler avant » donne l'échéance réelle.
+//    L'ancienneté « ouvert depuis plus de 24 h » reste en temps calendaire.
 //  v94 (03/11/2026) : « Nouveau lead » de la Vroom Team aligné sur celui des
 //    Appels entrants : seules les CONCESSIONS PILOTES sont proposées (réglage
 //    appel_entrant_sites, contrôlé aussi par plateau_lead_creer), chacune avec
@@ -379,6 +385,55 @@
   function normTel(n) {
     var t = String(n || '').replace(/[^0-9+]/g, '');
     if (!t) return ''; if (t[0] === '+') return t; if (t[0] === '0') return '+33' + t.slice(1); return t;
+  }
+  // v95 : minutes en heures d'ouverture (lun-sam 08:30-12:30, 14:00-19:00, Paris).
+  var OUV = [[510, 750], [840, 1140]];
+  var __fmtP = null;
+  function partsP(ms) {
+    if (!__fmtP) __fmtP = new Intl.DateTimeFormat('en-GB', { timeZone: 'Europe/Paris', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit', hourCycle: 'h23' });
+    var o = {}; __fmtP.formatToParts(new Date(ms)).forEach(function (x) { o[x.type] = x.value; });
+    return { y: +o.year, mo: +o.month, d: +o.day, h: +o.hour % 24, mi: +o.minute, s: +o.second };
+  }
+  function msP(y, mo, d, minute) {   // instant d'une heure de Paris (minutes depuis minuit)
+    var g = Date.UTC(y, mo - 1, d, 0, minute), p = partsP(g);
+    var off = Date.UTC(p.y, p.mo - 1, p.d, p.h, p.mi, p.s) - g;
+    var r = g - off, q = partsP(r);
+    var off2 = Date.UTC(q.y, q.mo - 1, q.d, q.h, q.mi, q.s) - r;
+    return off2 === off ? r : g - off2;
+  }
+  function plagesJour(y, mo, d) {   // plages ouvrées [début, fin] en ms d'un jour de Paris
+    var dow = new Date(Date.UTC(y, mo - 1, d)).getUTCDay();
+    if (dow === 0) return [];
+    return OUV.map(function (p) { return [msP(y, mo, d, p[0]), msP(y, mo, d, p[1])]; });
+  }
+  function ouvrees(a, b) {          // minutes ouvrées entre deux instants (ms)
+    if (a == null || b == null || isNaN(a) || isNaN(b) || b <= a) return 0;
+    var p = partsP(a), t = 0, j = Date.UTC(p.y, p.mo - 1, p.d);
+    for (var k = 0; k < 93; k++) {
+      var dd = new Date(j + k * 86400000), pl = plagesJour(dd.getUTCFullYear(), dd.getUTCMonth() + 1, dd.getUTCDate());
+      if (pl.length && pl[0][0] >= b) break;
+      pl.forEach(function (x) { t += Math.max(0, Math.min(b, x[1]) - Math.max(a, x[0])); });
+    }
+    return t / 60000;
+  }
+  function finOuvree(a, m) {        // instant atteint après m minutes ouvrées à partir de a (ms)
+    var p = partsP(a), j = Date.UTC(p.y, p.mo - 1, p.d), r = m * 60000;
+    for (var k = 0; k < 93; k++) {
+      var dd = new Date(j + k * 86400000), pl = plagesJour(dd.getUTCFullYear(), dd.getUTCMonth() + 1, dd.getUTCDate());
+      for (var i = 0; i < pl.length; i++) {
+        var deb = Math.max(a, pl[i][0]), dur = pl[i][1] - deb;
+        if (dur <= 0) continue;
+        if (r <= dur) return deb + r;
+        r -= dur;
+      }
+    }
+    return a + m * 60000;
+  }
+  function minsO(v) { return v ? ouvrees(ts(v), Date.now()) : 0; }
+  function ouvert() { var n = Date.now(), p = partsP(n); return plagesJour(p.y, p.mo, p.d).some(function (x) { return n >= x[0] && n < x[1]; }); }
+  function tmO(v, sla, cap) {
+    var m = minsO(v);
+    return '<span class="tm ' + niv(m, sla) + '"><b>' + duree(m) + '</b><small>' + esc(cap || ('SLA ' + slaTxt(sla))) + '</small></span>';
   }
   function tm(v, sla, cap) {
     var m = mins(v);
@@ -1039,7 +1094,7 @@
       ls.forEach(function (l) {
         var depuis = l.transfere_le || l.derniere_action_le;
         var attente = l.id_lead && !l.od_contact_le && ['recu', 'resolu', 'attribue'].indexOf(l.od_statut) !== -1 && depuis;
-        var gauche = attente ? tm(depuis, SLA_SITE, 'sur le site · SLA 2 h')
+        var gauche = attente ? tmO(depuis, SLA_SITE, 'sur le site · SLA 2 h')
           : '<span class="tm neutre"><b>' + esc(depuis ? jour(depuis) : jour(l.recu_le)) + '</b><small>' + (depuis ? 'transféré' : 'reçu') + '</small></span>';
         var q = resumeQualif(l.qualification);
         h += '<div class="lr' + univCls(l) + '" data-a="open" data-id="' + esc(l.sf_lead_id) + '" tabindex="0"><div>' + gauche + '</div>'
@@ -2437,7 +2492,7 @@
     function prenom(n) { return String(propre(n) || '').split(' ')[0]; }
     function arrive(l) { return S.depuis === 'bacs' ? l.recu_le : l.arrive_le; }
     function slaDe(l) { return S.depuis === 'bacs' ? (l.sla_min || 60) : (l.sla_site || l.sla_min || 60); }
-    function niveau(l) { var m = mins(arrive(l)); return m >= 1440 ? 'stock' : niv(m, slaDe(l)); }
+    function niveau(l) { return mins(arrive(l)) >= 1440 ? 'stock' : niv(minsO(arrive(l)), slaDe(l)); }
     function verrouAutre(l) { return l.verrou_par && Number(l.verrou_par) !== Number(MOI) && l.verrou_jusqu && ts(l.verrou_jusqu) > Date.now(); }
     function estMien(l) { return l.zone === 'vendeur' && Number(l.id_user_attribue) === Number(MOI); }
     function sitesStats() { return (S.stats && S.stats.sites) || []; }
@@ -2543,7 +2598,7 @@
     }
     // v88 : minutes avant d'agir. Un lead « pas joint » attend son rappel ;
     // les autres, la fin de leur délai.
-    function cleUrgence(l) { return l.rappel_le ? (ts(l.rappel_le) - Date.now()) / 60000 : slaDe(l) - mins(arrive(l)); }
+    function cleUrgence(l) { return l.rappel_le ? (ts(l.rappel_le) - Date.now()) / 60000 : slaDe(l) - minsO(arrive(l)); }
     function rappelDu(l) { return !!l.rappel_le && ts(l.rappel_le) <= Date.now(); }
     function quandRappel(v) {
       var d = new Date(v), n = new Date(), dem = new Date(); dem.setDate(n.getDate() + 1);
@@ -2833,7 +2888,7 @@
       var ss = sitesVendeur();
       return ss.length === 1 ? 'Pool ' + siteNom(ss[0].site) : 'Pool de vos sites';
     }
-    function reste(l) { return slaDe(l) - mins(arrive(l)); }
+    function reste(l) { return slaDe(l) - minsO(arrive(l)); }
     function retardsEquipe(sid) { return S.leads.filter(function (l) { return l.zone === 'vendeur' && (sid == null || Number(l.id_site) === Number(sid)) && niveau(l) === 'crit'; }).length; }
     function libPerim() {
       var sid = sitePoste();
@@ -2942,7 +2997,7 @@
     function rebours(l) {
       var m = mins(arrive(l));
       if (m >= 1440) return '<span class="tm crit"><b>' + duree(m) + '</b><small>arrivé le ' + jour(arrive(l)) + '</small></span>';
-      var r = slaDe(l) - m;
+      var r = slaDe(l) - minsO(arrive(l));
       if (r <= 0) return '<span class="tm crit"><b>+' + duree(-r) + '</b><small>hors délai</small></span>';
       return '<span class="tm ' + (r <= slaDe(l) * 0.4 ? 'warn' : 'ok') + '"><b>' + duree(r) + '</b><small>avant le délai</small></span>';
     }
@@ -2953,7 +3008,7 @@
     function retourDans(l) {
       if (l.zone !== 'vendeur' || l.tentatives || l.attribue_par_nom || !l.attribue_le) return null;
       if (['libre', 'prise_directe', 'rendu', 'retour_pool', null, undefined, ''].indexOf(l.attribution_regle) === -1) return null;
-      var r = minRetour() - mins(l.attribue_le);
+      var r = minRetour() - minsO(l.attribue_le);
       return r > 0 && r <= minRetour() ? r : null;
     }
     function etatCourt(l) {
@@ -3067,9 +3122,9 @@
         + (r.peut_modifier ? ' <button type="button" class="lien" data-a="regle-modifier" data-id="' + sid + '">Modifier la règle</button>' : '') + '</div></div>';
     }
     function ageLead(l) {
-      var m = mins(arrive(l)), r = slaDe(l) - m;
+      var m = mins(arrive(l)), r = slaDe(l) - minsO(arrive(l));
       if (m >= 1440) return '<div class="age r"><b>' + duree(m) + '</b><small>en attente</small></div>';
-      if (r <= 0) return '<div class="age o"><b>' + duree(m) + '</b><small>hors délai</small></div>';
+      if (r <= 0) return '<div class="age o"><b>' + duree(minsO(arrive(l))) + '</b><small>hors délai</small></div>';
       return '<div class="age v"><b>' + duree(r) + '</b><small>avant le délai</small></div>';
     }
     function carteLead(l) {
@@ -3225,7 +3280,7 @@
       var gauche = l.zone === 'plateau'
         ? '<span class="tm neutre"><b>' + duree(mins(l.recu_le)) + '</b><small>au plateau · ' + esc(l.statut_bacs || '') + '</small></span>'
         : mins(arrive(l)) >= 1440 ? '<span class="tm crit"><b>' + duree(mins(arrive(l))) + '</b><small>arrivé le ' + jour(arrive(l)) + '</small></span>'
-        : tm(arrive(l), slaDe(l), (S.depuis === 'bacs' ? 'depuis la réception' : 'sur le site') + ' · SLA ' + slaTxt(slaDe(l)));
+        : tmO(arrive(l), slaDe(l), (S.depuis === 'bacs' ? 'depuis la réception' : 'sur le site') + ' · SLA ' + slaTxt(slaDe(l)));
       return '<div class="lr' + (verrouAutre(l) ? ' resa' : '') + univCls(l) + '" data-a="open" data-id="' + l.id_lead + '" tabindex="0">'
         + '<div>' + gauche + '</div>'
         + '<div><span class="lr-n">' + esc(nomLead(l)) + '</span> <span class="lr-v">' + esc(siteNom(l.site) + qui) + '</span><p class="lr-d">' + esc(demandeDe(l)) + '</p><div class="tags">' + tagsLead(l) + '</div></div>'
@@ -3243,7 +3298,7 @@
         var why = l.par_plateau ? 'Qualifié par ' + (l.transfere_par_nom ? propre(l.transfere_par_nom) + ' (Vroom Team)' : 'la Vroom Team') + (l.qualification ? ' : ' + l.qualification : '')
           : l.attribue_par_nom ? 'Attribué par ' + propre(l.attribue_par_nom) + (l.attribue_le ? ' il y a ' + duree(mins(l.attribue_le)) : '')
           : l.tentatives ? 'Pas joint ×' + l.tentatives + (l.rappel_le ? ' · ' + texteRappel(l) : ', dernier essai ' + quand(l.dernier_essai)) : (l.message ? String(l.message).replace(/^\[[^\]]*\]\s*/, '').slice(0, 140) : (l.source_libelle || ''));
-        var gauche = l.rappel_le ? tmRappel(l) : mins(arrive(l)) >= 1440 ? '<span class="tm crit"><b>' + duree(mins(arrive(l))) + '</b><small>arrivé le ' + jour(arrive(l)) + '</small></span>' : tm(arrive(l), slaDe(l), 'depuis l\'arrivée · SLA ' + slaTxt(slaDe(l)));
+        var gauche = l.rappel_le ? tmRappel(l) : mins(arrive(l)) >= 1440 ? '<span class="tm crit"><b>' + duree(mins(arrive(l))) + '</b><small>arrivé le ' + jour(arrive(l)) + '</small></span>' : tmO(arrive(l), slaDe(l), 'depuis l\'arrivée · SLA ' + slaTxt(slaDe(l)));
         h += '<div class="todo" data-a="open" data-id="' + l.id_lead + '" tabindex="0"><div class="todo-v">' + verbe + '<small>' + sous + '</small></div>'
           + '<div><span class="lr-n">' + esc(nomLead(l)) + '</span> <span class="lr-v">' + esc(demandeDe(l)) + '</span><p class="why">' + esc(why) + '</p><div class="tags">' + tagsLead(l) + '</div></div>'
           + '<div>' + gauche + '</div></div>';
@@ -3259,7 +3314,7 @@
       return h;
     }
     function vuePiscineVendeur() {
-      var ls = piscine(null).sort(function (a, b) { return (slaDe(a) - mins(arrive(a))) - (slaDe(b) - mins(arrive(b))); });
+      var ls = piscine(null).sort(function (a, b) { return (slaDe(a) - minsO(arrive(a))) - (slaDe(b) - minsO(arrive(b))); });
       var h = '<div class="ph"><div><h2>' + esc(poolNom()) + '</h2><p>Libre-service : premier arrivé, premier servi. Prendre met le lead à votre nom ; s\'il ne vous concerne pas, rendez-le au Pool.<br><b>' + esc(texteRetour()) + '</b></p></div></div><div class="list">';
       if (!ls.length) h += '<div class="empty">Le Pool est vide.</div>';
       ls.forEach(function (l) { h += ligneLead(l); });
@@ -3649,7 +3704,7 @@
         var auj = new Date(l.rappel_le).toDateString() === new Date().toDateString();
         return '<span class="ac-p ' + (rappelDu(l) ? 'crit' : 'rap') + '" title="' + esc(texteRappel(l)) + '">' + esc(auj ? hh(l.rappel_le) : jour(l.rappel_le)) + '</span>';
       }
-      var m = mins(arrive(l)), r = slaDe(l) - m, cl, t;
+      var m = mins(arrive(l)), r = slaDe(l) - minsO(arrive(l)), cl, t;
       if (m >= 1440) { cl = 'crit'; t = dureeC(m); }
       else if (r <= 0) { cl = 'crit'; t = '+' + dureeC(-r); }
       else { cl = r <= slaDe(l) * 0.4 ? 'warn' : 'ok'; t = dureeC(r); }
@@ -3776,13 +3831,13 @@
     function delaiTete(l) {
       if (l.zone === 'plateau') return '<div class="fx-del neutre"><b>À la Vroom Team</b><small>reçu ' + esc(quand(l.recu_le)) + '</small></div>';
       var dep = arrive(l); if (!dep) return '';
-      var sla = slaDe(l), fin = ts(dep) + sla * 60000, rest = (fin - Date.now()) / 60000;
+      var sla = slaDe(l), fin = finOuvree(ts(dep), sla), now = Date.now(), rest = fin > now ? ouvrees(now, fin) : -ouvrees(fin, now);
       if (l.tentatives > 0) return '<div class="fx-del ok"><b>' + plural(l.tentatives, 'tentative') + '</b><small>arrivé ' + esc(quand(dep)) + '</small></div>';
       var part = Math.max(0, Math.min(1, 1 - rest / sla)), cl = rest <= 0 ? 'crit' : part > 0.6 ? 'warn' : 'ok';
       var coul = cl === 'crit' ? '#e24b4a' : cl === 'warn' ? '#fac055' : '#53bda7', fond = cl === 'crit' ? '#f3d6d6' : cl === 'warn' ? '#f6e6bd' : '#dcefe9';
       var txt = rest > 0 ? (rest < 60 ? Math.ceil(rest) + "'" : Math.floor(rest / 60) + 'h' + String(Math.floor(rest % 60)).padStart(2, '0')) : '!';
       return '<div class="fx-del ' + cl + '"><i style="background:conic-gradient(' + coul + ' 0 ' + Math.round(part * 100) + '%,' + fond + ' ' + Math.round(part * 100) + '% 100%)"><em>' + txt + '</em></i>'
-        + '<span><b>' + (rest > 0 ? 'À rappeler avant ' + hh(fin) : -rest < 1 ? 'Délai dépassé' : 'Délai dépassé de ' + duree(-rest)) + '</b><small>délai de rappel du site : ' + slaTxt(sla) + (POSTE === 'vendeur' ? ' · ensuite votre chef est prévenu' : '') + '</small></span></div>';
+        + '<span><b>' + (rest > 0 ? 'À rappeler avant ' + quand(fin) : -rest < 1 ? 'Délai dépassé' : 'Délai dépassé de ' + duree(-rest)) + '</b><small>délai de rappel du site : ' + slaTxt(sla) + ' ouvrées' + (POSTE === 'vendeur' ? ' · ensuite votre chef est prévenu' : '') + '</small></span></div>';
     }
     var QLIB = { projet: 'Projet', echeance: 'Échéance', reprise: 'Reprise', financement: 'Financement', modele: 'Modèle' };
     function carteVroom(l, cx) {
@@ -3886,8 +3941,8 @@
       var del = '';
       if (l.zone !== 'plateau') {
         if (l.transfere_le) del += '<div><span>Vroom Team</span><span class="tm ok"><b>transmis en ' + duree((ts(l.transfere_le) - ts(l.recu_le)) / 60000) + '</b><small>après réception</small></span></div>';
-        del += '<div><span>Sur le site</span>' + (mins(l.arrive_le) >= 1440 ? '<span class="tm crit"><b>' + duree(mins(l.arrive_le)) + '</b><small>arrivé le ' + esc(quand(l.arrive_le)) + '</small></span>' : tm(l.arrive_le, l.sla_site || 60, 'sans contact · SLA ' + slaTxt(l.sla_site || 60))) + '</div>';
-        if (l.zone === 'vendeur' && l.attribue_le) del += '<div><span>Chez ' + esc(prenom(l.vendeur_nom)) + ' depuis</span>' + tm(l.attribue_le, 30, l.tentatives ? plural(l.tentatives, 'tentative') : 'sans appel') + '</div>';
+        del += '<div><span>Sur le site</span>' + (mins(l.arrive_le) >= 1440 ? '<span class="tm crit"><b>' + duree(mins(l.arrive_le)) + '</b><small>arrivé le ' + esc(quand(l.arrive_le)) + '</small></span>' : tmO(l.arrive_le, l.sla_site || 60, 'sans contact · SLA ' + slaTxt(l.sla_site || 60))) + '</div>';
+        if (l.zone === 'vendeur' && l.attribue_le) del += '<div><span>Chez ' + esc(prenom(l.vendeur_nom)) + ' depuis</span>' + tmO(l.attribue_le, 30, l.tentatives ? plural(l.tentatives, 'tentative') : 'sans appel') + '</div>';
       }
       var c3 = '<div class="fx-card"><h3 class="fx-t">' + (POSTE === 'vendeur' || (mien && !gere) ? 'Résultat de l\'appel' : 'Que faire de ce lead ?') + '</h3>'
         + '<div class="dr-f fx-act">' + piedDrawer(l, gere, mien) + '</div></div>'
