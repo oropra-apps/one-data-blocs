@@ -1,4 +1,9 @@
 // ============================================================================
+//  v46 (04/11/2026) : retour vendeurs — l'infobulle de survol devient
+//    utilisable : elle reste ouverte quand la souris passe de l'événement à
+//    l'infobulle (délai de fermeture), le nom du client ouvre sa fiche client,
+//    le téléphone (celui du rendez-vous, sinon le portable de la fiche) se
+//    clique pour appeler.
 //  v45 (04/11/2026) : création d'une SOCIÉTÉ comme dans BACS — module partagé
 //    oropra-bacs-client v6 : la société est créée dans BACS d'abord (compte
 //    Business Account), puis dans One Data ; le panneau final rappelle de lui
@@ -1573,7 +1578,10 @@ OD.define('agenda', {
 #agenda-root .fc .fc-list-event:hover td{background:#f2f6fc}
 #agenda-root .fc .fc-list-day-cushion{background:#fbfcfe}
 #agenda-root .fc .fc-list-event-dot{border-radius:3px}
-#agenda-tip{position:fixed;z-index:2000;pointer-events:none;display:none;max-width:280px}
+#agenda-tip{position:fixed;z-index:2000;pointer-events:auto;display:none;max-width:300px}
+#agenda-tip a.agt-lien{color:#2a5ea9;text-decoration:none;border-bottom:1px solid transparent;cursor:pointer}
+#agenda-tip a.agt-lien:hover{border-bottom-color:currentColor}
+#agenda-tip .agt-tel{font-size:11px;font-weight:700;margin-top:4px;padding-left:15px}
 #agenda-tip .agt-card{background:#fff;border:1.5px solid #e8eef7;border-radius:10px;box-shadow:0 8px 26px rgba(42,94,169,.16);padding:9px 12px;font-family:"Nunito Sans",system-ui,sans-serif}
 #agenda-tip .agt-title{font-size:12px;font-weight:800;color:#1F4A85;line-height:1.25;display:flex;align-items:flex-start;gap:7px}
 #agenda-tip .agt-dot{width:8px;height:8px;border-radius:3px;flex:0 0 auto;margin-top:3px}
@@ -1822,9 +1830,29 @@ OD.define('agenda', {
   function ensureTip() { const d = frontDoc(); if (tipEl && tipEl.isConnected) return tipEl; tipEl = d.createElement('div'); tipEl.id = 'agenda-tip'; (d.body || d.documentElement).appendChild(tipEl); return tipEl; }
   function hhmm(x) { return x ? String(x.getUTCHours()).padStart(2, '0') + ':' + String(x.getUTCMinutes()).padStart(2, '0') : ''; }
   function hhmmStr(s) { return (typeof s === 'string' && s.length >= 16) ? s.slice(11, 16) : ''; }
+  let tipTimer = null, tipCle = null;
+  const telCache = {};
+  function annulerMasquage() { if (tipTimer) { clearTimeout(tipTimer); tipTimer = null; } }
+  function masquerBientot(ms) { annulerMasquage(); tipTimer = setTimeout(() => { tipTimer = null; hideTip(); }, ms || 300); }
+  function lienTel(tel) {
+    const t = String(tel || '').trim(); if (!t) return '';
+    return '<div class="agt-tel">📞 <a class="agt-lien" href="tel:' + esc(t.replace(/[^0-9+]/g, '')) + '">' + esc(t) + '</a></div>';
+  }
   function showTip(el, ev) {
+    annulerMasquage();
     const t = ensureTip(); const p = ev.extendedProps || {};
+    if (!t.__agtLie) {
+      t.__agtLie = true;
+      t.addEventListener('mouseenter', annulerMasquage);
+      t.addEventListener('mouseleave', () => masquerBientot(200));
+      t.addEventListener('click', (e) => {
+        const a = e.target.closest('[data-agt-client]');
+        if (a) { e.preventDefault(); const id = a.getAttribute('data-agt-client'); hideTip(); ouvrirFicheClient(id); return; }
+        if (e.target.closest('a[href^="tel:"]')) setTimeout(hideTip, 50);
+      });
+    }
     const cn = clientName(p); const main = cn || ev.title || '';
+    const idCli = Number(p.id_client) > 0 ? Number(p.id_client) : null;
     const sub = typeLabel(p);
     const startTxt = hhmmStr(ev.startStr) || hhmm(ev.start);
     const endTxt = ev.endStr ? hhmmStr(ev.endStr) : (ev.end ? hhmm(ev.end) : '');
@@ -1834,22 +1862,49 @@ OD.define('agenda', {
     const xx = p.extra || {};
     const qui = (p.source_type === 'rdv' && xx.proprietaire) ? ('Agenda de ' + xx.proprietaire) : '';
     const pose = xx.pose_par ? ('Posé par ' + xx.pose_par) : '';
-    t.innerHTML = '<div class="agt-card"><div class="agt-title"><span class="agt-dot" style="background:' + accent + '"></span><span>' + esc(main) + '</span></div>'
+    const titre = (idCli && cn) ? '<a class="agt-lien" data-agt-client="' + idCli + '" title="Ouvrir la fiche client">' + esc(main) + '</a>' : esc(main);
+    const tel = xx.tel || (idCli ? telCache[idCli] : '') || '';
+    tipCle = ev.id || (ev.startStr + '|' + main);
+    t.innerHTML = '<div class="agt-card"><div class="agt-title"><span class="agt-dot" style="background:' + accent + '"></span><span>' + titre + '</span></div>'
       + (sub ? '<div class="agt-type">' + esc(sub) + (cn ? '' : ' · sans client') + '</div>' : '')
       + (qui || pose ? '<div class="agt-type">' + esc([qui, pose].filter(Boolean).join(' · ')) + '</div>' : '')
       + (xx.vehicule ? '<div class="agt-type">🚗 ' + esc(xx.vehicule) + '</div>' : '')
       + (xx.vin || xx.immat ? '<div class="agt-type">' + esc([xx.immat, xx.vin ? 'VIN ' + xx.vin : ''].filter(Boolean).join(' · ')) + '</div>' : '')
-      + (xx.tel ? '<div class="agt-type">📞 ' + esc(xx.tel) + '</div>' : '')
+      + '<div data-agt-tel>' + lienTel(tel) + '</div>'
       + '<div class="agt-time">' + esc(range) + '</div>'
       + '<div class="agt-desc">' + (desc ? esc(desc) : '<i>Pas de commentaire</i>') + '</div></div>';
     t.style.display = 'block';
     const r = el.getBoundingClientRect(); const tr = t.getBoundingClientRect();
     const vw = frontWin().innerWidth || window.innerWidth;
-    let top = r.top - tr.height - 8; if (top < 6) top = r.bottom + 8;
+    let top = r.top - tr.height - 4; if (top < 6) top = r.bottom + 4;
     let left = r.left; if (left + tr.width > vw - 8) left = vw - 8 - tr.width; if (left < 6) left = 6;
     t.style.top = top + 'px'; t.style.left = left + 'px';
+    // Pas de téléphone sur le rendez-vous : portable (ou fixe) de la fiche client.
+    if (!tel && idCli && telCache[idCli] === undefined) {
+      const cle = tipCle; telCache[idCli] = '';
+      Promise.resolve(sb().from('CLIENT').select('TEl_MOB, TEL_FIXE').eq('IDVu', idCli).maybeSingle()).then((r2) => {
+        const d = (r2 && r2.data) || {};
+        telCache[idCli] = String(d.TEl_MOB || d.TEL_FIXE || '').trim();
+        if (telCache[idCli] && tipCle === cle && t.style.display === 'block') {
+          const z = t.querySelector('[data-agt-tel]'); if (z) z.innerHTML = lienTel(telCache[idCli]);
+        }
+      }).catch(() => {});
+    }
   }
-  function hideTip() { if (tipEl) tipEl.style.display = 'none'; }
+  function hideTip() { annulerMasquage(); if (tipEl) tipEl.style.display = 'none'; }
+  // Fiche client : variable « client sélectionné » lue par toute la fiche, puis
+  // navigation vers la page (même chemin que lead-mgmt et le tableau de bord).
+  function ouvrirFicheClient(id) {
+    const n = Number(id); if (!(n > 0)) return;
+    let FW = frontWin(); try { FW = (wwLib.getFrontWindow && wwLib.getFrontWindow()) || FW; } catch (e) {}
+    try { wwLib.wwVariable.updateValue(CFG.selectedClientVar, { IDVu: n }); } catch (e) {}
+    try { FW.__odFicheTab = 0; } catch (e) {}
+    let editeur = false;
+    try { editeur = window.self !== window.top; } catch (e) { editeur = true; }
+    if (editeur) { try { wwLib.wwApp.goTo('259f1951-a2d4-4b90-ac83-0b3febe1d4ec'); return; } catch (e) {} }
+    try { wwLib.goTo('/fr/fiche-client'); return; } catch (e) {}
+    try { FW.location.href = '/fr/fiche-client?idvu=' + n; } catch (e) {}
+  }
   // L'infobulle vit dans le body : si l'agenda disparaît pendant qu'elle est
   // affichée (navigation vers la fiche de bilatérale), mouseleave ne vient
   // jamais et elle restait figée par-dessus la page suivante (14/10/2026).
@@ -1857,7 +1912,7 @@ OD.define('agenda', {
   // retire dès que l'agenda n'est plus dans le document.
   if (!window.__agendaTipGuard) {
     window.__agendaTipGuard = true;
-    const masquer = () => { try { const t = frontDoc().getElementById('agenda-tip'); if (t) t.style.display = 'none'; } catch (e) {} };
+    const masquer = (e) => { try { const t = frontDoc().getElementById('agenda-tip'); if (!t) return; if (e && e.type === 'mousedown' && e.target && t.contains(e.target)) return; t.style.display = 'none'; } catch (x) {} };
     try {
       const W = frontWin();
       ['mousedown', 'scroll', 'popstate', 'pagehide', 'blur'].forEach(ev => W.addEventListener(ev, masquer, true));
@@ -2068,7 +2123,7 @@ OD.define('agenda', {
         // jamais de mouseleave, l'infobulle restait collée par-dessus le popup.
         if (touch) return;
         info.el.addEventListener('mouseenter', () => showTip(info.el, info.event));
-        info.el.addEventListener('mouseleave', hideTip);
+        info.el.addEventListener('mouseleave', () => masquerBientot(300));
       },
       eventClick: (arg) => {
         hideTip();
