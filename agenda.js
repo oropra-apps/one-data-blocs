@@ -1,4 +1,10 @@
 // ============================================================================
+//  v50 (04/11/2026) : livraisons en couleurs PLEINES de la charte One Data —
+//    VN vert #53bda7 (texte blanc), VO / VD orange #fac055 (texte bleu foncé).
+//    Elles étaient teintées à 14-22 % et se confondaient avec les créneaux.
+//    Agenda personnel, vue Livraisons, blocs « N livraisons » et filtres.
+//    Inchangé : la livraison faite par le vendeur (bleu gris) et l'agenda du
+//    site (une couleur par personne).
 //  v49 (04/11/2026) : boutons « SMS de confirmation » et « E-mail de
 //    confirmation » aux couleurs des boutons SMS et Email de la fiche client
 //    (SMS ambre #e6a817, e-mail bleu #1F4A85, mêmes bordures et survols).
@@ -304,7 +310,7 @@ OD.define('agenda', {
       relance:   '#9aa3ad',   // relances : gris
       bilat:     '#1F4A85',   // bilatérales : bleu foncé (charte One Data, v25 — le violet n'en fait pas partie)
       livraison: '#53bda7',   // livraisons VN : vert
-      livraisonVo: '#e8833a', // v46 : livraisons VO (et VD) : orange
+      livraisonVo: '#fac055', // v50 : livraisons VO (et VD) : orange One Data
       creneau:   '#2a5ea9',   // créneaux : bleu
       bacs:      '#aab2bd',   // v29 : RDV BACS neutres (il n'y en a plus depuis le 02/11/2026)
       prepa:     '#b45f1a',   // v34 : préparation VN (agenda du préparateur)
@@ -415,6 +421,8 @@ OD.define('agenda', {
     return RX_VO.test(desc) && !RX_VN.test(desc);
   }
   function couleurLivr(e) { return estLivraisonVo(e) ? CFG.colors.livraisonVo : CFG.colors.livraison; }
+  // v50 : texte lisible sur une livraison pleine (blanc sur vert, bleu foncé sur orange).
+  function texteSur(c) { return c === CFG.colors.livraisonVo ? '#1F4A85' : '#ffffff'; }
   function tint(hex, a) { const h = hex.replace('#', ''); const n = parseInt(h, 16); return 'rgba(' + ((n >> 16) & 255) + ',' + ((n >> 8) & 255) + ',' + (n & 255) + ',' + a + ')'; }
   const toFc = (ts) => (ts ? String(ts).replace(' ', 'T') : null);
 
@@ -445,8 +453,8 @@ OD.define('agenda', {
     return {
       id: e.uid, title: (estLivr ? '🚚 ' : '') + composeTitle(e),
       start: toFc(e.event_start_time), end: toFc(e.event_end_time), allDay: !!e.is_event_all_day,
-      backgroundColor: tint(c, estNeutre(e) ? 0.18 : 0.14), borderColor: tint(c, estNeutre(e) ? 0.45 : 0.14),
-      textColor: estNeutre(e) ? '#5B6475' : '#1F4A85',
+      backgroundColor: estLivr ? c : tint(c, estNeutre(e) ? 0.18 : 0.14), borderColor: estLivr ? c : tint(c, estNeutre(e) ? 0.45 : 0.14),
+      textColor: estLivr ? texteSur(c) : (estNeutre(e) ? '#5B6475' : '#1F4A85'),
       editable: (!estNeutre(e) && !!e.can_edit && (e.source_type === 'rdv' || e.source_type === 'bilat')),
       extendedProps: Object.assign({ _accent: c }, e),
     };
@@ -461,7 +469,8 @@ OD.define('agenda', {
     return {
       id: e.uid, title: (PICTO[f] ? PICTO[f] + ' ' : '') + composeTitle(e) + (qui ? ' · ' + qui : ''),
       start: toFc(e.event_start_time), end: toFc(e.event_end_time), allDay: false,
-      backgroundColor: f === 'livraison' && !vendeurLivre ? tint(c, 0.20) : tint(c, 0.10), borderColor: tint(c, 0.5), textColor: '#1F4A85',
+      backgroundColor: f === 'livraison' && !vendeurLivre ? c : tint(c, 0.10), borderColor: f === 'livraison' && !vendeurLivre ? c : tint(c, 0.5),
+      textColor: f === 'livraison' && !vendeurLivre ? texteSur(c) : '#1F4A85',
       classNames: vendeurLivre ? ['ag-livr-vendeur'] : [],
       editable: !lectureSeule() && (!!e.can_edit && e.source_type === 'rdv'),
       extendedProps: Object.assign({ _accent: c }, e),
@@ -531,7 +540,7 @@ OD.define('agenda', {
       autres.push({
         id: 'grp-livr-' + k, title: '🚚 ' + lot.length + ' livraisons',
         start: lot[0].start, end: fin || lot[0].end, allDay: false,
-        backgroundColor: tint(c, 0.22), borderColor: tint(c, 0.22), textColor: '#1F4A85',
+        backgroundColor: c, borderColor: c, textColor: texteSur(c),
         editable: false,
         extendedProps: { _accent: c, _groupe: lot, source_type: 'groupe', title: lot.length + ' livraisons',
                          description: lot.map(ev => '• ' + (ev.title || '')).join('\n') }
