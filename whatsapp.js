@@ -1,3 +1,13 @@
+// v19 (04/11/2026) : numéros WhatsApp de VENDEUR (coexistence : appli WhatsApp
+// Business sur le téléphone du vendeur + One Data sur le même numéro).
+// - Un vendeur qui a son propre numéro raccordé sur le site sélectionné écrit
+//   depuis CE numéro : ses clients reçoivent le message du numéro qu'ils
+//   connaissent, et la conversation est la même que sur son téléphone.
+// - La conversation affichée est cherchée parmi TOUS les numéros du site
+//   (concession + vendeurs) : un chef des ventes voit l'échange d'un vendeur
+//   avec son client. Priorité au numéro de l'utilisateur, puis au plus récent.
+// - Sans numéro de vendeur raccordé, le comportement est strictement celui de
+//   la v18 (numéro de la concession, SITE.Fax).
 // v18 (28/10/2026) : modèles de messages (Administration › Modèles de
 // messages, module `modeles` chargé à la demande). Bouton « Modèles » dans la
 // zone de saisie quand la conversation est ouverte, et lien « Choisir un
@@ -180,6 +190,23 @@ OD.define('whatsapp', {
         }
       }
     } catch (e) { console.warn('[wa] site', e); }
+    // Numéros du site (v19) : celui de la concession (SITE.Fax) et ceux des
+    // vendeurs raccordés en coexistence. Si l'utilisateur a le sien sur ce
+    // site, c'est de lui qu'il écrit.
+    state.numerosSite = state.waBusiness ? [state.waBusiness] : [];
+    state.numeroPerso = false;
+    try {
+      const site = readVar(SELECTED_SITE_VAR_ID);
+      if (site != null && site !== '') {
+        const ns = await sb().from('wa_phone_number_id')
+          .select('wa_business, mode, id_user, actif').eq('id_site', Number(site));
+        const lignes = (ns.data || []).filter(n => n.actif !== false);
+        lignes.forEach(n => { const w = String(n.wa_business); if (state.numerosSite.indexOf(w) < 0) state.numerosSite.push(w); });
+        const moi = me().ID_User;
+        const perso = lignes.find(n => n.mode === 'coexistence' && moi != null && Number(n.id_user) === Number(moi));
+        if (perso) { state.waBusiness = String(perso.wa_business); state.numeroPerso = true; }
+      }
+    } catch (e) { console.warn('[wa] numéros du site', e); }
     // Le nom de la concession montré au client N'EST PAS le libellé du DMS.
     // « SCEAUX TT92 » est un code interne ; ce que le client doit lire est le
     // nom affiché du compte WhatsApp, « Lexus Sceaux », pour que le message et
@@ -202,14 +229,17 @@ OD.define('whatsapp', {
     } catch (e) { console.warn('[wa] contact', e); }
     if (state.contact) {
       try {
-        // (client + site) => conversation unique : contact_id + wa_business = SITE.Fax
+        // (client + site) => conversations du client sur les numéros du site
+        // (concession + vendeurs). Priorité au numéro de l'utilisateur, puis
+        // à la plus récente.
         let q = sb().from('wa_conversations')
           .select('id, contact_id, wa_business, last_inbound_at, last_message_at, last_message_preview')
           .eq('contact_id', state.contact.id);
-        if (state.waBusiness) q = q.eq('wa_business', Number(state.waBusiness));
+        if (state.numerosSite && state.numerosSite.length) q = q.in('wa_business', state.numerosSite);
         else q = q.not('wa_business', 'is', null);
-        const cv = await q.order('last_message_at', { ascending: false, nullsFirst: false }).limit(1).maybeSingle();
-        state.conv = cv.data || null;
+        const cv = await q.order('last_message_at', { ascending: false, nullsFirst: false }).limit(20);
+        const convs = cv.data || [];
+        state.conv = convs.find(c => String(c.wa_business) === String(state.waBusiness)) || convs[0] || null;
       } catch (e) { console.warn('[wa] conv', e); }
     }
   }
