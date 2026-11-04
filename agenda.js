@@ -1,4 +1,8 @@
 // ============================================================================
+//  v49 (04/11/2026) : boutons « SMS de confirmation » et « E-mail de
+//    confirmation » aux couleurs des boutons SMS et Email de la fiche client
+//    (SMS ambre #e6a817, e-mail bleu #1F4A85, mêmes bordures et survols).
+//    Aucun autre changement.
 //  v48 (04/11/2026) : infobulle vraiment utilisable.
 //    * En allant de l'événement vers l'infobulle, la souris passait sur
 //      d'autres événements dont l'infobulle remplaçait aussitôt la première :
@@ -1804,6 +1808,10 @@ OD.define('agenda', {
 #agenda-ov .agm-conf{gap:8px;flex-wrap:wrap}
 #agenda-ov .agm-conf-b{flex:1;min-width:150px;display:inline-flex;align-items:center;justify-content:center;gap:7px;border:1.5px solid #e2eaf5;background:#fff;color:#2a5ea9;border-radius:9px;padding:9px 10px;font-family:inherit;font-size:13px;font-weight:700;cursor:pointer;transition:all .12s}
 #agenda-ov .agm-conf-b:hover{border-color:#2a5ea9;background:#eef4fc}
+#agenda-ov .agm-conf-b.sms{color:#e6a817;border-color:#f0dca6}
+#agenda-ov .agm-conf-b.sms:hover{background:#fdf7e8;border-color:#f0dca6}
+#agenda-ov .agm-conf-b.mail{color:#1F4A85;border-color:#d7dfe9}
+#agenda-ov .agm-conf-b.mail:hover{background:#f2f5f9;border-color:#d7dfe9}
 #agenda-ov .agm-conf-b[disabled]{opacity:.55;cursor:default}
 #agenda-ov .agm-confirm{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
 #agenda-ov .agm-confirm-txt{flex:1;min-width:140px;color:#a32d2d;font-weight:800;font-size:13px}
@@ -3612,10 +3620,10 @@ OD.define('agenda', {
       // v46 : confirmer le rendez-vous au client, par SMS ou par e-mail.
       if (ed && cs.idClient != null && Number(cs.idClient) > 0 && !isPastSlot((cs.date || '') + ' ' + (cs.time || ''))) {
         quoi += '<div class="agm-cell"><div class="agm-lbl">Confirmer au client</div><div class="agm-row agm-conf">'
-          + '<button type="button" class="agm-conf-b" id="agm-conf-sms"' + (cs.confCharge ? ' disabled' : '') + '>'
+          + '<button type="button" class="agm-conf-b sms" id="agm-conf-sms"' + (cs.confCharge ? ' disabled' : '') + '>'
           + '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4.5h16a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1H8l-4 3.5v-3.5H4a1 1 0 0 1-1-1v-9a1 1 0 0 1 1-1z"/></svg>'
           + '<span>SMS de confirmation</span></button>'
-          + '<button type="button" class="agm-conf-b" id="agm-conf-mail"' + (cs.confCharge ? ' disabled' : '') + '>'
+          + '<button type="button" class="agm-conf-b mail" id="agm-conf-mail"' + (cs.confCharge ? ' disabled' : '') + '>'
           + '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2.5" y="4.5" width="19" height="15" rx="2"/><path d="m3 6 9 6.5L21 6"/></svg>'
           + '<span>E-mail de confirmation</span></button>'
           + '</div><div class="agm-hint">Le message reprend la date et l’heure affichées ici ; vous le relisez avant l’envoi.</div></div>';
