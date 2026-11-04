@@ -1,4 +1,8 @@
-// ENTREPRISE — module One Data (OD.define) v6 (04/11/2026)
+// ENTREPRISE — module One Data (OD.define) v7 (04/11/2026)
+//
+// v7 : le rôle proposé par défaut pour un interlocuteur est « Salarié » (et non
+//   plus « Gérant »), qu'il s'agisse d'un particulier déjà connu, d'une
+//   création, ou d'un rattachement depuis la fiche du particulier.
 //
 // v6 : retours vendeurs.
 //   · Création d'un interlocuteur depuis une société : portable, fixe et e-mail
@@ -189,7 +193,7 @@ function openModal() {
     search: { NOM: '', SIRET: '', EMAIL: '', IDVu: '' },
     results: [], searching: false, searched: false, totalCount: 0,
     selected: null,
-    form: { type: 'Gérant', fonction: '', date_debut: '', commentaire: '' },
+    form: { type: 'Salarié', fonction: '', date_debut: '', commentaire: '' },
     saving: false, error: null,
     create: null
   };
@@ -449,7 +453,7 @@ function openInterlocuteur() {
   state.imodal = {
     q: '', results: [], searching: false, searched: false,
     selected: null,                      // { id, nom, sub, dans_bacs }
-    form: { type: 'Gérant', fonction: '', date_debut: '', commentaire: '' },
+    form: { type: 'Salarié', fonction: '', date_debut: '', commentaire: '' },
     create: null, saving: false, error: null
   };
   render();
