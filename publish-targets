@@ -110,3 +110,6 @@ lead-appel    = teamcolin
 # societe_pousser_bacs, livrées par 20261104010000_entreprise_interlocuteurs_bacs.sql
 # sur la seule base de Team Colin. Le reste de la flotte reste sur la v3.
 entreprise    = teamcolin
+
+# Entourage (Relationship__c BACS) : appelle get_entourage, entourage_* — Team Colin seulement.
+entourage     = teamcolin
