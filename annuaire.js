@@ -1,5 +1,8 @@
 // ============================================================================
-//  ANNUAIRE DU GROUPE — module One Data (OD.define)  v4
+//  ANNUAIRE DU GROUPE — module One Data (OD.define)  v5
+//  v5 (04/11/2026) : postes et lignes directes du standard 3CX (RPC
+//    annuaire_telephonie). Numéro affiché : celui que la personne a saisi
+//    dans « Mon compte », à défaut sa ligne directe ; poste en pastille.
 //  v4 (22/10/2026) : appel réservé aux licences Connect et Full
 //  (OD.peut('appel'), socle v29) ; sinon le numéro reste affiché, sans bouton.
 //  v1 (checklist)
@@ -42,6 +45,8 @@ OD.define('annuaire', {
     if (t.startsWith('0')) return '+33' + t.slice(1);
     return t;
   }
+  // v5 : numéro à appeler — saisi par la personne (Mon compte), sinon ligne directe 3CX.
+  function telDe(u) { return (u && (u.N_de_telephone || u._ld)) || ''; }
   function parseSites(u) {
     // multiSite = "2009,2010" ; sinon ID_SITE primaire
     const raw = (u.multiSite && String(u.multiSite).trim()) ? String(u.multiSite) : String(u.ID_SITE || '');
@@ -125,6 +130,9 @@ OD.define('annuaire', {
 .an-ct svg{width:13px;height:13px;flex:0 0 auto;color:var(--mut)}
 .an-ct span{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;user-select:text;-webkit-user-select:text;cursor:text}
 .an-ct.na{color:var(--mut);opacity:.6;pointer-events:none;font-weight:500}
+.an-ct small{color:var(--mut);font-weight:600}
+.an-ct.an-ct2{cursor:default}
+.an-poste{display:inline-block;font-size:11px;font-weight:800;color:#2f8a76;background:#e4f5f0;border-radius:6px;padding:2px 7px}
 .an-actions{display:flex;gap:8px;margin-top:2px}
 .an-act{flex:1;display:inline-flex;align-items:center;justify-content:center;gap:6px;border:1px solid var(--bd);background:var(--bg);border-radius:9px;padding:8px;cursor:pointer;font:inherit;font-size:12px;font-weight:700;color:var(--md);transition:.15s}
 .an-act:hover{background:var(--hov);border-color:#acc5e4}
@@ -209,7 +217,7 @@ OD.define('annuaire', {
   // ---------------------------------------------------------------- actions
   function callUser(u) {
     if (!peutAppeler()) return;
-    const to = normPhone(u.N_de_telephone);
+    const to = normPhone(telDe(u));
     if (!to) { toast('Aucun numéro pour ' + fullName(u)); return; }
     const w = (wwLib.getFrontWindow && wwLib.getFrontWindow()) || window;
     const device = (typeof globalThis !== 'undefined' && globalThis.__ONE_DATA__ && globalThis.__ONE_DATA__.device)
@@ -238,7 +246,7 @@ OD.define('annuaire', {
         globalThis.__ONE_DATA__.call = call;
         try { window._twilioCall = call; window.parent._twilioCall = call; window.top._twilioCall = call; } catch (e) {}
         // pilote le softphone (même API que le bouton Appeler de la fiche client)
-        if (UI) UI.incall({ name: name, number: u.N_de_telephone, idvu: 0, client: null });
+        if (UI) UI.incall({ name: name, number: telDe(u), idvu: 0, client: null });
         call.on('accept', () => { if (UI) { UI.answer(); UI.minimize(true); } });
         call.on('disconnect', () => {
           if (UI) UI.close();
@@ -275,7 +283,7 @@ OD.define('annuaire', {
     }
   }
   function copyUser(u) {
-    const lines = [fullName(u), u.FONCTION, u.N_de_telephone, u.email].filter(Boolean).join('\n');
+    const lines = [fullName(u), u.FONCTION, telDe(u), u._poste ? 'Poste ' + u._poste : '', u.email].filter(Boolean).join('\n');
     const done = () => toast('Contact copié');
     try { navigator.clipboard.writeText(lines).then(done, done); }
     catch (e) { done(); }
@@ -306,6 +314,13 @@ OD.define('annuaire', {
       sb.from('ROLE').select('id,name')
     ]);
     if (u.error) throw u.error;
+    // v5 : postes et lignes directes 3CX
+    try {
+      const t = await sb.rpc('annuaire_telephonie');
+      const parUser = {};
+      ((t && t.data) || []).forEach(x => { parUser[x.id_user] = x; });
+      (u.data || []).forEach(x => { const e = parUser[x.ID_User]; if (e) { x._poste = e.poste; x._sys = e.systeme; x._ld = e.ligne_directe; } });
+    } catch (e) {}
     const siteMap = {};
     (s.data || []).forEach(x => { siteMap[x.ID_SITE] = x; });
     const users = (u.data || []);
@@ -410,7 +425,7 @@ OD.define('annuaire', {
   // v4 : appel réservé aux licences Connect et Full (socle v29 : OD.peut).
   function peutAppeler() { return (typeof OD === 'undefined' || typeof OD.peut !== 'function' || OD.peut('appel')); }
   function contactLines(u) {
-    const tel = normPhone(u.N_de_telephone), aff = prettyPhone(u.N_de_telephone);
+    const tel = normPhone(telDe(u)), aff = prettyPhone(telDe(u));
     const mail = (u.email || '').trim();
     const lTel = (tel && !peutAppeler())
       ? '<span class="an-ct">' + I.phone + '<span>' + esc(aff) + '</span></span>'
@@ -420,10 +435,13 @@ OD.define('annuaire', {
     const lMail = mail
       ? '<button class="an-ct" data-act="email" data-id="' + u.ID_User + '" title="Écrire à ' + esc(mail) + '">' + I.mail + '<span>' + esc(mail) + '</span></button>'
       : '<span class="an-ct na">' + I.mail + '<span>Pas d\'email</span></span>';
-    return '<div class="an-contact">' + lTel + lMail + '</div>';
+    // ligne directe en second quand la personne a saisi un autre numéro
+    const ld = (u.N_de_telephone && u._ld && normPhone(u._ld) !== tel) ? '<span class="an-ct an-ct2">' + I.phone + '<span>' + esc(prettyPhone(u._ld)) + ' <small>ligne directe</small></span></span>' : '';
+    const poste = u._poste ? '<span class="an-poste" title="Poste du standard ' + esc(u._sys || '') + '">Poste ' + esc(u._poste) + '</span>' : '';
+    return '<div class="an-contact">' + lTel + ld + (poste ? '<div>' + poste + '</div>' : '') + lMail + '</div>';
   }
   function actBtns(u) {
-    const tel = normPhone(u.N_de_telephone);
+    const tel = normPhone(telDe(u));
     return '<div class="an-actions">' +
       (peutAppeler() ? '<button class="an-act call' + (tel ? '' : ' dis') + '" data-act="call" data-id="' + u.ID_User + '">' + I.phone + 'Appeler</button>' : '') +
       '<button class="an-act' + (u.email ? '' : ' dis') + '" data-act="email" data-id="' + u.ID_User + '">' + I.mail + 'Email</button>' +
@@ -431,7 +449,7 @@ OD.define('annuaire', {
       '</div>';
   }
   function iconBtns(u) {
-    const tel = normPhone(u.N_de_telephone);
+    const tel = normPhone(telDe(u));
     return '<div class="an-row-acts">' +
       (peutAppeler() ? '<button class="an-ico call' + (tel ? '' : ' dis') + '" data-act="call" data-id="' + u.ID_User + '" title="Appeler">' + I.phone + '</button>' : '') +
       '<button class="an-ico' + (u.email ? '' : ' dis') + '" data-act="email" data-id="' + u.ID_User + '" title="Email">' + I.mail + '</button>' +
