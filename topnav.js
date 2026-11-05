@@ -1,5 +1,10 @@
 // ============================================================================
-//  TOP NAV — module One Data (OD.define)  v42 — SÉLECTEUR DE PÉRIMÈTRE
+//  TOP NAV — module One Data (OD.define)  v43 — SÉLECTEUR DE PÉRIMÈTRE
+//  v43 (04/11/2026) : « Mon compte » complet (RPC mon_compte) : identité,
+//    fonction, licence, responsable, sites et rôles ; téléphonie (numéro
+//    affiché dans l'annuaire, modifiable ; poste et ligne directe 3CX ;
+//    numéro One Data ; SMS ; WhatsApp) ; messagerie connectée et signature ;
+//    rattachement BACS ; changement de mot de passe ; déconnexion.
 //  v42 (03/11/2026) : accès « Appels entrants » (rôle 13). Menus réduits à
 //  Clients › Base client et Véhicules › Stock VN / Stock VO ; bouton
 //  « + Nouveau lead » dans la barre (ancre #od-lead-appel, module
@@ -1162,30 +1167,149 @@ OD.define('topnav', {
   function openAccount() {
     closeBurger();
     const u = user();
-    const fullName = [pick(u, ['prenom', 'Prenom', 'PRENOM']), pick(u, ['nom', 'Nom', 'NOM'])].filter(Boolean).join(' ') || pick(u, ['nomComplet', 'nom_complet_affichage']) || 'Mon compte';
-    const email = pick(u, ['email', 'Email', 'mail', 'EMAIL']);
-    const tel = pick(u, ['N_de_telephone', 'telephone', 'tel', 'phone', 'voip_number']);
-    const api = getSiteApi();
-    const site = api ? siteName(api, api.getSiteId && api.getSiteId()) : null;
-
-    let rows = '';
-    if (email) rows += '<div class="od-row"><span class="od-k">Email</span><span class="od-v">' + esc(email) + '</span></div>';
-    if (tel) rows += '<div class="od-row"><span class="od-k">Téléphone</span><span class="od-v">' + esc(tel) + '</span></div>';
-    if (site) rows += '<div class="od-row"><span class="od-k">Site</span><span class="od-v">' + esc(site) + '</span></div>';
-    if (!rows) rows = '<div class="od-row"><span class="od-k">Compte</span><span class="od-v">' + esc(fullName) + '</span></div>';
+    const nomLocal = [pick(u, ['prenom', 'Prenom', 'PRENOM']), pick(u, ['nom', 'Nom', 'NOM'])].filter(Boolean).join(' ') || pick(u, ['nomComplet', 'nom_complet_affichage']) || 'Mon compte';
+    const sb = arbSb();
+    const LIC = { performance: 'Performance', intelligence: 'Intelligence', connect: 'Connect', full: 'Full' };
+    const telAff = function (t) {
+      var n = String(t || '').replace(/[^\d+]/g, '');
+      if (n.indexOf('+33') === 0) n = '0' + n.slice(3);
+      return /^0\d{9}$/.test(n) ? n.replace(/(\d{2})(?=\d)/g, '$1 ').trim() : (t || '');
+    };
+    const quand = function (v) { try { var d = new Date(v); return d.toLocaleDateString('fr-FR') + ' à ' + d.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' }); } catch (e) { return ''; } };
+    const ligne = function (k, v, cls) { return '<div class="od-ac-l"><span class="od-ac-k">' + esc(k) + '</span><span class="od-ac-v' + (cls ? ' ' + cls : '') + '">' + v + '</span></div>'; };
+    const vide = '<i class="od-ac-vide">non renseigné</i>';
 
     const bg = doc.createElement('div'); bg.className = 'od-modal-bg';
-    bg.innerHTML = STYLE +
-      '<div class="od-modal">' +
-        '<div class="od-modal-head"><span class="od-avatar">' + esc(userInitials()) + '</span><div><div class="od-mh-name">' + esc(fullName) + '</div></div></div>' +
-        '<div class="od-modal-body">' + rows + '</div>' +
+    bg.innerHTML = STYLE + ACC_STYLE +
+      '<div class="od-modal od-ac">' +
+        '<div class="od-modal-head"><span class="od-avatar">' + esc(userInitials()) + '</span><div><div class="od-mh-name">' + esc(nomLocal) + '</div><div class="od-mh-sub" data-sub></div></div>' +
+        '<button class="od-ac-x" data-close aria-label="Fermer">×</button></div>' +
+        '<div class="od-ac-body" data-body><div class="od-ac-load">Chargement…</div></div>' +
         '<div class="od-modal-foot"><button data-close>Fermer</button><button class="od-logout" data-logout>Se déconnecter</button></div>' +
       '</div>';
-    bg.addEventListener('mousedown', function (e) { if (e.target === bg) bg.remove(); });
-    bg.querySelector('[data-close]').addEventListener('click', function () { bg.remove(); });
-    bg.querySelector('[data-logout]').addEventListener('click', function () { bg.remove(); goAuth(); });
+    const fermer = function () { bg.remove(); };
+    bg.addEventListener('mousedown', function (e) { if (e.target === bg) fermer(); });
+    bg.querySelectorAll('[data-close]').forEach(function (b) { b.addEventListener('click', fermer); });
+    bg.querySelector('[data-logout]').addEventListener('click', function () { fermer(); goAuth(); });
     doc.body.appendChild(bg);
+    const body = bg.querySelector('[data-body]');
+
+    function rendre(c) {
+      c = c || {};
+      var sub = [c.fonction || c.role, c.licence ? 'Licence ' + (LIC[c.licence] || c.licence) : ''].filter(Boolean).join(' · ');
+      bg.querySelector('[data-sub]').textContent = sub;
+      var h = '';
+      h += '<section class="od-ac-s"><h3>Identité</h3>'
+        + ligne('Nom', esc(c.nom_complet || nomLocal))
+        + ligne('E-mail de connexion', c.email ? esc(c.email) : vide)
+        + ligne('Fonction', c.fonction ? esc(c.fonction) : (c.role ? esc(c.role) : vide))
+        + (c.vn_vo ? ligne('Univers', esc(c.vn_vo === 'VNVO' ? 'VN et VO' : c.vn_vo)) : '')
+        + ligne('Responsable', c.manager ? esc(c.manager) : vide)
+        + ligne('Licence', c.licence ? '<b class="od-ac-pill">' + esc(LIC[c.licence] || c.licence) + '</b>' : vide)
+        + '</section>';
+      var sites = c.sites || [];
+      h += '<section class="od-ac-s"><h3>Sites et rôles</h3>'
+        + (sites.length ? '<div class="od-ac-sites">' + sites.map(function (x) {
+            return '<span class="od-ac-site"><b>' + esc(x.site || '') + '</b>' + (x.role ? '<small>' + esc(x.role) + (x.reseau ? ' · ' + esc(x.reseau) : '') + '</small>' : '') + '</span>';
+          }).join('') + '</div>' : '<p class="od-ac-note">Aucun site rattaché.</p>')
+        + '</section>';
+      var p = c.poste || {};
+      h += '<section class="od-ac-s"><h3>Téléphonie</h3>'
+        + '<div class="od-ac-l"><span class="od-ac-k">Numéro dans l\'annuaire</span><span class="od-ac-v"><span data-tel>' + (c.telephone ? esc(telAff(c.telephone)) : vide) + '</span> <button class="od-ac-lien" data-edit-tel>' + (c.telephone ? 'Modifier' : 'Ajouter') + '</button></span></div>'
+        + '<div class="od-ac-edit" data-edit hidden><input type="tel" data-tel-in placeholder="06 12 34 56 78" value="' + esc(c.telephone ? telAff(c.telephone) : '') + '"><button class="od-ac-ok" data-tel-ok>Enregistrer</button><button class="od-ac-lien" data-tel-annule>Annuler</button><p class="od-ac-note">Visible par vos collègues dans l\'annuaire One Data et l\'annuaire du standard. Laissez vide pour le retirer.</p></div>'
+        + ligne('Poste', p.poste ? esc(p.poste) + (p.systeme ? ' <small>(' + esc(p.systeme) + ')</small>' : '') : vide)
+        + ligne('Ligne directe', p.ligne_directe ? esc(telAff(p.ligne_directe)) : vide)
+        + (c.voip ? ligne('Numéro One Data', esc(telAff(c.voip))) : '')
+        + (c.sms ? ligne('Numéro SMS', esc(telAff(c.sms))) : '')
+        + ligne('WhatsApp', c.whatsapp ? esc(c.whatsapp.nom || 'connecté') + (c.whatsapp.mode ? ' <small>(' + esc(c.whatsapp.mode) + ')</small>' : '') : vide)
+        + '</section>';
+      var m = c.messagerie;
+      h += '<section class="od-ac-s"><h3>Messagerie</h3>'
+        + (m ? ligne('Boîte connectée', esc(m.adresse || '') + ' <small>(' + esc(m.fournisseur === 'outlook' ? 'Outlook' : m.fournisseur === 'gmail' ? 'Gmail' : (m.fournisseur || '')) + ')</small>')
+             + ligne('État', m.statut === 'active' ? '<b class="od-ac-ok-t">Connectée</b>' + (m.synchro ? ' <small>synchro ' + esc(quand(m.synchro)) + '</small>' : '') : '<b class="od-ac-ko-t">' + esc(m.statut || 'à reconnecter') + '</b>' + (m.erreur ? ' <small>' + esc(String(m.erreur).slice(0, 90)) + '</small>' : ''))
+             + ligne('Signature', m.signature ? 'Définie' : vide)
+           : '<p class="od-ac-note">Aucune boîte e-mail connectée : les e-mails envoyés depuis One Data ne partent pas de votre adresse.</p>')
+        + '</section>';
+      h += '<section class="od-ac-s"><h3>Constructeur</h3>'
+        + ligne('Compte BACS', c.bacs ? '<b class="od-ac-ok-t">Rattaché</b>' : '<span class="od-ac-vide">non rattaché : vos gestes BACS ne vous sont pas attribués</span>')
+        + '</section>';
+      h += '<section class="od-ac-s"><h3>Sécurité</h3>'
+        + '<div class="od-ac-l"><span class="od-ac-k">Mot de passe</span><span class="od-ac-v"><button class="od-ac-lien" data-mdp>Changer le mot de passe</button></span></div>'
+        + '<div class="od-ac-edit" data-mdp-f hidden><input type="password" data-mdp1 placeholder="Nouveau mot de passe (8 caractères min.)" autocomplete="new-password"><input type="password" data-mdp2 placeholder="Confirmer" autocomplete="new-password"><button class="od-ac-ok" data-mdp-ok>Changer</button><p class="od-ac-msg" data-mdp-msg></p></div>'
+        + (c.cree_le ? ligne('Compte créé le', esc(new Date(c.cree_le).toLocaleDateString('fr-FR'))) : '')
+        + '</section>';
+      body.innerHTML = h;
+
+      const ed = body.querySelector('[data-edit]');
+      body.querySelector('[data-edit-tel]').addEventListener('click', function () { ed.hidden = !ed.hidden; if (!ed.hidden) body.querySelector('[data-tel-in]').focus(); });
+      body.querySelector('[data-tel-annule]').addEventListener('click', function () { ed.hidden = true; });
+      body.querySelector('[data-tel-ok]').addEventListener('click', async function () {
+        const v = body.querySelector('[data-tel-in]').value;
+        const r = sb ? await sb.rpc('mon_compte_telephone', { p_tel: v }) : { error: { message: 'Connexion indisponible' } };
+        if (r.error) { alerte(String(r.error.message || 'Numéro refusé').replace(/^.*?: /, '')); return; }
+        c.telephone = r.data; try { u.N_de_telephone = r.data; } catch (e) {}
+        rendre(c);
+      });
+      const mf = body.querySelector('[data-mdp-f]');
+      body.querySelector('[data-mdp]').addEventListener('click', function () { mf.hidden = !mf.hidden; });
+      body.querySelector('[data-mdp-ok]').addEventListener('click', async function () {
+        const a = body.querySelector('[data-mdp1]').value, b = body.querySelector('[data-mdp2]').value, msg = body.querySelector('[data-mdp-msg]');
+        msg.className = 'od-ac-msg';
+        if (a.length < 8) { msg.textContent = '8 caractères minimum.'; msg.classList.add('ko'); return; }
+        if (a !== b) { msg.textContent = 'Les deux saisies diffèrent.'; msg.classList.add('ko'); return; }
+        const r = sb ? await sb.auth.updateUser({ password: a }) : { error: { message: 'Connexion indisponible' } };
+        if (r.error) { msg.textContent = r.error.message || 'Changement refusé.'; msg.classList.add('ko'); return; }
+        msg.textContent = 'Mot de passe changé.'; msg.classList.add('ok');
+        body.querySelector('[data-mdp1]').value = ''; body.querySelector('[data-mdp2]').value = '';
+      });
+    }
+    function alerte(t) { const n = body.querySelector('.od-ac-edit .od-ac-note'); if (n) { n.textContent = t; n.classList.add('ko'); } }
+
+    (async function () {
+      try {
+        const r = sb ? await sb.rpc('mon_compte') : null;
+        if (!r || r.error || !r.data) throw (r && r.error) || new Error('vide');
+        rendre(r.data);
+      } catch (e) {
+        rendre({ nom_complet: nomLocal, email: pick(u, ['email', 'Email', 'mail', 'EMAIL']), telephone: pick(u, ['N_de_telephone']) });
+      }
+    })();
   }
+
+  const ACC_STYLE = `<style id="od-ac-css">
+.od-modal.od-ac{width:520px;max-height:calc(100vh - 36px);display:flex;flex-direction:column;font-family:"Nunito Sans",system-ui,sans-serif;color:#1F4A85}
+.od-ac .od-modal-head{position:relative}
+.od-ac .od-mh-sub{font-size:12.5px;opacity:.85;margin-top:2px}
+.od-ac-x{position:absolute;top:12px;right:12px;width:32px;height:32px;border:none;border-radius:8px;background:rgba(255,255,255,.14);color:#fff;font-size:20px;cursor:pointer}
+.od-ac-x:hover{background:rgba(255,255,255,.26)}
+.od-ac-body{overflow:auto;padding:4px 20px 12px;flex:1 1 auto}
+.od-ac-load{padding:30px 0;text-align:center;color:#7a98c5;font-size:13px}
+.od-ac-s{padding:12px 0;border-top:1px solid #eef2f8}
+.od-ac-s:first-child{border-top:none}
+.od-ac-s h3{margin:0 0 6px;font-size:11px;font-weight:800;letter-spacing:.05em;text-transform:uppercase;color:#7a98c5}
+.od-ac-l{display:flex;justify-content:space-between;align-items:baseline;gap:14px;padding:6px 0;font-size:13.5px}
+.od-ac-k{color:#7a98c5;flex:0 0 auto}
+.od-ac-v{color:#1F4A85;font-weight:600;text-align:right;word-break:break-word}
+.od-ac-v small,.od-ac-l small{color:#7a98c5;font-weight:500}
+.od-ac-vide{color:#7a98c5;font-weight:500;font-style:italic}
+.od-ac-pill{display:inline-block;background:#eef4fc;color:#2a5ea9;border-radius:99px;padding:2px 10px;font-size:12px}
+.od-ac-ok-t{color:#3a8d7b}.od-ac-ko-t{color:#e24b4a}
+.od-ac-sites{display:flex;flex-wrap:wrap;gap:6px;padding-top:2px}
+.od-ac-site{display:inline-flex;flex-direction:column;background:#f7f9fc;border:1px solid #e8eef7;border-radius:9px;padding:6px 10px;font-size:12.5px}
+.od-ac-site small{color:#7a98c5;font-size:11px}
+.od-ac-lien{border:none;background:none;padding:0;font:inherit;font-size:12.5px;font-weight:800;color:#2a5ea9;cursor:pointer;text-decoration:underline}
+.od-ac-edit{display:flex;flex-wrap:wrap;gap:8px;align-items:center;background:#f7f9fc;border:1px solid #e8eef7;border-radius:10px;padding:10px;margin:4px 0 6px}
+.od-ac-edit[hidden]{display:none}
+.od-ac-edit input{flex:1 1 180px;min-width:0;border:1px solid #cfdcef;border-radius:8px;padding:8px 10px;font:inherit;font-size:13.5px;color:#1F4A85;background:#fff}
+.od-ac-edit input:focus{outline:none;border-color:#2a5ea9}
+.od-ac-ok{border:none;background:#2a5ea9;color:#fff;border-radius:8px;padding:8px 14px;font:inherit;font-size:13px;font-weight:800;cursor:pointer}
+.od-ac-ok:hover{background:#1F4A85}
+.od-ac-note{flex:1 0 100%;margin:0;font-size:12px;color:#7a98c5}
+.od-ac-note.ko,.od-ac-msg.ko{color:#e24b4a;font-weight:700}
+.od-ac-msg{flex:1 0 100%;margin:0;font-size:12.5px}
+.od-ac-msg.ok{color:#3a8d7b;font-weight:700}
+@media (max-width:560px){.od-ac-l{flex-direction:column;align-items:flex-start;gap:2px}.od-ac-v{text-align:left}}
+</style>`;
 
   const ARB_STYLE = '<style id="od-arb-css">' +
 '.od-arb-bg{align-items:flex-start;padding:40px 18px;overflow:auto}' +
