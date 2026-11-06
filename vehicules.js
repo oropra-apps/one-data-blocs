@@ -1,4 +1,6 @@
 // VEHICULES — module One Data (OD.define) v1 (Lot B)
+//  v12 (06/11/2026) : le VIN s'affiche sur chaque carte véhicule (sous le modèle),
+//  sélectionnable d'un clic pour le copier.
 //  08/10/2026 (recette Team Colin, CLI-08) : 98 % des vehicules clients n'ont
 //  ni marque ni modele (l'export DMS « parc vehicule » n'est pas encore livre).
 //  La carte affichait « Véhicule » et une date trompeuse : la date de
@@ -117,7 +119,8 @@ OD.define('vehicules', {
 
   function card(r, actif) {
     var titre = [r.MARQUE ? String(r.MARQUE).toUpperCase() : '', cap(r.NomModele || r.VERSION || '')].filter(Boolean).join(' ') || 'Véhicule';
-    var ver = (r.NomModele && r.VERSION) ? cap(r.VERSION) : ((titre === 'Véhicule' && r.VIN) ? 'VIN ' + String(r.VIN) : '');
+    var ver = (r.NomModele && r.VERSION) ? cap(r.VERSION) : '';
+    var vin = r.VIN ? String(r.VIN).trim().toUpperCase() : '';
     var immat = r.IMMAT || '';
     var est = !r.DT_PMEC && r.VIN ? state.mecEst[vinKey(r.VIN)] : null;
     var dt = r.DT_PMEC ? '1re MEC ' + fmtDate(r.DT_PMEC) : (est ? '1re MEC ' + fmtDate(est) : '');
@@ -140,6 +143,7 @@ OD.define('vehicules', {
       '<div class="vh-body">' +
         '<div class="vh-title">' + esc(titre) + '</div>' +
         (ver ? '<div class="vh-sub">' + esc(ver) + '</div>' : '') +
+        (vin ? '<div class="vh-vin" title="Numéro de série (VIN)"><span>VIN</span>' + esc(vin) + '</div>' : '') +
         '<div class="vh-meta">' + (immat ? '<span class="vh-immat">' + esc(immat) + '</span>' : '') + (dt ? '<span class="vh-date">' + esc(dt) + (est ? '<span class="vh-est" title="Date estimée en fonction de l\u2019immat">e</span>' : '') + '</span>' : '') +
           (kmTxt ? '<span class="vh-date" title="' + esc(kmTitle) + '">' + esc(kmTxt) + '</span>' : '') + '</div>' +
         (aff ? '<div class="vh-aff">' + esc(aff) + '</div>' : '') + foot +
@@ -172,6 +176,8 @@ OD.define('vehicules', {
     '.vh-meta{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:3px}' +
     '.vh-immat{font-size:11px;font-weight:800;letter-spacing:.5px;color:#2a5ea9;background:#eef4fc;border:1px solid #d6e2f2;border-radius:6px;padding:2px 7px}' +
     '.vh-date{font-size:12px;color:#7a98c5;font-weight:600}' +
+    '.vh-vin{font-size:11.5px;font-weight:700;color:#5a7196;letter-spacing:.4px;font-variant-numeric:tabular-nums;user-select:all;word-break:break-all}' +
+    '.vh-vin span{font-size:10px;font-weight:800;color:#7a98c5;letter-spacing:.6px;margin-right:6px;user-select:none}' +
     '.vh-est{display:inline-flex;align-items:center;justify-content:center;width:15px;height:15px;margin-left:5px;border-radius:50%;background:#eef4fc;border:1px solid #c9dcf3;color:#2a5ea9;font-size:10px;font-weight:800;font-style:italic;line-height:1;cursor:help;vertical-align:1px}' +
     '.vh-aff{font-size:12px;color:#5a7196;font-weight:600;margin-top:1px}' +
     '.vh-foot{margin-top:10px;display:flex;gap:8px;align-items:center}' +
