@@ -1,4 +1,9 @@
 // ============================================================================
+//  v80 (06/11/2026) : la PLAGE DE DATES choisie est retrouvée au retour sur la
+//    page (fiche client, simulation…) le jour même ; quand ce n'est pas le
+//    mois en cours, bandeau orange « Ce n'est pas le mois en cours » et bouton
+//    « Revenir au mois en cours ». Mémoire locale du navigateur, effacée le
+//    lendemain ou au retour au mois en cours.
 //  v79 (06/11/2026) : module partagé oropra-bacs-client v7 — la création d'un
 //    client ne propose plus d'envoyer la demande de consentement par SMS (les
 //    vendeurs la recueillent à la commande). Aucun autre changement.
@@ -299,9 +304,24 @@ OD.define('kanban', {
   function ageBadge(j) { if (j == null) return ''; const cls = j <= 7 ? 'ok' : (j <= 21 ? 'warn' : 'late'); return '<span class="k-age ' + cls + '">' + j + ' j</span>'; }
 
   const state = window.__kanban || {};
-  // Periode TOUJOURS reinitialisee a l'arrivee sur la page (13/08/2026) :
-  // l'etat vit sur window.__kanban et survit aux navigations SPA.
-  { const now = new Date(), first = new Date(now.getFullYear(), now.getMonth(), 1); state.period = { from: ymd(first), to: ymd(now) }; }
+  // Periode reinitialisee au mois en cours a l'arrivee sur la page (13/08/2026),
+  // SAUF (v80, 06/11/2026) si le vendeur a choisi une autre plage aujourd'hui :
+  // elle est retrouvee au retour (fiche client, simulation…), avec un bandeau
+  // « pas le mois en cours » et un bouton pour y revenir.
+  function moisCourantKan() { const now = new Date(), first = new Date(now.getFullYear(), now.getMonth(), 1); return { from: ymd(first), to: ymd(now) }; }
+  function estMoisCourantKan(p) { const m = moisCourantKan(); return !!p && p.from === m.from && p.to === m.to; }
+  function memoPeriodKan() {
+    try {
+      if (estMoisCourantKan(state.period)) localStorage.removeItem('od.kanban.period');
+      else localStorage.setItem('od.kanban.period', JSON.stringify({ from: state.period.from, to: state.period.to, le: ymd(new Date()) }));
+    } catch (e) {}
+  }
+  state.period = moisCourantKan();
+  try {
+    const mp = JSON.parse(localStorage.getItem('od.kanban.period') || 'null');
+    if (mp && mp.le === ymd(new Date()) && /^\d{4}-\d{2}-\d{2}$/.test(mp.from) && /^\d{4}-\d{2}-\d{2}$/.test(mp.to) && mp.from <= mp.to) state.period = { from: mp.from, to: mp.to };
+    else localStorage.removeItem('od.kanban.period');
+  } catch (e) {}
   if (state.vendeurId === undefined) state.vendeurId = null;
   if (state.busSite === undefined) state.busSite = null;
   if (state.cards === undefined) state.cards = null;
@@ -536,7 +556,8 @@ OD.define('kanban', {
     } else {
       h += '<div class="k-vend"><span class="k-vend-l">Vendeur</span><span class="k-vend-n">' + vendName + '</span></div>';
     }
-    h += '<div class="k-dates"><button type="button" class="k-range" data-krange="1">\ud83d\udcc5 <span class="k-range-t">' + esc(fmtPeriodKan()) + '</span> <span class="k-caret">▾</span></button></div>';
+    h += '<div class="k-dates"><button type="button" class="k-range' + (estMoisCourantKan(state.period) ? '' : ' k-range-autre') + '" data-krange="1">\ud83d\udcc5 <span class="k-range-t">' + esc(fmtPeriodKan()) + '</span> <span class="k-caret">▾</span></button>'
+      + (estMoisCourantKan(state.period) ? '' : '<span class="k-autre">Ce n\'est pas le mois en cours <button type="button" class="k-mois" data-kmois="1">Revenir au mois en cours</button></span>') + '</div>';
     h += '<div class="k-filters"><div class="k-fgroup">' + chip('type', 'tous', state.fType, 'Tous') + chip('type', 'VN', state.fType, 'VN') + chip('type', 'VO', state.fType, 'VO') + '</div>';
     h += '<div class="k-fgroup">' + chip('client', 'tous', state.fClient, 'Tous clients') + chip('client', 'particulier', state.fClient, 'Particuliers') + chip('client', 'societe', state.fClient, 'Sociétés') + '</div>';
     h += '<div class="k-fgroup">' + chip('fin', 'tous', state.fFin, 'Tous') + chip('fin', 'financement', state.fFin, 'Financement') + chip('fin', 'comptant', state.fFin, 'Comptant') + '</div>';
@@ -575,6 +596,7 @@ OD.define('kanban', {
     if (!from || !to) return;
     if (from === state.period.from && to === state.period.to) return;
     state.period.from = from; state.period.to = to;
+    memoPeriodKan();
     state.cards = null; state.versionsData = {}; state.openVersions = null;
     loadData();
   }
@@ -3234,6 +3256,9 @@ OD.define('kanban', {
     const kr = e.target.closest('[data-krange]');
     if (kr) { openRangePickerKan(kr); return; }
 
+    // v80 : retour au mois en cours
+    if (e.target.closest('[data-kmois]')) { const m = moisCourantKan(); applyPeriodKan(m.from, m.to); return; }
+
     const so = e.target.closest('[data-selopen]');
     if (so) { state.selOpen = !state.selOpen; if (state.selOpen) loadVendeurs(); render(); return; }
 
@@ -3277,7 +3302,7 @@ OD.define('kanban', {
     const which = d.getAttribute('data-period'), val = d.value;
     if (!val) return;
     state.period[which] = val;
-    if (state.period.from && state.period.to && state.period.from <= state.period.to) { state.cards = null; loadData(); }
+    if (state.period.from && state.period.to && state.period.from <= state.period.to) { memoPeriodKan(); state.cards = null; loadData(); }
   }, true);
 
   function bindDnD() {
@@ -3358,7 +3383,11 @@ OD.define('kanban', {
     '#kanban-root .k-vitem{display:flex;align-items:center;gap:6px;width:100%;text-align:left;background:none;border:none;border-radius:8px;padding:8px 10px;font-family:inherit;font-size:13px;font-weight:700;color:#1c2b45;cursor:pointer}' +
     '#kanban-root .k-vitem:hover{background:rgba(172,197,228,.18)}' +
     '#kanban-root .k-vitem.on{background:#2a5ea9;color:#fff}' +
-    '#kanban-root .k-dates{display:flex;align-items:center;gap:6px}' +
+    '#kanban-root .k-dates{display:flex;align-items:center;gap:6px;flex-wrap:wrap}' +
+    '#kanban-root .k-range.k-range-autre{border-color:#B25E00;color:#B25E00;background:#FFF6EA}' +
+    '#kanban-root .k-autre{display:inline-flex;align-items:center;gap:8px;font-size:11.5px;font-weight:700;color:#B25E00;background:#FFF6EA;border:1px solid #F2D3A8;border-radius:10px;padding:4px 6px 4px 10px}' +
+    '#kanban-root .k-mois{font-family:inherit;font-size:11.5px;font-weight:800;color:#fff;background:#2a5ea9;border:0;border-radius:8px;padding:5px 10px;cursor:pointer}' +
+    '#kanban-root .k-mois:hover{background:#1F4A85}' +
     '#kanban-root .k-date{border:1px solid #ece9e1;border-radius:8px;padding:6px 9px;font-family:inherit;font-size:12px;color:#1c2b45;background:#fff}' +
     '#kanban-root .k-date:focus{outline:none;border-color:#2a5ea9}' +
     '#kanban-root .k-date-sep{color:#b4b2a9}' +
