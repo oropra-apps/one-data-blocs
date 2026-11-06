@@ -1,4 +1,10 @@
 // ============================================================================
+//  v52 (06/11/2026) : une RELANCE posée par un rapport vendeur se déplace
+//    dans l'agenda — glisser-déposer, étirer pour la durée, ou clic : fenêtre
+//    « Relance » avec date, heure et durée —, à condition que sa date
+//    actuelle ET sa nouvelle date soient à venir. RPC rpv_relance_deplacer
+//    (vérifie aussi propriétaire ou manager, relance non faite). Les autres
+//    rapports vendeur restent fixes.
 //  v51 (06/11/2026) : retours vendeurs.
 //    · LIVRAISONS : boutons « SMS de confirmation » et « E-mail de
 //      confirmation », comme pour un RDV client, dans la fiche livraison et
@@ -463,7 +469,8 @@ OD.define('agenda', {
       start: toFc(e.event_start_time), end: toFc(e.event_end_time), allDay: !!e.is_event_all_day,
       backgroundColor: estLivr ? c : tint(c, estNeutre(e) ? 0.18 : 0.14), borderColor: estLivr ? c : tint(c, estNeutre(e) ? 0.45 : 0.14),
       textColor: estLivr ? texteSur(c) : (estNeutre(e) ? '#5B6475' : '#1F4A85'),
-      editable: (!estNeutre(e) && !!e.can_edit && (e.source_type === 'rdv' || e.source_type === 'bilat')),
+      editable: (!estNeutre(e) && !!e.can_edit && (e.source_type === 'rdv' || e.source_type === 'bilat')) || relanceDeplacable(e),
+      durationEditable: e.source_type !== 'rpv' || relanceDeplacable(e),
       extendedProps: Object.assign({ _accent: c }, e),
     };
   }
@@ -499,7 +506,8 @@ OD.define('agenda', {
       start: journee ? String(e.event_start_time || '').slice(0, 10) : toFc(e.event_start_time),
       end: journee ? null : toFc(e.event_end_time), allDay: journee,
       backgroundColor: tint(c, 0.16), borderColor: tint(c, 0.16), textColor: '#1F4A85',
-      editable: (!!e.can_edit && (e.source_type === 'rdv' || e.source_type === 'bilat')),
+      editable: (!!e.can_edit && (e.source_type === 'rdv' || e.source_type === 'bilat')) || relanceDeplacable(e),
+      durationEditable: e.source_type !== 'rpv' || relanceDeplacable(e),
       extendedProps: Object.assign({ _accent: c }, e),
     };
   }
@@ -896,11 +904,17 @@ OD.define('agenda', {
   let typesActifs = TYPES_EVT.map(x => x.cle);
 
   function estNeutre(e) { return !!(e && e.extra && e.extra.neutre); }
+  // v52 : relance à venir, pas encore faite -> déplaçable.
+  function relanceDeplacable(e) {
+    return !!(e && e.source_type === 'rpv' && e.can_edit !== false && e.extra && e.extra.resultat_rdv === 'Relance'
+      && Number(e.extra.traite || 0) !== 1 && !isPastSlot(e.event_start_time || ''));
+  }
   // v31 : pourquoi un événement ne se déplace pas (null = déplaçable).
   function raisonVerrou(e) {
     if (!e || e._provisoire || e._groupe) return null;
     if (estNeutre(e)) return 'Activité BACS : elle se déplace dans BACS.';
-    if (e.source_type === 'rpv') return 'Rapport vendeur : il ne se déplace pas dans l\u2019agenda.';
+    if (e.source_type === 'rpv' && !relanceDeplacable(e)) return (e.extra && e.extra.resultat_rdv === 'Relance')
+      ? 'Relance échue ou faite : elle ne se déplace plus.' : 'Rapport vendeur : il ne se déplace pas dans l\u2019agenda.';
     if (e.source_type === 'bilat' && !e.can_edit) return 'Bilatérale : seul le manager qui l\u2019a posée peut la déplacer.';
     if (e.source_type === 'rdv' && !e.can_edit) return 'RDV de ' + ((e.extra && e.extra.proprietaire) || 'un collègue') + ' : seul son propriétaire peut le déplacer.';
     return null;
@@ -1169,6 +1183,68 @@ OD.define('agenda', {
         close(); ouvrirFicheLivraison(p, ev); refetch();
       } catch (e) { toast('Impossible : ' + ((e && e.message) || e)); }
     }));
+  }
+  // v52 : fenêtre d'une relance (rapport vendeur) — date, heure, durée.
+  function ouvrirRelance(p, ev) {
+    const d = frontDoc(); try { hideTip(); } catch (e) {}
+    let ov = d.getElementById('agenda-rel-ov'); if (ov) ov.remove();
+    const ok = relanceDeplacable(p);
+    const deb = String(toFc(p.event_start_time) || '');
+    const fin = String(toFc(p.event_end_time) || '');
+    let dur = 30; try { const m = Math.round((new Date(fin) - new Date(deb)) / 60000); if (m >= 15) dur = m; } catch (e) {}
+    const nomCli = clientName(p);
+    const st = 'position:fixed;inset:0;z-index:99990;background:rgba(31,74,133,.28);display:flex;align-items:center;justify-content:center;padding:16px;font-family:"Nunito Sans",system-ui,sans-serif';
+    let h = '<style>'
+      + '#agenda-rel-ov .arl{background:#fff;border-radius:16px;box-shadow:0 16px 50px rgba(42,94,169,.25);width:min(460px,100%);color:#1F4A85}'
+      + '#agenda-rel-ov .arl-h{display:flex;justify-content:space-between;align-items:center;padding:14px 18px;border-bottom:1.5px solid #eef2f8;font-size:12.5px;font-weight:800;text-transform:uppercase;letter-spacing:.04em}'
+      + '#agenda-rel-ov .arl-x{border:0;background:#f2f6fc;color:#2a5ea9;border-radius:8px;width:30px;height:30px;font-size:17px;cursor:pointer}'
+      + '#agenda-rel-ov .arl-c{padding:14px 18px;display:grid;gap:12px}'
+      + '#agenda-rel-ov .arl-cli{border:0;background:none;padding:0;font:800 17px "Nunito Sans",system-ui,sans-serif;color:#2a5ea9;cursor:pointer;text-align:left}#agenda-rel-ov .arl-cli:hover{text-decoration:underline}'
+      + '#agenda-rel-ov .arl-l{font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:.05em;color:#5f7aa3;margin-bottom:4px}'
+      + '#agenda-rel-ov .arl-r{display:flex;gap:8px;flex-wrap:wrap}#agenda-rel-ov input,#agenda-rel-ov select{border:1.5px solid #e2eaf5;border-radius:10px;padding:9px 10px;font:600 13px "Nunito Sans",system-ui,sans-serif;color:#1F4A85;background:#fff}'
+      + '#agenda-rel-ov .arl-cm{background:#f7f9fc;border:1.5px solid #e2eaf5;border-radius:10px;padding:10px 12px;font-size:13px;font-weight:600;white-space:pre-wrap}'
+      + '#agenda-rel-ov .arl-n{font-size:12.5px;font-weight:700;color:#7a5208;background:#fff8ec;border-radius:10px;padding:9px 12px}'
+      + '#agenda-rel-ov .arl-e{font-size:12.5px;font-weight:700;color:#a32d2d}'
+      + '#agenda-rel-ov .arl-f{display:flex;gap:10px;justify-content:flex-end;padding:12px 18px;border-top:1.5px solid #eef2f8}'
+      + '#agenda-rel-ov .arl-f button{border:1.5px solid #d6e2f2;background:#fff;color:#2a5ea9;border-radius:10px;padding:10px 14px;font:800 13px "Nunito Sans",system-ui,sans-serif;cursor:pointer}'
+      + '#agenda-rel-ov .arl-f button.pri{background:#2a5ea9;border-color:#2a5ea9;color:#fff}#agenda-rel-ov .arl-f button[disabled]{opacity:.55;cursor:default}'
+      + '</style><div class="arl" role="dialog" aria-modal="true" aria-label="Relance">'
+      + '<div class="arl-h"><span>\ud83d\udcde Relance</span><button type="button" class="arl-x" data-x aria-label="Fermer">\u00d7</button></div><div class="arl-c">'
+      + '<div>' + (Number(p.id_client) > 0 ? '<button type="button" class="arl-cli" data-fiche title="Ouvrir la fiche client">' + esc(nomCli || 'Client') + ' \u203a</button>' : '<b>' + esc(nomCli || '\u2014') + '</b>') + '</div>';
+    if (ok) {
+      h += '<div><div class="arl-l">Quand</div><div class="arl-r">'
+        + '<input type="date" id="arl-date" min="' + esc(agToday()) + '" value="' + esc(deb.slice(0, 10)) + '">'
+        + '<input type="time" id="arl-time" step="900" value="' + esc(deb.slice(11, 16)) + '">'
+        + '<select id="arl-dur" title="Dur\u00e9e">' + optionsDuree(dur) + '</select></div></div>';
+    } else {
+      h += '<div><div class="arl-l">Quand</div><b>' + esc(dateLongue(p.event_start_time)) + '</b></div>'
+        + '<div class="arl-n">' + esc(raisonVerrou(p) || 'Cette relance ne se d\u00e9place pas.') + '</div>';
+    }
+    if (String(p.description || '').trim()) h += '<div><div class="arl-l">Commentaire du rapport</div><div class="arl-cm">' + esc(String(p.description).trim()) + '</div></div>';
+    h += '<div class="arl-e" id="arl-err"></div></div><div class="arl-f">'
+      + (ok ? '<button type="button" class="pri" data-ok>Enregistrer</button>' : '') + '<button type="button" data-x>Fermer</button></div></div>';
+    ov = d.createElement('div'); ov.id = 'agenda-rel-ov'; ov.style.cssText = st; ov.innerHTML = h;
+    (d.body || d.documentElement).appendChild(ov);
+    const close = () => { try { ov.remove(); } catch (e) {} };
+    ov.addEventListener('mousedown', (e) => { if (e.target === ov) close(); });
+    ov.querySelectorAll('[data-x]').forEach(b => b.addEventListener('click', close));
+    const bf = ov.querySelector('[data-fiche]'); if (bf) bf.addEventListener('click', () => { close(); ouvrirFicheClient(p.id_client); });
+    const bo = ov.querySelector('[data-ok]');
+    if (bo) bo.addEventListener('click', async () => {
+      const err = ov.querySelector('#arl-err'); err.textContent = '';
+      const date = ov.querySelector('#arl-date').value, time = ov.querySelector('#arl-time').value, mins = Number(ov.querySelector('#arl-dur').value) || 30;
+      if (!date || !time) { err.textContent = 'Date et heure requises.'; return; }
+      const startStr = date + ' ' + time + ':00';
+      if (isPastSlot(startStr)) { err.textContent = 'Une relance ne se d\u00e9place que vers une date \u00e0 venir.'; return; }
+      bo.disabled = true;
+      try {
+        const r = await sb().rpc('rpv_relance_deplacer', { p_id_rapport: Number(p.origin_id), p_debut: startStr, p_fin: endStrFrom(date, time, mins) });
+        if (r && r.error) throw r.error;
+        close(); toast('Relance d\u00e9plac\u00e9e au ' + libQuand(startStr), 'ok');
+        try { const w = frontWin(); if (typeof w.oropraNotifBadgeRefresh === 'function') w.oropraNotifBadgeRefresh(); } catch (x) {}
+        refetch();
+      } catch (e) { bo.disabled = false; err.textContent = (e && e.message) ? e.message : String(e); }
+    });
   }
   function nomSiteDe(id) { return ((siteAg.sites || []).find(x => Number(x.id_site) === Number(id)) || {}).nom || ('Site ' + id); }
   function nomPersonne(id) {
@@ -3525,6 +3601,7 @@ OD.define('agenda', {
       if (st === 'rdv' && resteAConclure(p)) { openCompteRendu(ev); return; }
       if (st === 'bilat') { openBilatPassee(ev); return; }
     }
+    if (st === 'rpv') { ouvrirRelance(p, ev); return; }   // v52 : relance d'un rapport vendeur
     if (st !== 'rdv' && st !== 'bilat') return;            // rpv : non \u00e9ditable ici
     // v28 : RDV d'un collègue où l'on est invité — lecture seule.
     if (st === 'rdv' && p.can_edit === false) {
@@ -4085,6 +4162,18 @@ OD.define('agenda', {
     const startStr = date + ' ' + time + ':00';
     // v41 : un événement déjà passé se repositionne librement ; un événement à venir ne se tire pas dans le passé.
     const etaitPasse = isPastSlot(p.event_start_time || '') || isPastSlot((arg.oldEvent && arg.oldEvent.startStr) || '');
+    if (st === 'rpv') {
+      if (etaitPasse) { try { arg.revert(); } catch (x) {} showAgError('D\u00e9placement impossible', 'Cette relance est d\u00e9j\u00e0 \u00e9chue : elle ne se d\u00e9place plus.'); return; }
+      if (isPastSlot(startStr)) { try { arg.revert(); } catch (x) {} showAgError('D\u00e9placement impossible', 'Une relance ne se d\u00e9place que vers une date \u00e0 venir.'); return; }
+      try {
+        const r = await sb().rpc('rpv_relance_deplacer', { p_id_rapport: Number(p.origin_id), p_debut: startStr, p_fin: endStrFrom(date, time, mins) });
+        if (r && r.error) throw r.error;
+        toast((arg.oldEvent && arg.oldEvent.startStr === ev.startStr ? 'Dur\u00e9e de la relance modifi\u00e9e \u00b7 ' : 'Relance d\u00e9plac\u00e9e au ') + libQuand(startStr), 'ok');
+        try { const w = frontWin(); if (typeof w.oropraNotifBadgeRefresh === 'function') w.oropraNotifBadgeRefresh(); } catch (x) {}
+        refetch();
+      } catch (e) { console.error('[agenda] relance', e); try { arg.revert(); } catch (x) {} toast('D\u00e9placement impossible : ' + ((e && e.message) ? e.message : String(e))); }
+      return;
+    }
     if (isPastSlot(startStr) && !etaitPasse) { try { arg.revert(); } catch (x) {} showAgError('D\u00e9placement impossible', 'On ne peut pas d\u00e9placer un \u00e9v\u00e9nement \u00e0 venir dans le pass\u00e9.'); return; }
     const endStr = endStrFrom(date, time, mins);
     const dur = fmtDuree(mins);
