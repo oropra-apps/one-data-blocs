@@ -1,4 +1,7 @@
-// ENTREPRISE — module One Data (OD.define) v7 (04/11/2026)
+// ENTREPRISE — module One Data (OD.define) v8 (06/11/2026)
+//
+// v8 : module partagé oropra-bacs-client v7 (plus de demande de consentement
+//   par SMS à la création). Aucun autre changement.
 //
 // v7 : le rôle proposé par défaut pour un interlocuteur est « Salarié » (et non
 //   plus « Gérant »), qu'il s'agisse d'un particulier déjà connu, d'une
@@ -36,7 +39,7 @@
 OD.define('entreprise', {
   mount(__anchor, ctx) {
     const OROPRA_DOUBLONS_URL = 'https://cdn.jsdelivr.net/gh/oropra-apps/one-data-blocs@aa457b862a926340283e1b8e2e956cbff6357658/oropra-doublons.js';
-    const OROPRA_BACS_CLIENT_URL = 'https://cdn.jsdelivr.net/gh/oropra-apps/one-data-blocs@oropra-bacs-client-v6/oropra-bacs-client.js';
+    const OROPRA_BACS_CLIENT_URL = 'https://cdn.jsdelivr.net/gh/oropra-apps/one-data-blocs@oropra-bacs-client-v7/oropra-bacs-client.js';
     function chargerDoublons() {
       if (window.oropraDoublons) return Promise.resolve();
       if (window.__oropraDoublonsChargement) return window.__oropraDoublonsChargement;
@@ -47,15 +50,15 @@ OD.define('entreprise', {
       }); return window.__oropraDoublonsChargement;
     }
     function chargerBacsClient() {
-      if (window.oropraBacsClient && window.oropraBacsClient.version >= 6) return Promise.resolve(window.oropraBacsClient);
-      if (window.__odBacsClientV6) return window.__odBacsClientV6;
-      window.__odBacsClientV6 = new Promise((ok) => {
+      if (window.oropraBacsClient && window.oropraBacsClient.version >= 7) return Promise.resolve(window.oropraBacsClient);
+      if (window.__odBacsClientV7) return window.__odBacsClientV7;
+      window.__odBacsClientV7 = new Promise((ok) => {
         const sc = document.createElement('script'); sc.src = OROPRA_BACS_CLIENT_URL; sc.async = true;
         sc.onload = () => ok(window.oropraBacsClient || null);
-        sc.onerror = () => { window.__odBacsClientV6 = null; ok(null); };
+        sc.onerror = () => { window.__odBacsClientV7 = null; ok(null); };
         document.head.appendChild(sc);
       });
-      return window.__odBacsClientV6;
+      return window.__odBacsClientV7;
     }
     chargerDoublons().then(function(){ try { if (window.oropraDoublons && !document.getElementById('od-css-er')) { var e=document.createElement('style'); e.id='od-css-er'; e.textContent=window.oropraDoublons.css('er'); document.head.appendChild(e); } } catch(x){} });
     __anchor.id = 'oropra-entreprise-rattachement';
