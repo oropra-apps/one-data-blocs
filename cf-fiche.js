@@ -1,4 +1,12 @@
 // ============================================================================
+//  v13 (06/11/2026) : retours vendeurs.
+//    · CONSENTEMENTS : chaque marque affiche sa date de mise à jour dans BACS
+//      (Optin_LastSavingDate / Optin_Date, client_consentement_synthese v2)
+//      sans passer par « Voir le détail ». Plus aucun bouton pour demander le
+//      consentement : les vendeurs le recueillent à la commande.
+//    · TÉLÉPHONES : le clic lance l'appel One Data (3CX, sinon VoIP) pour les
+//      licences Connect et Full ; sans ces licences, le numéro est du simple
+//      texte. Plus de lien « tel: » (fenêtre Chrome « ouvrir l'application »).
 //  v12 (04/11/2026) : pas de bloc Consentements RGPD sur une société (les
 //    consentements portent sur des personnes : ceux des interlocuteurs sont
 //    sur leur propre fiche). Aucune relecture BACS lancée pour une société.
@@ -583,6 +591,7 @@ const STYLE = `<style>
 #oropra-client-fiche .cs-c{display:flex;align-items:center;gap:6px;border-radius:8px;padding:6px 8px;font-size:12px;font-weight:700;min-width:0}
 #oropra-client-fiche .cs-c span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 #oropra-client-fiche .cs-c svg{flex:none;width:13px;height:13px}
+#oropra-client-fiche .cs-m-maj{margin-top:8px;font-size:12px;font-weight:700;color:#5a7ba8}
 #oropra-client-fiche .cs-c.consenti{background:#e9f7f3;color:#2f8f77}
 #oropra-client-fiche .cs-c.attente{background:#fdf5e1;color:#a8740a}
 #oropra-client-fiche .cs-c.refuse{background:#fdf1f1;color:#c43c3b}
@@ -663,7 +672,7 @@ function valeurLue(field, type, opts, v) {
     const o = (opts.options || []).find(x => String(x.value) === String(v));
     return esc(o ? o.label : v);
   }
-  if (field === 'TEl_MOB' || field === 'TEL_FIXE') return `<a href="tel:${esc(cleanDigits(v))}">${esc(telLisible(v))}</a>`;
+  if (field === 'TEl_MOB' || field === 'TEL_FIXE') return peutAppeler() ? `<a href="#" data-cf-tel="${esc(String(v).replace(/[^0-9+]/g, ''))}" title="Appeler">${esc(telLisible(v))}</a>` : esc(telLisible(v));
   if (field === 'EMAIL') return `<a href="mailto:${esc(v)}">${esc(v)}</a>`;
   if (type === 'date') return esc(dateFr(v));
   if (type === 'number' && /^\d+$/.test(String(v))) return esc(Number(v).toLocaleString('fr-FR'));
@@ -908,17 +917,8 @@ function carteMarque(m, synth) {
     return `<div class="cs-c ${e}" title="${esc((CANAUX_LONG[c[0]] || c[1]) + ' : ' + libEtat(e))}">${iconeEtat(e)}<span>${esc(c[1])}</span></div>`;
   }).join('');
 
-  let act = '';
-  if (m.statut !== 'consenti' && !synth.sans_bacs) {
-    let note = '';
-    if (m.possible) note = m.demande_le ? 'Relancer : le client reçoit un nouveau SMS.' : 'Le client reçoit un SMS et choisit lui-même.';
-    else if (m.motif === 'sans_portable') note = 'Pas de portable : la demande part par SMS.';
-    else if (m.motif === 'compte_absent') note = 'Pas encore de compte BACS pour ce client.';
-    else if (m.motif === 'extension') note = 'Demande depuis One Data : extension BACS 3.3.4 requise. Sinon, bouton « Demande du Consentement ' + m.libelle + ' » dans BACS.';
-    act = `<div class="cs-act"><p>${esc(note)}</p>` +
-      (m.possible ? `<button type="button" class="cf-btn cf-btn-primary" data-cs-demander="${esc(m.marque)}" data-cs-site="${esc(m.id_site)}">${ICON_SMS}<span>${m.demande_le ? 'Relancer la demande' : 'Demander le consentement'}</span></button>` : '') +
-      `</div>`;
-  }
+  // v13 : plus de demande de consentement depuis One Data (recueilli à la commande).
+  const act = m.maj_bacs ? `<div class="cs-m-maj">Mis à jour dans BACS le ${esc(dateHeureFr(m.maj_bacs))}</div>` : `<div class="cs-m-maj">Aucune mise à jour connue dans BACS</div>`;
   return `<div class="cs-m ${cls}">
     <div class="cs-m-h"><div class="cs-m-ic">${ic}</div><div><div class="cs-m-nom">${esc(m.libelle)}</div><div class="cs-m-stat">${esc(stat)}</div>${sub ? `<div class="cs-m-sub">${esc(sub)}</div>` : ''}</div></div>
     <div class="cs-canaux">${canaux}</div>${act}</div>`;
@@ -960,7 +960,6 @@ async function peindreConsent(forcer) {
   z.innerHTML = h;
   z.querySelectorAll('[data-cf-field]').forEach(lierChamp);
   const det = z.querySelector('[data-cs-detail]'); if (det) det.addEventListener('click', openConsentModal);
-  z.querySelectorAll('[data-cs-demander]').forEach(b => b.addEventListener('click', () => demanderConsent(b.getAttribute('data-cs-site'))));
   relireSiBesoin(idvu, s);
 }
 
@@ -1084,9 +1083,47 @@ function lierChamp(el) {
   else el.addEventListener('input', () => updateClientField(field, el.value));
 }
 
+// v13 : appel depuis un numéro de la fiche (même chemin que le bouton
+// « Appeler » du shell : 3CX d'abord, sinon VoIP du navigateur).
+function peutAppeler() { return (typeof OD === 'undefined' || typeof OD.peut !== 'function' || OD.peut('appel')); }
+function candidatsFenetres() {
+  const c = [];
+  try { c.push(wwLib.getFrontWindow && wwLib.getFrontWindow()); } catch (e) {}
+  try { c.push(typeof globalThis !== 'undefined' ? globalThis : null); } catch (e) {}
+  c.push(window);
+  try { c.push(window.parent); } catch (e) {}
+  try { c.push(window.top); } catch (e) {}
+  return c;
+}
+function chercherGlobal(test) { const c = candidatsFenetres(); for (let i = 0; i < c.length; i++) { try { if (c[i] && test(c[i])) return c[i]; } catch (e) {} } return null; }
+function appelerNumero(brut) {
+  if (!peutAppeler()) return;
+  const t = String(brut || '').replace(/\s+/g, ''); if (!t) return;
+  const to = t[0] === '+' ? t : (t[0] === '0' ? '+33' + t.slice(1) : t);
+  const c = state.client || {};
+  const nom = [c.CIVILITE, c.PRENOM, c.NOM].filter(Boolean).join(' ');
+  const w3 = chercherGlobal(x => x.OD3CX && typeof x.OD3CX.appeler === 'function');
+  if (w3) { w3.OD3CX.appeler(to, { nom: nom, idvu: c.IDVu }); return; }
+  const device = (typeof globalThis !== 'undefined' && globalThis.__ONE_DATA__ && globalThis.__ONE_DATA__.device)
+    || window._twilioDevice || (window.parent && window.parent._twilioDevice) || (window.top && window.top._twilioDevice);
+  if (!device || typeof device.connect !== 'function') { try { alert('La téléphonie One Data n\'est pas prête sur ce poste : rechargez la page (F5).'); } catch (e) {} return; }
+  const wu = chercherGlobal(x => x.__VOIP_UI__); const UI = wu ? wu.__VOIP_UI__ : null;
+  (async () => {
+    try {
+      const call = await device.connect({ params: { To: to } });
+      globalThis.__ONE_DATA__ = globalThis.__ONE_DATA__ || {}; globalThis.__ONE_DATA__.call = call;
+      try { window._twilioCall = call; window.parent._twilioCall = call; window.top._twilioCall = call; } catch (e) {}
+      if (UI) UI.incall({ name: nom, number: brut, idvu: c.IDVu, client: c });
+      call.on('accept', () => { if (UI) { UI.answer(); UI.minimize(true); } });
+      call.on('disconnect', () => { if (UI) UI.close(); try { window._twilioCall = null; window.parent._twilioCall = null; window.top._twilioCall = null; } catch (e) {} if (globalThis.__ONE_DATA__) globalThis.__ONE_DATA__.call = null; });
+    } catch (e) { console.error('[cf-fiche] appel', e); }
+  })();
+}
+
 function bindEvents() {
   const root = getRoot();
   if (!root) return;
+  root.querySelectorAll('[data-cf-tel]').forEach(el => el.addEventListener('click', ev => { ev.preventDefault(); appelerNumero(el.getAttribute('data-cf-tel')); }));
   root.querySelectorAll('[data-cf-action="enter-edit"]').forEach(el => el.addEventListener('click', enterEdit));
   root.querySelectorAll('[data-cf-action="cancel-edit"]').forEach(el => el.addEventListener('click', cancelEdit));
   root.querySelectorAll('[data-cf-action="save-edit"]').forEach(el => el.addEventListener('click', saveEdit));
