@@ -1,6 +1,10 @@
 /* =====================================================================
  * oropra-bacs-client.js — création d'un client SUIVIE dans BACS ET dans
- * One Data, partagée                                   v6 (04/11/2026)
+ * One Data, partagée                                   v7 (06/11/2026)
+ *
+ * v7 : PLUS DE DEMANDE DE CONSENTEMENT depuis One Data. Les vendeurs le
+ *   recueillent à la commande : la création d'un client ne propose plus
+ *   l'envoi du SMS de consentement, et consentement() ne fait plus rien.
  *
  * v6 : CLIENT ENTREPRISE COMME DANS BACS (recon du 03/11).
  *   · Une SOCIÉTÉ suit désormais le même parcours qu'un particulier : BACS
@@ -330,7 +334,7 @@
       ui.fermer();
       return { data: f, error: null };
     }
-    await etapeConsentement(ui, sb, f.id_client, a.p_id_site, urlCompte(f.compte || (res && res.compte)));
+    // v7 : pas de demande de consentement à la création (recueilli à la commande).
     ui.fermer();
     return { data: f, error: null };
   }
@@ -408,6 +412,7 @@
 
   // Le même panneau, seul, pour un client existant.
   async function consentementSeul(sb, idClient, idSite) {
+    return null;   // v7 : le consentement n'est plus demandé depuis One Data
     if (!sb || idClient == null) return null;
     var ping = await demander('ping', {}, 10000);
     var ui = panneau(true);
@@ -586,7 +591,7 @@
     return { data: Object.assign({}, r.data, { bacs_ok: s.ok, bacs_erreur: s.erreur || null }), error: null };
   }
 
-  window.oropraBacsClient = { version: 6, consentement: consentementSeul, creer: creer, compte: compte, ouvrir: ouvrir, urlCompte: urlCompte,
+  window.oropraBacsClient = { version: 7, consentement: consentementSeul, creer: creer, compte: compte, ouvrir: ouvrir, urlCompte: urlCompte,
                               surveiller: surveiller, appliquer: appliquer, bloque: bloque,
                               interlocuteur: interlocuteur, renvoyer: renvoyer, retirer: retirer, pousserSociete: pousserSociete };
 })();
