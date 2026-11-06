@@ -1,3 +1,8 @@
+// v21 (06/11/2026) : PHOTOS À L'ENDROIT. Une photo prise au téléphone porte
+// son sens dans ses métadonnées (EXIF) ; WhatsApp les retire à l'envoi et la
+// photo arrivait couchée ou à l'envers (démo du 05/11). Avant l'envoi, la
+// photo JPEG est redessinée dans le bon sens (et ramenée à 2560 px au plus),
+// sans métadonnées. Les autres pièces jointes partent telles quelles.
 // v19 (04/11/2026) : numéros WhatsApp de VENDEUR (coexistence : appli WhatsApp
 // Business sur le téléphone du vendeur + One Data sur le même numéro).
 // - Un vendeur qui a son propre numéro raccordé sur le site sélectionné écrit
@@ -447,11 +452,44 @@ OD.define('whatsapp', {
     inp.onchange = () => { const f = inp.files && inp.files[0]; if (f) sendAttachment(f); };
     inp.click();
   }
+  // v21 : remet une photo JPEG dans son sens (EXIF) avant l'envoi.
+  function chargerImage(file) {
+    return new Promise((ok, ko) => {
+      const url = URL.createObjectURL(file);
+      const img = new Image();
+      img.style.imageOrientation = 'from-image';
+      img.onload = () => ok({ img, url });
+      img.onerror = () => { URL.revokeObjectURL(url); ko(new Error('image illisible')); };
+      img.src = url;
+    });
+  }
+  async function photoALEndroit(file) {
+    if (!file || !/^image\/(jpeg|jpg|pjpeg|webp)$/i.test(file.type || '')) return file;
+    try {
+      let src = null, w = 0, h = 0, libere = null;
+      if (typeof createImageBitmap === 'function') {
+        try { src = await createImageBitmap(file, { imageOrientation: 'from-image' }); w = src.width; h = src.height; libere = () => { try { src.close(); } catch (e) {} }; } catch (e) { src = null; }
+      }
+      if (!src) { const r = await chargerImage(file); src = r.img; w = r.img.naturalWidth; h = r.img.naturalHeight; libere = () => URL.revokeObjectURL(r.url); }
+      if (!w || !h) { if (libere) libere(); return file; }
+      const MAX = 2560, k = Math.min(1, MAX / Math.max(w, h));
+      const cw = Math.round(w * k), ch = Math.round(h * k);
+      const cv = doc.createElement('canvas'); cv.width = cw; cv.height = ch;
+      cv.getContext('2d').drawImage(src, 0, 0, cw, ch);
+      if (libere) libere();
+      const blob = await new Promise(ok => cv.toBlob(ok, 'image/jpeg', 0.88));
+      if (!blob) return file;
+      const nom = String(file.name || 'photo.jpg').replace(/\.(jpe?g|webp)$/i, '') + '.jpg';
+      try { return new File([blob], nom, { type: 'image/jpeg' }); } catch (e) { blob.name = nom; return blob; }
+    } catch (e) { console.warn('[wa] photo : envoi sans redressement', e); return file; }
+  }
+
   async function sendAttachment(file) {
     stopDictation();
     if (!state.conv || state.sending) return;
     state.sending = true; render();
     try {
+      file = await photoALEndroit(file);
       const fd = new FormData();
       fd.append('conversation_id', state.conv.id);
       fd.append('to_phone_e164', toE164(state.client && state.client.TEl_MOB));
