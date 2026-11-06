@@ -1,4 +1,10 @@
 // CONTACTS — module One Data (OD.define) v1 (Lot B)
+// v12 (06/11/2026) : retours vendeurs.
+//   · Pavé RPV d'un RDV : enrichi du rendez-vous saisi (type, date et heure,
+//     vendeur, invités, site, commentaire, annulation) — RPC contacts_rdv_des_rpv.
+//   · Leads clôturés : en bas de l'onglet, les leads du client qui ne sont
+//     plus dans le cycle en cours (client_leads_clotures), même rendu que les
+//     leads du cycle, avec leur statut final.
 // v10 (27/10/2026) : mail — le lien « voir plus » manquait quand le corps était à peine plus
 //   long que l'extrait (affichage coupé à 60 caractères sans moyen de lire la suite).
 // ============================================================================
@@ -263,6 +269,30 @@ OD.define('contacts', {
   }
 
   // ---- rendu d'un item (porté du template natif) ----
+  // v12 : le rendez-vous derrière un pavé RPV
+  if (!window.__rpvRdv) window.__rpvRdv = {};
+  var JOURS = ['dim.', 'lun.', 'mar.', 'mer.', 'jeu.', 'ven.', 'sam.'];
+  function hm(d) { var p = function (n) { return String(n).padStart(2, '0'); }; return p(d.getHours()) + ':' + p(d.getMinutes()); }
+  function rdvQuand(r) {
+    var d = r.debut ? new Date(r.debut) : null; if (!d || isNaN(d)) return '';
+    var p = function (n) { return String(n).padStart(2, '0'); };
+    var f = r.fin ? new Date(r.fin) : null;
+    return JOURS[d.getDay()] + ' ' + p(d.getDate()) + '/' + p(d.getMonth() + 1) + '/' + d.getFullYear() + ' · ' + hm(d) + (f && !isNaN(f) ? ' – ' + hm(f) : '');
+  }
+  function rdvBloc(r, commentaireRpv) {
+    var l2 = [r.vendeur ? 'avec ' + r.vendeur : '', r.site || ''].filter(Boolean).join(' · ');
+    var inv = (r.invites || []).filter(Boolean);
+    var com = r.commentaire && String(r.commentaire).trim() !== String(commentaireRpv || '').trim() ? r.commentaire : '';
+    return '<div style="margin:2px 0 6px;padding:8px 10px;border-radius:8px;background:' + (r.annule ? '#fbeaea' : '#eef4fb') + ';border:1px solid ' + (r.annule ? '#f3c9c9' : '#d6e3f3') + ';font-size:12.5px;color:#1F4A85;line-height:1.5;">'
+      + '<div style="font-weight:700;">' + esc(r.type || 'Rendez-vous') + ' · ' + esc(rdvQuand(r)) + (r.annule ? ' <span style="color:#c43c3b;">· annulé</span>' : '') + '</div>'
+      + (l2 ? '<div style="color:#2a5ea9;">' + esc(l2) + '</div>' : '')
+      + (inv.length ? '<div style="color:#5a7ba8;">Invités : ' + esc(inv.join(', ')) + '</div>' : '')
+      + (r.cree_par ? '<div style="color:#5a7ba8;">Posé par ' + esc(r.cree_par) + '</div>' : '')
+      + (r.resultat ? '<div style="color:#5a7ba8;">Résultat : ' + esc(r.resultat) + '</div>' : '')
+      + (com ? '<div style="margin-top:3px;white-space:pre-wrap;word-break:break-word;color:#1F4A85;">« ' + esc(com) + ' »</div>' : '')
+      + '</div>';
+  }
+
   function renderItem(item) {
     var media = item && item.media, sens = item && item.sens, agent = (item && item.agent) || '';
     var dateContact = item && item.date_contact;
@@ -369,6 +399,8 @@ OD.define('contacts', {
       var sidr='rv_'+uid, sTr=commentaire.length>80, rr=truncate(commentaire,80);
       contentHtml=commentaire?'<div style="font-size:13px;color:#4b5563;line-height:1.5;"><span id="sum_'+sidr+'">'+esc(rr)+'</span>'+(sTr?toggleBtn(sidr):'')+'<span id="ful_'+sidr+'" style="display:none;">'+esc(commentaire)+(sTr?toggleBtn(sidr,'voir moins'):'')+'</span></div>':'';
       var noteHtml=note!=null?(function(){var g=note>=7;return '<div style="display:flex;flex-direction:column;align-items:center;gap:1px;flex-shrink:0;"><span style="font-size:13px;font-weight:700;color:'+(g?'#4CAF7D':'#E05252')+';background:'+(g?'#D1FAE5':'#FEE2E2')+';border:1.5px solid '+(g?'#4CAF7D':'#E05252')+';border-radius:50%;width:26px;height:26px;display:inline-flex;align-items:center;justify-content:center;">'+note+'</span><span style="font-size:9px;color:#9ca3af;">IA</span></div>';})():'';
+      var rdvI = (window.__rpvRdv || {})[String(item.id_ligne)];
+      if (rdvI) contentHtml = rdvBloc(rdvI, commentaire) + contentHtml;
       metaRight='<span style="font-size:11px;color:#9ca3af;white-space:nowrap;text-align:right;line-height:1.4">'+formatDate(dateContact)+'</span>'+noteHtml;
     }
     else if (media === 'LEAD_EXTERNE') {
@@ -446,13 +478,14 @@ OD.define('contacts', {
   // ---- data ----
   async function load() {
     var idvu = currentIdvu();
-    if (idvu == null) { state.rows = []; state.loading = false; return; }
+    if (idvu == null) { state.rows = []; state.clos = []; state.loading = false; return; }
     try {
       var site = readVar(VAR_SITE);
       var cq = sb.from('CYCLE_COM').select('id_cycle_com').eq('id_client', idvu).ilike('status', '%Ouvert%').order('id_cycle_com', { ascending: false }).limit(1);
       if (site != null && site !== '') cq = cq.eq('id_site', Number(site));
       var cyc = await cq.maybeSingle();
       var idCycle = cyc && cyc.data ? cyc.data.id_cycle_com : null;
+      try { var lc = await sb.rpc('client_leads_clotures', { p_id_client: idvu, p_cycle_en_cours: idCycle }); state.clos = (lc && !lc.error && Array.isArray(lc.data)) ? lc.data : []; } catch (e2) { state.clos = []; }
       if (idCycle == null) { state.rows = []; state.loading = false; return; }
       var res = await sb.from('v_contacts_client')
         .select('id_ligne, id_cycle_com, date_contact, media, sens, statut, contenu_texte, agent, voip_recording_url, voip_summary, voip_duration_seconds, delivery_status, email_subject, email_snippet, email_body_html, email_has_attachments, attachments, canal_contact, resultat, dt_activation, note_chatgpt, origine_echange, vehicule_interet, phone_from')
@@ -464,6 +497,8 @@ OD.define('contacts', {
       // une seconde copie ici jusqu'au 23/08/2026, ce qui garantissait à
       // terme une divergence entre l'onglet et la modale.
       state.rows = window.__oropraContactFilter(res.data || []);
+      var ids = state.rows.filter(function (r) { return r.media === 'RAPPORT_VENDEUR'; }).map(function (r) { return Number(r.id_ligne); }).filter(Boolean);
+      if (ids.length) { try { var rr = await sb.rpc('contacts_rdv_des_rpv', { p_ids: ids }); if (rr && !rr.error && rr.data) Object.assign(window.__rpvRdv, rr.data); } catch (e3) {} }
       state.loading = false;
     } catch (e) { console.error('[contacts]', e); state.err = e.message || String(e); state.loading = false; }
   }
@@ -474,10 +509,12 @@ OD.define('contacts', {
     if (!root) return;
     if (state.loading) { root.innerHTML = STYLE + '<div class="ct-msg">Chargement des \u00e9changes\u2026</div>'; return; }
     if (state.err) { root.innerHTML = STYLE + '<div class="ct-msg ct-err">Erreur : ' + esc(state.err) + '</div>'; return; }
-    if (!state.rows || !state.rows.length) { root.innerHTML = STYLE + '<div class="ct-msg">Aucun \u00e9change sur le cycle en cours.</div>'; return; }
-    root.innerHTML = STYLE + '<div class="ct-wrap">' + state.rows.map(renderItem).join('') + '</div>';
+    var clos = state.clos || [];
+    if ((!state.rows || !state.rows.length) && !clos.length) { root.innerHTML = STYLE + '<div class="ct-msg">Aucun \u00e9change sur le cycle en cours.</div>'; return; }
+    var hClos = clos.length ? '<div style="margin:14px 2px 2px;font-size:11px;font-weight:800;letter-spacing:.06em;text-transform:uppercase;color:#7a98c5;">Leads cl\u00f4tur\u00e9s (' + clos.length + ')</div>' + clos.map(renderItem).join('') : '';
+    root.innerHTML = STYLE + '<div class="ct-wrap">' + ((state.rows && state.rows.length) ? state.rows.map(renderItem).join('') : '<div class="ct-msg" style="padding:18px 20px">Aucun \u00e9change sur le cycle en cours.</div>') + hClos + '</div>';
     // Les leads affichés sans leur détail le reçoivent, puis on redessine.
-    window.__oropraLeadHydrate(sb, state.rows, render);
+    window.__oropraLeadHydrate(sb, (state.rows || []).concat(clos), render);
   }
 
   // surveillance du changement de client (le shell ne détruit plus le panneau)
