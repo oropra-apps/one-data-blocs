@@ -1,4 +1,12 @@
 // ============================================================================
+//  v51 (06/11/2026) : retours vendeurs.
+//    · LIVRAISONS : boutons « SMS de confirmation » et « E-mail de
+//      confirmation », comme pour un RDV client, dans la fiche livraison et
+//      dans la modification ; le message parle de la livraison du véhicule.
+//    · Le NOM DU CLIENT est cliquable dans la modale d'un RDV et dans la
+//      fiche livraison : il ouvre sa fiche client.
+//    · Module partagé oropra-bacs-client v7 (plus de demande de consentement
+//      par SMS à la création d'un client).
 //  v50 (04/11/2026) : livraisons en couleurs PLEINES de la charte One Data —
 //    VN vert #53bda7 (texte blanc), VO / VD orange #fac055 (texte bleu foncé).
 //    Elles étaient teintées à 14-22 % et se confondaient avec les créneaux.
@@ -1095,10 +1103,13 @@ OD.define('agenda', {
       + '#agenda-livr-ov .alv-f{display:flex;gap:10px;flex-wrap:wrap;padding:12px 18px;border-top:1.5px solid #eef2f8}'
       + '#agenda-livr-ov .alv-f button{border:1.5px solid #d6e2f2;background:#fff;color:#2a5ea9;border-radius:10px;padding:10px 14px;font:800 13px "Nunito Sans",system-ui,sans-serif;cursor:pointer}'
       + '#agenda-livr-ov .alv-f button.pri{background:#2a5ea9;border-color:#2a5ea9;color:#fff}'
+      + '#agenda-livr-ov .alv-cli{border:0;background:none;padding:0;font:800 17px "Nunito Sans",system-ui,sans-serif;color:#2a5ea9;cursor:pointer;text-align:left}#agenda-livr-ov .alv-cli:hover{text-decoration:underline}'
+      + '#agenda-livr-ov .alv-conf{display:flex;gap:8px;flex-wrap:wrap}#agenda-livr-ov .alv-conf button{flex:1;min-width:150px;display:inline-flex;align-items:center;justify-content:center;gap:7px;background:#fff;border-radius:10px;padding:9px 10px;font:700 13px "Nunito Sans",system-ui,sans-serif;cursor:pointer}'
+      + '#agenda-livr-ov .alv-conf .sms{color:#e6a817;border:1.5px solid #f0dca6}#agenda-livr-ov .alv-conf .sms:hover{background:#fdf7e8}#agenda-livr-ov .alv-conf .mail{color:#1F4A85;border:1.5px solid #d7dfe9}#agenda-livr-ov .alv-conf .mail:hover{background:#f2f5f9}'
       + '</style><div class="alv" role="dialog" aria-modal="true" aria-label="Livraison">'
       + '<div class="alv-h"><span>' + esc((estLiv ? (p.title || 'Livraison') : (p.title || 'Rendez-vous'))) + '</span><button type="button" class="alv-x" data-x aria-label="Fermer">×</button></div>'
       + '<div class="alv-c">'
-      + '<div><div class="alv-t">' + esc(nomCli || composeTitle(p) || '—') + '</div><div class="alv-s">' + esc(dateLongue(p.event_start_time)) + (li.tel ? ' · ' + esc(li.tel) : '') + '</div></div>';
+      + '<div><div class="alv-t">' + (Number(p.id_client) > 0 ? '<button type="button" class="alv-cli" data-fiche title="Ouvrir la fiche client">' + esc(nomCli || composeTitle(p) || 'Client') + ' ›</button>' : esc(nomCli || composeTitle(p) || '—')) + '</div><div class="alv-s">' + esc(dateLongue(p.event_start_time)) + (li.tel ? ' · ' + esc(li.tel) : '') + '</div></div>';
     if (estLiv) {
       h += '<div class="alv-g">' + ligne('Véhicule', veh || (vinCde ? '—' : ''), vinCde) + ligne('Vendu par', li.vendeur || '', p.extra && p.extra.proprietaire && p.extra.proprietaire !== li.vendeur ? 'posé par ' + p.extra.proprietaire : '') + '</div>';
       if (siteAExpert(p.id_site) || li.livre_par === 'vendeur') {
@@ -1116,6 +1127,13 @@ OD.define('agenda', {
       h += '<div class="alv-g">' + ligne(f === 'prepa' ? 'Demandée par' : 'Dans l’agenda de', p.extra.proprietaire, '') + (p.extra.vin ? ligne('VIN', p.extra.vin, '') : '') + '</div>';
     }
     if (comm) h += '<div><div class="alv-l">' + (estLiv ? 'Commentaire BACS' : 'Commentaire') + '</div><div class="alv-cm">' + esc(comm) + '</div></div>';
+    // v51 : confirmer la livraison (ou le RDV) au client, comme dans la modale.
+    if (!ro && Number(p.id_client) > 0 && !isPastSlot(p.event_start_time)) {
+      h += '<div><div class="alv-l">Confirmer au client</div><div class="alv-conf" style="margin-top:4px">'
+        + '<button type="button" class="sms" data-conf="sms"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4.5h16a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1H8l-4 3.5v-3.5H4a1 1 0 0 1-1-1v-9a1 1 0 0 1 1-1z"/></svg>SMS de confirmation</button>'
+        + '<button type="button" class="mail" data-conf="mail"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2.5" y="4.5" width="19" height="15" rx="2"/><path d="m3 6 9 6.5L21 6"/></svg>E-mail de confirmation</button>'
+        + '</div></div>';
+    }
     h += '</div><div class="alv-f">'
       + (!ro && p.can_edit ? '<button type="button" class="pri" data-edit>Modifier le rendez-vous</button>' : '')
       + (!ro && p.can_edit && isPastSlot(p.event_start_time) && Number(p.id_client) > 0 ? '<button type="button" class="pri" data-edit>Compte rendu</button>' : '')
@@ -1126,6 +1144,15 @@ OD.define('agenda', {
     ov.addEventListener('mousedown', (e) => { if (e.target === ov) close(); });
     ov.querySelectorAll('[data-x]').forEach(b => b.addEventListener('click', close));
     const be = ov.querySelector('[data-edit]'); if (be) be.addEventListener('click', () => { close(); window.__agendaSelected = p; openEdit(ev); });
+    const bf = ov.querySelector('[data-fiche]'); if (bf) bf.addEventListener('click', () => { close(); ouvrirFicheClient(p.id_client); });
+    ov.querySelectorAll('[data-conf]').forEach(b => b.addEventListener('click', () => {
+      const deb = String(toFc(p.event_start_time) || p.event_start_time || '');
+      confirmerAuClient(b.getAttribute('data-conf'), {
+        idClient: Number(p.id_client), idSite: p.id_site != null ? Number(p.id_site) : null,
+        date: deb.slice(0, 10), time: deb.slice(11, 16), rdvType: p.id_rdv_type != null ? Number(p.id_rdv_type) : (estLiv ? 4 : null),
+        owner: p.id_user != null ? Number(p.id_user) : null, ownerNom: (estLiv && li.vendeur) || (p.extra && p.extra.proprietaire) || ''
+      }, false);
+    }));
     const bp = ov.querySelector('[data-print]'); if (bp) bp.addEventListener('click', () => {
       const lot = [p]; const jour = new Date(toFc(p.event_start_time));
       planningSeul = estLiv ? 'livraison' : null;
@@ -1814,6 +1841,8 @@ OD.define('agenda', {
 #agenda-ov .agm-sync.ko{color:#a32d2d;background:#fdf1f1;border-color:#f2c4c4}
 #agenda-ov .agm-sync.ko .pt{background:#e24b4a}
 #agenda-ov .agm-cli-ro{padding:10px 12px;border:1.5px solid #e2eaf5;border-radius:10px;background:#f7f9fc;color:#1F4A85;font-weight:700;font-size:13px}
+#agenda-ov .agm-cli-lien{width:100%;display:flex;justify-content:space-between;align-items:center;gap:8px;font-family:inherit;text-align:left;cursor:pointer;color:#2a5ea9;transition:all .12s}
+#agenda-ov .agm-cli-lien:hover{border-color:#2a5ea9;background:#eef4fc;text-decoration:underline}
 #agenda-ov .agm-conf{gap:8px;flex-wrap:wrap}
 #agenda-ov .agm-conf-b{flex:1;min-width:150px;display:inline-flex;align-items:center;justify-content:center;gap:7px;border:1.5px solid #e2eaf5;background:#fff;color:#2a5ea9;border-radius:9px;padding:9px 10px;font-family:inherit;font-size:13px;font-weight:700;cursor:pointer;transition:all .12s}
 #agenda-ov .agm-conf-b:hover{border-color:#2a5ea9;background:#eef4fc}
@@ -2599,8 +2628,8 @@ OD.define('agenda', {
         // l'appel direct si le module partagé ne se charge pas : la base exige
         // de toute façon que BACS soit ouvert chez le vendeur.
         const _bc = await (window.__odBacsClientPret || (window.__odBacsClientPret = new Promise(function (ok) {
-              if (window.oropraBacsClient) return ok(window.oropraBacsClient);
-              var sc = document.createElement('script'); sc.src = 'https://cdn.jsdelivr.net/gh/oropra-apps/one-data-blocs@oropra-bacs-client-v6/oropra-bacs-client.js'; sc.async = true;
+              if (window.oropraBacsClient && window.oropraBacsClient.version >= 7) return ok(window.oropraBacsClient);
+              var sc = document.createElement('script'); sc.src = 'https://cdn.jsdelivr.net/gh/oropra-apps/one-data-blocs@oropra-bacs-client-v7/oropra-bacs-client.js'; sc.async = true;
               sc.onload = function () { ok(window.oropraBacsClient || null); };
               sc.onerror = function () { window.__odBacsClientPret = null; ok(null); };
               document.head.appendChild(sc);
@@ -2897,8 +2926,8 @@ OD.define('agenda', {
         if (window.oropraBacsClient) window.oropraBacsClient.appliquer(el, _m);
         if (_m.__bacsSuivi) return;
         (window.__odBacsClientPret || (window.__odBacsClientPret = new Promise(function (ok) {
-          if (window.oropraBacsClient) return ok(window.oropraBacsClient);
-          var sc = document.createElement('script'); sc.src = 'https://cdn.jsdelivr.net/gh/oropra-apps/one-data-blocs@oropra-bacs-client-v6/oropra-bacs-client.js'; sc.async = true;
+          if (window.oropraBacsClient && window.oropraBacsClient.version >= 7) return ok(window.oropraBacsClient);
+          var sc = document.createElement('script'); sc.src = 'https://cdn.jsdelivr.net/gh/oropra-apps/one-data-blocs@oropra-bacs-client-v7/oropra-bacs-client.js'; sc.async = true;
           sc.onload = function () { ok(window.oropraBacsClient || null); };
           sc.onerror = function () { window.__odBacsClientPret = null; ok(null); };
           document.head.appendChild(sc);
@@ -3622,7 +3651,9 @@ OD.define('agenda', {
     let quoi = '';
     if (cs.mode === 'rdv') {
       let cli;
-      if (ed) cli = '<div class="agm-cli-ro">' + esc(cs.clientLabel || ('Client ' + (cs.idClient != null ? cs.idClient : ''))) + '</div>';
+      if (ed) cli = Number(cs.idClient) > 0
+        ? '<button type="button" class="agm-cli-ro agm-cli-lien" id="agm-cli-fiche" title="Ouvrir la fiche client">' + esc(cs.clientLabel || ('Client ' + cs.idClient)) + '<span aria-hidden="true">›</span></button>'
+        : '<div class="agm-cli-ro">' + esc(cs.clientLabel || ('Client ' + (cs.idClient != null ? cs.idClient : ''))) + '</div>';
       else if (cs.idClient != null) cli = '<div class="agm-cli-sel" id="agm-cli-box"><span class="agm-cli-name">' + esc(cs.clientLabel || ('Client ' + cs.idClient)) + '</span><button type="button" class="agm-cli-change" id="agm-cli-change">Changer</button></div>';
       else cli = '<button type="button" class="agm-cli-pick" id="agm-cli-pick"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg><span>Choisir un client</span></button>';
       quoi += '<div class="agm-cell"><div class="agm-lbl">Client</div>' + cli + '</div>';
@@ -3779,6 +3810,7 @@ OD.define('agenda', {
     if (g('agm-del-yes')) g('agm-del-yes').addEventListener('click', () => performDelete(false));
     if (g('agm-del-serie')) g('agm-del-serie').addEventListener('click', () => performDelete(true));
     if (g('agm-save')) g('agm-save').addEventListener('click', doSave);
+    if (g('agm-cli-fiche')) g('agm-cli-fiche').addEventListener('click', () => { const id = cs && cs.idClient; closeCreate(); ouvrirFicheClient(id); });
     if (g('agm-conf-sms')) g('agm-conf-sms').addEventListener('click', () => confirmerRdv('sms'));
     if (g('agm-conf-mail')) g('agm-conf-mail').addEventListener('click', () => confirmerRdv('mail'));
     if (g('agm-real-now')) g('agm-real-now').addEventListener('click', () => { if (cs && cs.editId != null) goBilaterale(cs.editId, true); });
@@ -3830,6 +3862,10 @@ OD.define('agenda', {
     syncInputs();
     const s = cs; if (!s || s.idClient == null) return;
     s.confCharge = true; renderCreate();
+    return confirmerAuClient(canal, s, true);
+  }
+  // v51 : aussi depuis la fiche livraison (s construit à partir de l'événement).
+  async function confirmerAuClient(canal, s, modale) {
     let cli = null, site = null;
     try {
       const c = sb();
@@ -3839,8 +3875,7 @@ OD.define('agenda', {
       ]);
       cli = rc && rc.data; site = rs && rs.data;
     } catch (e) { console.warn('[agenda] confirmation : lecture client / site', e && e.message); }
-    if (cs !== s) return;
-    s.confCharge = false; renderCreate();
+    if (modale) { if (cs !== s) return; s.confCharge = false; renderCreate(); }
     if (!cli) { toast('Fiche client introuvable : impossible de préparer le message.'); return; }
 
     const soc = cli.idmultivu === 1 || cli.idmultivu === '1';
@@ -3852,7 +3887,10 @@ OD.define('agenda', {
     const vendeur = (s.ownerNom || (s.owner != null ? nomPersonne(s.owner) : '') || viewerName() || '').trim();
     const telSite = site && site.Telephone ? String(site.Telephone).trim() : '';
 
-    const phrase = tel
+    const livr = Number(s.rdvType) === 4 || Number(s.rdvType) === 9;
+    const phrase = livr
+      ? 'je vous confirme la livraison de votre véhicule le ' + jour + ' à ' + h + (adresse ? ' à la concession, ' + adresse : '') + '.'
+      : tel
       ? 'je vous confirme notre rendez-vous téléphonique du ' + jour + ' à ' + h + ' : je vous appellerai à ce moment-là.'
       : 'je vous confirme notre rendez-vous du ' + jour + ' à ' + h + (adresse ? ' à la concession, ' + adresse : '') + '.';
 
@@ -3873,7 +3911,8 @@ OD.define('agenda', {
       + para('En cas d’empêchement, il suffit de répondre à ce message' + (telSite ? ' ou de nous appeler au ' + telSite : '') + '.')
       + para('À très bientôt,');
     ui.open({ mode: 'new', client: cli,
-      subject: 'Confirmation de votre rendez-vous ' + (tel ? 'téléphonique ' : '') + 'du ' + jour + ' à ' + h,
+      subject: livr ? 'Confirmation de la livraison de votre véhicule le ' + jour + ' à ' + h
+                    : 'Confirmation de votre rendez-vous ' + (tel ? 'téléphonique ' : '') + 'du ' + jour + ' à ' + h,
       body: corps });
   }
   async function doSave() {
