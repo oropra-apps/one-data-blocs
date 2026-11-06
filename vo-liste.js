@@ -1,4 +1,7 @@
 // ============================================================================
+//  v43 (06/11/2026) : module partagé oropra-bacs-client v7 — la création d'un
+//    client ne propose plus d'envoyer la demande de consentement par SMS (les
+//    vendeurs la recueillent à la commande). Aucun autre changement.
 //  v42 (04/11/2026) : HISTORIQUE DU VÉHICULE — la barre « Achat du VO »
 //    porte le prix d'achat en colonne Total, pour les chefs des ventes et leur
 //    hiérarchie (la base ne le rend qu'à eux).
@@ -1285,8 +1288,8 @@ OD.define('vo-liste', {
         // l'appel direct si le module partagé ne se charge pas : la base exige
         // de toute façon que BACS soit ouvert chez le vendeur.
         const _bc = await (window.__odBacsClientPret || (window.__odBacsClientPret = new Promise(function (ok) {
-              if (window.oropraBacsClient) return ok(window.oropraBacsClient);
-              var sc = document.createElement('script'); sc.src = 'https://cdn.jsdelivr.net/gh/oropra-apps/one-data-blocs@oropra-bacs-client-v5/oropra-bacs-client.js'; sc.async = true;
+              if (window.oropraBacsClient && window.oropraBacsClient.version >= 7) return ok(window.oropraBacsClient);
+              var sc = document.createElement('script'); sc.src = 'https://cdn.jsdelivr.net/gh/oropra-apps/one-data-blocs@oropra-bacs-client-v7/oropra-bacs-client.js'; sc.async = true;
               sc.onload = function () { ok(window.oropraBacsClient || null); };
               sc.onerror = function () { window.__odBacsClientPret = null; ok(null); };
               document.head.appendChild(sc);
@@ -1661,8 +1664,8 @@ OD.define('vo-liste', {
         if (window.oropraBacsClient) window.oropraBacsClient.appliquer(el, _m);
         if (_m.__bacsSuivi) return;
         (window.__odBacsClientPret || (window.__odBacsClientPret = new Promise(function (ok) {
-          if (window.oropraBacsClient) return ok(window.oropraBacsClient);
-          var sc = document.createElement('script'); sc.src = 'https://cdn.jsdelivr.net/gh/oropra-apps/one-data-blocs@oropra-bacs-client-v5/oropra-bacs-client.js'; sc.async = true;
+          if (window.oropraBacsClient && window.oropraBacsClient.version >= 7) return ok(window.oropraBacsClient);
+          var sc = document.createElement('script'); sc.src = 'https://cdn.jsdelivr.net/gh/oropra-apps/one-data-blocs@oropra-bacs-client-v7/oropra-bacs-client.js'; sc.async = true;
           sc.onload = function () { ok(window.oropraBacsClient || null); };
           sc.onerror = function () { window.__odBacsClientPret = null; ok(null); };
           document.head.appendChild(sc);
