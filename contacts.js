@@ -1,4 +1,7 @@
 // CONTACTS — module One Data (OD.define) v1 (Lot B)
+// v13 (06/11/2026) : appels d'un collègue — la carte affiche la durée et un
+//   résumé succinct (objet + suite) ; transcription et enregistrement restent
+//   réservés au vendeur et à sa hiérarchie (vue v_voip_calls_masked).
 // v12 (06/11/2026) : retours vendeurs.
 //   · Pavé RPV d'un RDV : enrichi du rendez-vous saisi (type, date et heure,
 //     vendeur, invités, site, commentaire, annulation) — RPC contacts_rdv_des_rpv.
@@ -317,7 +320,20 @@ OD.define('contacts', {
       var tonalite = (summary && summary.tonalite) || '';
       var dialogue = (summary && summary.dialogue) || '', objet = (summary && summary.objet) || '';
       if (url) contentHtml += audioPill(url, duration, '#60AEDF', uid);
-      if (objet || dialogue || transcription) {
+      // v13 : hors vendeur de l'appel et sa hiérarchie, la base ne renvoie que
+      // l'objet et l'action suivante (summary.reserve) : durée + résumé succinct.
+      var reserve = !!(summary && summary.reserve);
+      if (!url && duration > 0) {
+        var mn = Math.floor(duration / 60), sc = duration % 60;
+        contentHtml += '<div style="font-size:12px;color:#5a7196;font-weight:700;margin-top:4px;">Appel de ' + (mn ? mn + ' min ' + String(sc).padStart(2, '0') + ' s' : sc + ' s') + '</div>';
+      }
+      if (reserve) {
+        var suite = (summary && summary.action_suivante) || '';
+        contentHtml += '<div style="margin-top:6px;font-size:13px;color:#4b5563;line-height:1.6;">' + (objet ? esc(objet) : '<i>Résumé indisponible.</i>') + '</div>'
+          + (suite && suite !== objet ? '<div style="margin-top:3px;font-size:12.5px;color:#2a5ea9;line-height:1.5;"><b>Suite :</b> ' + esc(suite) + '</div>' : '')
+          + '<div style="margin-top:5px;font-size:11px;color:#9ca3af;">Transcription et enregistrement réservés au vendeur et à sa hiérarchie.</div>';
+      }
+      else if (objet || dialogue || transcription) {
         var tid = 'tr_' + uid;
         var dialogueHtml = dialogue ? dialogue.split('\n').filter(function(l){return l.trim();}).map(function(line){
           if (line.indexOf('Vendeur:') === 0) return '<div style="margin-bottom:6px;"><span style="font-size:11px;font-weight:700;color:#2a5ea9;text-transform:uppercase;letter-spacing:.4px;">Vendeur</span><span style="font-size:13px;color:#374151;margin-left:6px;">'+esc(line.replace('Vendeur:','').trim())+'</span></div>';
