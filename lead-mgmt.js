@@ -1,6 +1,6 @@
 // ============================================================================
 //  LEAD MANAGEMENT — module One Data (OD.define 'lead-mgmt')
-//  VERSION TEAM COLIN (v98) — déploiement CIBLÉ (publish-targets :
+//  VERSION TEAM COLIN (v99) — déploiement CIBLÉ (publish-targets :
 //  v98 (05/11/2026) : ACCUEIL DES LEADS. Un message automatique (RCS, SMS
 //    ou e-mail) part au client, qui choisit l'heure de son rappel. Postes
 //    vendeur, chef des ventes et direction (posteSite) :
@@ -18,6 +18,9 @@
 //    d'identifiants. Si la vue n'existe pas, échoue ou ne renvoie rien,
 //    l'écran reste exactement celui de la v97 (pas de pastille, pas de
 //    filtre, tri inchangé). Le poste Vroom Team (posteVroom) n'est pas touché.
+//    v99 (06/11/2026) : « Remettre au congélateur » (poste_congelateur_remettre, SQL 13)
+//    sur la fiche d'un lead repris du congélateur ; liste triée par date de
+//    réception ; plus de délai ni d'échéance affichés pour ces leads.
 //    v98 (06/11/2026) : onglet « CONGÉLATEUR » (vendeur, chef des ventes) — les
 //    leads BACS abandonnés par la Vroom Team, avec le motif d'abandon
 //    (poste_congelateur, 30 jours par défaut, 90 / 120 / date choisie). « Prendre » (poste_congelateur_prendre)
@@ -3173,12 +3176,12 @@
         lbl = esc(sitesVendeur().length === 1 ? siteNom(sitesVendeur()[0].site) : plural(sitesVendeur().length, 'site')) + ' · ' + esc(nom);
         p = '<b>' + plural(ml.length, 'lead à rappeler', 'leads à rappeler') + '</b>'
           + (crit ? ' · <b class="t-crit">' + crit + ' en retard</b>' : '')
-          + (s && reste(s) > 0 ? ' · le prochain expire dans <b>' + duree(reste(s)) + '</b>' : '')
+          + (s && !estCongele(s) && reste(s) > 0 ? ' · le prochain expire dans <b>' + duree(reste(s)) + '</b>' : '')
           + ' · <b>' + plural(li, 'lead libre', 'leads libres') + '</b> dans le ' + esc(poolNom()) + '.';
         if (s) {
           var rs = reste(s);
           cta = '<button type="button" class="cta" data-a="appeler" data-id="' + s.id_lead + '">' + (__lmPeutAppeler() ? 'Appeler le suivant' : 'Traiter le suivant')
-            + '<small>' + esc(nomLead(s)) + ' · ' + (rs < 0 ? 'en retard de ' + duree(-rs) : 'expire dans ' + duree(rs)) + '</small></button>';
+            + '<small>' + esc(nomLead(s)) + ' · ' + (estCongele(s) ? 'repris du congélateur' : rs < 0 ? 'en retard de ' + duree(-rs) : 'expire dans ' + duree(rs)) + '</small></button>';
         } else if (li) {
           var o = trierPool(libres(null))[0];
           cta = '<button type="button" class="cta" data-a="prendre" data-id="' + o.id_lead + '">Prendre dans le Pool<small>' + esc(nomLead(o)) + ' · ' + esc(demandeDe(o)) + '</small></button>';
@@ -3708,7 +3711,7 @@
           var a = '';
           if (!gere) a = '<button type="button" class="btn sm" data-a="open" data-id="' + l.id_lead + '">Ouvrir</button>';
           else if (g.act === 'attribuer') a = '<select id="sel-' + l.id_lead + '" aria-label="Vendeur">' + optionsVendeurs(l.id_site) + '</select><button type="button" class="btn sm pri" data-a="attribuer" data-id="' + l.id_lead + '">Attribuer</button>';
-          else if (g.act === 'liberer') a = '<button type="button" class="btn sm" data-a="rendre" data-id="' + l.id_lead + '">Rendre au Pool</button><select id="sel-' + l.id_lead + '" aria-label="Vendeur">' + optionsVendeurs(l.id_site, l.id_user_attribue) + '</select><button type="button" class="btn sm pri" data-a="attribuer" data-id="' + l.id_lead + '">Attribuer</button>';
+          else if (g.act === 'liberer') a = '<button type="button" class="btn sm" data-a="rendre" data-id="' + l.id_lead + '">' + libRendre(l) + '</button><select id="sel-' + l.id_lead + '" aria-label="Vendeur">' + optionsVendeurs(l.id_site, l.id_user_attribue) + '</select><button type="button" class="btn sm pri" data-a="attribuer" data-id="' + l.id_lead + '">Attribuer</button>';
           else if (g.act === 'renvoyer') a = '<select id="sit-' + l.id_lead + '" aria-label="Site">' + sitesRenvoi(l).map(function (s) { return '<option value="' + s.id_site + '">' + esc(siteNom(s.site)) + ' · ' + esc(propre(s.reseau || '')) + '</option>'; }).join('') + '</select><button type="button" class="btn sm pri" data-a="renvoyer" data-id="' + l.id_lead + '">Renvoyer</button>';
           else if (g.act === 'injoignable') a = (l.sf_lead_id && !sansPlateau(l) ? '<button type="button" class="btn sm vr" data-a="confier" data-id="' + l.id_lead + '">Confier à la Vroom Team</button>' : '') + '<button type="button" class="btn sm dang" data-a="clore-inj" data-id="' + l.id_lead + '">Clore</button>';
           var tsv = g.act === 'liberer' ? tm(l.attribue_le, 20, 'pris par ' + prenom(l.vendeur_nom)) : tm(arrive(l), slaDe(l));
@@ -4082,6 +4085,7 @@
     }
     function delaiTete(l) {
       if (l.zone === 'plateau') return '<div class="fx-del neutre"><b>À la Vroom Team</b><small>reçu ' + esc(quand(l.recu_le)) + '</small></div>';
+      if (estCongele(l)) return '<div class="fx-del neutre"><span><b>Repris du congélateur</b><small>sans délai · ' + (l.tentatives ? plural(l.tentatives, 'tentative') : 'pas encore appelé') + '</small></span></div>';
       var crn = creneauAcc(l);   // v97 : le client a choisi l'heure de son rappel
       if (crn) {
         var tcr = tonCreneau(crn), clc = tcr === 'rouge' ? 'crit' : tcr === 'orange' ? 'warn' : 'neutre';
@@ -4197,14 +4201,15 @@
         + (D.cx ? carteConnu(cx) : '') + filClient(cx);
       // colonne 3 : délais et gestes
       var del = '';
-      if (l.zone !== 'plateau') {
+      if (l.zone !== 'plateau' && !estCongele(l)) {
         if (l.transfere_le) del += '<div><span>Vroom Team</span><span class="tm ok"><b>transmis en ' + duree(ouvrees(ts(l.recu_le), ts(l.transfere_le), OUV_VROOM)) + '</b><small>après réception</small></span></div>';
         del += '<div><span>Sur le site</span>' + (mins(l.arrive_le) >= 1440 ? '<span class="tm crit"><b>' + duree(mins(l.arrive_le)) + '</b><small>arrivé le ' + esc(quand(l.arrive_le)) + '</small></span>' : tmO(l.arrive_le, l.sla_site || 60, 'sans contact · SLA ' + slaTxt(l.sla_site || 60))) + '</div>';
         if (l.zone === 'vendeur' && l.attribue_le) del += '<div><span>Chez ' + esc(prenom(l.vendeur_nom)) + ' depuis</span>' + tmO(l.attribue_le, 30, l.tentatives ? plural(l.tentatives, 'tentative') : 'sans appel') + '</div>';
       }
       var c3 = '<div class="fx-card"><h3 class="fx-t">' + (POSTE === 'vendeur' || (mien && !gere) ? 'Résultat de l\'appel' : 'Que faire de ce lead ?') + '</h3>'
         + '<div class="dr-f fx-act">' + piedDrawer(l, gere, mien) + '</div></div>'
-        + (del ? '<div class="fx-card"><div class="fx-lab">Délais</div><div class="delais">' + del + '</div></div>' : '');
+        + (del ? '<div class="fx-card"><div class="fx-lab">Délais</div><div class="delais">' + del + '</div></div>' : '')
+        + (estCongele(l) && (mien || gere) ? '<div class="fx-card"><div class="fx-lab">Congélateur</div><p class="hint">Lead repris du congélateur : aucun délai, aucune alerte. S\'il n\'aboutit pas, remettez-le pour un collègue.</p><div class="row"><button type="button" class="btn" data-a="rendre" data-id="' + l.id_lead + '">Remettre au congélateur</button></div></div>' : '');
       h += '<div class="dr-b fx-g"><aside class="fx-c1">' + c1 + '</aside><section class="fx-c2">' + c2 + '</section><aside class="fx-c3">' + c3 + '</aside></div>';
       if (D.demo) h = h.replace('<div class="dr-b fx-g">', '<p class="demo">Fiche d\'exemple de la visite guidée : rien n\'est enregistré.</p><div class="dr-b fx-g">');
       var top = $drawer.scrollTop;
@@ -4245,7 +4250,7 @@
       if (mode === 'attribuer') {
         h += '<div class="row"><select id="dr-vendeur" aria-label="Vendeur">' + optionsVendeurs(l.id_site, l.id_user_attribue) + '</select><button type="button" class="btn pri" data-a="attribuer" data-id="' + l.id_lead + '|dr">' + (l.id_user_attribue ? 'Réattribuer' : 'Attribuer') + '</button></div>'
           + '<div class="row">' + (l.sf_lead_id && !sansPlateau(l) ? '<button type="button" class="btn vr" data-a="confier" data-id="' + l.id_lead + '">Confier à la Vroom Team</button>' : '')
-          + (l.id_user_attribue ? '<button type="button" class="btn" data-a="rendre" data-id="' + l.id_lead + '">Rendre au Pool</button>' : '')
+          + (l.id_user_attribue ? '<button type="button" class="btn" data-a="rendre" data-id="' + l.id_lead + '">' + libRendre(l) + '</button>' : '')
           + (!l.id_user_attribue && libre && chefVend(l.id_site) ? '<button type="button" class="btn vr" data-a="prendre" data-id="' + l.id_lead + '">Je le prends</button>' : '') + '</div>';
       } else if (mode === 'resultat') {
         h += piedResultat(l, true);
@@ -4277,7 +4282,7 @@
         return h + '</div>' + piedClore(l);
       }
       h += '</div>';
-      if (!dansChef) h += '<div class="row pied"><span class="hint">' + (l.sf_lead_id ? 'Lead BACS : le RDV et la clôture partent aussi dans BACS.' : 'Lead hors BACS : tout est enregistré dans One Data.') + '</span><button type="button" class="btn sm ghost" data-a="rendre" data-id="' + l.id_lead + '">Rendre au Pool</button></div>';
+      if (!dansChef) h += '<div class="row pied"><span class="hint">' + (l.sf_lead_id ? 'Lead BACS : le RDV et la clôture partent aussi dans BACS.' : 'Lead hors BACS : tout est enregistré dans One Data.') + '</span><button type="button" class="btn sm ghost" data-a="rendre" data-id="' + l.id_lead + '">' + libRendre(l) + '</button></div>';
       return h;
     }
     // v88 : la prochaine tentative, choisie par le vendeur.
@@ -4775,7 +4780,7 @@
     }
     function vueCongelateur() {
       var sid = POSTE === 'vendeur' ? null : sitePoste();
-      var ls = congeles(sid);
+      var ls = congeles(sid).slice().sort(function (a, b) { return ts(b.recu_le) - ts(a.recu_le); });
       var h = '<div class="ph"><div><h2>Congélateur</h2><p>Les leads que la Vroom Team a abandonnés dans BACS, avec le motif. Libre-service : « Prendre » met le lead à votre nom et le repasse « Accepté » dans BACS.<br><b>Ici, pas de délai : un lead repris du congélateur ne revient pas au Pool et ne déclenche aucune alerte.</b></p></div></div>' + barreCong() + '<div class="list">';
       if (S.cong == null) h += '<div class="empty">Chargement du congélateur…</div>';
       else if (!ls.length) h += '<div class="empty">Le congélateur est vide.</div>';
@@ -4784,10 +4789,11 @@
         var dem = [c.modele, c.campagne || c.source_bacs].filter(Boolean).join(' · ') || 'Demande BACS';
         var a = verrou ? '<span class="resa-l">Réservé par ' + esc(propre(c.verrou_nom || 'un collègue')) + '</span>'
           : '<button type="button" class="btn vr" data-a="cg-prendre" data-id="' + esc(c.sf) + '"' + (S.comme ? ' disabled' : '') + '>Prendre</button>';
-        h += '<div class="lr v2 cg' + univCls(c) + '"><div><span class="tm froid"><b>' + esc(jour(c.abandonne_le || c.recu_le)) + '</b><small>abandonné</small></span></div>'
+        h += '<div class="lr v2 cg' + univCls(c) + '"><div><span class="tm froid"><b>' + esc(jour(c.recu_le)) + '</b><small>reçu</small></span></div>'
           + '<div class="who"><span class="lr-n">' + esc(propre(c.nom) || 'Sans nom') + '</span>' + (sid == null && POSTE !== 'vendeur' ? ' <span class="lr-v">' + esc(siteNom(c.site)) + '</span>' : '')
-          + '<p class="lr-d">' + esc(dem) + ' · reçu le ' + esc(jour(c.recu_le)) + '</p>'
-          + '<p class="why">Motif : <b>' + esc(c.motif || 'non renseigné') + '</b>' + (c.abandonne_par ? ' · ' + esc(propre(c.abandonne_par)) : '') + (c.commentaire ? ' · « ' + esc(String(c.commentaire).slice(0, 120)) + ' »' : '') + '</p></div>'
+          + '<p class="lr-d">' + esc(dem) + (c.abandonne_le ? ' · abandonné le ' + esc(jour(c.abandonne_le)) : '') + '</p>'
+          + '<p class="why">Motif : <b>' + esc(c.motif || 'non renseigné') + '</b>' + (c.abandonne_par ? ' · ' + esc(propre(c.abandonne_par)) : '') + (c.commentaire ? ' · « ' + esc(String(c.commentaire).slice(0, 120)) + ' »' : '') + '</p>'
+          + (c.remis_le ? '<p class="why">Remis au congélateur par <b>' + esc(propre(c.remis_par || 'un collègue')) + '</b> le ' + esc(jour(c.remis_le)) + (c.remis_commentaire ? ' · « ' + esc(String(c.remis_commentaire).slice(0, 160)) + ' »' : '') + '</p>' : '') + '</div>'
           + '<div class="src"><span class="tag">' + esc(c.source_bacs || 'BACS') + '</span></div>'
           + '<div class="lr-a">' + a + '</div></div>';
       });
@@ -4874,8 +4880,26 @@
         apres(nomLead(l) + ' clos' + (r && r.vers_bacs ? ', et abandonné dans BACS' : '') + '.');
       });
     }
+    // v98 : un lead repris du congélateur y retourne (BACS repasse « Abandonné »).
+    function libRendre(l) { return estCongele(l) ? 'Remettre au congélateur' : 'Rendre au Pool'; }
+    function modalRemettre(id) {
+      var l = leadDe(id);
+      ouvrirModal('<div class="mb-h"><div><h2>Remettre ' + esc(nomLead(l)) + ' au congélateur</h2><p>Le lead quitte votre liste et redevient libre au congélateur. Dans BACS, il repasse « Abandonné » avec son motif d\'origine, au nom du compte Vroom qui l\'avait abandonné.</p></div><button type="button" class="x" data-a="modal-close" aria-label="Fermer">' + X_SVG + '</button></div>'
+        + '<div class="mb-b"><div class="fg"><label class="full">Commentaire pour les collègues (facultatif)<textarea id="cg-com" maxlength="500" placeholder="Ex. : injoignable 3 fois, rappeler en janvier"></textarea></label></div></div>'
+        + '<div class="mb-f"><button type="button" class="btn ghost" data-a="modal-close">Annuler</button><button type="button" class="btn pri" data-a="cg-remettre-ok" data-id="' + esc(id) + '">Remettre au congélateur</button></div>');
+    }
+    function remettreCongele(id) {
+      var l = leadDe(id), t = $modal.querySelector('#cg-com'), com = t ? t.value : '';
+      return geste(async function () {
+        var r = await rpc('poste_congelateur_remettre', { p_id_lead: Number(id), p_commentaire: com || null });
+        if (r && r.ok === false) { toast(r.motif || 'Impossible de remettre ce lead au congélateur.', true); return; }
+        fermerModal();
+        apres(nomLead(l) + ' est de retour au congélateur.');
+      });
+    }
     function rendre(id) {
       var l = leadDe(id);
+      if (estCongele(l)) return modalRemettre(id);
       return geste(async function () {
         await rpc('poste_rendre', { p_id_lead: Number(id), p_motif: null });
         apres(nomLead(l) + ' est de nouveau dans le Pool' + (POSTE !== 'vendeur' && l.vendeur_nom ? ' (repris à ' + prenom(l.vendeur_nom) + ')' : '') + '.');
@@ -5035,6 +5059,7 @@
         case 'prendre': return prendre(id);
         case 'cg-prendre': return prendreCongele(id);
         case 'cg-jours': return congPeriode(Number(id) || 30, null);
+        case 'cg-remettre-ok': return remettreCongele(id);
         case 'tout-attribuer': return toutAttribuer();
         case 'ac-filtre': S.acFiltre = id; render(); return;
         case 'rappels': S.rappels = !S.rappels && accDispo(); S.leads = filtrerUniv(S.tous); S.suggKey = null; render(); if (POSTE !== 'vendeur') chargerAide(); return;
