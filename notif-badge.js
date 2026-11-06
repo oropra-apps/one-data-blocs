@@ -1,5 +1,12 @@
 // ============================================================================
-//  NOTIF BADGE — module One Data (OD.define)  v7 — LE FEU, PAS LE COMPTEUR
+//  NOTIF BADGE — module One Data (OD.define)  v8 — LE FEU, PAS LE COMPTEUR
+//
+//  v8 (06/11/2026) — LA PASTILLE SUIT LE RYTHME DES VENDEURS. Elle se
+//  recalculait toutes les cinq minutes : un appel, un SMS ou une réponse
+//  mettait jusqu'à cinq minutes à s'y voir. Le calcul (notif_feu) prend moins
+//  de 0,1 s : il repart désormais toutes les 60 s (onglet visible et en
+//  ligne seulement), au retour sur l'onglet dès 15 s d'ancienneté, et le
+//  premier calcul part au plus tard 1,5 s après l'affichage.
 //
 //  Module app-level : ancre masquée dans le header, PERSISTANT.
 //
@@ -60,8 +67,8 @@ OD.define('notif-badge', {
 
     /* ---- Config ----------------------------------------------------------- */
     const VAR_NB_NOTIFS = '9fc0eca4-2325-4774-8e27-4c66515a9166';   // sortie : nb_notifs (Number)
-    const PERIOD_MS     = 5 * 60 * 1000;                            // rafraîchissement périodique
-    const RETOUR_MS     = 60 * 1000;                                // recalcul au retour si plus vieux
+    const PERIOD_MS     = 60 * 1000;                                  // rafraîchissement périodique
+    const RETOUR_MS     = 15 * 1000;                                // recalcul au retour si plus vieux
     const LOG = (...a) => console.log('%c[notif-badge]', 'color:#2a5ea9;font-weight:bold', ...a);
 
     function fwin() {
@@ -253,9 +260,9 @@ OD.define('notif-badge', {
       const premierCalcul = () => calculer();
       try {
         if (typeof window.requestIdleCallback === 'function') {
-          window.requestIdleCallback(premierCalcul, { timeout: 6000 });
-        } else { setTimeout(premierCalcul, 3500); }
-      } catch (e) { setTimeout(premierCalcul, 3500); }
+          window.requestIdleCallback(premierCalcul, { timeout: 1500 });
+        } else { setTimeout(premierCalcul, 800); }
+      } catch (e) { setTimeout(premierCalcul, 800); }
 
       periodique();
       brancherRappel();
