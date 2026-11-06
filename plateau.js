@@ -1,5 +1,9 @@
 // ============================================================================
-//  VROOM TEAM (plateau) — module One Data (OD.define 'plateau')  v4
+//  VROOM TEAM (plateau) — module One Data (OD.define 'plateau')  v5
+//  v5 (06/11/2026) : RAPPELS DUS dans la vue standard. La tuile « rappels dus »
+//    s'ouvre sur la liste des rappels arrivés à échéance (les plus anciens
+//    d'abord, avec site, demande et tentatives) ; « Rappeler » réserve CE lead
+//    (plateau_prendre) et l'ouvre dans le poste, sans passer par la Vue liste.
 //  v4 (02/11/2026) : tuiles au design One Data (fond bleu très pâle, sans
 //    bordure ni ombre, coins 8 px, chiffres en bleu, aucun rouge ni beige).
 //    Liseré bleu à gauche au survol, seulement sur une tuile cliquable ;
@@ -221,6 +225,13 @@
       '@media (max-width:700px){.odpl .tiles{grid-template-columns:repeat(2,minmax(0,1fr))}}',
       '.odpl .tile{background:#f5f8fc;border:0;border-radius:8px;padding:16px}.odpl .tile b{display:block;font-size:28px;font-weight:900;color:var(--bl2)}.odpl .tile.r b,.odpl .tile.o b{color:#c7820a}',
       '.odpl .bigbtn{font-size:17px;font-weight:900;padding:18px 34px;border-radius:16px;border:0;background:var(--bl);color:#fff;box-shadow:0 10px 26px rgba(42,94,169,.3);min-height:60px}',
+      '.odpl button.tile.clic{font:inherit;color:inherit;cursor:pointer;text-align:center}.odpl button.tile.clic:hover,.odpl button.tile.clic.on{box-shadow:inset 3px 0 0 var(--bl)}',
+      '.odpl .rap{margin:26px auto 0;text-align:left;background:#fff;border:1px solid #e6eef8;border-radius:12px;overflow:hidden}',
+      '.odpl .rap-h{display:flex;align-items:center;gap:10px;padding:12px 16px;background:#f5f8fc}.odpl .rap-h b{color:var(--bl2);font-size:15px}.odpl .rap-h .lnk{margin-left:auto}',
+      '.odpl .rap-l{display:flex;align-items:center;gap:14px;padding:10px 16px;border-top:1px solid #eef3f9}',
+      '.odpl .rap-t{display:flex;flex-direction:column;min-width:96px}.odpl .rap-t b{color:#c7820a;font-size:14px}.odpl .rap-t.tard b{color:#b25e00}.odpl .rap-t small,.odpl .rap-c small{font-size:12px;color:var(--tx2)}',
+      '.odpl .rap-c{flex:1;min-width:0;display:flex;flex-direction:column}.odpl .rap-c b{color:var(--bl2);font-size:14px}',
+      '.odpl .btn-rap{font:inherit;font-size:13px;font-weight:800;border:0;border-radius:10px;padding:9px 16px;background:var(--bl);color:#fff;cursor:pointer}.odpl .btn-rap:disabled{opacity:.5;cursor:default}',
       '.odpl .lnk{border:0;background:transparent;color:var(--bl);font-weight:800;font-size:13px;text-decoration:underline;padding:6px}',
       '.odpl kbd{font:inherit;font-size:11px;font-weight:900;padding:1px 6px;border-radius:5px;border:1px solid currentColor;opacity:.75}',
       // tour de contrôle
@@ -339,7 +350,7 @@
       vue: 'attente', occupe: false, pause: false, enchainer: true,
       cur: null, fiche: null, cx: null, sites: null, site: null, vendeurs: {}, vendeur: '',
       creneaux: {}, slot: null, issue: null, q: {}, modele: '', note: '', rappel: '2h', rappelDate: '', smsBacs: true, mailBacs: false,
-      motif: MOTIFS[0], etape: 0, passes: [], file: [], cpt: {}, stats: {}, bacs: null, debut: null, dernier: null, liens: null, dictee: false
+      motif: MOTIFS[0], etape: 0, passes: [], file: [], cpt: {}, rappels: null, voirRappels: false, stats: {}, bacs: null, debut: null, dernier: null, liens: null, dictee: false
     };
     injecterCss(doc);
     el.innerHTML = '';
@@ -352,16 +363,33 @@
       var r = await Promise.all([
         rpc('plateau_mes_stats', { p_id_user: null }).catch(function () { return S.stats; }),
         rpc('plateau_bacs_etat').catch(function () { return S.bacs; }),
-        rpc('plateau_suivant', { p_passer: S.passes.length ? S.passes : null, p_reserver: false }).catch(function () { return null; })
+        rpc('plateau_suivant', { p_passer: S.passes.length ? S.passes : null, p_reserver: false }).catch(function () { return null; }),
+        rpc('plateau_file2', { p_vue: 'rappels' }).catch(function () { return null; })
       ]);
       S.stats = r[0] || {}; S.bacs = r[1]; if (r[2]) { S.file = r[2].file || []; S.cpt = r[2]; }
+      if (Array.isArray(r[3])) S.rappels = r[3];
     }
-    async function servir() {
+    // v5 : sfCible = un rappel choisi dans la liste « Rappels dus ».
+    async function servir(sfCible) {
       if (S.occupe) return;
       if (bacsBloque()) { toast(doc, 'BACS n\'est pas ouvert sur ce poste : ouvrez-le dans un onglet de ce navigateur, avec l\'extension One Data.', true); return; }
       S.occupe = true; S.vue = 'charge'; render();
       try {
-        var r = await rpc('plateau_suivant', { p_passer: S.passes.length ? S.passes : null, p_reserver: true });
+        var r;
+        if (sfCible) {
+          var pr = await rpc('plateau_prendre', { p_sf_lead_id: sfCible });
+          if (!pr || pr.action !== 'reserve') {
+            S.vue = 'attente';
+            toast(doc, pr && pr.action === 'occupe' ? 'Ce lead est déjà pris par ' + (pr.par_nom || 'un collègue') + '.'
+              : pr && pr.action === 'clos' ? 'Ce lead est clos dans BACS (' + (pr.statut || '') + ').' : 'Ce lead n\'est plus disponible.', true);
+            chargerEntour().then(render);
+            return;
+          }
+          var ligne = (S.rappels || []).filter(function (x) { return x.sf_lead_id === sfCible; })[0] || {};
+          r = Object.assign({}, S.cpt || {}, { sf: sfCible, raison: 'rappel', jusqu: pr.jusqu, lead: ligne, file: S.file });
+        } else {
+          r = await rpc('plateau_suivant', { p_passer: S.passes.length ? S.passes : null, p_reserver: true });
+        }
         S.file = r.file || []; S.cpt = r;
         if (!r.sf) { S.vue = 'vide'; S.cur = null; return; }
         reveillerBacs();
@@ -436,6 +464,38 @@
         + (reste.length ? '<span class="muted">· en tout ' + reste.join(', ') + '</span>' : '')
         + '<span style="flex:1"></span><label class="small muted" style="display:flex;gap:8px;align-items:center"><input type="checkbox" data-x="enchainer"' + (S.enchainer ? ' checked' : '') + ' style="accent-color:#2a5ea9;width:16px;height:16px"> Enchaîner automatiquement</label></div>';
     }
+    // v5 : RAPPELS DUS visibles dans la vue standard (avant : seulement en
+    // « Vue liste »). Dus = heure de rappel passée ou dans les 5 minutes,
+    // comme plateau_suivant. Les plus anciens d'abord.
+    function rappelsDus() {
+      var lim = Date.now() + 5 * 60000;
+      return (S.rappels || []).filter(function (x) { return x.rappel_le && ts(x.rappel_le) <= lim; })
+        .sort(function (a, b) { return ts(a.rappel_le) - ts(b.rappel_le); });
+    }
+    function rappelsAVenir() {
+      var lim = Date.now() + 5 * 60000, fin = new Date(); fin.setHours(23, 59, 59, 999);
+      return (S.rappels || []).filter(function (x) { return x.rappel_le && ts(x.rappel_le) > lim && ts(x.rappel_le) <= fin.getTime(); });
+    }
+    function listeRappels() {
+      var ls = rappelsDus(), av = rappelsAVenir();
+      if (!S.voirRappels) {
+        return ls.length ? '<p class="small muted" style="margin-top:18px"><button type="button" class="lnk" data-a="voir-rappels">Voir les ' + plural(ls.length, 'rappel dû', 'rappels dus') + '</button>' + (av.length ? ' · ' + plural(av.length, 'autre', 'autres') + ' plus tard aujourd\'hui' : '') + '</p>' : '';
+      }
+      var moi = Number(user.ID_User || user.id_user || 0);
+      var h = '<div class="rap"><div class="rap-h"><b>Rappels dus</b><span class="muted small">' + (ls.length ? plural(ls.length, 'client attend', 'clients attendent') + ' votre appel' : 'aucun pour l\'instant')
+        + (av.length ? ' · ' + plural(av.length, 'autre', 'autres') + ' plus tard aujourd\'hui' : '') + '</span><button type="button" class="lnk" data-a="voir-rappels">Masquer</button></div>';
+      ls.forEach(function (x) {
+        var pris = x.verrou_par && ts(x.verrou_jusqu) > Date.now() && Number(x.verrou_par) !== moi;
+        var dem = [x.type_demande, x.modele].filter(Boolean).join(' · ');
+        var retard = Date.now() - ts(x.rappel_le);
+        h += '<div class="rap-l"><span class="rap-t' + (retard > 3600000 ? ' tard' : '') + '"><b>' + esc(quand(x.rappel_le)) + '</b><small>' + (retard > 60000 ? 'il y a ' + dureeMin(retard / 60000) : 'maintenant') + '</small></span>'
+          + '<span class="rap-c"><b>' + esc(propre(x.nom || 'Client')) + '</b><small>' + esc([dem, x.site ? propre(x.site) : '', x.tentatives ? plural(x.tentatives, 'tentative') : ''].filter(Boolean).join(' · ')) + '</small></span>'
+          + (pris ? '<span class="small muted">pris par ' + esc(propre(x.verrou_nom || 'un collègue')) + '</span>'
+            : '<button type="button" class="btn-rap" data-a="servir-sf" data-id="' + esc(x.sf_lead_id) + '"' + (bacsBloque() ? ' disabled' : '') + '>Rappeler</button>')
+          + '</div>';
+      });
+      return h + '</div>';
+    }
     function ecranAttente() {
       var c = S.cpt || {};
       var titre = S.pause ? 'Vous êtes en pause' : S.vue === 'vide' ? 'Aucun lead à servir pour l\'instant' : S.vue === 'charge' ? 'Recherche du lead suivant…' : 'Prête pour le lead suivant ?';
@@ -443,10 +503,11 @@
         : S.vue === 'vide' ? 'Tous les leads à traiter sont pris ou attendent leur heure de rappel. Le poste regarde à nouveau toutes les 30 secondes.'
         : 'One Data vous sert le plus urgent : les demandes 1 h d\'abord, puis les rappels promis, les relances 48 h et les demandes du jour.';
       return '<div class="wait"><h2>' + titre + '</h2><p class="muted">' + sous + '</p>'
-        + '<div class="tiles"><div class="tile r"><b>' + nf(c.n1h || 0) + '</b>demandes 1 h</div><div class="tile o"><b>' + nf(c.nrappels || 0) + '</b>rappels dus</div>'
+        + '<div class="tiles"><div class="tile r"><b>' + nf(c.n1h || 0) + '</b>demandes 1 h</div><button type="button" class="tile o clic' + (S.voirRappels ? ' on' : '') + '" data-a="voir-rappels" aria-expanded="' + !!S.voirRappels + '"><b>' + nf(rappelsDus().length || c.nrappels || 0) + '</b>rappels dus</button>'
         + '<div class="tile o"><b>' + nf(c.n48h || 0) + '</b>relances 48 h</div><div class="tile"><b>' + nf(c.npool || 0) + '</b>leads au Pool</div></div>'
         + (S.pause ? '<button type="button" class="bigbtn" data-a="reprendre">Reprendre</button>'
           : '<button type="button" class="bigbtn" data-a="servir"' + (bacsBloque() || S.vue === 'charge' ? ' disabled' : '') + '>' + (S.vue === 'charge' ? 'Un instant…' : 'Lead suivant <kbd>Entrée</kbd>') + '</button>')
+        + (!S.pause ? listeRappels() : '')
         + (typeof opt.creer === 'function' ? '<p class="small muted" style="margin-top:14px">Un client appelle ou se présente sans demande ? <button type="button" class="lnk" data-a="creer">Créer un lead et l\'envoyer à un vendeur</button> <kbd>N</kbd></p>' : '')
         + (S.passes.length ? '<p class="small muted" style="margin-top:16px">' + plural(S.passes.length, 'lead passé', 'leads passés') + ' pendant cette session. <button type="button" class="lnk" data-a="oublier-passes">Les remettre dans la file</button></p>' : '')
         + '</div>';
@@ -764,6 +825,8 @@
       var a = t.getAttribute('data-a'), id = t.getAttribute('data-id');
       switch (a) {
         case 'servir': return servir();
+        case 'servir-sf': return servir(id);
+        case 'voir-rappels': S.voirRappels = !S.voirRappels; render(); return;
         case 'pause':
           if (S.vue === 'lead') { toast(doc, 'Terminez d\'abord le lead en cours (ou passez-le).', true); return; }
           S.pause = true; render(); return;
