@@ -1,4 +1,7 @@
 // ============================================================================
+//  v28 (06/11/2026) : module partagé oropra-bacs-client v7 — la création d'un
+//    client ne propose plus d'envoyer la demande de consentement par SMS (les
+//    vendeurs la recueillent à la commande). Aucun autre changement.
 //  v27 (04/11/2026) : création d'une SOCIÉTÉ comme dans BACS — module partagé
 //    oropra-bacs-client v6 : la société est créée dans BACS d'abord (compte
 //    Business Account), puis dans One Data ; le panneau final rappelle de lui
@@ -591,8 +594,8 @@ OD.define('client-search', {
       // l'appel direct si le module partagé ne se charge pas : la base exige
       // de toute façon que BACS soit ouvert chez le vendeur.
       const _bc = await (window.__odBacsClientPret || (window.__odBacsClientPret = new Promise(function (ok) {
-            if (window.oropraBacsClient) return ok(window.oropraBacsClient);
-            var sc = document.createElement('script'); sc.src = 'https://cdn.jsdelivr.net/gh/oropra-apps/one-data-blocs@oropra-bacs-client-v6/oropra-bacs-client.js'; sc.async = true;
+            if (window.oropraBacsClient && window.oropraBacsClient.version >= 7) return ok(window.oropraBacsClient);
+            var sc = document.createElement('script'); sc.src = 'https://cdn.jsdelivr.net/gh/oropra-apps/one-data-blocs@oropra-bacs-client-v7/oropra-bacs-client.js'; sc.async = true;
             sc.onload = function () { ok(window.oropraBacsClient || null); };
             sc.onerror = function () { window.__odBacsClientPret = null; ok(null); };
             document.head.appendChild(sc);
@@ -1265,8 +1268,8 @@ OD.define('client-search', {
       if (window.oropraBacsClient) window.oropraBacsClient.appliquer(el, _m);
       if (_m.__bacsSuivi) return;
       (window.__odBacsClientPret || (window.__odBacsClientPret = new Promise(function (ok) {
-        if (window.oropraBacsClient) return ok(window.oropraBacsClient);
-        var sc = document.createElement('script'); sc.src = 'https://cdn.jsdelivr.net/gh/oropra-apps/one-data-blocs@oropra-bacs-client-v6/oropra-bacs-client.js'; sc.async = true;
+        if (window.oropraBacsClient && window.oropraBacsClient.version >= 7) return ok(window.oropraBacsClient);
+        var sc = document.createElement('script'); sc.src = 'https://cdn.jsdelivr.net/gh/oropra-apps/one-data-blocs@oropra-bacs-client-v7/oropra-bacs-client.js'; sc.async = true;
         sc.onload = function () { ok(window.oropraBacsClient || null); };
         sc.onerror = function () { window.__odBacsClientPret = null; ok(null); };
         document.head.appendChild(sc);
