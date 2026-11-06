@@ -1,5 +1,9 @@
 // ============================================================================
-//  TOP NAV — module One Data (OD.define)  v43 — SÉLECTEUR DE PÉRIMÈTRE
+//  TOP NAV — module One Data (OD.define)  v44 — SÉLECTEUR DE PÉRIMÈTRE
+//  v44 (06/11/2026) : Vroom Team (rôle 10) — plus de page Notifications
+//    (« On vous attend ») ni de pastille sur « Clients » : ses rappels sont
+//    dans son poste (« Rappels dus »). Pastille « Clients » aussi retirée
+//    pour le rôle 13, qui n'avait déjà plus la page.
 //  v43 (04/11/2026) : « Mon compte » complet (RPC mon_compte) : identité,
 //    fonction, licence, responsable, sites et rôles ; téléphonie (numéro
 //    affiché dans l'annuaire, modifiable ; poste et ligne directe 3CX ;
@@ -162,7 +166,7 @@ OD.define('topnav', {
   const wwLib = window.wwLib;
   const doc = __anchor.ownerDocument || wwLib.getFrontDocument();
   const ROOT_ID = 'nav-root';
-  const NAV_VER = 42; // <- numéro de version (témoin de chargement)
+  const NAV_VER = 44; // <- numéro de version (témoin de chargement)
 
   // ------------------------------------------------------------- favicon
   // Posée une fois par chargement de l'app ; les balises existantes (icônes
@@ -603,7 +607,7 @@ OD.define('topnav', {
     // objectifs, bilatérales, activité, import VN). Les droits sont tenus
     // en base ; ce filtre évite seulement d'ouvrir des pages vides.
     var __roleMenu = Number((user() || {}).ID_Role != null ? user().ID_Role : (user() || {}).id_role);
-    var __masque = (__roleMenu === 10) ? [P.pipe, P.perf, P.objectifs, P.bilat, P.activite, P.vnConfig]
+    var __masque = (__roleMenu === 10) ? [P.pipe, P.perf, P.objectifs, P.bilat, P.activite, P.vnConfig, P.notifs]
                  : (__roleMenu === 13) ? [P.pipe, P.perf, P.objectifs, P.bilat, P.activite, P.vnConfig, P.marketing, P.notifs] : [];
     // v42 : appels entrants (rôle 13) — Base client, stocks, « Nouveau lead ».
     var __appels = (__roleMenu === 13);
@@ -622,7 +626,7 @@ OD.define('topnav', {
           (it.leads && __leadsBadge ? '<span class="od-pill od-leads-pill" style="display:none"></span>' : '') + '</a>';
       });
       menusHtml += '<div class="od-m" data-mi="' + mi + '"><button data-toggle="' + mi + '">' + esc(m.label) +
-        (m.badge ? '<span class="od-pill od-notifs-pill" style="display:none"></span>' : '') +
+        (m.badge && __masque.indexOf(P.notifs) === -1 ? '<span class="od-pill od-notifs-pill" style="display:none"></span>' : '') +
         (m.leads && __leadsBadge ? '<span class="od-pill od-leads-pill" style="display:none"></span>' : '') +
         '</button><div class="od-drop">' + items + '</div></div>';
     });
