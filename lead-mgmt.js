@@ -1,6 +1,10 @@
 // ============================================================================
 //  LEAD MANAGEMENT — module One Data (OD.define 'lead-mgmt')
-//  VERSION TEAM COLIN (v100) — déploiement CIBLÉ (publish-targets :
+//  VERSION TEAM COLIN (v101) — déploiement CIBLÉ (publish-targets :
+//  v101 (09/11/2026) : Pool BACS Vroom — TRAFIC ATELIER regroupé et classé par
+//    date de RDV atelier (à venir d'abord, puis RDV passés) ; à gauche « RDV atelier
+//    jeu. 13/11 8h · dans 3 j » au lieu d'un compte à rebours en heures ; étiquette
+//    « Trafic atelier » (plateau_file2 : traitement 'atelier', rdv_atelier).
 //  v100 (09/11/2026) : onglet « Suivis » (demande d'Arnaud Lefebvre) : quand un
 //    client rappelle, chacun retrouve sa demande et voit où elle en est, même
 //    si un collègue la suit — vendeur, dernier geste, statut One Data et BACS,
@@ -708,13 +712,34 @@
       return null;
     }
     function univCls(l) { var u = univ(l); return u === 'VN' ? ' vt-vn' : u === 'VO' ? ' vt-vo' : ''; }
-    function frais(l) { return mins(l.recu_le) < 1440 || minsB(l.recu_le) < 510; }
+    // v101 : un lead atelier n'est jamais « frais » : son délai est le RDV atelier.
+    function frais(l) { if (l && l.traitement === 'atelier') return false; return mins(l.recu_le) < 1440 || minsB(l.recu_le) < 510; }
     // v77 : le chef du plateau revient à sa supervision depuis le poste opérateur.
     function aSupervision() { try { return /poste-operateur/i.test(FW.location.hash || '') && S.superviseur === true; } catch (e) { return false; } }
     // v77 : type de traitement BACS. ch1 = « Demande client (1h) » pas encore
     // traité, reçu il y a moins de 24 h ; ch48 = « Relance concession (48h) ».
     function ch1(l) { return !!(l && l.chrono && l.traitement === '1h' && frais(l)); }
     function ch48(l) { return !!(l && l.chrono && l.traitement === '48h' && mins(l.recu_le) < 4320); }
+    // v101 : trafic atelier — l'échéance est le RDV d'atelier du client.
+    function chAt(l) { return !!(l && l.traitement === 'atelier'); }
+    function rdvAt(l) { return l.rdv_atelier || l.echeance || null; }
+    function ordreAt(a, b) {
+      var n = Date.now(), ta = ts(rdvAt(a)) || 0, tb = ts(rdvAt(b)) || 0, fa = ta >= n, fb = tb >= n;
+      if (fa !== fb) return fa ? -1 : 1;
+      return fa ? ta - tb : tb - ta;
+    }
+    function jourRdv(v) {
+      var d = new Date(v), j = ['dim.', 'lun.', 'mar.', 'mer.', 'jeu.', 'ven.', 'sam.'][d.getDay()];
+      return j + ' ' + String(d.getDate()).padStart(2, '0') + '/' + String(d.getMonth() + 1).padStart(2, '0') + ' ' + d.getHours() + 'h' + (d.getMinutes() ? String(d.getMinutes()).padStart(2, '0') : '');
+    }
+    function gaucheAtelier(l) {
+      var r = rdvAt(l);
+      if (!r) return '<span class="tm at"><b>RDV atelier ?</b><small>reçu le ' + esc(jour(l.recu_le)) + '</small></span>';
+      var m = (ts(r) - Date.now()) / 60000, q;
+      if (m >= 0) q = m < 60 ? 'dans ' + Math.max(1, Math.round(m)) + ' min' : m < 1440 ? 'dans ' + Math.round(m / 60) + ' h' : 'dans ' + Math.round(m / 1440) + ' j';
+      else q = -m < 1440 ? 'passé auj.' : 'passé (' + Math.round(-m / 1440) + ' j)';
+      return '<span class="tm at' + (m < 0 ? ' passe' : m < 1440 ? ' proche' : '') + '"><b>' + esc(jourRdv(r)) + '</b><small>RDV atelier · ' + esc(q) + '</small></span>';
+    }
     function reste(l) { return l.echeance ? (ts(l.echeance) - Date.now()) / 60000 : null; }
     function hms(m) {
       m = Math.max(0, m);
@@ -729,6 +754,7 @@
     }
     function tagTraitement(l) {
       if (!l || !l.traitement) return '';
+      if (l.traitement === 'atelier') return '<span class="tag at">Trafic atelier' + (l.rdv_atelier_type ? ' · ' + esc(String(l.rdv_atelier_type).toLowerCase()) : '') + '</span>';
       var t = l.traitement === '1h' ? 'Demande client (1h)' : 'Relance concession (48h)';
       return '<span class="tag ' + (l.traitement === '1h' ? 'crit' : 'warn') + '"' + (l.traitement_deduit ? ' title="Type de traitement déduit de la source : BACS ne l\'a pas encore transmis"' : '') + '>' + t + (l.traitement_deduit ? ' ?' : '') + '</span>';
     }
@@ -985,6 +1011,7 @@
       var libres = libresTous().filter(function (l) { return l.statut_eff === 'A affecter' || l.statut_eff === 'Nouveau'; });
       var fr = libres.filter(frais);
       if (fr.length) return fr.slice().sort(function (a, b) { return (mins(b.recu_le) - (b.sla_min || 120)) - (mins(a.recu_le) - (a.sla_min || 120)); })[0];
+      var at = libres.filter(chAt).sort(ordreAt); if (at.length) return at[0];
       return libres.slice().sort(function (a, b) { return ts(b.recu_le) - ts(a.recu_le); })[0] || null;
     }
     function renderSituation() {
@@ -1006,7 +1033,7 @@
       if (s) {
         var m = mins(s.recu_le), sla = s.sla_min || 120;
         cta = '<button type="button" class="cta' + (ch1(s) ? ' cta1' : '') + '" data-a="prendre" data-id="' + esc(s.sf_lead_id) + '"' + dis() + '>Prendre le suivant<small>'
-          + esc(nomLead(s)) + ' · ' + (ch1(s) ? 'Demande client (1h) · ' + texteChrono(s) : !frais(s) ? 'reçu le ' + jour(s.recu_le) : m >= sla ? 'hors délai de ' + duree(m - sla) : 'attend depuis ' + duree(m)) + '</small></button>';
+          + esc(nomLead(s)) + ' · ' + (ch1(s) ? 'Demande client (1h) · ' + texteChrono(s) : chAt(s) ? 'Trafic atelier · RDV ' + jourRdv(rdvAt(s)) : !frais(s) ? 'reçu le ' + jour(s.recu_le) : m >= sla ? 'hors délai de ' + duree(m - sla) : 'attend depuis ' + duree(m)) + '</small></button>';
       }
       var b = S.bacs || {};
       var voyant = !b.ecrire_bacs ? '' : '<span class="voyant ' + (b.canal !== 'moi' || b.echecs ? 'crit' : b.en_attente ? 'warn' : 'ok') + '">'
@@ -1091,6 +1118,20 @@
         + (!S.stock ? chipsSources() : '') + '</div><div class="list">';
       var ls = S.stock ? vus(S.stockListe || []) : base.filter(function (l) { return S.age === 'frais' ? frais(l) : !frais(l); });
       if (!S.stock) ls.sort(S.age === 'frais' ? function (a, b) { return (mins(b.recu_le) - (b.sla_min || 120)) - (mins(a.recu_le) - (a.sla_min || 120)); } : function (a, b) { return ts(b.recu_le) - ts(a.recu_le); });
+      // v101 : trafic atelier regroupé, par date de RDV atelier (à venir d'abord).
+      var gAt = S.stock ? [] : ls.filter(chAt).sort(ordreAt);
+      if (gAt.length) ls = ls.filter(function (l) { return !chAt(l); });
+      function blocAtelier() {
+        if (!gAt.length) return '';
+        var t = '<p class="grp gat">Trafic atelier · par date de RDV atelier <span class="num">' + gAt.length + '</span></p>';
+        gAt.forEach(function (l) { t += ligneLead(l, gaucheAtelier(l), l.statut_eff === 'Accepté' ? 'Rappeler' : 'Prendre'); });
+        return t;
+      }
+      if (!S.stock && S.age === 'vieux' && gAt.length) {
+        h += blocAtelier();
+        if (ls.length) h += '<p class="grp g0">Autres leads de plus de 24 h</p>';
+        gAt = [];
+      }
       // v77 : les leads « Demande client (1h) » d'abord, quels que soient les
       // filtres VN / VO et la période ; puis les « Relance concession (48h) ».
       if (!S.stock && S.age === 'frais') {
@@ -1105,12 +1146,13 @@
           h += '<p class="grp g48">Relance concession (48h) <span class="num">' + g48.length + '</span></p>';
           g48.forEach(function (l) { h += ligneLead(l, gaucheChrono(l), l.statut_eff === 'Accepté' ? 'Rappeler' : 'Prendre'); });
         }
-        if ((g1.length || g48.length) && reste0.length) h += '<p class="grp g0">Autres leads de moins de 24 h</p>';
+        h += blocAtelier();
+        if ((g1.length || g48.length || gAt.length) && reste0.length) h += '<p class="grp g0">Autres leads de moins de 24 h</p>';
         ls = reste0;
-        if (!ls.length && (g1.length || g48.length)) return h + '</div><p class="foot">Prendre réserve le lead à votre nom ' + (k.verrou_minutes || 5) + ' min. Les leads « Demande client (1h) » sont pénalisés par le constructeur au-delà d\'une heure.</p>';
+        if (!ls.length && (g1.length || g48.length || gAt.length)) return h + '</div><p class="foot">Prendre réserve le lead à votre nom ' + (k.verrou_minutes || 5) + ' min. Les leads « Demande client (1h) » sont pénalisés par le constructeur au-delà d\'une heure.</p>';
       }
       if (S.stock && !S.stockListe) h += '<div class="empty">Chargement du stock…</div>';
-      else if (!ls.length) h += '<div class="empty">' + (S.campagne ? 'Aucun lead de cette campagne à traiter.' : S.stock ? 'Aucun lead en stock.' : S.age === 'frais' ? 'Aucun lead de moins de 24 h à prendre.' : 'Aucun lead de plus de 24 h dans le Pool BACS.') + '</div>';
+      else if (!ls.length && !(S.age === 'vieux' && h.indexOf('grp gat') > -1)) h += '<div class="empty">' + (S.campagne ? 'Aucun lead de cette campagne à traiter.' : S.stock ? 'Aucun lead en stock.' : S.age === 'frais' ? 'Aucun lead de moins de 24 h à prendre.' : 'Aucun lead de plus de 24 h dans le Pool BACS.') + '</div>';
       ls.forEach(function (l) {
         var gauche = S.stock || !frais(l)
           ? '<span class="tm crit"><b>' + duree(mins(l.recu_le)) + '</b><small>reçu le ' + jour(l.recu_le) + '</small></span>'
@@ -5447,6 +5489,9 @@
 .lmtc .tag.ok{background:var(--ok-bg);color:var(--m-vert);font-weight:700}
 .lmtc .tag.crit{background:var(--chaud-bg);color:var(--m-rouge);font-weight:700}
 .lmtc .tag.warn{background:var(--alerte-bg);color:var(--m-orange);font-weight:700}
+.lmtc .tag.at{background:#E6F0FA;color:#2557A1;font-weight:700}
+.lmtc .tm.at b{color:#2557A1}.lmtc .tm.at.proche b{color:#B25E00}.lmtc .tm.at.passe b{color:#5a7196}
+.lmtc .grp.gat{color:#2557A1}
 .lmtc .tags{display:flex;flex-wrap:wrap;gap:5px;margin-top:6px}
 
 /* Minuteurs */
