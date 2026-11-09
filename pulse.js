@@ -1,10 +1,11 @@
 // ============================================================================
-//  PULSE — télémétrie d'usage One Data (OD.define)  v6
+//  PULSE — télémétrie d'usage One Data (OD.define)  v7
 //  Module AMBIANT : le socle (v25+) lui crée une ancre invisible, uniquement
 //  chez les tenants à qui le registre sert 'pulse'. Persistant, sans rendu.
 //
 //  Ce qui est mesuré : écrans ouverts, temps ACTIF (onglet visible + geste dans
-//  la dernière minute), clics sur les éléments interactifs, clics répétés de
+//  les 5 dernières minutes, ou appel téléphonique en cours), temps OUVERT
+//  (onglet visible, avec ou sans geste), clics sur les éléments interactifs, clics répétés de
 //  frustration, temps de montage des modules, latence des appels Supabase,
 //  erreurs JavaScript.
 //  Ce qui ne l'est JAMAIS : le contenu des champs, les données clients, les
@@ -17,7 +18,8 @@
 // ============================================================================
 OD.define('pulse', {
   mount(__anchor, ctx) {
-    const VERSION = 6;   // v6 : une coupure réseau = UNE friction, plus une « Erreur JS » par requête (25/10/2026)
+    const VERSION = 7;   // v7 : inactivité portée à 5 min, appel en cours compté actif, temps ouvert mesuré (09/11/2026)
+                         // v6 : une coupure réseau = UNE friction, plus une « Erreur JS » par requête (25/10/2026)
                          // v4 : écran principal = module monté occupant la plus grande surface visible
                          // v3 : actions métier déduites des écritures réussies (catalogue ACTIONS)
                          // v2 : rien n'est mesuré sur la page de connexion (ancre 'auth')
@@ -35,7 +37,7 @@ OD.define('pulse', {
 
     const FLUSH_MS = 20000;
     const TICK_MS = 5000;
-    const INACTIF_MS = 60000;
+    const INACTIF_MS = 5 * 60000;   // v7 : la lecture d'une fiche ou d'une liste compte
     const SESSION_IDLE_MS = 30 * 60000;
     const LENT_MS = 1500;
     const MODULES_MUETS = new Set(['pulse', 'retours']);
@@ -137,12 +139,27 @@ OD.define('pulse', {
     let derniereVue = { page: null, ts: 0 };   // anti-doublon de vue de page
     let derniereActivite = Date.now();
     let actifAccumule = 0;
+    let ouvertAccumule = 0;   // v7 : onglet visible, avec ou sans geste
+    let appelAccumule = 0;    // v7 : part du temps actif passée en communication
 
+    // Le temps OUVERT et la part APPEL voyagent dans les props de l'événement
+    // 'actif' : aucun nouveau type à déclarer côté edge function.
     function viderActif() {
-      if (actifAccumule > 0) {
-        pousser({ type: 'actif', page: pageCourante, duree_ms: actifAccumule });
-        actifAccumule = 0;
+      if (actifAccumule > 0 || ouvertAccumule > 0) {
+        pousser({ type: 'actif', page: pageCourante, duree_ms: actifAccumule,
+                  props: { ouvert: ouvertAccumule, appel: appelAccumule } });
+        actifAccumule = 0; ouvertAccumule = 0; appelAccumule = 0;
       }
+    }
+    // v7 : appel 3CX en cours, lu dans l'état du module phone3cx (même fenêtre
+    // ou fenêtre principale WeWeb). Un appel de plus de 2 h est jugé périmé.
+    function enAppel() {
+      try {
+        const fw = W.wwLib && W.wwLib.getFrontWindow ? W.wwLib.getFrontWindow() : null;
+        const st = W.__od3cx || (fw && fw.__od3cx);
+        const a = st && st.appel;
+        return !!(a && a.etat === 'en_cours' && st.depuis && Date.now() - st.depuis < 2 * 3600000);
+      } catch (e) { return false; }
     }
     function surveillerPage() {
       const p = chemin();
@@ -159,11 +176,22 @@ OD.define('pulse', {
     ecouter(document, 'mousemove', () => { const n = Date.now(); if (n - dernierMouvement > 2000) { dernierMouvement = n; derniereActivite = n; } }, { capture: true, passive: true });
     ecouter(document, 'scroll', marquerActivite, { capture: true, passive: true });
 
+    // v7 : on cumule le temps réellement écoulé depuis le tic précédent. Onglet
+    // masqué, le navigateur espace les tics (jusqu'à une minute) : pendant un
+    // appel, le temps continue d'être compté ; hors appel, un écart anormal
+    // (veille de l'ordinateur) est plafonné.
+    let dernierTic = Date.now();
     const tick = setInterval(() => {
       surveillerPage();
-      if (document.visibilityState === 'visible' && Date.now() - derniereActivite < INACTIF_MS && utilisateur()) {
-        actifAccumule += TICK_MS;
-      }
+      const n = Date.now(), ecart = n - dernierTic;
+      dernierTic = n;
+      if (!utilisateur()) return;
+      const visible = document.visibilityState === 'visible';
+      const appel = enAppel();
+      const pas = Math.min(ecart, appel ? 70000 : 2 * TICK_MS);
+      if (appel || (visible && n - derniereActivite < INACTIF_MS)) actifAccumule += pas;
+      if (appel) appelAccumule += pas;
+      if (visible) ouvertAccumule += Math.min(ecart, 2 * TICK_MS);
     }, TICK_MS);
     const tickPage = setInterval(surveillerPage, 700);
     nettoyages.push(() => { clearInterval(tick); clearInterval(tickPage); });
