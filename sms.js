@@ -1,3 +1,5 @@
+// v15 (09/11/2026) : bouton « Modèles » — le texte en cours est proposé à
+// « Enregistrer mon message comme modèle » (Mes modèles, module modeles v3).
 // v13 (28/10/2026) : bouton « Modèles » dans la fenêtre SMS — modèles gérés
 // dans Administration › Modèles de messages (module `modeles`, chargé à la
 // demande). open({ client, text, idLead }) : idLead adapte les variables au
@@ -524,7 +526,8 @@ OD.define('sms', {
     const api = await chargerModeles();
     if (!api) { state.error = 'Les modèles de messages ne sont pas disponibles.'; render(); return; }
     const c = state.client || {};
-    const m = await api.choisir({ canal: 'sms', idClient: c.IDVu, idLead: state.idLead, idSite: state.site, contexte: state.idLead ? 'lead' : 'client', doc: doc });
+    const m = await api.choisir({ canal: 'sms', idClient: c.IDVu, idLead: state.idLead, idSite: state.site, contexte: state.idLead ? 'lead' : 'client', doc: doc,
+                                  brouillon: { corps: state.input || '' } });
     if (!m) return;
     state.input = m.corps; state.error = null; state.trous = m.manquantes || [];
     render();
