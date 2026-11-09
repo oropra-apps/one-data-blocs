@@ -1,5 +1,13 @@
 // ============================================================================
-//  MODÈLES DE MESSAGES — module One Data (OD.define 'modeles')  v2
+//  MODÈLES DE MESSAGES — module One Data (OD.define 'modeles')  v3
+//  v3 (09/11/2026) : MES MODÈLES (demande de Yanis Fernandes). Chacun peut
+//  enregistrer ses propres modèles d'e-mail et de SMS, visibles de lui seul,
+//  depuis la fenêtre « Modèles » : « Nouveau modèle », ou « Enregistrer mon
+//  message comme modèle » (le texte en cours, passé par la fenêtre d'envoi en
+//  option brouillon). Ils apparaissent en tête, sous « Mes modèles », avec
+//  Modifier / Supprimer. Mêmes variables {{…}} que les modèles du groupe.
+//  L'administration des modèles du groupe est inchangée et ne voit pas les
+//  modèles personnels. API : enregistrer({ canal, objet, corps|html, doc }).
 //  v2 (28/10/2026) : relecture des textes. Variables « le_vehicule » et
 //  « du_vehicule » (article accordé : « la Toyota Yaris », « le Toyota C-HR »,
 //  « la Lexus ES d'occasion »), nom du véhicule nettoyé en base. Partie
@@ -146,6 +154,9 @@
     + '.odm-prev .wa{background:#e7f6f2;border-radius:10px;padding:10px 12px;}'
     + '.odm-prev .meta{font-size:11.5px;color:var(--tm);}'
     + '.odm-search{position:relative;margin-bottom:10px;}'
+    + '.odm-badge.perso{background:var(--gbg);color:#1b7a44;}'
+    + '.odm-prev .acts{display:flex;gap:8px;flex-wrap:wrap;margin-top:4px;}'
+    + '.odm-ft .gauche{margin-right:auto;display:flex;gap:8px;flex-wrap:wrap;}'
     /* administration */
     + '.odm{width:100%;box-sizing:border-box;}'
     + '.odm-head{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:12px;}'
@@ -212,6 +223,7 @@
   function trier(liste, univers) {
     var rang = {}; CATEGORIES.forEach(function (c, i) { rang[c[0]] = i; });
     return liste.slice().sort(function (a, b) {
+      if (!!a.perso !== !!b.perso) return a.perso ? -1 : 1;
       var la = univers && a.univers !== 'tous' && a.univers !== univers ? 1 : 0, lb = univers && b.univers !== 'tous' && b.univers !== univers ? 1 : 0;
       if (la !== lb) return la - lb;
       var ca = rang[a.categorie] != null ? rang[a.categorie] : 99, cb = rang[b.categorie] != null ? rang[b.categorie] : 99;
@@ -220,16 +232,33 @@
     });
   }
 
+  // Texte brut d'un HTML d'e-mail (brouillon enregistré comme modèle).
+  function htmlTexte(html, d) {
+    var x = String(html || '').replace(/<blockquote[\s\S]*$/i, '')
+      .replace(/<br\s*\/?>/gi, '\n').replace(/<\/(p|div|li|h\d)>/gi, '\n\n').replace(/<li[^>]*>/gi, '• ');
+    var t = (d || document).createElement('textarea'); t.innerHTML = x.replace(/<[^>]+>/g, '');
+    return t.value.replace(/ /g, ' ').replace(/[ \t]+\n/g, '\n').replace(/\n{3,}/g, '\n\n').trim();
+  }
+  var CATALOGUE = null;
+  function catalogue() {
+    if (CATALOGUE) return Promise.resolve(CATALOGUE);
+    return rpc('modele_variables_catalogue', {}).then(function (l) { CATALOGUE = l || []; return CATALOGUE; }, function () { CATALOGUE = []; return CATALOGUE; });
+  }
+  function persoPossible(canal) { return canal === 'sms' || canal === 'email'; }
+
   function choisir(o) {
     o = o || {};
     var d = o.doc || document;
     style(d);
+    var br = o.brouillon || null;
+    var brCorps = br ? (br.corps != null ? String(br.corps) : htmlTexte(br.html, d)).trim() : '';
+    var brObjet = br && br.objet ? String(br.objet).trim() : '';
     return new Promise(function (resolve) {
-      var st = { liste: null, err: null, q: '', sel: null, cat: '' };
+      var st = { liste: null, err: null, q: '', sel: null, cat: '', bruts: null, ed: null, conf: null, vars: [] };
       var ov = d.createElement('div'); ov.className = 'odm-ov';
       d.body.appendChild(ov);
       function fin(v) { try { d.removeEventListener('keydown', clavier, true); ov.remove(); } catch (e) { } resolve(v); }
-      function clavier(e) { if (e.key === 'Escape') { e.stopPropagation(); fin(null); } }
+      function clavier(e) { if (e.key === 'Escape') { e.stopPropagation(); if (st.ed && !o.creer) { st.ed = null; rendre(); } else fin(null); } }
       d.addEventListener('keydown', clavier, true);
       function visibles() {
         var q = fold(st.q);
@@ -239,15 +268,77 @@
         });
       }
       function courant() { var v = visibles(); for (var i = 0; i < v.length; i++) if (v[i].id === st.sel) return v[i]; return v[0] || null; }
+      function brut(id) { return (st.bruts || []).filter(function (x) { return Number(x.id) === Number(id); })[0] || null; }
+
+      // --- éditeur d'un modèle personnel ---
+      function rendreEditeur() {
+        var e = st.ed, lib = libCanal(o.canal);
+        var h = '<div class="odm-box etroit"><div class="odm-hd"><div style="flex:1"><h2>' + (e.id ? 'Modifier mon modèle ' : 'Nouveau modèle ') + esc(lib) + '</h2>'
+          + '<p>Visible par vous seul. Les variables entre {{ }} se remplissent toutes seules à chaque envoi.</p></div>'
+          + '<button class="odm-x" data-a="' + (o.creer ? 'x' : 'ed-annule') + '" aria-label="Fermer">×</button></div><div class="odm-bd">';
+        if (e.err) h += '<div class="odm-err">' + esc(e.err) + '</div>';
+        h += '<div class="odm-f"><label class="odm-lbl">Titre</label><input class="odm-in" data-e="titre" maxlength="80" placeholder="Ex. : Relance après essai" value="' + esc(e.titre) + '"></div>';
+        if (o.canal === 'email') h += '<div class="odm-f"><label class="odm-lbl">Objet de l\'e-mail</label><input class="odm-in" data-e="objet" value="' + esc(e.objet) + '"></div>';
+        h += '<div class="odm-f"><label class="odm-lbl">Texte</label><textarea class="odm-ta" data-e="corps" rows="' + (o.canal === 'email' ? 10 : 6) + '">' + esc(e.corps) + '</textarea>';
+        if (o.canal === 'sms') { var c = compteSms(e.corps); h += '<div class="odm-cnt" data-e="cnt"><b>' + c.car + '</b> caractères · <b>' + c.sms + '</b> SMS</div>'; }
+        h += '</div>';
+        if (st.vars.length) {
+          var grp = {}; st.vars.forEach(function (v) { (grp[v.groupe] = grp[v.groupe] || []).push(v); });
+          h += '<label class="odm-lbl">Insérer une variable</label><div class="odm-vars">'
+            + Object.keys(grp).map(function (g) {
+                return '<div class="grp"><b>' + esc(g) + '</b>' + grp[g].map(function (v) {
+                  return '<button class="odm-var" data-a="var" data-v="' + esc(v.cle) + '" title="Exemple : ' + esc(v.exemple) + '">' + esc(v.libelle) + '</button>';
+                }).join('') + '</div>';
+              }).join('') + '</div>';
+        }
+        h += '</div><div class="odm-ft">'
+          + '<button class="odm-btn gh" data-a="' + (o.creer ? 'x' : 'ed-annule') + '">Annuler</button>'
+          + '<button class="odm-btn pri" data-a="ed-ok"' + (e.saving ? ' disabled' : '') + '>' + (e.saving ? 'Enregistrement…' : 'Enregistrer') + '</button></div></div>';
+        ov.innerHTML = h;
+        ov.querySelectorAll('[data-e]').forEach(function (el) {
+          var k = el.getAttribute('data-e'); if (k === 'cnt') return;
+          el.addEventListener('input', function () {
+            st.ed[k] = el.value;
+            if (k === 'corps' && o.canal === 'sms') { var c = compteSms(el.value), n = ov.querySelector('[data-e="cnt"]'); if (n) n.innerHTML = '<b>' + c.car + '</b> caractères · <b>' + c.sms + '</b> SMS'; }
+          });
+          el.addEventListener('focus', function () { st.ed._champ = k; });
+        });
+        var t = ov.querySelector('[data-e="titre"]'); if (t && !e.titre) t.focus();
+      }
+      function ouvrirEditeur(e) {
+        st.ed = Object.assign({ id: null, titre: '', objet: '', corps: '', err: null, saving: false }, e || {});
+        rendre();
+        catalogue().then(function (l) { st.vars = l; if (st.ed) rendre(); });
+      }
+      async function enregistrerEditeur() {
+        var e = st.ed; if (!e || e.saving) return;
+        e.saving = true; e.err = null; rendre();
+        try {
+          var id = await rpc('modele_perso_enregistrer', { p_id: e.id, p_canal: o.canal, p_titre: e.titre || '', p_objet: e.objet || null, p_corps: e.corps || '' });
+          toast(d, e.id ? 'Modèle modifié.' : 'Modèle enregistré dans « Mes modèles ».');
+          if (o.creer) return fin(null);
+          st.ed = null; st.sel = Number(id); st.q = ''; st.cat = '';
+          await recharger();
+        } catch (x) { e.saving = false; e.err = msgErr(x); rendre(); }
+      }
+      async function recharger() {
+        try {
+          var l = await lister(o); st.liste = trier(l, o.univers);
+          st.bruts = persoPossible(o.canal) ? await rpc('modele_perso_lister', { p_canal: o.canal }) : [];
+        } catch (x) { st.err = 'Modèles indisponibles : ' + msgErr(x); st.liste = st.liste || []; }
+        rendre();
+      }
+
       function rendre() {
-        var lib = libCanal(o.canal), h = '<div class="odm-box"><div class="odm-hd"><div style="flex:1"><h2>Modèles ' + esc(lib) + '</h2>'
+        if (st.ed) return rendreEditeur();
+        var lib = libCanal(o.canal), perso = persoPossible(o.canal), h = '<div class="odm-box"><div class="odm-hd"><div style="flex:1"><h2>Modèles ' + esc(lib) + '</h2>'
           + '<p>' + (o.canal === 'whatsapp' && o.motif ? 'Le texte choisi devient le motif du message WhatsApp.' : 'Le texte choisi remplace celui de votre message ; vous le relisez avant l\'envoi.') + '</p></div>'
           + '<button class="odm-x" data-a="x" aria-label="Fermer">×</button></div><div class="odm-bd">';
         if (st.err) h += '<div class="odm-err">' + esc(st.err) + '</div>';
         if (!st.liste && !st.err) h += '<div class="odm-empty"><span class="odm-spin"></span>Préparation des modèles…</div>';
-        else if (st.liste && !st.liste.length) h += '<div class="odm-empty">Aucun modèle ' + esc(lib) + ' n\'est encore défini. L\'administrateur les crée dans Administration › Modèles de messages.</div>';
+        else if (st.liste && !st.liste.length) h += '<div class="odm-empty">Aucun modèle ' + esc(lib) + ' pour le moment.' + (perso ? ' Créez le vôtre avec « Nouveau modèle ».' : ' L\'administrateur les crée dans Administration › Modèles de messages.') + '</div>';
         else if (st.liste) {
-          var cats = []; st.liste.forEach(function (m) { if (cats.indexOf(m.categorie) === -1) cats.push(m.categorie); });
+          var cats = []; st.liste.forEach(function (m) { if (!m.perso && cats.indexOf(m.categorie) === -1) cats.push(m.categorie); });
           h += '<div class="odm-search"><input class="odm-in" data-x="q" type="search" placeholder="Rechercher un modèle…" value="' + esc(st.q) + '"></div>';
           if (cats.length > 3) h += '<div class="odm-chips" style="margin-bottom:10px"><button class="odm-chip' + (!st.cat ? ' on' : '') + '" data-a="cat" data-v="">Tous</button>'
             + cats.map(function (c) { return '<button class="odm-chip' + (st.cat === c ? ' on' : '') + '" data-a="cat" data-v="' + esc(c) + '">' + esc(libCat(c)) + '</button>'; }).join('') + '</div>';
@@ -255,23 +346,34 @@
           h += '<div class="odm-pick"><div class="odm-list">';
           if (!v.length) h += '<div class="odm-empty">Aucun modèle ne correspond.</div>';
           v.forEach(function (m) {
-            var g = libCat(m.categorie);
+            var g = m.perso ? 'Mes modèles' : libCat(m.categorie);
             if (g !== last) { h += '<div class="odm-gt">' + esc(g) + '</div>'; last = g; }
             var loin = o.univers && m.univers !== 'tous' && m.univers !== o.univers;
             h += '<button class="odm-it' + (cur && cur.id === m.id ? ' on' : '') + (loin ? ' loin' : '') + '" data-a="sel" data-v="' + m.id + '"><span class="t">' + esc(m.titre) + '</span>'
-              + (m.univers !== 'tous' ? '<span class="odm-badge ' + m.univers.toLowerCase() + '">' + m.univers + '</span>' : '')
-              + (m.specifique_site ? '<span class="odm-badge site" title="Version propre à votre site">site</span>' : '') + '</button>';
+              + (m.perso ? '' : (m.univers !== 'tous' ? '<span class="odm-badge ' + m.univers.toLowerCase() + '">' + m.univers + '</span>' : ''))
+              + (m.specifique_site && !m.perso ? '<span class="odm-badge site" title="Version propre à votre site">site</span>' : '') + '</button>';
           });
           h += '</div><div class="odm-prev">';
           if (cur) {
+            if (cur.perso) h += '<div><span class="odm-badge perso">Mon modèle</span></div>';
             if (cur.objet) h += '<div class="obj">' + surligner(cur.objet) + '</div>';
             h += '<div class="txt' + (o.canal === 'whatsapp' && o.motif ? ' wa' : '') + '">' + surligner(cur.corps) + '</div>';
             if (cur.manquantes && cur.manquantes.length) h += '<div class="odm-warn">À compléter après insertion : ' + cur.manquantes.map(esc).join(', ') + '.</div>';
             if (o.canal === 'sms') { var c = compteSms(cur.corps); h += '<div class="meta">' + c.car + ' caractères · ' + c.sms + ' SMS' + (c.unicode ? ' (accents spéciaux : 70 caractères par SMS)' : '') + '</div>'; }
+            if (cur.perso) {
+              h += st.conf === cur.id
+                ? '<div class="acts"><span class="meta" style="align-self:center">Supprimer ce modèle ?</span><button class="odm-btn dg sm" data-a="del-ok" data-v="' + cur.id + '">Supprimer</button><button class="odm-btn gh sm" data-a="del-non">Annuler</button></div>'
+                : '<div class="acts"><button class="odm-btn gh sm" data-a="mod" data-v="' + cur.id + '">Modifier</button><button class="odm-btn dg sm" data-a="del" data-v="' + cur.id + '">Supprimer</button></div>';
+            }
           }
           h += '</div></div>';
         }
-        h += '</div><div class="odm-ft"><button class="odm-btn gh" data-a="x">Annuler</button>'
+        h += '</div><div class="odm-ft">';
+        if (perso && st.liste) {
+          h += '<div class="gauche"><button class="odm-btn gh" data-a="nouveau">+ Nouveau modèle</button>'
+            + (brCorps ? '<button class="odm-btn gh" data-a="depuis">Enregistrer mon message comme modèle</button>' : '') + '</div>';
+        }
+        h += '<button class="odm-btn gh" data-a="x">Annuler</button>'
           + '<button class="odm-btn pri" data-a="ok"' + (st.liste && courant() ? '' : ' disabled') + '>Utiliser ce modèle</button></div></div>';
         ov.innerHTML = h;
         var qi = ov.querySelector('[data-x="q"]');
@@ -280,26 +382,49 @@
           if (st._focus) { qi.focus(); st._focus = false; }
         }
       }
-      ov.addEventListener('click', function (e) {
-        if (e.target === ov) return fin(null);
+      ov.addEventListener('mousedown', function (e) { if (e.target.closest && e.target.closest('[data-a="var"]')) e.preventDefault(); });
+      ov.addEventListener('click', async function (e) {
+        if (e.target === ov) return st.ed ? null : fin(null);
         var b = e.target.closest('[data-a]'); if (!b) return;
         var a = b.getAttribute('data-a'), v = b.getAttribute('data-v');
         if (a === 'x') return fin(null);
+        if (a === 'ed-annule') { st.ed = null; return rendre(); }
+        if (a === 'ed-ok') return enregistrerEditeur();
+        if (a === 'var') {
+          var champ = st.ed && st.ed._champ === 'objet' ? 'objet' : 'corps';
+          var el = ov.querySelector('[data-e="' + champ + '"]'); if (!el) return;
+          var ins = '{{' + v + '}}', p0 = el.selectionStart != null ? el.selectionStart : el.value.length, p1 = el.selectionEnd != null ? el.selectionEnd : p0;
+          el.value = el.value.slice(0, p0) + ins + el.value.slice(p1); st.ed[champ] = el.value;
+          el.focus(); try { el.setSelectionRange(p0 + ins.length, p0 + ins.length); } catch (x) { }
+          el.dispatchEvent(new Event('input'));
+          return;
+        }
+        if (a === 'nouveau') return ouvrirEditeur({});
+        if (a === 'depuis') return ouvrirEditeur({ objet: brObjet, corps: brCorps });
+        if (a === 'mod') { var bm = brut(v); if (bm) ouvrirEditeur({ id: Number(bm.id), titre: bm.titre, objet: bm.objet || '', corps: bm.corps }); return; }
+        if (a === 'del') { st.conf = Number(v); return rendre(); }
+        if (a === 'del-non') { st.conf = null; return rendre(); }
+        if (a === 'del-ok') {
+          try { await rpc('modele_perso_supprimer', { p_id: Number(v) }); toast(d, 'Modèle supprimé.'); st.conf = null; st.sel = null; await recharger(); }
+          catch (x) { toast(d, msgErr(x), true); }
+          return;
+        }
         if (a === 'cat') { st.cat = v; st.sel = null; return rendre(); }
-        if (a === 'sel') { st.sel = Number(v); return rendre(); }
+        if (a === 'sel') { st.sel = Number(v); st.conf = null; return rendre(); }
         if (a === 'ok') { var m = courant(); if (!m) return; utilise(m.id); return fin({ id: m.id, titre: m.titre, objet: m.objet, corps: m.corps, manquantes: m.manquantes || [], categorie: m.categorie }); }
       });
       // double-clic sur un modèle = l'utiliser
-      ov.addEventListener('dblclick', function (e) { var b = e.target.closest('[data-a="sel"]'); if (b) { var m = courant(); if (m) { utilise(m.id); fin({ id: m.id, titre: m.titre, objet: m.objet, corps: m.corps, manquantes: m.manquantes || [], categorie: m.categorie }); } } });
+      ov.addEventListener('dblclick', function (e) { if (st.ed) return; var b = e.target.closest('[data-a="sel"]'); if (b) { var m = courant(); if (m) { utilise(m.id); fin({ id: m.id, titre: m.titre, objet: m.objet, corps: m.corps, manquantes: m.manquantes || [], categorie: m.categorie }); } } });
       st._focus = true;
+      if (o.creer) { ouvrirEditeur({ objet: brObjet, corps: brCorps }); return; }
       rendre();
-      lister(o).then(function (l) {
-        st.liste = trier(l, o.univers);
-        if (o.categorie) { var x = st.liste.filter(function (m) { return m.categorie === o.categorie; })[0]; if (x) st.sel = x.id; }
-        rendre();
-      }, function (e) { st.err = 'Modèles indisponibles : ' + msgErr(e); st.liste = []; rendre(); });
+      recharger().then(function () {
+        if (o.categorie && st.liste) { var x = st.liste.filter(function (m) { return m.categorie === o.categorie; })[0]; if (x) { st.sel = x.id; rendre(); } }
+      });
     });
   }
+  // Ouvre directement l'éditeur « Nouveau modèle » avec le message en cours.
+  function enregistrer(o) { return choisir(Object.assign({}, o || {}, { creer: true, brouillon: o })); }
 
   /* ======================================================================
      ADMINISTRATION
@@ -552,7 +677,7 @@
     return { recharger: charger };
   }
 
-  W.__OD_MODELES__ = { lister: lister, choisir: choisir, utilise: utilise, texteHtml: texteHtml, gerer: gerer, compteSms: compteSms, CATEGORIES: CATEGORIES };
+  W.__OD_MODELES__ = { lister: lister, choisir: choisir, enregistrer: enregistrer, utilise: utilise, texteHtml: texteHtml, gerer: gerer, compteSms: compteSms, CATEGORIES: CATEGORIES };
 
   if (OD.define) OD.define('modeles', {
     mount: function (el) { gerer(el); }
