@@ -1,5 +1,8 @@
 // ============================================================================
-//  VROOM TEAM (plateau) — module One Data (OD.define 'plateau')  v5
+//  VROOM TEAM (plateau) — module One Data (OD.define 'plateau')  v6
+//  v6 (09/11/2026) : TRAFIC ATELIER — servi comme « Trafic atelier · RDV atelier »
+//    (RDV à venir le plus proche d'abord), tuile « trafic atelier », date du RDV
+//    atelier au lieu d'un délai en heures (plateau_suivant : raison 'atelier').
 //  v5 (06/11/2026) : RAPPELS DUS dans la vue standard. La tuile « rappels dus »
 //    s'ouvre sur la liste des rappels arrivés à échéance (les plus anciens
 //    d'abord, avec site, demande et tentatives) ; « Rappeler » réserve CE lead
@@ -221,7 +224,7 @@
       // écran d'attente
       '.odpl .wait{max-width:760px;margin:48px auto;padding:0 20px;text-align:center}',
       '.odpl .wait h2{font-size:28px;margin-bottom:8px}',
-      '.odpl .tiles{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:14px;margin:28px 0}',
+      '.odpl .tiles{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:14px;margin:28px 0}',
       '@media (max-width:700px){.odpl .tiles{grid-template-columns:repeat(2,minmax(0,1fr))}}',
       '.odpl .tile{background:#f5f8fc;border:0;border-radius:8px;padding:16px}.odpl .tile b{display:block;font-size:28px;font-weight:900;color:var(--bl2)}.odpl .tile.r b,.odpl .tile.o b{color:#c7820a}',
       '.odpl .bigbtn{font-size:17px;font-weight:900;padding:18px 34px;border-radius:16px;border:0;background:var(--bl);color:#fff;box-shadow:0 10px 26px rgba(42,94,169,.3);min-height:60px}',
@@ -336,6 +339,7 @@
   var RAISON = {
     '1h': ['Demande client · 1 h', 'r', 'pénalité constructeur au-delà'],
     '48h': ['Relance concession · 48 h', 'o', 'délai BACS'],
+    'atelier': ['Trafic atelier · RDV atelier', 'b', 'rendez-vous d\'atelier du client'],
     'rappel': ['Rappel promis', 'o', 'heure promise au client'],
     'frais': ['Demande du jour', 'b', ''],
     'pool': ['Pool', 'b', '']
@@ -449,7 +453,8 @@
       if (f.raison === '1h' || f.raison === '48h') {
         var rest = f.echeance ? (ts(f.echeance) - Date.now()) / 1000 : null;
         txt = (f.raison === '1h' ? '1 h' : '48 h') + ' · ' + propre(f.nom) + (rest == null ? '' : rest > 0 ? ' · reste ' + (rest < 3600 ? chrono(rest) : dureeMin(rest / 60)) : ' · hors délai');
-      } else if (f.raison === 'rappel') txt = 'Rappel promis ' + quand(f.rappel_le) + ' · ' + propre(f.nom);
+      } else if (f.raison === 'atelier') txt = 'Atelier · ' + propre(f.nom) + (f.echeance ? ' · RDV ' + quand(f.echeance) : '');
+      else if (f.raison === 'rappel') txt = 'Rappel promis ' + quand(f.rappel_le) + ' · ' + propre(f.nom);
       else txt = propre(f.nom) + (f.demande ? ' · ' + f.demande : '');
       return '<span class="pill ' + r[1] + '">' + esc(txt) + '</span>';
     }
@@ -459,6 +464,7 @@
       if (c.n1h) reste.push(plural(c.n1h, 'demande 1 h', 'demandes 1 h'));
       if (c.nrappels) reste.push(plural(c.nrappels, 'rappel dû', 'rappels dus'));
       if (c.n48h) reste.push(plural(c.n48h, 'relance 48 h', 'relances 48 h'));
+      if (c.natelier) reste.push(plural(c.natelier, 'lead atelier', 'leads atelier'));
       if (c.npool) reste.push(plural(c.npool, 'lead au Pool', 'leads au Pool'));
       return '<div class="strip"><b>' + (S.vue === 'lead' ? 'Après cet appel :' : 'En attente :') + '</b>' + (f.length ? f.map(pilule).join('') : '<span class="muted">rien d\'urgent</span>')
         + (reste.length ? '<span class="muted">· en tout ' + reste.join(', ') + '</span>' : '')
@@ -504,7 +510,7 @@
         : 'One Data vous sert le plus urgent : les demandes 1 h d\'abord, puis les rappels promis, les relances 48 h et les demandes du jour.';
       return '<div class="wait"><h2>' + titre + '</h2><p class="muted">' + sous + '</p>'
         + '<div class="tiles"><div class="tile r"><b>' + nf(c.n1h || 0) + '</b>demandes 1 h</div><button type="button" class="tile o clic' + (S.voirRappels ? ' on' : '') + '" data-a="voir-rappels" aria-expanded="' + !!S.voirRappels + '"><b>' + nf(rappelsDus().length || c.nrappels || 0) + '</b>rappels dus</button>'
-        + '<div class="tile o"><b>' + nf(c.n48h || 0) + '</b>relances 48 h</div><div class="tile"><b>' + nf(c.npool || 0) + '</b>leads au Pool</div></div>'
+        + '<div class="tile o"><b>' + nf(c.n48h || 0) + '</b>relances 48 h</div><div class="tile"><b>' + nf(c.natelier || 0) + '</b>trafic atelier</div><div class="tile"><b>' + nf(c.npool || 0) + '</b>leads au Pool</div></div>'
         + (S.pause ? '<button type="button" class="bigbtn" data-a="reprendre">Reprendre</button>'
           : '<button type="button" class="bigbtn" data-a="servir"' + (bacsBloque() || S.vue === 'charge' ? ' disabled' : '') + '>' + (S.vue === 'charge' ? 'Un instant…' : 'Lead suivant <kbd>Entrée</kbd>') + '</button>')
         + (!S.pause ? listeRappels() : '')
@@ -520,6 +526,12 @@
       if (raison === 'rappel') {
         var rp = lead.rappel_le || S.fiche.rappel_le;
         return '<div class="ring"><div class="small muted">Rappel promis pour <b style="color:#1c2b45">' + esc(quand(rp)) + '</b>' + (lead.tentatives ? '<br>' + plural(lead.tentatives, 'tentative', 'tentatives') + ' déjà' : '') + '</div></div>';
+      }
+      if (raison === 'atelier' && ech) {
+        var ma = (ts(ech) - Date.now()) / 60000;
+        return '<div class="ring"><div class="small muted">RDV atelier du client : <b style="color:#1c2b45">' + esc(quand(ech)) + '</b><br>'
+          + (ma >= 0 ? (ma < 1440 ? 'dans ' + dureeMin(ma) : 'dans ' + Math.round(ma / 1440) + ' j') : 'déjà passé (il y a ' + dureeMin(-ma) + ')')
+          + (lead.rdv_atelier_type ? ' · ' + esc(String(lead.rdv_atelier_type).toLowerCase()) : '') + '<br>Reçue ' + esc(quand(rec)) + '</div></div>';
       }
       if ((raison !== '1h' && raison !== '48h') || !ech) return '<div class="ring"><div class="small muted">Reçue ' + esc(quand(rec)) + ' · il y a ' + dureeMin((Date.now() - ts(rec)) / 60000) + '</div></div>';
       var tot = Math.max(1, ts(ech) - ts(rec)), rest = ts(ech) - Date.now(), part = Math.max(0, Math.min(1, 1 - rest / tot));
@@ -883,7 +895,7 @@
       if (!el.isConnected || !root.isConnected) return detruire();
       if (S.occupe) return;
       await chargerEntour();
-      if (S.vue === 'vide' && !S.pause && S.enchainer && (S.cpt.n1h || S.cpt.nrappels || S.cpt.n48h || S.cpt.npool)) return servir();
+      if (S.vue === 'vide' && !S.pause && S.enchainer && (S.cpt.n1h || S.cpt.nrappels || S.cpt.n48h || S.cpt.natelier || S.cpt.npool)) return servir();
       // on ne repeint pas pendant une saisie (la note, le modèle)
       var a = doc.activeElement; if (a && root.contains(a) && /^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName)) return;
       render();
