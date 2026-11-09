@@ -1,3 +1,6 @@
+// v14 (09/11/2026) : bouton « Modèles » — le message en cours (objet et
+// texte, sans la signature ni le message cité) est proposé à « Enregistrer
+// mon message comme modèle » (Mes modèles, module modeles v3).
 // v13 (29/10/2026) : dictée vocale du corps du message (bouton micro à côté
 // du trombone, comme les fenêtres SMS et WhatsApp). Le texte s'insère à
 // l'endroit du curseur (sinon avant la signature), le texte provisoire
@@ -1057,7 +1060,8 @@ OD.define('email', {
     if (!api) { state.error = 'Les modèles de messages ne sont pas disponibles.'; render(); return; }
     const ed0 = getRoot() && getRoot().querySelector('.em-body'); if (ed0) state.bodyHtml = ed0.innerHTML;
     const c = state.client || {};
-    const m = await api.choisir({ canal: 'email', idClient: c.IDVu, idLead: state.idLead, idSite: readVar(SELECTED_SITE_VAR_ID), contexte: state.idLead ? 'lead' : 'client', doc: doc });
+    const m = await api.choisir({ canal: 'email', idClient: c.IDVu, idLead: state.idLead, idSite: readVar(SELECTED_SITE_VAR_ID), contexte: state.idLead ? 'lead' : 'client', doc: doc,
+                                  brouillon: { objet: state.subject || '', html: sansSignature(state.bodyHtml || '') } });
     if (!m) return;
     // Le corps du modèle remplace la saisie ; un message cité (réponse,
     // transfert) reste en dessous, la signature est reposée par applySignature.
