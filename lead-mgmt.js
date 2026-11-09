@@ -1,6 +1,13 @@
 // ============================================================================
 //  LEAD MANAGEMENT — module One Data (OD.define 'lead-mgmt')
-//  VERSION TEAM COLIN (v99) — déploiement CIBLÉ (publish-targets :
+//  VERSION TEAM COLIN (v100) — déploiement CIBLÉ (publish-targets :
+//  v100 (09/11/2026) : onglet « Suivis » (demande d'Arnaud Lefebvre) : quand un
+//    client rappelle, chacun retrouve sa demande et voit où elle en est, même
+//    si un collègue la suit — vendeur, dernier geste, statut One Data et BACS,
+//    prochain rappel. En lecture : on ouvre la fiche du client, on ne prend
+//    pas le lead d'un collègue. Sans recherche : les leads du site déjà pris
+//    en charge (60 jours, ou encore ouverts) ; la recherche (nom, téléphone,
+//    e-mail, véhicule) porte sur TOUS les leads du site. RPC poste_site_suivis.
 //  v98 (05/11/2026) : ACCUEIL DES LEADS. Un message automatique (RCS, SMS
 //    ou e-mail) part au client, qui choisit l'heure de son rappel. Postes
 //    vendeur, chef des ventes et direction (posteSite) :
@@ -3217,6 +3224,7 @@
                 ['arappeler', 'À rappeler', aRappeler().length, aRappeler().some(function (l) { return niveau(l) === 'crit'; }), 'r'],
                 ['relances', 'Relances', aRelancer().length, aRelancer().some(rappelDu), 'b'],
                 ['campagnes', 'Campagnes', S.mesSollis ? S.mesSollis.length : null, false, 'b'],
+                ['suivis', 'Suivis', null, false, 'b'],
                 ['historique', 'Historique', null, false, 'b']].filter(function (o) { return !(S.comme && (o[0] === 'campagnes' || o[0] === 'historique')); });
       }
       var sid = sitePoste(), pool = libres(sid);
@@ -3226,6 +3234,7 @@
       if (chefVend(sid)) { var mes = mesLeadsDu(sid); t.push(['mes', 'Mes leads', mes.length, mes.some(function (l) { return niveau(l) === 'crit'; }), 'r']); }
       t = t.concat([['bloques', 'En souffrance', bloques(sid).length, bloques(sid).length > 0, 'r'],
               ['campagnes', 'Campagnes', null, false, 'b']]);
+      t.push(['suivis', 'Suivis', null, false, 'b']);
       if (!S.comme) t.push(['historique', 'Historique', null, false, 'b']);
       return t;
     }
@@ -3808,6 +3817,7 @@
     }
 
     function renderPanel() {
+      if (S.tab === 'suivis') return vueSuivis();
       if (S.tab === 'historique') return vueHistorique();
       if (S.tab === 'accueil' && POSTE === 'vendeur') return accueilVendeur();
       if (S.tab === 'accueil' && POSTE === 'chef' && sitePoste() != null) return accueilChef();
@@ -3916,6 +3926,68 @@
           + '<td>' + esc(siteNom(x.site) || '—') + '</td>'
           + '<td class="l">' + esc(resLib(x)) + (x.note ? '<small title="' + esc(x.note) + '">' + esc(String(x.note).slice(0, 60)) + '</small>' : '') + '</td>'
           + '<td><span class="h-st ' + stCls(x) + '"' + (x.vendu_le ? ' title="Vente du ' + esc(jour(x.vendu_le)) + '"' : '') + '>' + esc(stLib(x)) + '</span>' + (x.vendu_le ? '<small>le ' + esc(jour(x.vendu_le)) + '</small>' : '') + '</td>'
+          + '<td>' + suite + '</td></tr>';
+      });
+      return h + '</tbody></table></div>';
+    }
+    // ── v100 : SUIVIS — où en est la demande d'un client, quel que soit le vendeur ──
+    var SUIVI_GESTE = { bacs: 'Mis à jour dans BACS', bacs_activite: 'Activité dans BACS', contact_detecte: 'Contact détecté', retour_pool: 'Revenu au Pool',
+                        congelateur: 'Mis au congélateur', congelateur_retour: 'Sorti du congélateur', apv: 'Orienté après-vente', reaffectation: 'Réattribué', stock_equipe: 'Réparti dans l\'équipe' };
+    function suiviEtat() { if (!S.suivis) S.suivis = { rows: null, err: null, q: '', t: null, seq: 0 }; return S.suivis; }
+    async function chargerSuivis() {
+      var X = suiviEtat(), seq = ++X.seq, sid = sitePoste();
+      X.err = null; if (X.rows == null || X.q) X.rows = null; render(); suiviFocus();
+      try {
+        var r = await rpc('poste_site_suivis', { p_sites: sid != null ? [Number(sid)] : null, p_q: X.q ? X.q : null }) || [];
+        if (seq !== X.seq) return;
+        X.rows = r;
+      } catch (e) { if (seq !== X.seq) return; X.rows = []; X.err = messageErreur(e); }
+      if (S.tab === 'suivis') { render(); suiviFocus(); }
+    }
+    function suiviFocus() {
+      var X = suiviEtat(); if (!X.focus) return;
+      var qi = root.querySelector('[data-x="suivi-q"]'); if (qi) { try { qi.focus(); qi.setSelectionRange(qi.value.length, qi.value.length); } catch (e) {} }
+    }
+    function suiviRecherche(v) {
+      var X = suiviEtat(); X.q = String(v || '').trim(); X.focus = true;
+      clearTimeout(X.t); X.t = setTimeout(chargerSuivis, 350);
+    }
+    function suiviOuvrir(id) {
+      var x = ((S.suivis && S.suivis.rows) || []).find(function (r) { return Number(r.id_lead) === Number(id); });
+      if (!x) return;
+      if (x.id_client) return ficheClient(x.id_client);
+      if (S.leads.some(function (l) { return Number(l.id_lead) === Number(id); })) return ouvrir(id);
+      toast('Pas encore de fiche client rattachée à cette demande.', true);
+    }
+    function suiviGeste(x) {
+      if (!x.dernier_geste) return x.premier_contact_le ? 'Premier contact' : '—';
+      return RES_LIB[x.dernier_geste] || SUIVI_GESTE[x.dernier_geste] || String(x.dernier_geste).replace(/_/g, ' ');
+    }
+    function suiviStCls(x) {
+      return x.statut === 'converti' ? 'vendu' : (x.statut === 'perdu' || x.statut === 'rejete') ? 'perdu' : x.statut === 'contacte' ? 'contacte' : 'cours';
+    }
+    function vueSuivis() {
+      var X = suiviEtat(), sid = sitePoste(), rows = X.rows || [];
+      var h = '<div class="ph"><div><h2>Suivis</h2><p>Quand un client rappelle : retrouvez sa demande et voyez où elle en est, même si un collègue la suit. '
+        + (X.q ? 'La recherche porte sur toutes les demandes' : 'Les demandes déjà prises en charge (60 derniers jours, ou encore ouvertes)')
+        + (sid != null ? ' de ' + esc(siteNom((siteInfo(sid) || {}).site)) : ' de votre périmètre') + '. Un clic ouvre la fiche du client.</p></div></div>'
+        + '<div class="hist-f"><label class="q">Rechercher un client<input type="search" data-x="suivi-q" placeholder="Nom, téléphone, e-mail, véhicule…" value="' + esc(X.q || '') + '"></label></div>';
+      if (X.err) return h + '<p class="alerte">' + esc(X.err) + '</p>';
+      if (X.rows == null) return h + '<div class="empty">Recherche des demandes…</div>';
+      if (!rows.length) return h + '<div class="empty">' + (X.q ? 'Aucune demande ne correspond à « ' + esc(X.q) + ' ».' : 'Aucune demande prise en charge sur cette période.') + '</div>';
+      h += '<p class="hist-n">' + plural(rows.length, 'demande') + (rows.length >= 300 ? ' (les 300 plus récentes : précisez la recherche)' : '') + '</p>'
+        + '<div class="hist-w"><table class="hist"><thead><tr><th>Client</th><th>Demande</th><th>Suivi par</th><th>Dernier geste</th><th>Statut</th><th>Suite</th></tr></thead><tbody>';
+      rows.forEach(function (x) {
+        var moi = Number(x.id_user_attribue) === Number(MOI);
+        var suite = x.rappel_le && ['converti', 'perdu', 'rejete'].indexOf(x.statut) === -1
+          ? '<span class="h-rap' + (ts(x.rappel_le) <= Date.now() ? ' du' : '') + '">' + esc(ts(x.rappel_le) <= Date.now() ? 'rappel en retard' : 'rappel ' + quandRappel(x.rappel_le)) + '</span>'
+          : (x.clos_le && ['perdu', 'rejete', 'converti'].indexOf(x.statut) !== -1 ? '<small>clos le ' + esc(jour(x.clos_le)) + '</small>' : '');
+        h += '<tr class="clic" data-a="suivi-open" data-id="' + x.id_lead + '" tabindex="0">'
+          + '<td class="l"><b>' + esc(propre(x.nom) || 'Sans nom') + '</b>' + (x.telephone ? '<small>' + esc(x.telephone) + '</small>' : '') + '</td>'
+          + '<td class="l">' + esc(x.vehicule || x.source_libelle || '—') + '<small>' + esc([x.vehicule ? x.source_libelle : null, 'reçu le ' + jour(x.recu_le), sid == null ? siteNom(x.site) : null].filter(Boolean).join(' · ')) + '</small></td>'
+          + '<td class="l">' + (x.vendeur_nom ? '<b>' + esc(moi ? 'Moi' : propre(x.vendeur_nom)) + '</b>' : '<span>Pool</span>') + '</td>'
+          + '<td class="l">' + esc(suiviGeste(x)) + '<small>' + esc([x.dernier_geste_le ? quand(x.dernier_geste_le) : (x.premier_contact_le ? quand(x.premier_contact_le) : ''), x.dernier_geste_par ? propre(x.dernier_geste_par) : ''].filter(Boolean).join(' · ')) + '</small></td>'
+          + '<td><span class="h-st ' + suiviStCls(x) + '">' + esc(ST_LIB[x.statut] || x.statut || '—') + '</span>' + (x.statut_bacs ? '<small>BACS : ' + esc(x.statut_bacs) + '</small>' : '') + '</td>'
           + '<td>' + suite + '</td></tr>';
       });
       return h + '</tbody></table></div>';
@@ -5047,10 +5119,12 @@
     function memoAck() { try { FW.localStorage.setItem('lmtc-ack-site', JSON.stringify(Array.from(S.ack).slice(-200))); } catch (e) {} }
     async function action(a, id) {
       switch (a) {
+        case 'suivi-open': return suiviOuvrir(id);
         case 'tab':
           S.tab = id; S.cell = null; render();
           if (id === 'campagnes' && !S.campagnes) { await chargerCampagnes(); render(); }
           if (id === 'historique') chargerHistorique();
+          if (id === 'suivis') chargerSuivis();
           if (id === 'relais' && !S.relais) { try { S.relais = await rpc('poste_relais', { p_jours: 30 }) || []; } catch (e) { S.relais = []; toast(messageErreur(e), true); } render(); }
           return;
         case 'ack': S.ack.add(id); memoAck(); render(); return;
@@ -5182,6 +5256,7 @@
     root.addEventListener('input', function (ev) {
       if (ev.target.getAttribute && ev.target.getAttribute('data-x') === 'comme-q') { S.commeQ = ev.target.value; var li = root.querySelector('.k-vlist'); if (li) li.innerHTML = listeComme(); }
       if (ev.target.getAttribute && ev.target.getAttribute('data-x') === 'hist-q') histFiltre(ev.target);
+      if (ev.target.getAttribute && ev.target.getAttribute('data-x') === 'suivi-q') suiviRecherche(ev.target.value);
     });
     root.addEventListener('change', function (ev) {
       var k = ev.target.getAttribute && ev.target.getAttribute('data-x');
