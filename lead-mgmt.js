@@ -1,10 +1,14 @@
 // ============================================================================
 //  LEAD MANAGEMENT — module One Data (OD.define 'lead-mgmt')
-//  VERSION TEAM COLIN (v101) — déploiement CIBLÉ (publish-targets :
+//  VERSION TEAM COLIN (v102) — déploiement CIBLÉ (publish-targets :
+//  v102 (09/11/2026) : onglet Rappels — section « Arriéré BACS » : rappels promis
+//    avant l'arrivée de la Vroom Team dans One Data (06/11), sortis des rappels dus
+//    et du compteur (plateau_base vue 'arriere').
 //  v101 (09/11/2026) : Pool BACS Vroom — TRAFIC ATELIER regroupé et classé par
 //    date de RDV atelier (à venir d'abord, puis RDV passés) ; à gauche « RDV atelier
 //    jeu. 13/11 8h · dans 3 j » au lieu d'un compte à rebours en heures ; étiquette
 //    « Trafic atelier » (plateau_file2 : traitement 'atelier', rdv_atelier).
+//    « Stock accepté » ne reste plus bloqué sur « Chargement du stock… ».
 //  v100 (09/11/2026) : onglet « Suivis » (demande d'Arnaud Lefebvre) : quand un
 //    client rappelle, chacun retrouve sa demande et voit où elle en est, même
 //    si un collègue la suit — vendeur, dernier geste, statut One Data et BACS,
@@ -681,7 +685,7 @@
     var S = {
       tab: 'piscine', stock: false, age: 'frais', demoMode: false, univ: 'tous', per: periodeDefaut(), sources: null, campagne: null, miens: false,
       actions: null, actJours: 1, sitesCreation: null,   // v81
-      kpis: null, piscine: [], rappels: [], transferts: [], campagnes: null, stockListe: null,
+      kpis: null, piscine: [], rappels: [], arriere: [], transferts: [], campagnes: null, stockListe: null,
       ack: new Set(), vus: new Set(), frais: new Set(), premier: true,
       bacs: null,
       dr: null, // { sf, fiche, sites, vendeurs, site, envois }
@@ -861,14 +865,18 @@
         S.stock ? rpc('plateau_file2', { p_vue: 'stock' }) : Promise.resolve(S.stockListe),
         S.tab === 'campagnes' ? rpc('plateau_campagnes', { p_jours: 90 }) : Promise.resolve(S.campagnes),
         rpc('plateau_bacs_etat').catch(function () { return S.bacs; }),
-        S.superviseur == null ? rpc('plateau_superviseur').catch(function () { return false; }) : Promise.resolve(S.superviseur)
+        S.superviseur == null ? rpc('plateau_superviseur').catch(function () { return false; }) : Promise.resolve(S.superviseur),
+        rpc('plateau_file2', { p_vue: 'arriere' }).catch(function () { return null; })
       ]);
+      if (Array.isArray(res[8])) S.arriere = res[8];
       S.superviseur = res[7] === true;
       S.bacs = res[6] || S.bacs;
       S.kpis = res[0] || {}; MOI = S.kpis.moi;
       S.piscine = res[1] || []; S.rappels = res[2] || []; S.transferts = res[3] || [];
       signalerArrivees();
-      S.stockListe = res[4] || null; S.campagnes = res[5] || null;
+      // v101 : un rafraîchissement lancé avant le clic sur « Stock accepté » ne doit
+      // pas effacer le stock chargé entre-temps (restait sur « Chargement du stock… »).
+      S.stockListe = res[4] || S.stockListe || null; S.campagnes = res[5] || S.campagnes || null;
       S.erreur = null; S.charge = true;
     }
     // v77 : un nouveau lead « Demande client (1h) » se signale (son,
@@ -1173,6 +1181,17 @@
         var gauche = '<span class="tm ' + cls + '"><b>' + b + '</b><small>prévu ' + (quand(l.rappel_le).length > 5 ? 'le ' : 'à ') + esc(quand(l.rappel_le)) + '</small></span>';
         h += ligneLead(l, gauche, __lmPeutAppeler() ? 'Appeler' : 'Traiter').replace('<div class="tags">', '<div class="tags"><span class="tag ' + (l.statut_eff === 'Projet Long Terme' ? 'vr' : 'warn') + '">' + esc(libStatut(l.statut_eff)) + '</span>');
       });
+      // v102 : arriéré BACS — rappels promis avant l'arrivée de la Vroom Team dans
+      // One Data (06/11), hors compteur, servis en dernier par « Lead suivant ».
+      var arr = fc(S.arriere || []).filter(function (l) { return okUniv(l) && (!S.miens || Number(l.derniere_action_par) === Number(MOI)); })
+        .sort(function (a, b) { return ts(a.rappel_le) - ts(b.rappel_le); });
+      if (arr.length) {
+        h += '<p class="grp garr">Arriéré BACS · rappels promis avant le 06/11 <span class="num">' + arr.length + '</span></p>';
+        arr.forEach(function (l) {
+          var gauche = '<span class="tm arr"><b>' + esc(jour(l.rappel_le)) + '</b><small>promis il y a ' + esc(duree(mins(l.rappel_le))) + '</small></span>';
+          h += ligneLead(l, gauche, __lmPeutAppeler() ? 'Appeler' : 'Traiter').replace('<div class="tags">', '<div class="tags"><span class="tag">' + esc(libStatut(l.statut_eff)) + '</span>');
+        });
+      }
       return h + '</div>';
     }
     function etatTransfert(l) {
@@ -1277,7 +1296,7 @@
 
     // ── Panneau latéral : la fiche du lead ────────────────────────────────
     function itemConnu(sf) {
-      return S.piscine.concat(S.rappels, S.transferts, S.stockListe || []).find(function (x) { return x.sf_lead_id === sf; }) || null;
+      return S.piscine.concat(S.rappels, S.arriere || [], S.transferts, S.stockListe || []).find(function (x) { return x.sf_lead_id === sf; }) || null;
     }
     function chipGroup(name, opts, val) {
       return '<div class="chips">' + opts.map(function (o, i) {
@@ -1697,7 +1716,7 @@
     // Aucun geste n'est enregistré (geste() et canal() refusent), rien n'est
     // réservé ni libéré dans BACS.
     async function ouvrirExemple(sfVoulu) {
-      var tous = [].concat(S.piscine || [], S.stockListe || [], S.rappels || [], S.transferts || []).filter(function (x) { return x && x.sf_lead_id; });
+      var tous = [].concat(S.piscine || [], S.stockListe || [], S.rappels || [], S.arriere || [], S.transferts || []).filter(function (x) { return x && x.sf_lead_id; });
       var cand = (sfVoulu && tous.find(function (x) { return x.sf_lead_id === sfVoulu; })) || tous[0];
       var fiche = null;
       if (cand) { try { fiche = await rpc('plateau_fiche', { p_sf_lead_id: cand.sf_lead_id }); } catch (e) { fiche = null; } }
@@ -1918,7 +1937,7 @@
         case 'relancer': return relancer(id);
         case 'stock':
           S.tab = 'piscine'; S.stock = !!id; render();
-          if (S.stock && !S.stockListe) { try { S.stockListe = await rpc('plateau_file2', { p_vue: 'stock' }); } catch (e) { toast(messageErreur(e), true); S.stockListe = []; } render(); }
+          if (S.stock && !S.stockListe) { try { S.stockListe = (await rpc('plateau_file2', { p_vue: 'stock' })) || []; } catch (e) { toast(messageErreur(e), true); S.stockListe = []; } render(); }
           return;
         case 'source': {
           var src = (S.kpis && S.kpis.sources) || [];
@@ -5492,6 +5511,7 @@
 .lmtc .tag.at{background:#E6F0FA;color:#2557A1;font-weight:700}
 .lmtc .tm.at b{color:#2557A1}.lmtc .tm.at.proche b{color:#B25E00}.lmtc .tm.at.passe b{color:#5a7196}
 .lmtc .grp.gat{color:#2557A1}
+.lmtc .grp.garr{color:#5a7196}.lmtc .tm.arr b{color:#5a7196}
 .lmtc .tags{display:flex;flex-wrap:wrap;gap:5px;margin-top:6px}
 
 /* Minuteurs */
