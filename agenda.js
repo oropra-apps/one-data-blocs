@@ -1,4 +1,7 @@
 // ============================================================================
+//  v53 (09/11/2026) : bouton « Choisir un jour » à côté de « Aujourd'hui »
+//    (demande des vendeurs). Il ouvre un calendrier ; le jour choisi s'affiche
+//    en vue Jour. Sur mobile aussi.
 //  v52 (06/11/2026) : une RELANCE posée par un rapport vendeur se déplace
 //    dans l'agenda — glisser-déposer, étirer pour la durée, ou clic : fenêtre
 //    « Relance » avec date, heure et durée —, à condition que sa date
@@ -2143,6 +2146,39 @@ OD.define('agenda', {
     refetch();
     setTimeout(refetch, 1200);
   }
+  // v53 : aller à un jour précis. Un petit calendrier s'ouvre sous le bouton ;
+  // le jour choisi s'affiche en vue Jour.
+  function choisirJour(bouton) {
+    const d = frontDoc();
+    let pop = d.getElementById('agenda-jour-pop');
+    if (pop) { pop.remove(); return; }
+    let courant = agToday();
+    try { const x = calendar.getDate(); courant = x.getFullYear() + '-' + String(x.getMonth() + 1).padStart(2, '0') + '-' + String(x.getDate()).padStart(2, '0'); } catch (e) {}
+    pop = d.createElement('div'); pop.id = 'agenda-jour-pop';
+    pop.style.cssText = 'position:fixed;z-index:99995;background:#fff;border:1.5px solid #d6e2f2;border-radius:12px;box-shadow:0 12px 32px rgba(42,94,169,.22);padding:10px 12px;display:flex;gap:8px;align-items:center;font-family:"Nunito Sans",system-ui,sans-serif';
+    pop.innerHTML = '<input type="date" value="' + courant + '" style="border:1.5px solid #e2eaf5;border-radius:9px;padding:7px 9px;font:700 13px \'Nunito Sans\',system-ui,sans-serif;color:#1F4A85;background:#fff">'
+      + '<button type="button" style="border:0;background:#2a5ea9;color:#fff;border-radius:9px;padding:8px 12px;font:800 12.5px \'Nunito Sans\',system-ui,sans-serif;cursor:pointer">Afficher</button>';
+    (d.body || d.documentElement).appendChild(pop);
+    try {
+      const r = bouton.getBoundingClientRect(), w = d.defaultView || window, lp = pop.offsetWidth || 250;
+      pop.style.top = Math.round(r.bottom + 6) + 'px';
+      pop.style.left = Math.round(Math.max(8, Math.min(r.left, (w.innerWidth || 1000) - lp - 8))) + 'px';
+    } catch (e) { pop.style.top = '80px'; pop.style.left = '16px'; }
+    const inp = pop.querySelector('input'), ok = pop.querySelector('button');
+    const fermer = () => { try { pop.remove(); } catch (e) {} d.removeEventListener('mousedown', dehors, true); d.removeEventListener('keydown', echap, true); };
+    const dehors = (e) => { if (!pop.contains(e.target) && e.target !== bouton && !(bouton && bouton.contains(e.target))) fermer(); };
+    const echap = (e) => { if (e.key === 'Escape') fermer(); };
+    const aller = () => {
+      const v = inp.value; if (!/^\d{4}-\d{2}-\d{2}$/.test(v)) return;
+      fermer();
+      try { calendar.changeView('timeGridDay', v); } catch (e) { try { calendar.gotoDate(v); } catch (x) {} }
+    };
+    inp.addEventListener('change', aller);
+    inp.addEventListener('keydown', (e) => { if (e.key === 'Enter') aller(); });
+    ok.addEventListener('click', aller);
+    setTimeout(() => { d.addEventListener('mousedown', dehors, true); d.addEventListener('keydown', echap, true); }, 0);
+    try { inp.focus(); if (typeof inp.showPicker === 'function') inp.showPicker(); } catch (e) {}
+  }
   function updateSundayBtn() { try { const b = document.querySelector('#agenda-root .fc-dimanche-button'); if (b) b.classList.toggle('fc-button-active', showSunday); } catch (e) {} }
 
   // --- responsive -------------------------------------------------------------
@@ -2160,9 +2196,9 @@ OD.define('agenda', {
   function isTouch() { try { return frontWin().matchMedia('(hover: none)').matches; } catch (e) { return false; } }
   function layoutOptions(m) {
     return m ? {
-      headerToolbar: { left: 'prev,next today', center: 'title', right: 'timeGridDay,timeGrid3,listWeek,dayGridMonth' },
+      headerToolbar: { left: 'prev,next today choixjour', center: 'title', right: 'timeGridDay,timeGrid3,listWeek,dayGridMonth' },
     } : {
-      headerToolbar: { left: 'prev,next today dimanche', center: 'title', right: 'dayGridMonth,timeGridWeek,timeGridDay,listWeek' },
+      headerToolbar: { left: 'prev,next today choixjour dimanche', center: 'title', right: 'dayGridMonth,timeGridWeek,timeGridDay,listWeek' },
     };
   }
   let lastMobile = null;
@@ -2221,7 +2257,10 @@ OD.define('agenda', {
         dayGridMonth: { dayHeaderFormat: { weekday: 'short' } },
         timeGridDay: { titleFormat: { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' } },
       },
-      customButtons: { dimanche: { text: 'Dimanche', click: function () { showSunday = !showSunday; calendar.setOption('hiddenDays', showSunday ? [] : [0]); updateSundayBtn(); } } },
+      customButtons: {
+        dimanche: { text: 'Dimanche', click: function () { showSunday = !showSunday; calendar.setOption('hiddenDays', showSunday ? [] : [0]); updateSundayBtn(); } },
+        choixjour: { text: 'Choisir un jour', hint: 'Afficher un jour précis', click: function (ev, el) { choisirJour(el || (ev && (ev.currentTarget || ev.target))); } }
+      },
       headerToolbar: lay0.headerToolbar,
       buttonText: { today: "Aujourd'hui", month: 'Mois', week: 'Semaine', day: 'Jour', list: 'Liste' },
       slotLabelFormat: { hour: '2-digit', minute: '2-digit', hour12: false },
