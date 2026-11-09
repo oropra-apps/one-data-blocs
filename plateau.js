@@ -1,5 +1,7 @@
 // ============================================================================
-//  VROOM TEAM (plateau) — module One Data (OD.define 'plateau')  v6
+//  VROOM TEAM (plateau) — module One Data (OD.define 'plateau')  v7
+//  v7 (09/11/2026) : ARRIÉRÉ BACS (rappels promis avant le 06/11) servi en dernier,
+//    libellé « Arriéré BACS », compté à part dans la bande « En attente ».
 //  v6 (09/11/2026) : TRAFIC ATELIER — servi comme « Trafic atelier · RDV atelier »
 //    (RDV à venir le plus proche d'abord), tuile « trafic atelier », date du RDV
 //    atelier au lieu d'un délai en heures (plateau_suivant : raison 'atelier').
@@ -340,6 +342,7 @@
     '1h': ['Demande client · 1 h', 'r', 'pénalité constructeur au-delà'],
     '48h': ['Relance concession · 48 h', 'o', 'délai BACS'],
     'atelier': ['Trafic atelier · RDV atelier', 'b', 'rendez-vous d\'atelier du client'],
+    'arriere': ['Arriéré BACS · rappel promis avant le 06/11', 'b', ''],
     'rappel': ['Rappel promis', 'o', 'heure promise au client'],
     'frais': ['Demande du jour', 'b', ''],
     'pool': ['Pool', 'b', '']
@@ -454,7 +457,7 @@
         var rest = f.echeance ? (ts(f.echeance) - Date.now()) / 1000 : null;
         txt = (f.raison === '1h' ? '1 h' : '48 h') + ' · ' + propre(f.nom) + (rest == null ? '' : rest > 0 ? ' · reste ' + (rest < 3600 ? chrono(rest) : dureeMin(rest / 60)) : ' · hors délai');
       } else if (f.raison === 'atelier') txt = 'Atelier · ' + propre(f.nom) + (f.echeance ? ' · RDV ' + quand(f.echeance) : '');
-      else if (f.raison === 'rappel') txt = 'Rappel promis ' + quand(f.rappel_le) + ' · ' + propre(f.nom);
+      else if (f.raison === 'rappel' || f.raison === 'arriere') txt = (f.raison === 'arriere' ? 'Arriéré · ' : 'Rappel promis ') + quand(f.rappel_le) + ' · ' + propre(f.nom);
       else txt = propre(f.nom) + (f.demande ? ' · ' + f.demande : '');
       return '<span class="pill ' + r[1] + '">' + esc(txt) + '</span>';
     }
@@ -465,6 +468,7 @@
       if (c.nrappels) reste.push(plural(c.nrappels, 'rappel dû', 'rappels dus'));
       if (c.n48h) reste.push(plural(c.n48h, 'relance 48 h', 'relances 48 h'));
       if (c.natelier) reste.push(plural(c.natelier, 'lead atelier', 'leads atelier'));
+      if (c.narriere) reste.push(plural(c.narriere, 'rappel en arriéré', 'rappels en arriéré'));
       if (c.npool) reste.push(plural(c.npool, 'lead au Pool', 'leads au Pool'));
       return '<div class="strip"><b>' + (S.vue === 'lead' ? 'Après cet appel :' : 'En attente :') + '</b>' + (f.length ? f.map(pilule).join('') : '<span class="muted">rien d\'urgent</span>')
         + (reste.length ? '<span class="muted">· en tout ' + reste.join(', ') + '</span>' : '')
@@ -523,7 +527,7 @@
     function anneau() {
       var cur = S.cur, raison = cur.raison, lead = cur.lead || {};
       var ech = lead.echeance || S.fiche.echeance, rec = lead.recu_le || S.fiche.recu_le;
-      if (raison === 'rappel') {
+      if (raison === 'rappel' || raison === 'arriere') {
         var rp = lead.rappel_le || S.fiche.rappel_le;
         return '<div class="ring"><div class="small muted">Rappel promis pour <b style="color:#1c2b45">' + esc(quand(rp)) + '</b>' + (lead.tentatives ? '<br>' + plural(lead.tentatives, 'tentative', 'tentatives') + ' déjà' : '') + '</div></div>';
       }
@@ -895,7 +899,7 @@
       if (!el.isConnected || !root.isConnected) return detruire();
       if (S.occupe) return;
       await chargerEntour();
-      if (S.vue === 'vide' && !S.pause && S.enchainer && (S.cpt.n1h || S.cpt.nrappels || S.cpt.n48h || S.cpt.natelier || S.cpt.npool)) return servir();
+      if (S.vue === 'vide' && !S.pause && S.enchainer && (S.cpt.n1h || S.cpt.nrappels || S.cpt.n48h || S.cpt.natelier || S.cpt.npool || S.cpt.narriere)) return servir();
       // on ne repeint pas pendant une saisie (la note, le modèle)
       var a = doc.activeElement; if (a && root.contains(a) && /^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName)) return;
       render();
