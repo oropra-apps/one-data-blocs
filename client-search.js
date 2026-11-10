@@ -1,4 +1,12 @@
 // ============================================================================
+//  v29 (10/11/2026) : mode SÉLECTEUR (props.picker) pour le « Nouveau lead » de
+//    la Vroom Team (lead-mgmt v103). Mêmes onglets Particulier / Société, même
+//    recherche et même création (One Data + BACS) ; mais au choix d'un client,
+//    ou après sa création, le module émet l'événement « od:client-choisi »
+//    (detail = la fiche) sur son ancre au lieu d'ouvrir la fiche client. État
+//    propre au sélecteur (la recherche de la page Clients n'est pas touchée),
+//    pas de cycle de consultation, pas de recherche globale, pas d'import BDC.
+//    Sans props.picker : comportement strictement inchangé.
 //  v28 (06/11/2026) : module partagé oropra-bacs-client v7 — la création d'un
 //    client ne propose plus d'envoyer la demande de consentement par SMS (les
 //    vendeurs la recueillent à la commande). Aucun autre changement.
@@ -76,6 +84,10 @@
 OD.define('client-search', {
   mount(__anchor, ctx) {
     __anchor.id = 'oropra-client-search';
+    const PICKER = !!(ctx.props && ctx.props.picker);   // v29
+    function choisi(row) {                               // v29
+      try { __anchor.dispatchEvent(new CustomEvent('od:client-choisi', { bubbles: true, detail: row })); } catch (e) { }
+    }
 
   // --- dépendance : le module partagé de doublons ----------------------
   // Il n'est pas chargé par OD (c'est un simple script CDN qui pose
@@ -156,7 +168,7 @@ OD.define('client-search', {
   const emptyP = () => ({ NOM: '', PRENOM: '', EMAIL: '', IDVu: '', tel: '', vehicule: '', ville: '', cp: '', birthMin: '', birthMax: '', CSP: '' });
   const emptyS = () => ({ SIRET: '', NOM: '', EMAIL: '', IDVu: '', tel: '', vehicule: '' });
 
-  const state = window.__crs || {};
+  const state = PICKER ? {} : (window.__crs || {});   // v29
   if (state.activeTab === undefined) state.activeTab = 'particulier';
   if (state.showMore === undefined) state.showMore = false;
   if (state.filters === undefined) state.filters = { particulier: emptyP(), societe: emptyS() };
@@ -169,9 +181,9 @@ OD.define('client-search', {
   if (state.modal === undefined) state.modal = null;
   if (state.rg === undefined) state.rg = null;   // v23 : liste venue de la recherche globale
   if (state.rg && !Array.isArray(state.rg.ids)) state.rg = null;   // chargement interrompu par une navigation
-  window.__crs = state;
+  if (!PICKER) window.__crs = state;
   (function bdcvnSeed() {
-    const c = bdcvnCtx();
+    const c = PICKER ? null : bdcvnCtx();
     if (!c || !c.importId || c.__seeded) return;
     const p = c.prefill || {};
     if (p.type === 'particulier') {
@@ -243,7 +255,7 @@ OD.define('client-search', {
     try { const w = (wwLib.getFrontWindow && wwLib.getFrontWindow()) || window; w.location.href = href; } catch (e) { }
   }
   function bdcvnCtx() { try { return wwLib.wwVariable.getValue(BDCVN_CTX_VAR) || null; } catch (e) { return null; } }
-  function bdcvnActive() { const c = bdcvnCtx(); return !!(c && c.importId); }
+  function bdcvnActive() { if (PICKER) return false; const c = bdcvnCtx(); return !!(c && c.importId); }
   function bdcvnReturn(idvu) {
     const c = bdcvnCtx() || {};
     _writeVar(BDCVN_CTX_VAR, Object.assign({}, c, { pickedIdvu: String(idvu) }));
@@ -394,6 +406,7 @@ OD.define('client-search', {
   }
 
   async function selectRow(row) {
+    if (PICKER) { state.modal = null; render(); choisi(row); return; }   // v29
     if (bdcvnActive()) { bdcvnReturn(row.IDVu); return; }   // 🔵 retour import BDC
     // Ouvrir un cycle de CONSULTATION sur le site sélectionné si ce
     // client n'en a pas encore un ici.
@@ -621,6 +634,7 @@ OD.define('client-search', {
       }
       // 🔵 Créé depuis l'import BDC : on renvoie le nouveau client, pas de fiche.
       if (bdcvnActive()) { state.modal = null; bdcvnReturn(inserted.IDVu); return; }
+      if (PICKER) { state.modal = null; render(); choisi(inserted); return; }   // v29
       odSetSelectedClient(Object.assign({}, inserted, { full_count: state.totalCount + 1 }));
       triggerFicheClient(inserted.IDVu);          // 🔵 fetch + re-subscribe realtime
       state.modal = null;
@@ -1345,8 +1359,9 @@ OD.define('client-search', {
   // v23 : demande venue de la recherche globale (top nav). Consommée une seule
   // fois, si elle a moins de dix minutes. L'écouteur d'événement est posé une
   // fois pour la session et appelle toujours le DERNIER montage du module.
-  window.__crsRechercheGlobale = lancerRechercheGlobale;
+  if (!PICKER) window.__crsRechercheGlobale = lancerRechercheGlobale;
   (function depuisRechercheGlobale() {
+    if (PICKER) return;   // v29
     let p = null;
     try { p = JSON.parse(sessionStorage.getItem('od_recherche_clients') || 'null'); } catch (e) { }
     try { sessionStorage.removeItem('od_recherche_clients'); } catch (e) { }
