@@ -1,5 +1,8 @@
 // ============================================================================
-//  VROOM TEAM (plateau) — module One Data (OD.define 'plateau')  v7
+//  VROOM TEAM (plateau) — module One Data (OD.define 'plateau')  v8
+//  v8 (10/11/2026) : ABANDON — champ « Commentaire pour BACS » sous le motif ;
+//    il part dans la Description du lead BACS (« Abandon Vroom Team jj/mm : … »,
+//    à la suite de l'existante). Vide : les notes de l'appel sont envoyées.
 //  v7 (09/11/2026) : ARRIÉRÉ BACS (rappels promis avant le 06/11) servi en dernier,
 //    libellé « Arriéré BACS », compté à part dans la bande « En attente ».
 //  v6 (09/11/2026) : TRAFIC ATELIER — servi comme « Trafic atelier · RDV atelier »
@@ -356,7 +359,7 @@
     var S = {
       vue: 'attente', occupe: false, pause: false, enchainer: true,
       cur: null, fiche: null, cx: null, sites: null, site: null, vendeurs: {}, vendeur: '',
-      creneaux: {}, slot: null, issue: null, q: {}, modele: '', note: '', rappel: '2h', rappelDate: '', smsBacs: true, mailBacs: false,
+      creneaux: {}, slot: null, issue: null, q: {}, modele: '', note: '', noteAb: '', rappel: '2h', rappelDate: '', smsBacs: true, mailBacs: false,
       motif: MOTIFS[0], etape: 0, passes: [], file: [], cpt: {}, rappels: null, voirRappels: false, stats: {}, bacs: null, debut: null, dernier: null, liens: null, dictee: false
     };
     injecterCss(doc);
@@ -401,7 +404,7 @@
         if (!r.sf) { S.vue = 'vide'; S.cur = null; return; }
         reveillerBacs();
         S.cur = r; S.debut = Date.now();
-        Object.assign(S, { fiche: null, cx: null, sites: null, site: null, vendeur: '', slot: null, issue: null, q: {}, note: '', rappel: '2h', rappelDate: '', smsBacs: true, mailBacs: false, motif: MOTIFS[0], etape: 0 });
+        Object.assign(S, { fiche: null, cx: null, sites: null, site: null, vendeur: '', slot: null, issue: null, q: {}, note: '', noteAb: '', rappel: '2h', rappelDate: '', smsBacs: true, mailBacs: false, motif: MOTIFS[0], etape: 0 });
         S.vue = 'lead';
         var d = await Promise.all([
           rpc('plateau_fiche', { p_sf_lead_id: r.sf }).catch(function () { return null; }),
@@ -665,7 +668,9 @@
       }
       if (i === 'abandon') {
         return '<div class="card focus" style="border-color:#e24b4a"><h3 style="font-size:16px;color:#b23433">Motif de l\'abandon</h3><div class="f"><select data-x="motif">' + MOTIFS.map(function (m) { return '<option' + (m === S.motif ? ' selected' : '') + '>' + esc(m) + '</option>'; }).join('') + '</select></div>'
-          + '<p class="small muted" style="margin:10px 0 0">Le motif part dans BACS (statut « Abandonned »).</p></div>';
+          + '<div class="f" style="margin-top:12px"><label class="small muted" for="pl-noteab" style="display:block;margin-bottom:4px">Commentaire pour BACS</label>'
+          + '<textarea id="pl-noteab" data-x="noteAb" rows="3" placeholder="Ce que le client a dit, pourquoi on arrête…">' + esc(S.noteAb) + '</textarea></div>'
+          + '<p class="small muted" style="margin:10px 0 0">Le motif et le commentaire partent dans BACS (statut « Abandonned », commentaire dans la description du lead). Sans commentaire, vos notes de l\'appel sont envoyées.</p></div>';
       }
       if (i === 'passer') return '<div class="card focus"><h3 style="font-size:16px">Passer ce lead</h3><p class="small muted" style="margin:8px 0 0">Il est libéré pour vos collègues et ne vous sera plus servi pendant cette session. Rien n\'est écrit dans BACS.</p></div>';
       return '';
@@ -754,7 +759,7 @@
           await rpc('plateau_rappel', { p_sf_lead_id: sf, p_type: i, p_rappel_le: q.toISOString(), p_note: S.note || null, p_email: i === 'injoignable' && S.mailBacs, p_sms: i === 'injoignable' && S.smsBacs });
           msg = (i === 'injoignable' ? 'Rappel programmé ' : 'Projet long terme, rappel ') + (quand(q).length > 5 ? 'le ' : 'à ') + quand(q);
         } else if (i === 'abandon') {
-          await rpc('plateau_abandonner', { p_sf_lead_id: sf, p_motif: S.motif, p_note: S.note || null });
+          await rpc('plateau_abandonner', { p_sf_lead_id: sf, p_motif: S.motif, p_note: (S.noteAb || '').trim() || (S.note || '').trim() || null });
           msg = 'Lead abandonné · ' + S.motif;
         } else if (i === 'passer') {
           S.passes.push(sf);
@@ -873,7 +878,7 @@
       if (x === 'site') { S.slot = null; S.vendeur = ''; render(); }
       else if (x === 'rappelDate' || x === 'vendeur' || x === 'motif') render();
     }
-    root.addEventListener('input', function (ev) { var x = ev.target.getAttribute && ev.target.getAttribute('data-x'); if (x === 'note' || x === 'modele') S[x] = ev.target.value; });
+    root.addEventListener('input', function (ev) { var x = ev.target.getAttribute && ev.target.getAttribute('data-x'); if (x === 'note' || x === 'noteAb' || x === 'modele') S[x] = ev.target.value; });
     root.addEventListener('change', surSaisie);
     function surTouche(ev) {
       if (!el.isConnected || !root.isConnected) return detruire();
