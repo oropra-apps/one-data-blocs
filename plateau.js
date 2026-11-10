@@ -1,8 +1,10 @@
 // ============================================================================
-//  VROOM TEAM (plateau) — module One Data (OD.define 'plateau')  v8
+//  VROOM TEAM (plateau) — module One Data (OD.define 'plateau')  v9
+//  v9 (10/11/2026) : libellé sous le commentaire d'abandon — il part dans le
+//    champ « Commentaire » de la clôture BACS (et non « la description »).
 //  v8 (10/11/2026) : ABANDON — champ « Commentaire pour BACS » sous le motif ;
-//    il part dans la Description du lead BACS (« Abandon Vroom Team jj/mm : … »,
-//    à la suite de l'existante). Vide : les notes de l'appel sont envoyées.
+//    il part dans le champ « Commentaire » de la clôture BACS (API Description),
+//    comme quand l'opératrice clôture dans BACS. Vide : les notes de l'appel.
 //  v7 (09/11/2026) : ARRIÉRÉ BACS (rappels promis avant le 06/11) servi en dernier,
 //    libellé « Arriéré BACS », compté à part dans la bande « En attente ».
 //  v6 (09/11/2026) : TRAFIC ATELIER — servi comme « Trafic atelier · RDV atelier »
@@ -670,7 +672,7 @@
         return '<div class="card focus" style="border-color:#e24b4a"><h3 style="font-size:16px;color:#b23433">Motif de l\'abandon</h3><div class="f"><select data-x="motif">' + MOTIFS.map(function (m) { return '<option' + (m === S.motif ? ' selected' : '') + '>' + esc(m) + '</option>'; }).join('') + '</select></div>'
           + '<div class="f" style="margin-top:12px"><label class="small muted" for="pl-noteab" style="display:block;margin-bottom:4px">Commentaire pour BACS</label>'
           + '<textarea id="pl-noteab" data-x="noteAb" rows="3" placeholder="Ce que le client a dit, pourquoi on arrête…">' + esc(S.noteAb) + '</textarea></div>'
-          + '<p class="small muted" style="margin:10px 0 0">Le motif et le commentaire partent dans BACS (statut « Abandonned », commentaire dans la description du lead). Sans commentaire, vos notes de l\'appel sont envoyées.</p></div>';
+          + '<p class="small muted" style="margin:10px 0 0">Le motif et le commentaire partent dans BACS (statut « Abandonned », champ « Commentaire » de la clôture). Sans commentaire, vos notes de l\'appel sont envoyées.</p></div>';
       }
       if (i === 'passer') return '<div class="card focus"><h3 style="font-size:16px">Passer ce lead</h3><p class="small muted" style="margin:8px 0 0">Il est libéré pour vos collègues et ne vous sera plus servi pendant cette session. Rien n\'est écrit dans BACS.</p></div>';
       return '';
