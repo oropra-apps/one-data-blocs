@@ -1,6 +1,14 @@
 // ============================================================================
 //  LEAD MANAGEMENT — module One Data (OD.define 'lead-mgmt')
-//  VERSION TEAM COLIN (v102) — déploiement CIBLÉ (publish-targets :
+//  VERSION TEAM COLIN (v103) — déploiement CIBLÉ (publish-targets :
+//  v103 (10/11/2026) : Vroom Team —
+//    · ABANDON : champ « Commentaire pour BACS » sous le motif ; il part dans la
+//      Description du lead BACS (plateau_abandonner, note SQL 23).
+//    · NOUVEAU LEAD : 1re étape « Le client » = la recherche client habituelle
+//      (onglets Particulier / Société, module client-search v29 en mode
+//      sélecteur) ; si personne n'est trouvé, création d'un particulier ou d'une
+//      société comme d'habitude (One Data + BACS). Le client choisi pré-remplit
+//      la demande, rattachée à sa fiche (id_client).
 //  v102 (09/11/2026) : onglet Rappels — section « Arriéré BACS » : rappels promis
 //    avant l'arrivée de la Vroom Team dans One Data (06/11), sortis des rappels dus
 //    et du compteur (plateau_base vue 'arriere').
@@ -1468,7 +1476,8 @@
           h += '<label class="hint" for="lt-date">Rappeler le</label><input type="date" id="lt-date" value="' + dateLocale(demainA(9, 30)).slice(0, 10) + '">'
             + '<button type="button" class="btn pri" data-a="long-terme"' + dis() + '>Programmer</button>';
         } else {
-          h += '<select id="a-motif" aria-label="Motif d\'abandon BACS">' + MOTIFS_ABANDON.map(function (m) { return '<option>' + esc(m) + '</option>'; }).join('') + '</select>'
+          h += '<textarea id="a-com" rows="2" aria-label="Commentaire pour BACS" placeholder="Commentaire pour BACS : ce que le client a dit, pourquoi on arrête…" style="flex:1 1 100%;min-width:0;font:inherit;font-size:13px;border:1px solid #c9daf1;border-radius:8px;padding:8px 10px;resize:vertical">' + esc(D.comAb || '') + '</textarea>'
+            + '<select id="a-motif" aria-label="Motif d\'abandon BACS">' + MOTIFS_ABANDON.map(function (m) { return '<option>' + esc(m) + '</option>'; }).join('') + '</select>'
             + '<button type="button" class="btn dang" data-a="abandonner"' + dis() + '>Abandonner</button>';
         }
         h += '</div><div class="row pied"><span class="hint">' + (bloque() ? 'Bloqué : ouvrez BACS dans un onglet et connectez-vous.' : ecritBacs() ? 'Le geste est reporté automatiquement dans BACS.' : 'Reportez aussi le statut dans BACS : l\'écriture automatique n\'est pas activée.') + '</span>'
@@ -1501,7 +1510,7 @@
     }
     async function ouvrirCreer() {
       fermerDrawer(true);
-      S.dr = { mode: 'creer', form: { civilite: 'M.', origine: 'Prospection', nature: 'VN', type_demande: 'Essai', marque: 'Toyota', statut: 'Qualifié' }, vendeurs: [] };
+      S.dr = { mode: 'creer', etape: 'client', form: { civilite: 'M.', origine: 'Prospection', nature: 'VN', type_demande: 'Essai', marque: 'Toyota', statut: 'Qualifié' }, vendeurs: [] };
       $scrim.hidden = false; $drawer.hidden = false;
       renderDrawer();
       if (!S.sitesCreation) {
@@ -1512,6 +1521,15 @@
     }
     function renderCreer() {
       var D = S.dr, f = D.form || {};
+      $drawer.classList.toggle('pick', D.etape === 'client');
+      if (D.etape === 'client') {                       // v103 : recherche / création du client
+        if ($drawer.querySelector('.lm-pick')) return;  // déjà monté : ne pas perdre la recherche en cours
+        $drawer.innerHTML = '<header class="dr-h"><div><h2>Nouveau lead · le client</h2><p class="dr-s">Cherchez le client (particulier ou société). Introuvable ? Créez-le : il est créé dans One Data et dans BACS, puis vous saisissez sa demande.</p></div>' + XICON + '</header>'
+          + '<div class="dr-b"><div class="lm-pick" data-od-module="client-search" data-od-props="{&quot;picker&quot;:true}"></div></div>'
+          + '<footer class="dr-f"><div class="row"><button type="button" class="btn" data-a="close">Annuler</button></div></footer>';
+        try { var OD_ = (doc.defaultView || window).OD || window.OD; if (OD_ && OD_.mountAll) OD_.mountAll(); } catch (e) {}
+        return;
+      }
       var h = '<header class="dr-h"><div><h2>Nouveau lead</h2><p class="dr-s">Créé dans BACS sur la concession choisie, par votre onglet BACS.</p></div>' + XICON + '</header><div class="dr-b">';
       if (D.etape === 'suivi') {
         var e = D.etat || {}, st = e.statut || 'en_attente';
@@ -1531,7 +1549,9 @@
           + '<button type="button" class="btn ghost" data-a="nouveau">Créer un autre lead</button></div></footer>';
         $drawer.innerHTML = h; return;
       }
-      h += '<section><h3>Client</h3><div class="qf">'
+      h += '<section><h3>Client</h3>'
+        + (D.client ? '<div class="row" style="display:flex;align-items:center;gap:10px;margin:0 0 10px"><span class="tag">' + (D.client.soc ? 'Société' : 'Particulier') + '</span><b>' + esc(propre(D.client.nom) || 'Client') + '</b><small class="hint">fiche One Data n° ' + esc(D.client.id) + '</small><button type="button" class="btn sm ghost" data-a="creer-client" style="margin-left:auto">Changer de client</button></div>' : '')
+        + '<div class="qf">'
         + '<div class="q2"><label class="q"><span>Civilité *</span>' + fSel('c-civ', [['M.', 'M.'], ['MME.', 'Mme']], f.civilite) + '</label>'
         + '<label class="q"><span>Entreprise</span>' + fInp('c-ent', f.entreprise) + '</label></div>'
         + '<div class="q2"><label class="q"><span>Prénom *</span>' + fInp('c-prenom', f.prenom) + '</label><label class="q"><span>Nom *</span>' + fInp('c-nom', f.nom) + '</label></div>'
@@ -1577,7 +1597,26 @@
       if (ss.length === 1 && String(f.id_site) !== String(ss[0].id_site)) { f.id_site = String(ss[0].id_site); f.id_vendeur = null; return true; }
       return false;
     }
-    function memoCreer() { if (S.dr && S.dr.mode === 'creer' && S.dr.etape !== 'suivi') S.dr.form = lireCreer(); }
+    function memoCreer() { if (S.dr && S.dr.mode === 'creer' && S.dr.etape !== 'suivi' && S.dr.etape !== 'client') S.dr.form = lireCreer(); }
+    // v103 : client choisi (ou créé) dans la recherche -> la demande est pré-remplie.
+    function clientChoisi(c) {
+      var D = S.dr; if (!D || D.mode !== 'creer' || D.etape !== 'client' || !c || c.IDVu == null) return;
+      var soc = String(c.idmultivu) === '1', f = D.form || {};
+      var civ = String(c.CIVILITE || '').toUpperCase().replace(/\s/g, '');
+      var tel = c.TEl_MOB || c.TEL_MOB || c.tel_mob || c.mobile || '';
+      f.mobile = tel ? String(tel) : ''; f.email = c.EMAIL || '';
+      if (soc) { f.entreprise = c.NOM || ''; f.prenom = ''; f.nom = ''; f.nature = 'Entreprise'; }
+      else {
+        f.entreprise = ''; f.prenom = c.PRENOM || ''; f.nom = c.NOM || '';
+        f.civilite = /^(MME|MADAME|MLLE|MELLE|MADEMOISELLE)/.test(civ) ? 'MME.' : 'M.';
+        if (f.nature === 'Entreprise') f.nature = 'VN';
+      }
+      D.form = f;
+      D.client = { id: c.IDVu, soc: soc, nom: soc ? (c.NOM || '') : [c.PRENOM, c.NOM].filter(Boolean).join(' ') };
+      D.etape = null; D.doublons = null;
+      renderCreer();
+      if (soc) toast('Société choisie : saisissez le nom de votre interlocuteur.');
+    }
     async function chargerVendeursCreer() {
       var D = S.dr; if (!D || D.mode !== 'creer' || !D.form.id_site) return;
       var site = D.form.id_site;
@@ -1598,7 +1637,8 @@
       var p = { civilite: f.civilite, prenom: f.prenom, nom: f.nom, entreprise: f.entreprise, mobile: f.mobile, email: f.email,
                 origine: f.origine, nature: f.nature, type_demande: f.type_demande, marque: f.marque, modele: f.modele,
                 rappel_le: rappel ? rappel.toISOString() : null, commentaire: f.commentaire, statut: f.statut,
-                id_site: Number(f.id_site), id_vendeur: f.id_vendeur ? Number(f.id_vendeur) : null };
+                id_site: Number(f.id_site), id_vendeur: f.id_vendeur ? Number(f.id_vendeur) : null,
+                id_client: D.client ? Number(D.client.id) : null };
       return geste(async function () {
         var r = await rpc('plateau_lead_creer', { p: p, p_forcer: !!forcer });
         if (r && r.ok === false && r.doublons) { D.doublons = r.doublons; renderCreer(); toast('Ce client a déjà une demande ouverte.', true); return; }
@@ -1777,7 +1817,7 @@
     async function fermerDrawer(silencieux) {
       clearInterval(renouvellement); clearInterval(suiviCreation);
       var D = S.dr; S.dr = null;
-      $scrim.hidden = true; $drawer.hidden = true; $drawer.innerHTML = '';
+      $scrim.hidden = true; $drawer.hidden = true; $drawer.innerHTML = ''; $drawer.classList.remove('pick');
       // Fermer sans geste rend le lead aux collègues tout de suite.
       if (D && D.fiche && estMien(D.fiche) && !silencieux && !D.demo) {
         try { await rpc('plateau_liberer', { p_sf_lead_id: D.sf }); } catch (e) {}
@@ -1843,7 +1883,9 @@
     function abandonner() {
       var D = S.dr; if (!D) return;
       var motif = ($drawer.querySelector('#a-motif') || {}).value;
-      var note = (($drawer.querySelector('#q-note') || {}).value || '').trim() || null;
+      // v103 : le commentaire d'abandon part dans BACS (Description du lead).
+      var note = (($drawer.querySelector('#a-com') || {}).value || '').trim()
+              || (($drawer.querySelector('#q-note') || {}).value || '').trim() || null;
       return geste(async function () {
         await rpc('plateau_abandonner', { p_sf_lead_id: D.sf, p_motif: motif, p_note: note });
         apresGeste('Lead abandonné · ' + motif);
@@ -1919,6 +1961,7 @@
           });
         // v81
         case 'nouveau': return ouvrirCreer();
+        case 'creer-client': if (S.dr && S.dr.mode === 'creer') { memoCreer(); S.dr.etape = 'client'; renderCreer(); } return;
         case 'creer-envoyer': return envoyerCreer(false);
         case 'creer-forcer': return envoyerCreer(true);
         case 'retour-flux': if (opt && typeof opt.retourFlux === 'function') { clearInterval(suiviCreation); fermerDrawer(true); opt.retourFlux(); } return;
@@ -1990,6 +2033,10 @@
     }
     root.addEventListener('click', surClic);
     ov.addEventListener('click', surClic);
+    ov.addEventListener('od:client-choisi', function (ev) { clientChoisi(ev && ev.detail); });   // v103
+    ov.addEventListener('input', function (ev) {   // v103 : commentaire d'abandon conservé au re-rendu
+      var t = ev.target; if (t && t.id === 'a-com' && S.dr) S.dr.comAb = t.value;
+    });
     $scrim.addEventListener('click', function () { fermerDrawer(); });
     root.addEventListener('keydown', function (ev) {
       if ((ev.key === 'Enter' || ev.key === ' ') && ev.target.classList && ev.target.classList.contains('lr')) { ev.preventDefault(); ouvrir(ev.target.getAttribute('data-id')); }
@@ -2015,7 +2062,12 @@
         S.dr.form = lireCorriger(); S.dr.form.rappel = null; renderCorriger();
       }
     });
-    function surTouche(ev) { if (ev.key === 'Escape' && S.dr) fermerDrawer(); }
+    function surTouche(ev) {
+      if (ev.key !== 'Escape' || !S.dr) return;
+      // v103 : Échap dans la fiche de création client (ou le panneau BACS) ne ferme pas tout.
+      if ($drawer.querySelector('.crs-modal-overlay') || doc.querySelector('.obc-ov')) return;
+      fermerDrawer();
+    }
     doc.addEventListener('keydown', surTouche);
     // Accès des visites guidées (module tours) : fiche d'exemple et fermeture.
     try { FW.__lmtcTour = { poste: 'vroom', exemple: ouvrirExemple, fermer: function () { if (S.dr) fermerDrawer(); } }; } catch (e) {}
@@ -5644,6 +5696,8 @@
 .lmtc-ov .env small.err{color:#a32d2d}
 .lmtc-ov .dr-f{border-top:1.5px solid #eef2f8;padding:14px 18px;display:grid;gap:10px;background:#fff;border-radius:0 0 0 16px}
 .lmtc-ov .dr-f .row{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.lmtc-ov .drawer.pick{width:min(1080px,100%)}
+.lmtc-ov .drawer .lm-pick{min-height:320px}
 .lmtc-ov .dr-f .row.pied{justify-content:space-between;flex-wrap:nowrap}
 .lmtc-ov .dr-f .row.inj-msg{gap:16px;margin-top:6px}
 .lmtc-ov .dr-f .row.inj-msg label{display:inline-flex;align-items:center;gap:6px;cursor:pointer;color:var(--ink,#1F4A85)}
