@@ -1,6 +1,14 @@
 // ============================================================================
 //  LEAD MANAGEMENT — module One Data (OD.define 'lead-mgmt')
-//  VERSION TEAM COLIN (v104) — déploiement CIBLÉ (publish-targets :
+//  VERSION TEAM COLIN (v105) — déploiement CIBLÉ (publish-targets :
+//  v105 (12/11/2026) : FILTRES Vroom Team.
+//    · Vue liste (Pool, Rappels dus, Transferts, Mes actions) : barre commune —
+//      concession, type de traitement, source / campagne, délai, statut BACS,
+//      opératrice ; la période (bouton dates) s'applique aussi aux rappels.
+//      Les filtres sont gardés dans le navigateur (lmtc-flt).
+//    · Supervision : mêmes filtres sur les listes (1 h, 48 h, rappels dus) et
+//      les alertes (+ famille d'alerte) ; tableau des opératrices filtrable par
+//      opératrice et par période (plateau_supervision(p_du, p_au)).
 //  v104 (12/11/2026) : Vroom Team, vue liste — champ « Rechercher un lead »
 //    (nom, téléphone, e-mail, identifiant BACS) au-dessus des onglets : un
 //    client rappelle ou un lead est signalé → l'opératrice le trouve dans le
@@ -702,8 +710,10 @@
       bacs: null,
       dr: null, // { sf, fiche, sites, vendeurs, site, envois }
       charge: false, erreur: null,
-      rq: { q: '', res: null, err: null, seq: 0, t: null, focus: false }   // v104 : recherche
+      rq: { q: '', res: null, err: null, seq: 0, t: null, focus: false },   // v104 : recherche
+      flt: {}, equipe: null   // v105 : filtres
     };
+    try { S.flt = JSON.parse(FW.localStorage.getItem('lmtc-flt') || '{}') || {}; } catch (e) { S.flt = {}; }
     try { (JSON.parse(FW.localStorage.getItem('lmtc-ack') || '[]') || []).forEach(function (x) { S.ack.add(x); }); } catch (e) {}
     var MOI = null;
 
@@ -1133,12 +1143,12 @@
     }
     function vuePiscine() {
       var k = S.kpis || {};
-      var base = vus(S.piscine).filter(okUniv), nFr = base.filter(frais).length;
+      var base = F(vus(S.piscine).filter(okUniv), 'pool'), nFr = base.filter(frais).length;
       var h = '<div class="barre"><div class="seg"><button type="button" class="' + (!S.stock && S.age === 'frais' ? 'on' : '') + '" data-a="age" data-id="frais">Moins de 24 h <span class="num">' + nFr + '</span></button>'
         + '<button type="button" class="' + (!S.stock && S.age === 'vieux' ? 'on' : '') + '" data-a="age" data-id="vieux">Plus de 24 h <span class="num">' + (base.length - nFr) + '</span></button>'
         + '<button type="button" class="' + (S.stock ? 'on' : '') + '" data-a="stock" data-id="1">Stock accepté <span class="num">' + (S.stockListe ? vus(S.stockListe).length : (k.stock_acceptes_anciens || 0)) + '</span></button></div>'
         + (!S.stock ? chipsSources() : '') + '</div><div class="list">';
-      var ls = S.stock ? vus(S.stockListe || []) : base.filter(function (l) { return S.age === 'frais' ? frais(l) : !frais(l); });
+      var ls = S.stock ? F(vus(S.stockListe || []), 'pool') : base.filter(function (l) { return S.age === 'frais' ? frais(l) : !frais(l); });
       if (!S.stock) ls.sort(S.age === 'frais' ? function (a, b) { return (mins(b.recu_le) - (b.sla_min || 120)) - (mins(a.recu_le) - (a.sla_min || 120)); } : function (a, b) { return ts(b.recu_le) - ts(a.recu_le); });
       // v101 : trafic atelier regroupé, par date de RDV atelier (à venir d'abord).
       var gAt = S.stock ? [] : ls.filter(chAt).sort(ordreAt);
@@ -1157,7 +1167,7 @@
       // v77 : les leads « Demande client (1h) » d'abord, quels que soient les
       // filtres VN / VO et la période ; puis les « Relance concession (48h) ».
       if (!S.stock && S.age === 'frais') {
-        var g1 = S.piscine.filter(ch1).sort(function (a, b) { return ordreChrono(a) - ordreChrono(b); });
+        var g1 = F(S.piscine, 'pool').filter(ch1).sort(function (a, b) { return ordreChrono(a) - ordreChrono(b); });
         var g48 = ls.filter(function (l) { return !ch1(l) && ch48(l); }).sort(function (a, b) { return ts(a.echeance) - ts(b.echeance); });
         var reste0 = ls.filter(function (l) { return !ch1(l) && !ch48(l); });
         if (g1.length) {
@@ -1184,7 +1194,7 @@
       return h + '</div><p class="foot">Prendre réserve le lead à votre nom ' + (k.verrou_minutes || 5) + ' min.' + (S.stock ? ' Stock : leads acceptés il y a plus de 14 jours, sans suite.' : '') + '</p>';
     }
     function vueRappels() {
-      var ls = fc(S.rappels).filter(function (l) { return okUniv(l) && (!S.miens || Number(l.derniere_action_par) === Number(MOI)); })
+      var ls = F(fc(S.rappels), 'rappel').filter(function (l) { return okUniv(l) && (!S.miens || Number(l.derniere_action_par) === Number(MOI)); })
         .sort(function (a, b) { return ts(a.rappel_le) - ts(b.rappel_le); });
       var h = '<div class="barre"><span class="lbl-s">' + plural(nbDus(), 'rappel dû', 'rappels dus') + ' sur ' + plural(fc(S.rappels).filter(okUniv).length, 'programmé', 'programmés') + '.</span><div class="ph-r"><div class="seg"><button type="button" class="' + (!S.miens ? 'on' : '') + '" data-a="miens" data-id="">Tout le plateau</button><button type="button" class="' + (S.miens ? 'on' : '') + '" data-a="miens" data-id="1">Les miens</button></div></div></div><div class="list">';
       if (!ls.length) h += '<div class="empty">' + (S.campagne ? 'Aucun rappel pour cette campagne.' : 'Aucun rappel programmé.') + '</div>';
@@ -1197,7 +1207,7 @@
       });
       // v102 : arriéré BACS — rappels promis avant l'arrivée de la Vroom Team dans
       // One Data (06/11), hors compteur, servis en dernier par « Lead suivant ».
-      var arr = fc(S.arriere || []).filter(function (l) { return okUniv(l) && (!S.miens || Number(l.derniere_action_par) === Number(MOI)); })
+      var arr = F(fc(S.arriere || []), 'rappel').filter(function (l) { return okUniv(l) && (!S.miens || Number(l.derniere_action_par) === Number(MOI)); })
         .sort(function (a, b) { return ts(a.rappel_le) - ts(b.rappel_le); });
       if (arr.length) {
         h += '<p class="grp garr">Arriéré BACS · rappels promis avant le 06/11 <span class="num">' + arr.length + '</span></p>';
@@ -1219,7 +1229,7 @@
       return '<span class="tag">En attente' + (l.od_vendeur ? ' chez ' + esc(propre(l.od_vendeur)) : ' sur le site') + '</span>';
     }
     function vueTransferts() {
-      var ls = vus(S.transferts).filter(function (l) { return !S.miens || Number(l.derniere_action_par) === Number(MOI); });
+      var ls = F(vus(S.transferts), 'transfert').filter(function (l) { return !S.miens || Number(l.derniere_action_par) === Number(MOI); });
       var h = '<div class="barre"><span class="lbl-s">Le site a 2 h pour prendre un transfert.</span><div class="ph-r"><div class="seg"><button type="button" class="' + (!S.miens ? 'on' : '') + '" data-a="miens" data-id="">Tout le plateau</button><button type="button" class="' + (S.miens ? 'on' : '') + '" data-a="miens" data-id="1">Les miens</button></div></div></div><div class="list">';
       if (!ls.length) h += '<div class="empty">' + (S.campagne ? 'Aucun transfert pour cette campagne sur la période.' : 'Aucun transfert sur la période.') + '</div>';
       ls.forEach(function (l) {
@@ -1262,7 +1272,9 @@
         + '</div></div></div><div class="list">';
       if (!S.actions) return h + '<div class="empty">Chargement de vos actions…</div></div>';
       if (!S.actions.length) return h + '<div class="empty">Aucune action sur la période.</div></div>';
-      S.actions.forEach(function (a) {
+      var actF = F(S.actions, 'action');
+      if (!actF.length) h += '<div class="empty">Aucune action ne correspond aux filtres.</div>';
+      actF.forEach(function (a) {
         var et = a.correction_attente ? '<span class="tag warn">Correction en attente du superviseur</span>'
           : a.etat_bacs === 'fait' ? '<span class="tag ok">Reporté dans BACS</span>'
           : a.etat_bacs === 'echec' ? '<span class="tag crit" title="' + esc(a.erreur_bacs || '') + '">Refusé par BACS</span>'
@@ -1321,6 +1333,66 @@
       catch (e) { if (seq !== X.seq) return; X.res = []; X.err = messageErreur(e); }
       render();
     }
+    // ── v105 : filtres de la vue liste ──────────────────────────────────────
+    function perDefaut() { var p0 = periodeDefaut(); return S.per && S.per.du === p0.du && S.per.au === p0.au; }
+    function fActif() { var f = S.flt || {}; return !!(f.site || f.trt || f.src || f.delai || f.statut || f.op); }
+    function trtDe(l) { return l.traitement === '1h' ? '1h' : l.traitement === '48h' ? '48h' : l.traitement === 'atelier' ? 'atelier' : 'autre'; }
+    function delaiDe(l, kind) {
+      if (kind === 'rappel') return l.rappel_le && ts(l.rappel_le) <= Date.now() ? 'retard' : 'temps';
+      if (kind === 'transfert') {
+        var dep = l.transfere_le || l.derniere_action_le;
+        var att = l.id_lead && !l.od_contact_le && ['recu', 'resolu', 'attribue'].indexOf(l.od_statut) !== -1 && dep;
+        return !att ? 'sans' : mins(dep) >= SLA_SITE ? 'retard' : 'temps';
+      }
+      if (l.echeance) return ts(l.echeance) < Date.now() ? 'retard' : 'temps';
+      if (l.recu_le && l.sla_min) return minsV(l.recu_le) >= l.sla_min ? 'retard' : 'temps';
+      return 'sans';
+    }
+    function F(list, kind) {
+      var f = S.flt || {};
+      return (list || []).filter(function (l) {
+        if (kind === 'rappel' && !perDefaut() && !dansPeriode(l)) return false;
+        if (f.site && siteNom(l.site) !== f.site) return false;
+        if (f.statut && (kind === 'action' ? l.statut_actuel : l.statut_eff) !== f.statut) return false;
+        if (kind === 'action') return true;
+        if (f.trt && trtDe(l) !== f.trt) return false;
+        if (f.src) {
+          var k = f.src.slice(0, 2), val = f.src.slice(2);
+          if (k === 's:' && (l.source_libelle || l.source_bacs || '') !== val) return false;
+          if (k === 'c:' && (l.campagne || '') !== val) return false;
+        }
+        if (f.delai && delaiDe(l, kind) !== f.delai) return false;
+        if (f.op && String(l.derniere_action_par || '') !== f.op && String(l.verrou_par || '') !== f.op) return false;
+        return true;
+      });
+    }
+    function memoFlt() { try { FW.localStorage.setItem('lmtc-flt', JSON.stringify(S.flt || {})); } catch (e) {} }
+    function barreFiltres() {
+      if (['piscine', 'rappels', 'transferts', 'actions'].indexOf(S.tab) === -1 || S.rq.q.trim().length >= 2) return '';
+      var f = S.flt || {}, act = S.tab === 'actions';
+      var tout = (S.piscine || []).concat(S.rappels || [], S.arriere || [], S.transferts || [], S.stockListe || []);
+      var uniq = function (a) { return a.filter(function (x, i) { return x && a.indexOf(x) === i; }).sort(function (x, y) { return String(x).localeCompare(String(y), 'fr'); }); };
+      var sites = uniq(tout.map(function (l) { return siteNom(l.site); }).concat((S.actions || []).map(function (a) { return siteNom(a.site); })));
+      var srcs = uniq(tout.map(function (l) { return l.source_libelle || l.source_bacs; }));
+      var camps = uniq(tout.map(function (l) { return l.campagne; }));
+      var sts = uniq(act ? (S.actions || []).map(function (a) { return a.statut_actuel; }) : tout.map(function (l) { return l.statut_eff; }));
+      function sel(k, lab, opts) {
+        return '<select data-f="' + k + '" aria-label="' + esc(lab) + '"' + (f[k] ? ' class="on"' : '') + '><option value="">' + esc(lab) + '</option>'
+          + opts.map(function (o) { return '<option value="' + esc(o[0]) + '"' + (f[k] === o[0] ? ' selected' : '') + '>' + esc(o[1]) + '</option>'; }).join('') + '</select>';
+      }
+      var h = '<div class="fbar" role="group" aria-label="Filtres">' + sel('site', 'Toutes les concessions', sites.map(function (x) { return [x, x]; }));
+      if (!act) {
+        h += sel('trt', 'Tous les traitements', [['1h', 'Demande client (1h)'], ['48h', 'Relance concession (48h)'], ['atelier', 'Trafic atelier'], ['autre', 'Autres demandes']])
+          + '<select data-f="src" aria-label="Source ou campagne"' + (f.src ? ' class="on"' : '') + '><option value="">Toutes les sources et campagnes</option>'
+          + (srcs.length ? '<optgroup label="Sources">' + srcs.map(function (x) { return '<option value="s:' + esc(x) + '"' + (f.src === 's:' + x ? ' selected' : '') + '>' + esc(x) + '</option>'; }).join('') + '</optgroup>' : '')
+          + (camps.length ? '<optgroup label="Campagnes">' + camps.map(function (x) { return '<option value="c:' + esc(x) + '"' + (f.src === 'c:' + x ? ' selected' : '') + '>' + esc(x.length > 60 ? x.slice(0, 58) + '…' : x) + '</option>'; }).join('') + '</optgroup>' : '') + '</select>'
+          + sel('delai', 'Tous les délais', [['retard', 'En retard'], ['temps', 'Dans les temps'], ['sans', 'Sans échéance']]);
+      }
+      h += sel('statut', 'Tous les statuts BACS', sts.map(function (x) { return [x, libStatut(x)]; }));
+      if (!act) h += sel('op', 'Toutes les opératrices', (S.equipe || []).map(function (e) { return [String(e.id), propre(e.nom)]; }));
+      if (fActif()) h += '<button type="button" class="btn sm" data-a="flt-raz">Effacer les filtres</button>';
+      return h + (act ? '<span class="fn">Période : boutons ci-dessous</span>' : '<span class="fn">Période : bouton dates en haut à droite</span>') + '</div>';
+    }
     function renderPanel() {
       if (S.rq.q.trim().length >= 2) return vueRecherche();
       if (S.tab === 'rappels') return vueRappels();
@@ -1341,7 +1413,7 @@
       var ae = doc.activeElement, rqF = S.rq.focus || !!(ae && ae.getAttribute && ae.getAttribute('data-x') === 'vr-q');
       root.innerHTML = renderSituation() + bandeauBacs()
         + (S.erreur ? '<p class="alerte">' + esc(S.erreur) + ' Les données affichées datent du dernier chargement réussi.</p>' : '')
-        + bandeau1h() + '<div class="barre-o">' + renderTabs() + outilsVroom() + '</div>' + bandeauFiltre()
+        + bandeau1h() + '<div class="barre-o">' + renderTabs() + outilsVroom() + '</div>' + bandeauFiltre() + barreFiltres()
         + '<section class="act" aria-label="Leads"><div class="panel">' + renderPanel() + '</div></section>';
       if (rqF) { var qi = root.querySelector('[data-x="vr-q"]'); if (qi) { try { qi.focus(); qi.setSelectionRange(qi.value.length, qi.value.length); } catch (e) {} } }
       try { if (FW.scrollY !== y) FW.scrollTo(0, y); } catch (e) {}
@@ -2021,6 +2093,7 @@
           if (id === 'campagnes' && !S.campagnes) { render(); try { S.campagnes = await rpc('plateau_campagnes', { p_jours: 90 }); } catch (e) { toast(messageErreur(e), true); S.campagnes = []; } }
           render(); return;
         case 'ack': S.ack.add(id); memoAck(); render(); return;
+        case 'flt-raz': S.flt = {}; memoFlt(); render(); return;
         case 'rq-effacer': S.rq = { q: '', res: null, err: null, seq: S.rq.seq + 1, t: null, focus: false }; render(); return;
         case 'prendre': return prendre(id);
         case 'open': return ouvrir(id);
@@ -2086,6 +2159,12 @@
       S.rq.q = t.value; S.rq.focus = true; clearTimeout(S.rq.t); S.rq.t = setTimeout(chercherRq, 350);
     });
     root.addEventListener('focusout', function (ev) { var t = ev.target; if (t && t.getAttribute && t.getAttribute('data-x') === 'vr-q') S.rq.focus = false; });
+    root.addEventListener('change', function (ev) {   // v105 : filtres
+      var t = ev.target, k = t && t.getAttribute && t.getAttribute('data-f'); if (!k) return;
+      if (t.value) S.flt[k] = t.value; else delete S.flt[k];
+      memoFlt(); render();
+    });
+    rpc('plateau_equipe_noms').then(function (r) { S.equipe = Array.isArray(r) ? r : []; if (S.charge) render(); }).catch(function () { S.equipe = []; });
     ov.addEventListener('input', function (ev) {   // v103 : commentaire d'abandon conservé au re-rendu
       var t = ev.target; if (t && t.id === 'a-com' && S.dr) S.dr.comAb = t.value;
     });
@@ -2200,7 +2279,8 @@
     var doc = el.ownerDocument || document;
     var sb = ctx.supabase;
     var FW = frontWindow();
-    var S = { d: null, erreur: null, charge: false, ack: new Set(), pop: null };
+    var S = { d: null, erreur: null, charge: false, ack: new Set(), pop: null, flt: {}, eper: null };   // v105 : flt, eper
+    try { S.flt = JSON.parse(FW.localStorage.getItem('lmsv-flt') || '{}') || {}; } catch (e) { S.flt = {}; }
     try { (JSON.parse(FW.localStorage.getItem('lmsv-ack') || '[]') || []).forEach(function (x) { S.ack.add(x); }); } catch (e) {}
 
     injecterCss(doc); injecterCssSup(doc);
@@ -2245,8 +2325,56 @@
     }
 
     // ── Les alertes, recalculées à chaque lecture ─────────────────────────
+    // ── v105 : filtres de la supervision ───────────────────────────────────
+    function svActif() { var f = S.flt || {}; return !!(f.site || f.trt || f.src || f.delai || f.statut || f.op || f.du || f.au || f.fam); }
+    function jourDe(v) { var d = new Date(v); return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'); }
+    function FS(list, kind) {
+      var f = S.flt || {};
+      return (list || []).filter(function (l) {
+        if (f.site && siteNom(l.site) !== f.site) return false;
+        var tr = kind === 'rappel' ? (l.tr || 'autre') : kind;
+        if (f.trt && tr !== f.trt) return false;
+        if (f.src) { var k = f.src.slice(0, 2), val = f.src.slice(2); if (k === 's:' && (l.source || '') !== val) return false; if (k === 'c:' && (l.campagne || '') !== val) return false; }
+        if (f.delai) { var r = kind === 'rappel' ? (ts(l.rappel_le) <= Date.now() ? 'retard' : 'temps') : (reste(l) != null && reste(l) <= 0 ? 'retard' : 'temps'); if (r !== f.delai) return false; }
+        if (f.statut && (l.statut || '') !== f.statut) return false;
+        if (f.op && propre(kind === 'rappel' ? l.operateur : l.pris_par) !== f.op) return false;
+        if ((f.du || f.au) && l.recu_le) { var j = jourDe(l.recu_le); if ((f.du && j < f.du) || (f.au && j > f.au)) return false; }
+        return true;
+      });
+    }
+    function Sf() {
+      var d = S.d || {}, f = S.flt || {}, o = Object.assign({}, d);
+      o.chrono = FS(d.chrono, '1h'); o.chrono_48h = FS(d.chrono_48h, '48h'); o.rappels_dus = FS(d.rappels_dus, 'rappel');
+      o.equipe = (d.equipe || []).filter(function (e) { return !f.op || propre(e.nom) === f.op; });
+      return o;
+    }
+    function memoSv() { try { FW.localStorage.setItem('lmsv-flt', JSON.stringify(S.flt || {})); } catch (e) {} }
+    function barreSv() {
+      var d = S.d || {}, f = S.flt || {};
+      var tout = (d.chrono || []).concat(d.chrono_48h || [], d.rappels_dus || []);
+      var uniq = function (a) { return a.filter(function (x, i) { return x && a.indexOf(x) === i; }).sort(function (x, y) { return String(x).localeCompare(String(y), 'fr'); }); };
+      function sel(k, lab, opts) {
+        return '<select data-sf="' + k + '" aria-label="' + esc(lab) + '"' + (f[k] ? ' class="on"' : '') + '><option value="">' + esc(lab) + '</option>'
+          + opts.map(function (o) { return '<option value="' + esc(o[0]) + '"' + (f[k] === o[0] ? ' selected' : '') + '>' + esc(o[1]) + '</option>'; }).join('') + '</select>';
+      }
+      var srcs = uniq(tout.map(function (l) { return l.source; })), camps = uniq(tout.map(function (l) { return l.campagne; }));
+      var fams = uniq(['Réactivité', 'Présence', 'Charge', 'Qualité', 'Transmission', 'BACS'].concat((S.famsVues || [])));
+      return '<div class="fbar" role="group" aria-label="Filtres">'
+        + sel('site', 'Toutes les concessions', uniq(tout.map(function (l) { return siteNom(l.site); })).map(function (x) { return [x, x]; }))
+        + sel('trt', 'Tous les traitements', [['1h', 'Demande client (1h)'], ['48h', 'Relance concession (48h)'], ['atelier', 'Trafic atelier'], ['autre', 'Autres demandes']])
+        + '<select data-sf="src" aria-label="Source ou campagne"' + (f.src ? ' class="on"' : '') + '><option value="">Toutes les sources et campagnes</option>'
+        + (srcs.length ? '<optgroup label="Sources">' + srcs.map(function (x) { return '<option value="s:' + esc(x) + '"' + (f.src === 's:' + x ? ' selected' : '') + '>' + esc(x) + '</option>'; }).join('') + '</optgroup>' : '')
+        + (camps.length ? '<optgroup label="Campagnes">' + camps.map(function (x) { return '<option value="c:' + esc(x) + '"' + (f.src === 'c:' + x ? ' selected' : '') + '>' + esc(x.length > 60 ? x.slice(0, 58) + '…' : x) + '</option>'; }).join('') + '</optgroup>' : '') + '</select>'
+        + sel('delai', 'Tous les délais', [['retard', 'En retard'], ['temps', 'Dans les temps']])
+        + sel('statut', 'Tous les statuts BACS', uniq(tout.map(function (l) { return l.statut; })).map(function (x) { return [x, x]; }))
+        + sel('op', 'Toutes les opératrices', (d.equipe || []).map(function (e) { return [propre(e.nom), propre(e.nom)]; }))
+        + sel('fam', 'Toutes les alertes', fams.map(function (x) { return [x, x]; }))
+        + '<label>Reçus du <input type="date" data-sf="du" value="' + esc(f.du || '') + '"' + (f.du ? ' class="on"' : '') + '></label>'
+        + '<label>au <input type="date" data-sf="au" value="' + esc(f.au || '') + '"' + (f.au ? ' class="on"' : '') + '></label>'
+        + (svActif() ? '<button type="button" class="btn sm" data-a="sv-raz">Effacer les filtres</button>' : '') + '</div>';
+    }
     function alertes() {
-      var d = S.d || {}, j = d.jour || {}, out = [];
+      var d = Sf(), j = d.jour || {}, out = [];
       var libres = (d.chrono || []).filter(function (l) { return !l.pris_par; });
       var att = cfg('1h_attention_min', 30), grave = cfg('1h_grave_min', 45);
       var hors1 = libres.filter(function (l) { return reste(l) <= 0; });
@@ -2304,7 +2432,8 @@
       if (d.derniere_synchro && mins(d.derniere_synchro) > 30) out.push({ id: 'sync-' + d.derniere_synchro, niv: 'o', fam: 'BACS', t: d.derniere_synchro,
         titre: 'BACS n\'a pas été relu depuis ' + duree(mins(d.derniere_synchro)), d: 'Les leads arrivés depuis ne sont pas encore ici. Une opératrice doit ouvrir BACS avec l\'extension One Data.', a: [] });
       var ordre = { r: 0, o: 1, b: 2 };
-      return out.filter(function (a) { return !S.ack.has(a.id); }).sort(function (a, b) { return ordre[a.niv] - ordre[b.niv]; });
+      S.famsVues = out.map(function (a) { return a.fam; });
+      return out.filter(function (a) { return !S.ack.has(a.id) && (!S.flt.fam || a.fam === S.flt.fam); }).sort(function (a, b) { return ordre[a.niv] - ordre[b.niv]; });
     }
 
     // ── Rendu ─────────────────────────────────────────────────────────────
@@ -2340,7 +2469,7 @@
         + '</div>';
     }
     function renderChrono() {
-      var d = S.d, ch = d.chrono || [], c48 = d.chrono_48h || [];
+      var d = Sf(), ch = d.chrono || [], c48 = d.chrono_48h || [];
       var h = '<div class="sv-pan"><div class="sv-ph"><h2>Demande client (1h), en direct <span class="cnt">' + ch.length + '</span></h2><small>se met à jour seul</small></div>';
       if (!ch.length) h += '<p class="sv-vide">Aucun lead « Demande client (1h) » en attente. Les nouveaux s\'affichent ici dès que BACS est relu.</p>';
       ch.slice().sort(function (a, b) { return (a.pris_par ? 1 : 0) - (b.pris_par ? 1 : 0) || ts(a.echeance) - ts(b.echeance); }).forEach(function (l) {
@@ -2358,8 +2487,8 @@
         });
         if (c48.length > 4) h += '<p class="sv-plus">et ' + (c48.length - 4) + ' autres dans le Pool BACS.</p>';
       }
-      var rd = d.rappels_dus || [];
-      h += '<div class="sv-ph sv-ph2"><h3>Rappels dus <span class="cnt">' + ((d.jour || {}).rappels_dus || 0) + '</span></h3><small>les plus anciens</small></div>';
+      var rd = (d.rappels_dus || []).slice(0, svActif() ? 30 : 8);
+      h += '<div class="sv-ph sv-ph2"><h3>Rappels dus <span class="cnt">' + (svActif() ? (d.rappels_dus || []).length : ((d.jour || {}).rappels_dus || 0)) + '</span></h3><small>' + (svActif() ? 'selon les filtres' : 'les plus anciens') + '</small></div>';
       if (!rd.length) h += '<p class="sv-vide">Aucun rappel dû.</p>';
       else h += '<div class="scroll"><table class="sv-t"><thead><tr><th>Client</th><th>Opératrice</th><th>Prévu</th><th>Tentatives</th></tr></thead><tbody>'
         + rd.map(function (r) { var ret = mins(r.rappel_le); return '<tr><td>' + esc(propre(r.nom) || 'Sans nom') + (r.nature ? ' · ' + esc(r.nature) : '') + '</td><td>' + esc(propre(r.operateur) || '—') + '</td><td class="' + (ret > 120 ? 'bad' : 'warn') + '">' + esc(quand(r.rappel_le)) + '</td><td>' + (r.tentatives || 0) + ' / 3</td></tr>'; }).join('')
@@ -2402,10 +2531,13 @@
       return '<svg class="sv-sp" width="' + w + '" height="' + ht + '" viewBox="0 0 ' + w + ' ' + ht + '" aria-hidden="true"><path d="' + dd + ' L' + (w - 2) + ' ' + (ht - 2) + ' L2 ' + (ht - 2) + ' Z" fill="#eaf1fa"/><path d="' + dd + '" fill="none" stroke="#2a5ea9" stroke-width="1.6"/><circle cx="' + last[0] + '" cy="' + last[1] + '" r="2.6" fill="#2a5ea9"/></svg>';
     }
     function renderEquipe() {
-      var eq = (S.d.equipe || []).slice().sort(function (a, b) {
+      var eq = (Sf().equipe || []).slice().sort(function (a, b) {
         var ea = etat(a), eb = etat(b); return (eb.actif ? 1 : 0) - (ea.actif ? 1 : 0) || (b.pris || 0) - (a.pris || 0) || String(a.nom).localeCompare(String(b.nom));
       });
-      var h = '<div class="sv-pan"><div class="sv-ph"><h2>L\'équipe aujourd\'hui <span class="cnt">' + eq.length + '</span></h2><small>gestes faits dans One Data, chacune avec son compte</small></div>';
+      var pe = S.eper, titreEq = pe ? 'L\'équipe du ' + pe.du.split('-').reverse().join('/') + ' au ' + pe.au.split('-').reverse().join('/') : 'L\'équipe aujourd\'hui';
+      var h = '<div class="sv-pan"><div class="sv-ph"><h2>' + esc(titreEq) + ' <span class="cnt">' + eq.length + '</span></h2><small><span class="fbar" style="margin:0;display:inline-flex">'
+        + '<label>Période du <input type="date" data-sf="edu" value="' + esc(pe ? pe.du : '') + '"></label><label>au <input type="date" data-sf="eau" value="' + esc(pe ? pe.au : '') + '"></label>'
+        + (pe ? '<button type="button" class="btn sm" data-a="eper-raz">Aujourd\'hui</button>' : '') + '</span></small></div>';
       if (!eq.length) return h + '<p class="sv-vide">Aucune opératrice rattachée à cette équipe.</p></div>';
       h += '<div class="scroll"><table class="sv-t sv-eq"><thead><tr><th>Opératrice</th><th>Maintenant</th><th>Pris</th><th>Leads 1h dans l\'heure</th><th>Prise médiane</th><th>Qualifiés</th><th>Rappels</th><th>Abandons</th><th>Activité depuis 8 h</th><th></th></tr></thead><tbody>';
       eq.forEach(function (e) {
@@ -2473,7 +2605,7 @@
       var y = FW.scrollY || 0;
       root.innerHTML = renderHaut()
         + (S.erreur ? '<p class="alerte">' + esc(S.erreur) + ' Les données affichées datent du dernier chargement réussi.</p>' : '')
-        + '<div class="sv-g2">' + renderChrono() + renderAlertes() + '</div>'
+        + barreSv() + '<div class="sv-g2">' + renderChrono() + renderAlertes() + '</div>'
         + renderCorrections()
         + renderEquipe()
         + '<div class="sv-g3">' + renderFlux() + renderSites() + renderMotifs() + '</div>' + renderNote();
@@ -2518,6 +2650,8 @@
           detruire();
           return posteVroom(el, ctx, user, { apercu: ROLES_APERCU.indexOf(opt.role) !== -1, role: opt.role });
         case 'ack': S.ack.add(id); try { FW.localStorage.setItem('lmsv-ack', JSON.stringify(Array.from(S.ack).slice(-300))); } catch (e) {} render(); return;
+        case 'sv-raz': S.flt = {}; memoSv(); render(); return;
+        case 'eper-raz': S.eper = null; render(); return charger(false);
         case 'confier': return popConfier(id);
         case 'prevenir': return popPrevenir(id);
         case 'corr-ok': case 'corr-ko':   // v81
@@ -2557,12 +2691,23 @@
     root.addEventListener('click', surClic);
     ov.addEventListener('click', surClic);
     $scrim.addEventListener('click', fermerPop);
+    root.addEventListener('change', function (ev) {   // v105 : filtres supervision
+      var t = ev.target, k = t && t.getAttribute && t.getAttribute('data-sf'); if (!k) return;
+      if (k === 'edu' || k === 'eau') {
+        var pe = S.eper || { du: '', au: '' }; pe[k === 'edu' ? 'du' : 'au'] = t.value;
+        if (pe.du && !pe.au) pe.au = pe.du; if (pe.au && !pe.du) pe.du = pe.au;
+        if (pe.du > pe.au) { var x = pe.du; pe.du = pe.au; pe.au = x; }
+        S.eper = pe.du ? pe : null; render(); return charger(false);
+      }
+      if (t.value) S.flt[k] = t.value; else delete S.flt[k];
+      memoSv(); render();
+    });
     function surTouche(ev) { if (ev.key === 'Escape' && S.pop) fermerPop(); }
     doc.addEventListener('keydown', surTouche);
 
     // ── Chargement et cycle de vie ────────────────────────────────────────
     async function charger(silencieux) {
-      try { S.d = await rpc('plateau_supervision'); S.charge = true; S.erreur = null; }
+      try { S.d = await rpc('plateau_supervision', S.eper ? { p_du: S.eper.du, p_au: S.eper.au } : {}); S.charge = true; S.erreur = null; }
       catch (e) { S.erreur = msgErr(e); if (!silencieux && S.charge) toast(S.erreur, true); }
       try { S.corr = await rpc('plateau_corrections_attente') || []; } catch (e) { S.corr = S.corr || []; }   // v81
       if (!S.pop) render();
@@ -6064,6 +6209,11 @@
 .lmtc .barre-o{display:flex;align-items:flex-end;justify-content:space-between;gap:10px 16px;flex-wrap:wrap;border-bottom:1px solid var(--line);margin:0 0 18px}
 .lmtc .barre-o .tabs{border-bottom:0;margin:0;flex:1 1 auto}
 .lmtc .outils{display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:0 0 9px}
+.lmtc .fbar{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin:-6px 0 14px}
+.lmtc .fbar select,.lmtc .fbar input{font:inherit;font-size:12.5px;font-weight:700;color:#1F4A85;border:1.5px solid #d6e2f2;border-radius:9px;padding:6px 8px;background:#fff;max-width:240px}
+.lmtc .fbar select.on,.lmtc .fbar input.on{border-color:#2a5ea9;background:#eef4fc}
+.lmtc .fbar label{font-size:12px;font-weight:700;color:#5c7aa8;display:inline-flex;gap:6px;align-items:center}
+.lmtc .fbar .fn{font-size:12px;font-weight:700;color:#5c7aa8}
 .lmtc .seg-u{display:inline-flex;border:1px solid #ece9e1;border-radius:10px;overflow:hidden;background:#fff}
 .lmtc .seg-u button{border:0;background:none;padding:7px 11px;font:inherit;font-size:12px;font-weight:700;color:var(--ink-2);cursor:pointer}
 .lmtc .seg-u button+button{border-left:1px solid #ece9e1}
