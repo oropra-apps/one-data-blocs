@@ -1,6 +1,10 @@
 // ============================================================================
 //  LEAD MANAGEMENT — module One Data (OD.define 'lead-mgmt')
-//  VERSION TEAM COLIN (v103) — déploiement CIBLÉ (publish-targets :
+//  VERSION TEAM COLIN (v104) — déploiement CIBLÉ (publish-targets :
+//  v104 (12/11/2026) : Vroom Team, vue liste — champ « Rechercher un lead »
+//    (nom, téléphone, e-mail, identifiant BACS) au-dessus des onglets : un
+//    client rappelle ou un lead est signalé → l'opératrice le trouve dans le
+//    Pool (ou voit où il en est) et le prend. RPC plateau_chercher.
 //  v103 (10/11/2026) : Vroom Team —
 //    · ABANDON : champ « Commentaire pour BACS » sous le motif ; il part dans la
 //      Description du lead BACS (plateau_abandonner, note SQL 23).
@@ -697,7 +701,8 @@
       ack: new Set(), vus: new Set(), frais: new Set(), premier: true,
       bacs: null,
       dr: null, // { sf, fiche, sites, vendeurs, site, envois }
-      charge: false, erreur: null
+      charge: false, erreur: null,
+      rq: { q: '', res: null, err: null, seq: 0, t: null, focus: false }   // v104 : recherche
     };
     try { (JSON.parse(FW.localStorage.getItem('lmtc-ack') || '[]') || []).forEach(function (x) { S.ack.add(x); }); } catch (e) {}
     var MOI = null;
@@ -1074,7 +1079,8 @@
               ['actions', 'Mes actions', null, false, 'b']];
     }
     function outilsVroom() {
-      return '<div class="outils"><button type="button" class="btn sm pri" data-a="nouveau">+ Nouveau lead</button><div class="seg-u" role="group" aria-label="Univers">' + [['tous', 'VN + VO'], ['VN', 'VN'], ['VO', 'VO']].map(function (o) {
+      return '<div class="outils"><input type="search" data-x="vr-q" autocomplete="off" aria-label="Rechercher un lead" placeholder="Rechercher un lead : nom, téléphone, e-mail…" value="' + esc(S.rq.q) + '" style="flex:1 1 260px;min-width:220px;font:inherit;font-size:13.5px;font-weight:700;color:#1F4A85;padding:8px 12px;border:1.5px solid #d6e2f2;border-radius:10px;background:#fff;outline:none">'
+        + '<button type="button" class="btn sm pri" data-a="nouveau">+ Nouveau lead</button><div class="seg-u" role="group" aria-label="Univers">' + [['tous', 'VN + VO'], ['VN', 'VN'], ['VO', 'VO']].map(function (o) {
         return '<button type="button" class="' + (S.univ === o[0] ? 'on' : '') + '" data-a="univ" data-id="' + o[0] + '" aria-pressed="' + (S.univ === o[0]) + '">' + (o[0] !== 'tous' ? '<i class="pt vt-' + o[0].toLowerCase() + '"></i>' : '') + o[1] + '</button>'; }).join('') + '</div>'
         + boutonPeriode(S.per) + '</div>';
     }
@@ -1278,7 +1284,45 @@
       render();
     }
 
+    // ── v104 : recherche d'un lead ─────────────────────────────────────────
+    var RQ_PRENABLE = { piscine: 1, rappels: 1, arriere: 1, stock: 1 };
+    function rqEtat(x) {
+      var st = libStatut(x.statut_eff || x.statut_bacs || '');
+      if (x.vue === 'piscine') return 'Pool BACS · ' + st;
+      if (x.vue === 'rappels') return 'Rappel promis ' + quand(x.rappel_le);
+      if (x.vue === 'arriere') return 'Arriéré BACS';
+      if (x.vue === 'stock') return 'Stock accepté';
+      if (x.vue === 'transferts') return 'Transmis' + (x.site ? ' à ' + siteNom(x.site) : '');
+      return 'Hors Pool · BACS : ' + (st || '?') + (x.proprio_bacs ? ' · ' + propre(x.proprio_bacs) : '');
+    }
+    function vueRecherche() {
+      var X = S.rq, ls = X.res || [];
+      var h = '<div class="barre"><span class="lbl-s">' + (X.err ? esc(X.err) : X.res == null ? 'Recherche en cours…'
+        : ls.length ? plural(ls.length, 'lead trouvé', 'leads trouvés') + ' pour « ' + esc(X.q.trim()) + ' » · dans le Pool et ailleurs' : 'Aucun lead ne correspond à « ' + esc(X.q.trim()) + ' ».')
+        + '</span><div class="ph-r"><button type="button" class="btn sm" data-a="rq-effacer">Effacer la recherche</button></div></div><div class="list">';
+      ls.forEach(function (x) {
+        var dem = [x.source_bacs, x.modele, x.site ? siteNom(x.site) : ''].filter(Boolean).join(' · ');
+        var act = RQ_PRENABLE[x.vue] ? actionLigne(x, x.vue === 'rappels' || x.vue === 'arriere' || x.vue === 'stock' || x.statut_eff === 'Accepté' ? 'Rappeler' : 'Prendre')
+          : '<button type="button" class="btn" data-a="open" data-id="' + esc(x.sf_lead_id) + '">Voir</button>';
+        h += '<div class="lr" data-a="open" data-id="' + esc(x.sf_lead_id) + '" tabindex="0">'
+          + '<div><span class="tm neutre"><b>' + esc(x.recu_le ? jour(x.recu_le) : '—') + '</b><small>reçu</small></span></div>'
+          + '<div><span class="lr-n">' + esc(nomLead(x)) + '</span> <span class="lr-v">' + esc(x.telephone || '') + '</span>'
+          + '<p class="lr-d">' + esc(dem) + '</p><div class="tags"><span class="tag' + (RQ_PRENABLE[x.vue] ? ' camp' : '') + '">' + esc(rqEtat(x)) + '</span>'
+          + (x.campagne ? '<span class="tag">' + esc(x.campagne.length > 52 ? x.campagne.slice(0, 50) + '…' : x.campagne) + '</span>' : '') + '</div></div>'
+          + '<div class="lr-a">' + act + '</div></div>';
+      });
+      return h + '</div><p class="foot">La recherche porte sur tous les leads BACS de la copie One Data (nom, téléphone, e-mail, identifiant BACS), quels que soient les filtres.</p>';
+    }
+    async function chercherRq() {
+      var X = S.rq, seq = ++X.seq, q = X.q.trim();
+      if (q.length < 2) { X.res = null; X.err = null; render(); return; }
+      X.res = null; X.err = null; render();
+      try { var r = await rpc('plateau_chercher', { p_q: q }); if (seq !== X.seq) return; X.res = Array.isArray(r) ? r : []; }
+      catch (e) { if (seq !== X.seq) return; X.res = []; X.err = messageErreur(e); }
+      render();
+    }
     function renderPanel() {
+      if (S.rq.q.trim().length >= 2) return vueRecherche();
       if (S.tab === 'rappels') return vueRappels();
       if (S.tab === 'transferts') return vueTransferts();
       if (S.tab === 'campagnes') return vueCampagnes();
@@ -1294,10 +1338,12 @@
         return;
       }
       var y = (FW.scrollY || 0);
+      var ae = doc.activeElement, rqF = S.rq.focus || !!(ae && ae.getAttribute && ae.getAttribute('data-x') === 'vr-q');
       root.innerHTML = renderSituation() + bandeauBacs()
         + (S.erreur ? '<p class="alerte">' + esc(S.erreur) + ' Les données affichées datent du dernier chargement réussi.</p>' : '')
         + bandeau1h() + '<div class="barre-o">' + renderTabs() + outilsVroom() + '</div>' + bandeauFiltre()
         + '<section class="act" aria-label="Leads"><div class="panel">' + renderPanel() + '</div></section>';
+      if (rqF) { var qi = root.querySelector('[data-x="vr-q"]'); if (qi) { try { qi.focus(); qi.setSelectionRange(qi.value.length, qi.value.length); } catch (e) {} } }
       try { if (FW.scrollY !== y) FW.scrollTo(0, y); } catch (e) {}
       setTimeout(function () { S.frais.clear(); }, 7000);
     }
@@ -1975,6 +2021,7 @@
           if (id === 'campagnes' && !S.campagnes) { render(); try { S.campagnes = await rpc('plateau_campagnes', { p_jours: 90 }); } catch (e) { toast(messageErreur(e), true); S.campagnes = []; } }
           render(); return;
         case 'ack': S.ack.add(id); memoAck(); render(); return;
+        case 'rq-effacer': S.rq = { q: '', res: null, err: null, seq: S.rq.seq + 1, t: null, focus: false }; render(); return;
         case 'prendre': return prendre(id);
         case 'open': return ouvrir(id);
         case 'relancer': return relancer(id);
@@ -2034,6 +2081,11 @@
     root.addEventListener('click', surClic);
     ov.addEventListener('click', surClic);
     ov.addEventListener('od:client-choisi', function (ev) { clientChoisi(ev && ev.detail); });   // v103
+    root.addEventListener('input', function (ev) {   // v104 : recherche
+      var t = ev.target; if (!t || !t.getAttribute || t.getAttribute('data-x') !== 'vr-q') return;
+      S.rq.q = t.value; S.rq.focus = true; clearTimeout(S.rq.t); S.rq.t = setTimeout(chercherRq, 350);
+    });
+    root.addEventListener('focusout', function (ev) { var t = ev.target; if (t && t.getAttribute && t.getAttribute('data-x') === 'vr-q') S.rq.focus = false; });
     ov.addEventListener('input', function (ev) {   // v103 : commentaire d'abandon conservé au re-rendu
       var t = ev.target; if (t && t.id === 'a-com' && S.dr) S.dr.comAb = t.value;
     });
