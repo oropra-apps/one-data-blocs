@@ -1,5 +1,9 @@
 // ============================================================================
-//  VROOM TEAM (plateau) — module One Data (OD.define 'plateau')  v9
+//  VROOM TEAM (plateau) — module One Data (OD.define 'plateau')  v10
+//  v10 (12/11/2026) : RECHERCHE d'un lead dans l'écran d'attente (nom,
+//    téléphone, e-mail, identifiant BACS) : un client rappelle ou un lead est
+//    signalé → l'opératrice le trouve et le prend directement (plateau_chercher,
+//    puis plateau_prendre). Les leads hors Pool s'affichent avec leur état.
 //  v9 (10/11/2026) : libellé sous le commentaire d'abandon — il part dans le
 //    champ « Commentaire » de la clôture BACS (et non « la description »).
 //  v8 (10/11/2026) : ABANDON — champ « Commentaire pour BACS » sous le motif ;
@@ -243,6 +247,10 @@
       '.odpl .rap-c{flex:1;min-width:0;display:flex;flex-direction:column}.odpl .rap-c b{color:var(--bl2);font-size:14px}',
       '.odpl .btn-rap{font:inherit;font-size:13px;font-weight:800;border:0;border-radius:10px;padding:9px 16px;background:var(--bl);color:#fff;cursor:pointer}.odpl .btn-rap:disabled{opacity:.5;cursor:default}',
       '.odpl .lnk{border:0;background:transparent;color:var(--bl);font-weight:800;font-size:13px;text-decoration:underline;padding:6px}',
+      '.odpl .rq{margin:24px auto 0;text-align:left;max-width:640px}.odpl .rq label{display:block;margin-bottom:6px}',
+      '.odpl .rq input{width:100%;box-sizing:border-box;font:inherit;font-size:15px;font-weight:700;color:var(--bl2);padding:12px 14px;border:1.5px solid #d6e2f2;border-radius:12px;background:#fff;outline:none}',
+      '.odpl .rq input:focus{border-color:var(--bl);box-shadow:0 0 0 3px rgba(42,94,169,.12)}.odpl .rq .rap{margin-top:10px}',
+      '.odpl .rq-e{font-size:12px;font-weight:800;color:var(--tx2);text-align:right;max-width:190px}',
       '.odpl kbd{font:inherit;font-size:11px;font-weight:900;padding:1px 6px;border-radius:5px;border:1px solid currentColor;opacity:.75}',
       // tour de contrôle
       '.odpl .kpis{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:14px}',
@@ -362,7 +370,8 @@
       vue: 'attente', occupe: false, pause: false, enchainer: true,
       cur: null, fiche: null, cx: null, sites: null, site: null, vendeurs: {}, vendeur: '',
       creneaux: {}, slot: null, issue: null, q: {}, modele: '', note: '', noteAb: '', rappel: '2h', rappelDate: '', smsBacs: true, mailBacs: false,
-      motif: MOTIFS[0], etape: 0, passes: [], file: [], cpt: {}, rappels: null, voirRappels: false, stats: {}, bacs: null, debut: null, dernier: null, liens: null, dictee: false
+      motif: MOTIFS[0], etape: 0, passes: [], file: [], cpt: {}, rappels: null, voirRappels: false, stats: {}, bacs: null, debut: null, dernier: null, liens: null, dictee: false,
+      rq: { q: '', res: null, err: null, seq: 0, t: null }   // v10 : recherche
     };
     injecterCss(doc);
     el.innerHTML = '';
@@ -382,7 +391,7 @@
       if (Array.isArray(r[3])) S.rappels = r[3];
     }
     // v5 : sfCible = un rappel choisi dans la liste « Rappels dus ».
-    async function servir(sfCible) {
+    async function servir(sfCible, ligneCible, raisonCible) {
       if (S.occupe) return;
       if (bacsBloque()) { toast(doc, 'BACS n\'est pas ouvert sur ce poste : ouvrez-le dans un onglet de ce navigateur, avec l\'extension One Data.', true); return; }
       S.occupe = true; S.vue = 'charge'; render();
@@ -397,8 +406,8 @@
             chargerEntour().then(render);
             return;
           }
-          var ligne = (S.rappels || []).filter(function (x) { return x.sf_lead_id === sfCible; })[0] || {};
-          r = Object.assign({}, S.cpt || {}, { sf: sfCible, raison: 'rappel', jusqu: pr.jusqu, lead: ligne, file: S.file });
+          var ligne = ligneCible || (S.rappels || []).filter(function (x) { return x.sf_lead_id === sfCible; })[0] || {};
+          r = Object.assign({}, S.cpt || {}, { sf: sfCible, raison: raisonCible || 'rappel', jusqu: pr.jusqu, lead: ligne, file: S.file });
         } else {
           r = await rpc('plateau_suivant', { p_passer: S.passes.length ? S.passes : null, p_reserver: true });
         }
@@ -511,6 +520,54 @@
       });
       return h + '</div>';
     }
+    // v10 : recherche d'un lead (client qui rappelle, lead signalé).
+    var RQ_PRENABLE = { piscine: 1, rappels: 1, arriere: 1, stock: 1 };
+    function rqEtat(x) {
+      var st = x.statut_eff || x.statut_bacs || '';
+      if (x.vue === 'piscine') return 'Pool BACS · ' + st;
+      if (x.vue === 'rappels') return 'Rappel promis ' + quand(x.rappel_le);
+      if (x.vue === 'arriere') return 'Arriéré BACS';
+      if (x.vue === 'stock') return 'Stock accepté';
+      if (x.vue === 'transferts') return 'Transmis' + (x.site ? ' à ' + siteNom(x.site) : '');
+      return 'Hors Pool · BACS : ' + (st || '?') + (x.proprio_bacs ? ' · ' + propre(x.proprio_bacs) : '');
+    }
+    function rqLigne(x) {
+      var moi = Number(user.ID_User || user.id_user || 0);
+      var pris = x.verrou_par && Number(x.verrou_par) !== moi && x.verrou_jusqu && ts(x.verrou_jusqu) > Date.now();
+      var dem = [x.source_bacs, modeleAff(x.modele || ''), x.site ? siteNom(x.site) : ''].filter(Boolean).join(' · ');
+      var droite = !RQ_PRENABLE[x.vue] ? '<span class="rq-e">' + esc(rqEtat(x)) + '</span>'
+        : pris ? '<span class="rq-e">pris par ' + esc(propre(x.verrou_nom || 'un collègue')) + '</span>'
+        : '<button type="button" class="btn-rap" data-a="servir-q" data-id="' + esc(x.sf_lead_id) + '"' + (bacsBloque() ? ' disabled' : '') + '>Prendre</button>';
+      return '<div class="rap-l"><span class="rap-t"><b>' + esc(x.recu_le ? jour(x.recu_le) : '—') + '</b><small>reçu</small></span>'
+        + '<span class="rap-c"><b>' + esc(propre(x.nom || 'Client')) + '</b><small>' + esc([dem, x.telephone || ''].filter(Boolean).join(' · ')) + '</small>'
+        + (RQ_PRENABLE[x.vue] ? '<small>' + esc(rqEtat(x)) + '</small>' : '') + '</span>' + droite + '</div>';
+    }
+    function rechercheBloc() {
+      var X = S.rq, q = X.q.trim();
+      var h = '<div class="rq"><label class="small muted" for="pl-rq">Un client rappelle ou un lead vous est signalé ?</label>'
+        + '<input id="pl-rq" type="search" data-x="rq" autocomplete="off" placeholder="Rechercher un lead : nom, téléphone, e-mail…" value="' + esc(X.q) + '">';
+      if (q.length >= 2) {
+        h += '<div class="rap"><div class="rap-h"><b>Recherche</b><span class="muted small">'
+          + (X.err ? esc(X.err) : X.res == null ? 'en cours…' : X.res.length ? plural(X.res.length, 'lead trouvé', 'leads trouvés') : 'aucun lead ne correspond') + '</span></div>'
+          + (X.res || []).map(rqLigne).join('') + '</div>';
+      }
+      return h + '</div>';
+    }
+    async function chercherRq() {
+      var X = S.rq, seq = ++X.seq, q = X.q.trim();
+      if (q.length < 2) { X.res = null; X.err = null; render(); return; }
+      X.res = null; X.err = null; render();
+      try { var r = await rpc('plateau_chercher', { p_q: q }); if (seq !== X.seq) return; X.res = Array.isArray(r) ? r : []; }
+      catch (e) { if (seq !== X.seq) return; X.res = []; X.err = messageErreur(e); }
+      if (S.vue !== 'lead') render();
+    }
+    function servirRecherche(sf) {
+      var x = (S.rq.res || []).filter(function (r) { return r.sf_lead_id === sf; })[0];
+      if (!x) return;
+      var raison = x.vue === 'rappels' ? 'rappel' : x.vue === 'arriere' ? 'arriere' : 'pool';
+      S.rq = { q: '', res: null, err: null, seq: S.rq.seq + 1, t: null };
+      return servir(sf, x, raison);
+    }
     function ecranAttente() {
       var c = S.cpt || {};
       var titre = S.pause ? 'Vous êtes en pause' : S.vue === 'vide' ? 'Aucun lead à servir pour l\'instant' : S.vue === 'charge' ? 'Recherche du lead suivant…' : 'Prête pour le lead suivant ?';
@@ -522,7 +579,7 @@
         + '<div class="tile o"><b>' + nf(c.n48h || 0) + '</b>relances 48 h</div><div class="tile"><b>' + nf(c.natelier || 0) + '</b>trafic atelier</div><div class="tile"><b>' + nf(c.npool || 0) + '</b>leads au Pool</div></div>'
         + (S.pause ? '<button type="button" class="bigbtn" data-a="reprendre">Reprendre</button>'
           : '<button type="button" class="bigbtn" data-a="servir"' + (bacsBloque() || S.vue === 'charge' ? ' disabled' : '') + '>' + (S.vue === 'charge' ? 'Un instant…' : 'Lead suivant <kbd>Entrée</kbd>') + '</button>')
-        + (!S.pause ? listeRappels() : '')
+        + (!S.pause ? rechercheBloc() + listeRappels() : '')
         + (typeof opt.creer === 'function' ? '<p class="small muted" style="margin-top:14px">Un client appelle ou se présente sans demande ? <button type="button" class="lnk" data-a="creer">Créer un lead et l\'envoyer à un vendeur</button> <kbd>N</kbd></p>' : '')
         + (S.passes.length ? '<p class="small muted" style="margin-top:16px">' + plural(S.passes.length, 'lead passé', 'leads passés') + ' pendant cette session. <button type="button" class="lnk" data-a="oublier-passes">Les remettre dans la file</button></p>' : '')
         + '</div>';
@@ -849,6 +906,7 @@
       switch (a) {
         case 'servir': return servir();
         case 'servir-sf': return servir(id);
+        case 'servir-q': return servirRecherche(id);
         case 'voir-rappels': S.voirRappels = !S.voirRappels; render(); return;
         case 'pause':
           if (S.vue === 'lead') { toast(doc, 'Terminez d\'abord le lead en cours (ou passez-le).', true); return; }
@@ -874,13 +932,17 @@
       }
     });
     function surSaisie(ev) {
-      var t = ev.target, x = t.getAttribute && t.getAttribute('data-x'); if (!x) return;
+      var t = ev.target, x = t.getAttribute && t.getAttribute('data-x'); if (!x || x === 'rq') return;
       if (t.type === 'checkbox') { S[x] = t.checked; if (x !== 'enchainer') render(); return; }
       S[x] = t.value;
       if (x === 'site') { S.slot = null; S.vendeur = ''; render(); }
       else if (x === 'rappelDate' || x === 'vendeur' || x === 'motif') render();
     }
-    root.addEventListener('input', function (ev) { var x = ev.target.getAttribute && ev.target.getAttribute('data-x'); if (x === 'note' || x === 'noteAb' || x === 'modele') S[x] = ev.target.value; });
+    root.addEventListener('input', function (ev) {
+      var x = ev.target.getAttribute && ev.target.getAttribute('data-x');
+      if (x === 'note' || x === 'noteAb' || x === 'modele') S[x] = ev.target.value;
+      if (x === 'rq') { S.rq.q = ev.target.value; clearTimeout(S.rq.t); S.rq.t = setTimeout(chercherRq, 350); }   // v10
+    });
     root.addEventListener('change', surSaisie);
     function surTouche(ev) {
       if (!el.isConnected || !root.isConnected) return detruire();
