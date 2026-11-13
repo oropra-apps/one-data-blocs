@@ -1,6 +1,10 @@
 // ============================================================================
 //  LEAD MANAGEMENT — module One Data (OD.define 'lead-mgmt')
-//  VERSION TEAM COLIN (v108) — déploiement CIBLÉ (publish-targets :
+//  VERSION TEAM COLIN (v109) — déploiement CIBLÉ (publish-targets :
+//  v109 (13/11/2026) : écrans vendeur et chef des ventes — ALERTE BACS EN GRAND :
+//    les gestes refusés par BACS (RDV dans l'agenda, statut, attribution…) s'affichent
+//    comme chez la Vroom Team : le vendeur voit les siens, le chef ceux de ses sites ;
+//    bouton « Signaler au support ». RPC lead_refus_bacs_site.
 //  v108 (13/11/2026) : accueil du chef des ventes — le bloc « La Vroom Team et vous »
 //    ne s'affiche que lorsque plus de 10 leads transmis par la Vroom Team sont en
 //    attente (demande d'Antoine ; il affichait 0 / 0 en début de pilote).
@@ -3278,6 +3282,7 @@
         rpc('bacs_canal_etat').catch(function () { return S.bacs; })
       ]);
       S.tous = res[0] || []; S.stats = res[1] || {}; S.bacs = res[2] || null;
+      try { S.refus = await rpc('lead_refus_bacs_site'); } catch (e) { }   // v109 : refus BACS
       // v98 : le congélateur (leads abandonnés par la Vroom Team). Un échec ne bloque jamais la page.
       try { await chargerCong(); } catch (e) { S.cong = S.cong || null; }
       MOI = S.comme ? S.comme.id : S.stats.moi;
@@ -4372,7 +4377,7 @@
       }
       var y = (FW.scrollY || 0);
       var acc = S.tab === 'accueil' && (POSTE === 'vendeur' || (POSTE === 'chef' && sitePoste() != null));
-      root.innerHTML = bandeauComme() + (acc ? enteteAccueil() : renderSituation()) + bandeauBacsSite()
+      root.innerHTML = bandeauComme() + alerteBacsRefus(S.refus) + (acc ? enteteAccueil() : renderSituation()) + bandeauBacsSite()
         + (S.erreur ? '<p class="alerte">' + esc(S.erreur) + ' Les données affichées datent du dernier chargement réussi.</p>' : '')
         + '<div class="barre-o">' + renderTabs() + outils() + '</div>'
         + '<section class="act" aria-label="Leads"><div class="panel">' + renderPanel() + '</div></section>';
@@ -5479,6 +5484,7 @@
     async function action(a, id) {
       switch (a) {
         case 'suivi-open': return suiviOuvrir(id);
+        case 'bacs-signaler': signalerRefus(S.refus, toast); return;   // v109
         case 'tab':
           S.tab = id; S.cell = null; render();
           if (id === 'campagnes' && !S.campagnes) { await chargerCampagnes(); render(); }
