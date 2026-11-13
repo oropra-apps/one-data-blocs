@@ -1,6 +1,10 @@
 // ============================================================================
 //  LEAD MANAGEMENT — module One Data (OD.define 'lead-mgmt')
-//  VERSION TEAM COLIN (v109) — déploiement CIBLÉ (publish-targets :
+//  VERSION TEAM COLIN (v110) — déploiement CIBLÉ (publish-targets :
+//  v110 (13/11/2026) : écrans vendeur et chef — le STATUT BACS s'affiche tel quel sur
+//    chaque lead BACS (Nouveau, Accepté, Injoignable, Projet long terme…) ; un lead
+//    dont le client a d'autres demandes ouvertes dans le même cycle (client × site)
+//    porte « + N autre(s) demande(s) » ; « converti » se lit « Transformé en affaire ».
 //  v109 (13/11/2026) : écrans vendeur et chef des ventes — ALERTE BACS EN GRAND :
 //    les gestes refusés par BACS (RDV dans l'agenda, statut, attribution…) s'affichent
 //    comme chez la Vroom Team : le vendeur voit les siens, le chef ceux de ses sites ;
@@ -3094,8 +3098,13 @@
     function monStat() { return ((S.stats && S.stats.vendeurs) || []).filter(function (v) { return Number(v.id_user) === Number(MOI); }); }
     function stockDu(id) { return S.leads.filter(function (l) { return l.zone !== 'plateau' && Number(l.id_site) === Number(id) && mins(l.arrive_le) >= 1440; }).length; }
     function demandeDe(l) { return l.vehicule || (l.message ? String(l.message).replace(/^\[[^\]]*\]\s*/, '').slice(0, 90) : '') || l.source_libelle || 'Demande'; }
+    var BACS_LIB = { Abandonned: 'Abandonné', Interesse: 'Intéressé', 'A affecter': 'À affecter' };   // v110
+    function autresDemandes(l) { return Number((S.autres || {})[String(l.id_lead)] || 0); }
     function tagsLead(l) {
       var h = univTag(l) + '<span class="tag">' + esc(l.source_libelle || l.source || 'Lead') + '</span>';
+      if (l.statut_bacs && l.statut_bacs !== 'Abandonned') h += '<span class="tag" title="Statut du lead dans BACS">BACS : ' + esc(BACS_LIB[l.statut_bacs] || l.statut_bacs) + '</span>';
+      var nAutres = autresDemandes(l);
+      if (nAutres) h += '<span class="tag warn" title="Même client, même site : d\'autres demandes sont ouvertes">+ ' + nAutres + (nAutres > 1 ? ' autres demandes' : ' autre demande') + '</span>';
       if (l.par_plateau) h += '<span class="tag vr">Qualifié par la Vroom Team</span>';
       if (l.campagne) h += '<span class="tag camp" title="' + esc(l.campagne) + '">' + esc(l.campagne.length > 40 ? l.campagne.slice(0, 38) + '…' : l.campagne) + '</span>';
       if (l.tentatives > 0) h += '<span class="tag warn">' + plural(l.tentatives, 'tentative') + '</span>';
@@ -3283,6 +3292,7 @@
       ]);
       S.tous = res[0] || []; S.stats = res[1] || {}; S.bacs = res[2] || null;
       try { S.refus = await rpc('lead_refus_bacs_site'); } catch (e) { }   // v109 : refus BACS
+      try { S.autres = await rpc('lead_autres_demandes') || {}; } catch (e) { S.autres = S.autres || {}; }   // v110 : même cycle
       // v98 : le congélateur (leads abandonnés par la Vroom Team). Un échec ne bloque jamais la page.
       try { await chargerCong(); } catch (e) { S.cong = S.cong || null; }
       MOI = S.comme ? S.comme.id : S.stats.moi;
@@ -4201,7 +4211,7 @@
                     rendu: 'Rendu au Pool', plateau: 'Confié à la Vroom Team', rattachement_client: 'Fiche client rattachée', clos: 'Clos',
                     pas_interesse: 'Clos · pas intéressé', injoignable: 'Clos · injoignable', concurrent: 'Clos · concurrence',
                     doublon: 'Clos · doublon', spam: 'Clos · fausse demande', autre: 'Clos · autre' };
-    var ST_LIB = { recu: 'Nouveau', resolu: 'Nouveau', attribue: 'En cours', contacte: 'Contacté', perdu: 'Perdu', rejete: 'Écarté', converti: 'Vendu' };
+    var ST_LIB = { recu: 'Nouveau', resolu: 'Nouveau', attribue: 'En cours', contacte: 'Contacté', perdu: 'Perdu', rejete: 'Écarté', converti: 'Transformé en affaire' };
     var CANAL_LIB = { 'appel': 'appel', 'SMS': 'SMS', 'e-mail': 'e-mail', 'WhatsApp': 'WhatsApp', 'compte rendu': 'compte rendu' };
     function resLib(h) {
       if (h.resultat == null) return 'Contacté depuis la fiche client' + (h.canal ? ' · ' + (CANAL_LIB[h.canal] || h.canal) : '');
