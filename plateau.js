@@ -1,5 +1,10 @@
 // ============================================================================
-//  VROOM TEAM (plateau) — module One Data (OD.define 'plateau')  v11
+//  VROOM TEAM (plateau) — module One Data (OD.define 'plateau')  v12
+//  v12 (13/11/2026) : DEMANDES DU MÊME CLIENT — quand le client a d'autres demandes
+//    ouvertes sur le même site (même cycle commercial), la case « Clore aussi les N
+//    autres demandes » (cochée) s'affiche sous l'issue : qualifié ou RDV → les autres
+//    sont closes comme doublons ; abandon → même motif. One Data et BACS.
+//    RPC plateau_soeurs / plateau_cloturer_soeurs.
 //  v11 (13/11/2026) : ALERTE BACS EN GRAND — quand BACS refuse un geste de la
 //    Vroom Team, grand bandeau rouge (client, geste, raison) + bouton « Signaler
 //    au support » (O « Ça bug », détails copiés) et mail du support.
@@ -424,7 +429,7 @@
         if (!r.sf) { S.vue = 'vide'; S.cur = null; return; }
         reveillerBacs();
         S.cur = r; S.debut = Date.now();
-        Object.assign(S, { fiche: null, cx: null, sites: null, site: null, vendeur: '', slot: null, issue: null, q: {}, note: '', noteAb: '', rappel: '2h', rappelDate: '', smsBacs: true, mailBacs: false, motif: MOTIFS[0], etape: 0 });
+        Object.assign(S, { fiche: null, cx: null, sites: null, site: null, vendeur: '', slot: null, issue: null, q: {}, note: '', noteAb: '', rappel: '2h', rappelDate: '', smsBacs: true, mailBacs: false, motif: MOTIFS[0], etape: 0, soeurs: [], aussiSoeurs: true });
         S.vue = 'lead';
         var d = await Promise.all([
           rpc('plateau_fiche', { p_sf_lead_id: r.sf }).catch(function () { return null; }),
@@ -432,6 +437,7 @@
           rpc('plateau_sites', { p_sf_lead_id: r.sf }).catch(function () { return []; })
         ]);
         S.fiche = d[0] || {}; S.cx = d[1] || {}; S.sites = d[2] || [];
+        rpc('plateau_soeurs', { p_sf_lead_id: r.sf }).then(function (x) { if (S.cur && S.cur.sf === r.sf) { S.soeurs = x || []; render(); } }).catch(function () {});   // v12
         S.site = S.sites.length ? String(S.sites[0].id_site) : null;
         S.modele = modeleAff(S.fiche.modele || (r.lead && r.lead.modele) || '');
         var dem = String(S.fiche.type_demande || '').toLowerCase();
@@ -792,11 +798,22 @@
       if (i === 'passer') return 'Passer' + suiv;
       return 'Valider';
     }
+    // v12 : autres demandes ouvertes du même client sur le site
+    function soeursBloc() {
+      var ls = S.soeurs || [];
+      if (!ls.length || ['rdv', 'qualifie', 'abandon'].indexOf(S.issue) < 0) return '';
+      var n = ls.length, ab = S.issue === 'abandon';
+      return '<div class="card" style="margin-top:12px;border-color:#f3dca2;background:var(--orbg)"><label style="display:flex;gap:10px;align-items:flex-start;cursor:pointer;font-size:13.5px;font-weight:700">'
+        + '<input type="checkbox" data-a="soeurs"' + (S.aussiSoeurs ? ' checked' : '') + ' style="margin-top:3px">'
+        + '<span>' + (ab ? 'Abandonner aussi (même motif) ' : 'Clore aussi comme doublon ') + (n > 1 ? 'les ' + n + ' autres demandes' : 'l\'autre demande') + ' de ce client sur le site'
+        + ls.map(function (x) { return '<small style="display:block;font-weight:600;color:var(--tx2)">' + esc((x.source || 'Demande') + (x.recu_le ? ' · reçue le ' + jour(x.recu_le) : '') + (x.statut_bacs ? ' · BACS : ' + x.statut_bacs : '') + (x.vendeur ? ' · ' + propre(x.vendeur) : '')) + '</small>'; }).join('')
+        + '</span></label></div>';
+    }
     function colIssue() {
       var pret = peutValider();
       return '<aside class="col c-iss" aria-label="Issue de l\'appel"><div class="card"><h3 style="font-size:16px;margin-bottom:12px">Issue de l\'appel</h3><div class="iss">'
         + ISSUES.map(function (x) { return '<button type="button" class="is ' + x[3] + (S.issue === x[0] ? ' on' : '') + '" data-a="issue" data-id="' + x[0] + '" aria-pressed="' + (S.issue === x[0]) + '"><b>' + x[1] + '</b><small>touche ' + x[2] + '</small></button>'; }).join('')
-        + '</div></div>' + panneauIssue()
+        + '</div></div>' + panneauIssue() + soeursBloc()
         + '<div><button type="button" class="go' + (S.issue === 'abandon' ? ' ko' : '') + '" data-a="valider"' + (pret && !S.occupe ? '' : ' disabled') + '>' + esc(S.occupe ? 'Envoi…' : libelleValider()) + (pret ? ' <kbd style="border-color:#fff">⏎</kbd>' : '') + '</button>'
         + '<div class="note-go">' + (S.issue === 'passer' ? 'Rien n\'est écrit dans BACS.' : 'Écrit dans One Data et dans BACS par votre extension.') + '</div></div></aside>';
     }
@@ -871,6 +888,10 @@
           S.passes.push(sf);
           await rpc('plateau_liberer', { p_sf_lead_id: sf }).catch(function () {});
           msg = 'Lead passé';
+        }
+        if ((i === 'rdv' || i === 'qualifie' || i === 'abandon') && S.aussiSoeurs && (S.soeurs || []).length) {   // v12
+          try { var rs = await rpc('plateau_cloturer_soeurs', { p_sf_lead_id: sf, p_motif: i === 'abandon' ? S.motif : 'Doublon' }); if (msg && rs && rs.closes) msg += ' · ' + rs.closes + (rs.closes > 1 ? ' autres demandes closes' : ' autre demande close'); }
+          catch (e2) { toast(doc, 'Les autres demandes du client n\'ont pas pu être closes : ' + messageErreur(e2), true); }
         }
         if (i !== 'passer') reveillerBacs();
         if (msg) toast(doc, msg);
@@ -953,6 +974,7 @@
       switch (a) {
         case 'servir': return servir();
         case 'servir-sf': return servir(id);
+        case 'soeurs': S.aussiSoeurs = !S.aussiSoeurs; render(); return;   // v12
         case 'bacs-signaler': return signalerRefus();   // v11
         case 'servir-q': return servirRecherche(id);
         case 'voir-rappels': S.voirRappels = !S.voirRappels; render(); return;
