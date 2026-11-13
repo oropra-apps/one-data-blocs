@@ -1,6 +1,11 @@
 // ============================================================================
 //  LEAD MANAGEMENT — module One Data (OD.define 'lead-mgmt')
-//  VERSION TEAM COLIN (v119) — déploiement CIBLÉ (publish-targets :
+//  VERSION TEAM COLIN (v120) — déploiement CIBLÉ (publish-targets :
+//  v120 (13/11/2026) : PARTICULIER / PRO — étiquette « Pro » sur les leads
+//    professionnels (Nature Entreprise, SIRET, société, compte Entreprise :
+//    LEADS_EXTERNES.clientele via lead_clienteles()) et filtre
+//    « Particuliers + Pros / Particuliers / Pros » à côté de VN / VO.
+//    Aucune affectation : tous les leads restent dans le Pool, filtrable.
 //  v119 (13/11/2026) : la pastille de l'onglet Campagnes reprend EXACTEMENT celle de la
 //    barre de navigation (vert #00997f, texte blanc, 18 px) — la règle t-b l'écrasait.
 //    « Affaire ouverte dans BACS » (opportunité sans simulation) distinguée d'une
@@ -2978,7 +2983,7 @@
       relais: null,
       ack: new Set(), vus: new Set(), frais: new Set(), premier: true,
       dr: null, modal: null,
-      tous: [], univ: 'tous', comme: null, poste0: null,
+      tous: [], univ: 'tous', cli: 'tous', pros: {}, comme: null, poste0: null,
       // v97 : accueil des leads (vue v_lead_accueil_carte). accueil : id_lead
       // → ligne de la vue ; accKO : heure du dernier échec (la vue n'existe
       // pas encore, ou refuse) ; rappels : filtre « Rappels programmés ».
@@ -3023,14 +3028,22 @@
     function filtrerUniv(ls) {
       var u = univActif();
       var r = (ls || []).filter(function (l) { return u === 'tous' || !l.univers || l.univers === u || (S.comme && l.zone !== 'piscine'); });
+      if (S.cli !== 'tous') r = r.filter(function (l) { return (estPro(l) ? 'pro' : 'part') === S.cli; });   // v120
       // v97 : filtre « Rappels programmés » (aujourd'hui et demain), appliqué
       // comme le filtre VN / VO : toute la page (compteurs compris) le suit.
       return S.rappels && accDispo() ? r.filter(rappelProgramme) : r;
     }
     // v70 : VN / VO comme dans la gestion des ventes : un liseret à gauche,
     // vert pour le VN, orange pour le VO (plus de pastille).
-    function univTag(l) { return ''; }
+    // v120 : particulier / pro — seule l'étiquette « Pro » s'affiche.
+    function estPro(l) { return !!l && (l.clientele === 'pro' || (S.pros || {})[String(l.id_lead)] === 'pro'); }
+    function univTag(l) { return estPro(l) ? '<span class="tag pro" title="Client professionnel (société, SIRET ou demande Entreprise dans BACS)">Pro</span>' : ''; }
     function univCls(l) { return l && l.univers === 'VN' ? ' vt-vn' : l && l.univers === 'VO' ? ' vt-vo' : ''; }
+    function segCli() {
+      if (S.comme) return '';
+      return '<div class="seg-u" role="group" aria-label="Clientèle">' + [['tous', 'Particuliers + Pros'], ['part', 'Particuliers'], ['pro', 'Pros']].map(function (o) {
+        return '<button type="button" class="' + (S.cli === o[0] ? 'on' : '') + '" data-a="cli" data-id="' + o[0] + '" aria-pressed="' + (S.cli === o[0]) + '">' + o[1] + '</button>'; }).join('') + '</div>';
+    }
     function segUniv() {
       if (S.comme) return '';
       if (POSTE === 'vendeur' && univDe(S.stats && S.stats.mon_univers) !== 'tous') return '';
@@ -3072,7 +3085,7 @@
     }
     function fmtPer() { return fmtPeriode(S.per); }
     function outils() {
-      return '<div class="outils">' + selComme() + segUniv() + boutonRappels()
+      return '<div class="outils">' + selComme() + segUniv() + segCli() + boutonRappels()
         + '<button type="button" class="k-range" data-a="dates" title="Leads reçus sur la période">\ud83d\udcc5 <span class="k-range-t">' + esc(fmtPer()) + '</span> <span class="k-caret">\u25be</span></button></div>';
     }
     function bandeauComme() {
@@ -3098,7 +3111,7 @@
       POSTE = S.poste0 || POSTE; S.comme = null; S.poste0 = null; MOI = S.stats ? S.stats.moi : MOI;
       S.tab = 'pool'; S.cell = null; S.leads = filtrerUniv(S.tous); render(); chargerAide();
     }
-    var ACTIONS_APERCU = ['rappels', 'hist-open', 'tab', 'comme-off', 'comme', 'comme-menu', 'univ', 'dates', 'dem-plus', 'open', 'close', 'retour-liste', 'ack', 'reessayer', 'cell', 'fermer'];
+    var ACTIONS_APERCU = ['rappels', 'hist-open', 'tab', 'comme-off', 'comme', 'comme-menu', 'univ', 'cli', 'dates', 'dem-plus', 'open', 'close', 'retour-liste', 'ack', 'reessayer', 'cell', 'fermer'];
     function fermerDates() { fermerCalendrier(doc); }
     function appliquerDates(du, au) {
       fermerDates();
@@ -3344,6 +3357,7 @@
       S.tous = res[0] || []; S.stats = res[1] || {}; S.bacs = res[2] || null;
       try { S.refus = await rpc('lead_refus_bacs_site'); } catch (e) { }   // v109 : refus BACS
       try { S.autres = await rpc('lead_autres_demandes') || {}; } catch (e) { S.autres = S.autres || {}; }   // v110 : même cycle
+      try { S.pros = await rpc('lead_clienteles') || {}; } catch (e) { S.pros = S.pros || {}; }   // v120 : particulier / pro
       // v98 : le congélateur (leads abandonnés par la Vroom Team). Un échec ne bloque jamais la page.
       try { await chargerCong(); } catch (e) { S.cong = S.cong || null; }
       MOI = S.comme ? S.comme.id : S.stats.moi;
@@ -5798,6 +5812,7 @@
         case 'ac-filtre': S.acFiltre = id; render(); return;
         case 'rappels': S.rappels = !S.rappels && accDispo(); S.leads = filtrerUniv(S.tous); S.suggKey = null; render(); if (POSTE !== 'vendeur') chargerAide(); return;
         case 'univ': S.univ = id || 'tous'; S.leads = filtrerUniv(S.tous); S.suggKey = null; render(); if (POSTE !== 'vendeur') chargerAide(); return;
+        case 'cli': S.cli = id || 'tous'; S.leads = filtrerUniv(S.tous); S.suggKey = null; render(); if (POSTE !== 'vendeur') chargerAide(); return;   // v120
         case 'comme-off': S.commeMenu = false; S.commeQ = ''; if (S.comme) return sortirComme(); render(); return;
         case 'comme-menu': S.commeMenu = !S.commeMenu; S.commeQ = ''; render(); if (S.commeMenu) { var qi = root.querySelector('.k-vsearch'); if (qi) try { qi.focus(); } catch (e) {} } return;
         case 'comme': S.commeMenu = false; S.commeQ = ''; return entrerComme(Number(id));
@@ -6113,6 +6128,7 @@
 .lmtc .tag{display:inline-flex;align-items:center;font-size:11.5px;font-weight:600;border-radius:8px;padding:3px 9px;background:var(--calme-bg);color:var(--ink-2);white-space:nowrap;max-width:100%;overflow:hidden;text-overflow:ellipsis}
 .lmtc .tag.camp{background:var(--sel);color:var(--bleu)}
 .lmtc .tag.vr{background:var(--sel);color:var(--bleu-dk);font-weight:700}
+.lmtc .tag.pro{background:#2a5ea9;color:#fff;font-weight:700;letter-spacing:.02em}
 .lmtc .tag.ok{background:var(--ok-bg);color:var(--m-vert);font-weight:700}
 .lmtc .tag.crit{background:var(--chaud-bg);color:var(--m-rouge);font-weight:700}
 .lmtc .tag.warn{background:var(--alerte-bg);color:var(--m-orange);font-weight:700}
