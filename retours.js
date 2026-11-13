@@ -1,3 +1,6 @@
+// v12 (13/11/2026) : chaque retour s'affiche comme une conversation (le message
+// d'origine en premier, puis les échanges), les plus récentes en tête. L'utilisateur
+// peut supprimer une conversation de son fil (elle reste visible de l'équipe).
 // v11 (13/11/2026) : « Mes retours » devient une conversation. Chaque retour montre
 // tout le fil (réponses de l'équipe et de l'utilisateur) et un bouton « Répondre » :
 // l'utilisateur répond dans le même retour au lieu d'en ouvrir un nouveau
@@ -29,13 +32,13 @@
 //    - « Le signaler » juste après des clics répétés ou un écran en échec ;
 //    - un micro-sondage d'un geste, servi par l'edge function pulse ;
 //    - une notice unique d'information sur la mesure d'usage.
-//  Onglet « Mes retours » : statut + réponse de l'équipe, pastille de non-lus.
+//  Onglet « Mes retours » : une conversation par retour (répondre, supprimer), pastille de non-lus.
 //
 //  Rendu dans un Shadow DOM : aucune fuite de style avec WeWeb.
 // ============================================================================
 OD.define('retours', {
   mount(__anchor, ctx) {
-    const VERSION = 11;   // v5 : écran courant fourni par pulse (plus grande surface visible, accessoires exclus)
+    const VERSION = 12;   // v5 : écran courant fourni par pulse (plus grande surface visible, accessoires exclus)
                          // v4 : « Montrer l'endroit » nomme la zone désignée (titre du bloc, colonne, champ, type)
     const W = window;
 
@@ -246,7 +249,12 @@ textarea:focus{border-color:#1F4A85;outline:none}
 .rp em{display:block;font-style:normal;font-size:11px;font-weight:700;opacity:.72;margin-bottom:2px}
 .rp.ut{margin-left:22px;border-radius:12px 3px 12px 12px;background:#E8EEF7;color:#14305A}
 .rp.ut em{opacity:1;color:#5A72A0}
-.rpz{margin-top:8px}
+.rpz{margin-top:8px;display:flex;flex-wrap:wrap;align-items:center;gap:4px 16px}
+.rpz textarea{flex-basis:100%}
+.rpz .rpa{flex-basis:100%}
+.lkb.sup{color:#8A5300;font-weight:600}
+.cf{flex-basis:100%;display:flex;flex-wrap:wrap;align-items:center;gap:8px;font-size:12.5px;color:#14305A}
+.it.chat p{display:none}
 .rpz textarea{min-height:64px}
 .rpa{display:flex;gap:8px;justify-content:flex-end;align-items:center;margin-top:6px}
 .rpa small{margin-right:auto;font-size:12px;color:#B3261E}
@@ -907,14 +915,40 @@ textarea:focus{border-color:#1F4A85;outline:none}
     };
     // Fil d'un retour : messages de l'équipe et de l'utilisateur, puis « Répondre ».
     function filHtml(it) {
-      const msgs = Array.isArray(it.messages) && it.messages.length
+      const fil = Array.isArray(it.messages) && it.messages.length
         ? it.messages
         : (it.reponse ? [{ auteur: 'equipe', texte: it.reponse, le: it.reponse_le }] : []);
-      if (!msgs.length) return '';
-      const bulles = msgs.map(m => m.auteur === 'utilisateur'
-        ? `<div class="rp ut"><em>Ta réponse, ${esc(ilya(m.le))}</em>${esc(m.texte)}</div>`
-        : `<div class="rp"><em>Équipe One Data, ${esc(ilya(m.le))}</em>${esc(m.texte)}</div>`).join('');
-      return `${bulles}<div class="rpz" data-retour="${esc(it.id)}"><button type="button" class="lkb" data-a="rep-ouvrir">Répondre</button></div>`;
+      const msgs = [{ auteur: 'utilisateur', texte: it.texte || it.extrait || '', le: it.cree_le, origine: true }].concat(fil);
+      const bulles = msgs.filter(m => m.texte).map(m => m.origine
+        ? `<div class="rp ut"><em>Ton message, ${esc(ilya(m.le))}</em>${esc(m.texte)}</div>`
+        : (m.auteur === 'utilisateur'
+          ? `<div class="rp ut"><em>Ta réponse, ${esc(ilya(m.le))}</em>${esc(m.texte)}</div>`
+          : `<div class="rp"><em>Équipe One Data, ${esc(ilya(m.le))}</em>${esc(m.texte)}</div>`)).join('');
+      return `${bulles}${actionsHtml(it.id)}`;
+    }
+    const actionsHtml = (id) => `<div class="rpz" data-retour="${esc(id)}"><button type="button" class="lkb" data-a="rep-ouvrir">Répondre</button><button type="button" class="lkb sup" data-a="sup-demander">Supprimer</button></div>`;
+    function demanderSuppression(zone) {
+      zone.innerHTML = `<div class="cf"><span>Supprimer cette conversation de tes retours ?</span><button type="button" class="bt" data-a="sup-confirmer">Supprimer</button><button type="button" class="bt sec" data-a="sup-annuler">Annuler</button></div>`;
+    }
+    async function supprimerConversation(zone, bouton) {
+      bouton.disabled = true;
+      try {
+        const jeton = await Pz().jeton();
+        const r = await fetch(endpoint() + '?a=retour-masquer', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + jeton },
+          body: JSON.stringify({ tenant_id: tenant.id, retour_id: zone.dataset.retour }),
+        });
+        const j = await r.json().catch(() => ({}));
+        if (!r.ok || !j.ok) throw new Error(j.erreur || ('HTTP ' + r.status));
+        const it = zone.closest('.it');
+        if (it) it.remove();
+        if (!liste.querySelector('.it')) liste.innerHTML = '<div class="vide">Aucun avis envoyé pour l\'instant.<br>Le premier se donne en deux clics, depuis l\'onglet d\'à côté.</div>';
+      } catch (e) {
+        bouton.disabled = false;
+        zone.querySelector('.cf span').textContent = 'Suppression impossible pour le moment, réessaie.';
+        console.warn('[retours] retour-masquer KO', e && e.message);
+      }
     }
     function ouvrirReponse(zone) {
       zone.innerHTML = `<textarea rows="3" maxlength="4000" aria-label="Ta réponse"></textarea>
@@ -964,7 +998,7 @@ textarea:focus{border-color:#1F4A85;outline:none}
           } else {
             liste.innerHTML = items.map(it => {
               const h = HUM[it.humeur] || HUM.idee;
-              return `<div class="it${it.non_lu ? ' nl' : ''}">
+              return `<div class="it chat${it.non_lu ? ' nl' : ''}">
                 <span class="ic" style="--c:${h.c};--f:${h.f}" title="${esc(h.label)}">${I[h.id]}</span>
                 <div>
                   <p>${esc(it.extrait || h.label)}</p>
@@ -1139,7 +1173,9 @@ textarea:focus{border-color:#1F4A85;outline:none}
       else if (a === 'pk-annuler') finPick();
       else if (a === 'envoyer') envoyer();
       else if (a === 'rep-ouvrir') ouvrirReponse(b.closest('.rpz'));
-      else if (a === 'rep-annuler') { const z = b.closest('.rpz'); z.innerHTML = '<button type="button" class="lkb" data-a="rep-ouvrir">Répondre</button>'; }
+      else if (a === 'rep-annuler' || a === 'sup-annuler') { const z = b.closest('.rpz'); z.outerHTML = actionsHtml(z.dataset.retour); }
+      else if (a === 'sup-demander') demanderSuppression(b.closest('.rpz'));
+      else if (a === 'sup-confirmer') supprimerConversation(b.closest('.rpz'), b);
       else if (a === 'rep-envoyer') envoyerReponse(b.closest('.rpz'), b);
       else if (a === 'nouveau') { reinitialiser(); setTimeout(() => { try { grille.querySelector('button').focus(); } catch (x) {} }, 20); }
       else if (a === 'notice-ok') { ecrireLS(cleUid('od_retours_notice'), '1'); masquerCarte(); }
