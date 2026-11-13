@@ -1,4 +1,8 @@
 // CONTACTS — module One Data (OD.define) v1 (Lot B)
+// v14 (13/11/2026) : les pièces jointes des e-mails s'affichent toujours. Elles
+//   n'apparaissaient que si la liste arrivait déjà décodée : selon le module
+//   chargé en premier sur la fiche (historique, rdv…), elle restait en texte et
+//   la puce disparaissait (Kbis et justificatif de Mme ROSSEEL, 10/11).
 // v13 (06/11/2026) : appels d'un collègue — la carte affiche la durée et un
 //   résumé succinct (objet + suite) ; transcription et enregistrement restent
 //   réservés au vendeur et à sa hiérarchie (vue v_voip_calls_masked).
@@ -399,7 +403,7 @@ OD.define('contacts', {
       var sanitize=function(h){return h?h.replace(/<script[\s\S]*?<\/script>/gi,'').replace(/<iframe[\s\S]*?<\/iframe>/gi,'').replace(/\s+on\w+\s*=\s*"[^"]*"/gi,'').replace(/javascript:/gi,''):'';};
       var stripHtml=function(h){return h?h.replace(/<[^>]*>/g,'').replace(/\s+/g,' ').trim():'';};
       var bodyHtml=sanitize(item.email_body_html||''), fullContent=bodyHtml||esc(item.contenu_texte||item.email_snippet||''), fullPlain=stripHtml(item.email_body_html||'')||(item.contenu_texte||''), showT3=(fullPlain.length>snippetTrunc.length+3)||(snippetSrc.length>snippetTrunc.length);
-      var atts=(item.email_has_attachments&&Array.isArray(item.attachments))?item.attachments:[];
+      var atts=parseAttachments(item.attachments).filter(function(a){return a&&!a.is_inline;});
       var attachHtml=atts.length?'<div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:8px;">'+atts.map(function(a){return '<div id="att_'+a.id+'" data-storage-path="'+esc(a.storage_path||'')+'" onclick="window.__emDownload(\''+esc(a.id)+'\',\''+((a.filename||'fichier').replace(/'/g,"\\'"))+'\')" style="display:inline-flex;align-items:center;gap:6px;padding:5px 10px;border:1px solid #e5e7eb;border-radius:8px;background:#fff;cursor:pointer;font-size:12px;color:#374151;">'+docBadge(docExt(a),20)+'<span style="word-break:break-word;">'+esc(truncate(a.filename||'fichier',25))+'</span><span style="color:#9ca3af;font-size:11px;">'+formatSize(a.file_size)+'</span></div>';}).join('')+'</div>':'';
       headerMiddle='<span style="font-size:13px;font-weight:600;color:#111827;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="'+esc(subject)+'">'+esc(subject)+'</span>';
       contentHtml='<div style="font-size:13px;color:#4b5563;line-height:1.5;"><span id="sum_'+eid+'" style="color:#6b7280;">'+esc(snippetTrunc)+'</span>'+(showT3?toggleBtn(eid):'')+'<div id="ful_'+eid+'" style="display:none;color:#374151;word-break:break-word;overflow-wrap:anywhere;margin-top:4px;">'+fullContent+toggleBtn(eid,'voir moins')+'</div>'+attachHtml+'</div>';
