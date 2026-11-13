@@ -1,147 +1,6 @@
 // ============================================================================
 //  LEAD MANAGEMENT — module One Data (OD.define 'lead-mgmt')
-//  VERSION TEAM COLIN (v105) — déploiement CIBLÉ (publish-targets :
-//  v105 (12/11/2026) : FILTRES Vroom Team.
-//    · Vue liste (Pool, Rappels dus, Transferts, Mes actions) : barre commune —
-//      concession, type de traitement, source / campagne, délai, statut BACS,
-//      opératrice ; la période (bouton dates) s'applique aussi aux rappels.
-//      Les filtres sont gardés dans le navigateur (lmtc-flt).
-//    · Supervision : mêmes filtres sur les listes (1 h, 48 h, rappels dus) et
-//      les alertes (+ famille d'alerte) ; tableau des opératrices filtrable par
-//      opératrice et par période (plateau_supervision(p_du, p_au)).
-//  v104 (12/11/2026) : Vroom Team, vue liste — champ « Rechercher un lead »
-//    (nom, téléphone, e-mail, identifiant BACS) au-dessus des onglets : un
-//    client rappelle ou un lead est signalé → l'opératrice le trouve dans le
-//    Pool (ou voit où il en est) et le prend. RPC plateau_chercher.
-//  v103 (10/11/2026) : Vroom Team —
-//    · ABANDON : champ « Commentaire pour BACS » sous le motif ; il part dans la
-//      Description du lead BACS (plateau_abandonner, note SQL 23).
-//    · NOUVEAU LEAD : 1re étape « Le client » = la recherche client habituelle
-//      (onglets Particulier / Société, module client-search v29 en mode
-//      sélecteur) ; si personne n'est trouvé, création d'un particulier ou d'une
-//      société comme d'habitude (One Data + BACS). Le client choisi pré-remplit
-//      la demande, rattachée à sa fiche (id_client).
-//  v102 (09/11/2026) : onglet Rappels — section « Arriéré BACS » : rappels promis
-//    avant l'arrivée de la Vroom Team dans One Data (06/11), sortis des rappels dus
-//    et du compteur (plateau_base vue 'arriere').
-//  v101 (09/11/2026) : Pool BACS Vroom — TRAFIC ATELIER regroupé et classé par
-//    date de RDV atelier (à venir d'abord, puis RDV passés) ; à gauche « RDV atelier
-//    jeu. 13/11 8h · dans 3 j » au lieu d'un compte à rebours en heures ; étiquette
-//    « Trafic atelier » (plateau_file2 : traitement 'atelier', rdv_atelier).
-//    « Stock accepté » ne reste plus bloqué sur « Chargement du stock… ».
-//  v100 (09/11/2026) : onglet « Suivis » (demande d'Arnaud Lefebvre) : quand un
-//    client rappelle, chacun retrouve sa demande et voit où elle en est, même
-//    si un collègue la suit — vendeur, dernier geste, statut One Data et BACS,
-//    prochain rappel. En lecture : on ouvre la fiche du client, on ne prend
-//    pas le lead d'un collègue. Sans recherche : les leads du site déjà pris
-//    en charge (60 jours, ou encore ouverts) ; la recherche (nom, téléphone,
-//    e-mail, véhicule) porte sur TOUS les leads du site. RPC poste_site_suivis.
-//  v98 (05/11/2026) : ACCUEIL DES LEADS. Un message automatique (RCS, SMS
-//    ou e-mail) part au client, qui choisit l'heure de son rappel. Postes
-//    vendeur, chef des ventes et direction (posteSite) :
-//    * pastille d'état sur chaque lead (Envoyé, Lu, Attend un appel, Créneau
-//      choisi…), infobulle avec l'historique horodaté (envoyé, remis, lu,
-//      lien ouvert, réponse) ;
-//    * un créneau choisi par le client REMPLACE le compte à rebours du délai
-//      (« Rappel 14:30–15:00 », orange à moins de 30 min, rouge s'il est
-//      passé) ; la fiche du lead l'affiche aussi en tête ;
-//    * tri du Pool : « Attend un appel maintenant » d'abord, puis les
-//      créneaux à moins de 30 min, puis les leads sans créneau (ordre
-//      habituel), puis les créneaux plus lointains ;
-//    * filtre « Rappels programmés » (rappel aujourd'hui ou demain).
-//    Données : vue v_lead_accueil_carte (security_invoker), lue par lots
-//    d'identifiants. Si la vue n'existe pas, échoue ou ne renvoie rien,
-//    l'écran reste exactement celui de la v97 (pas de pastille, pas de
-//    filtre, tri inchangé). Le poste Vroom Team (posteVroom) n'est pas touché.
-//    v99 (06/11/2026) : « Remettre au congélateur » (poste_congelateur_remettre, SQL 13)
-//    sur la fiche d'un lead repris du congélateur ; liste triée par date de
-//    réception ; plus de délai ni d'échéance affichés pour ces leads.
-//    v98 (06/11/2026) : onglet « CONGÉLATEUR » (vendeur, chef des ventes) — les
-//    leads BACS abandonnés par la Vroom Team, avec le motif d'abandon
-//    (poste_congelateur, 30 jours par défaut, 90 / 120 / date choisie). « Prendre » (poste_congelateur_prendre)
-//    met le lead au nom du vendeur, sans retour au Pool au bout de 15 min,
-//    sans délai affiché ni mail. SQL : 09_congelateur.sql + 10_congelateur_periode.sql.
-//    v98 = accueil des leads reporté sur la v97 publiée (encart Client de la
-//    Vroom Team) ; fonction d'accueil renommée creneauAcc (elle masquait
-//    creneau(j, hr) du formulaire de RDV : « Invalid time value »).
-//  v97 (04/11/2026) : Vroom Team — encart « Client » dans la fiche du lead :
-//    le client One Data retrouvé par le téléphone (nom, ville, véhicules,
-//    accès à sa fiche). Quand le numéro est inconnu de One Data, One Data
-//    lance seul une recherche dans BACS (VM) et l'encart l'indique ; la
-//    fiche et le parc arrivent sans action de l'agent (plateau_file2 :
-//    client_tel, recherche_bacs).
-//  v96 (04/11/2026) : heures d'ouverture côté Vroom Team. Ses délais
-//    (attente avant prise, « hors délai » des leads frais, temps de
-//    transmission au site) comptent sur ses heures (lun-sam, réglage
-//    plateau_heures, 8 h-20 h) ; le délai du site après transmission compte
-//    sur les heures du site. Une « Demande client (1h) » reçue samedi soir
-//    reste dans le chrono le lundi matin (fraîcheur en heures BACS :
-//    lun-sam 9 h-12 h 30 / 14 h-19 h, calendrier des échéances BACS).
-//  v95 (04/11/2026) : tous les comptes à rebours des leads (Pool, accueil,
-//    fiche, relais, retour au Pool) comptent en HEURES D'OUVERTURE : lundi au
-//    samedi, 8 h 30-12 h 30 et 14 h-19 h, heure de Paris, comme la réactivité
-//    en base (od_minutes_ouvrees). Un lead arrivé à 22 h n'est plus « hors
-//    délai » à l'ouverture ; « À rappeler avant » donne l'échéance réelle.
-//    L'ancienneté « ouvert depuis plus de 24 h » reste en temps calendaire.
-//  v94 (03/11/2026) : « Nouveau lead » de la Vroom Team aligné sur celui des
-//    Appels entrants : seules les CONCESSIONS PILOTES sont proposées (réglage
-//    appel_entrant_sites, contrôlé aussi par plateau_lead_creer), chacune avec
-//    sa règle d'attribution ; le choix « Pool de la concession » (règle réelle
-//    du site : libre-service, automatique, chef des ventes) ou un vendeur
-//    avec ses leads en attente. Une seule concession pour la marque : elle
-//    est choisie d'office. Bouton « Créer et envoyer à la concession » /
-//    « … au vendeur ».
-//    Orienter un lead existant : le site du lead d'abord (choisi d'office),
-//    puis les autres concessions pilotes, puis celles où le client a déjà un
-//    dossier, puis les autres (plateau_sites) ; « Attribution » affiche la
-//    règle réelle du site choisi au lieu de « Tour de rôle du site ».
-//  v93 (02/11/2026) : tuiles au design One Data (fond bleu très pâle, sans
-//    bordure ni ombre, coins 8 px, chiffres en bleu, aucun rouge ni beige).
-//    Liseré bleu à gauche au survol, seulement sur une tuile cliquable ;
-//    la tuile choisie garde son liseré en bleu foncé.
-//  v92 (02/11/2026) : le chef des ventes peut s'attribuer un lead : « Moi »
-//  en tête de la liste des vendeurs, et bouton « Pour moi » sur le Pool de
-//  son accueil. Le lead passe dans son onglet « Mes leads ».
-//  v91 (02/11/2026) : retours vendeurs. Historique : un lead dont le client a
-//  acheté est « Vendu » (même s'il était rangé « écarté ») ; le contact fait
-//  depuis la fiche client (appel, SMS, e-mail, WhatsApp, compte rendu) y
-//  figure avec son canal. « Joint · RDV » : plus de raccourcis « Demain
-//  10:00… », seulement le choix de la date et de l'heure.
-//  v90 (02/11/2026) : Historique par rôle. Le vendeur ne voit que ses leads ;
-//  le chef des ventes et la direction voient ceux de toute l'équipe des sites
-//  qu'ils gèrent (site de la barre du haut), avec un filtre « Vendeur » et
-//  une colonne « Par ». Données : poste_historique (hiérarchie en base).
-//  v89 (02/11/2026) : republication du contenu prévu en v88 (la v88 publiée
-//  contenait par erreur une ancienne v86).
-//  v88 (02/11/2026) : retours vendeurs. « Pas joint » demande la date et
-//  l'heure de la prochaine tentative (raccourcis ou saisie libre) ; le lead
-//  reste dans les leads à rappeler, classé à l'heure de son rappel, avec
-//  « rappel prévu … » (rouge quand l'heure est passée). Avant, l'appel de la
-//  tentative faisait passer le lead en « contacté » et il disparaissait
-//  (corrigé en base : lead_detecter_contacts). Le fil du client ne montre que
-//  les contacts avec l'affaire du site choisi dans la barre du haut. Nouvel
-//  onglet « Historique » : les leads que j'ai traités, filtres période,
-//  statut, résultat, source et recherche.
-//  v87 (31/10/2026) : sur téléphone, la liste « Vendeur » s'ouvrait hors de
-//  l'écran (ancrée à droite d'un bouton placé à gauche) : elle s'ancre à
-//  gauche et tient dans la largeur de l'écran.
-//  v86 (30/10/2026) : la Vroom Team crée un lead depuis le mode flux
-//  (« + Nouveau lead », touche N, plateau v3) et l'envoie au vendeur choisi ;
-//  il le reçoit « Qualifié par la Vroom Team » dans ses leads à rappeler
-//  (rattachement côté base : _plateau_cree_lier). Sans vendeur : tour de rôle.
-//  v85 (30/10/2026) : les fenêtres SMS et WhatsApp (niveau 9990) s'ouvraient
-//  DERRIÈRE la fiche plein écran du lead (9991). La fiche, son voile et ses
-//  fenêtres passent sous elles (9980-9982), toujours au-dessus de la barre de
-//  navigation (1200). E-mail (10001), modèles et 3CX étaient déjà devant.
-//  v84 (30/10/2026) : PAGES D'ACCUEIL du vendeur (« ma journée ») et du chef
-//  des ventes (« mon site »), maquettes 6 et 7, onglet « Accueil » ouvert par
-//  défaut. Le Pool y tient la place centrale : à partir du 31/10, les
-//  demandes Leboncoin, La Centrale et teamcolin.fr y arrivent (fin
-//  d'UpYourLeads) ; les demandes BACS des sites Toyota arrivent par la Vroom
-//  Team. Vendeur : le prochain lead à appeler, À rappeler, le Pool du site,
-//  « aussi à faire ». Chef : indicateurs, « à traiter maintenant », le Pool
-//  avec le vendeur suggéré (Attribuer en un clic), l'équipe, la Vroom Team.
-//  Les autres onglets restent (Pool, À rappeler, Relances, Campagnes…).
+//  VERSION TEAM COLIN (v83) — déploiement CIBLÉ (publish-targets :
 //  v83 (30/10/2026) : FICHE DE TRAITEMENT DU VENDEUR ET DU CHEF DES VENTES,
 //  plein écran et aérée (maquette « Vendeur » validée par Antoine). Trois
 //  colonnes : la demande et ce que la Vroom Team a appris (avis Juste / À
@@ -151,11 +10,6 @@
 //  attribuer, résultat, autre site, clore). Délai de rappel en tête, « Lead
 //  suivant » pour enchaîner. Données : poste_lead_contexte (nouvelle).
 //  Le plateau s'appelle désormais « Vroom Team » dans tous les libellés.
-//  Vendeur rattaché à plusieurs sites : le Pool suit le site choisi dans le
-//  sélecteur de site (avant : Pool de tous ses sites, d'où les leads de
-//  Sceaux affichés à un vendeur connecté sur Arcueil). En base
-//  (poste_site_leads) : sur un site avec Vroom Team, une demande BACS non
-//  transmise et sans vendeur reste à la Vroom Team, jamais dans le Pool.
 //  v82 (30/10/2026) : PLATEAU VROOM « mode flux » (maquettes validées par
 //  Antoine). Le poste de l'opérateur et l'écran du superviseur viennent du
 //  module `plateau` (plateau.js v1, chargé par OD.manifest.plateau.cdn_url,
@@ -462,63 +316,6 @@
     var t = String(n || '').replace(/[^0-9+]/g, '');
     if (!t) return ''; if (t[0] === '+') return t; if (t[0] === '0') return '+33' + t.slice(1); return t;
   }
-  // v95 : minutes en heures d'ouverture (lun-sam 08:30-12:30, 14:00-19:00, Paris).
-  var OUV = [[510, 750], [840, 1140]];
-  var OUV_BACS = [[540, 750], [840, 1140]];   // v96 : calendrier des échéances BACS
-  var OUV_VROOM = [[480, 1200]];               // v96 : Vroom Team (plateau_heures 08-20)
-  var __fmtP = null;
-  function partsP(ms) {
-    if (!__fmtP) __fmtP = new Intl.DateTimeFormat('en-GB', { timeZone: 'Europe/Paris', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit', hourCycle: 'h23' });
-    var o = {}; __fmtP.formatToParts(new Date(ms)).forEach(function (x) { o[x.type] = x.value; });
-    return { y: +o.year, mo: +o.month, d: +o.day, h: +o.hour % 24, mi: +o.minute, s: +o.second };
-  }
-  function msP(y, mo, d, minute) {   // instant d'une heure de Paris (minutes depuis minuit)
-    var g = Date.UTC(y, mo - 1, d, 0, minute), p = partsP(g);
-    var off = Date.UTC(p.y, p.mo - 1, p.d, p.h, p.mi, p.s) - g;
-    var r = g - off, q = partsP(r);
-    var off2 = Date.UTC(q.y, q.mo - 1, q.d, q.h, q.mi, q.s) - r;
-    return off2 === off ? r : g - off2;
-  }
-  function plagesJour(y, mo, d, pl) {   // plages ouvrées [début, fin] en ms d'un jour de Paris
-    var dow = new Date(Date.UTC(y, mo - 1, d)).getUTCDay();
-    if (dow === 0) return [];
-    return (pl || OUV).map(function (p) { return [msP(y, mo, d, p[0]), msP(y, mo, d, p[1])]; });
-  }
-  function ouvrees(a, b, pl) {      // minutes ouvrées entre deux instants (ms)
-    if (a == null || b == null || isNaN(a) || isNaN(b) || b <= a) return 0;
-    var p = partsP(a), t = 0, j = Date.UTC(p.y, p.mo - 1, p.d);
-    for (var k = 0; k < 93; k++) {
-      var dd = new Date(j + k * 86400000), pj = plagesJour(dd.getUTCFullYear(), dd.getUTCMonth() + 1, dd.getUTCDate(), pl);
-      if (pj.length && pj[0][0] >= b) break;
-      pj.forEach(function (x) { t += Math.max(0, Math.min(b, x[1]) - Math.max(a, x[0])); });
-    }
-    return t / 60000;
-  }
-  function finOuvree(a, m, plg) {   // instant atteint après m minutes ouvrées à partir de a (ms)
-    var p = partsP(a), j = Date.UTC(p.y, p.mo - 1, p.d), r = m * 60000;
-    for (var k = 0; k < 93; k++) {
-      var dd = new Date(j + k * 86400000), pl = plagesJour(dd.getUTCFullYear(), dd.getUTCMonth() + 1, dd.getUTCDate(), plg);
-      for (var i = 0; i < pl.length; i++) {
-        var deb = Math.max(a, pl[i][0]), dur = pl[i][1] - deb;
-        if (dur <= 0) continue;
-        if (r <= dur) return deb + r;
-        r -= dur;
-      }
-    }
-    return a + m * 60000;
-  }
-  function minsO(v) { return v ? ouvrees(ts(v), Date.now()) : 0; }
-  function minsV(v) { return v ? ouvrees(ts(v), Date.now(), OUV_VROOM) : 0; }
-  function minsB(v) { return v ? ouvrees(ts(v), Date.now(), OUV_BACS) : 0; }
-  function tmV(v, sla, cap) {
-    var m = minsV(v);
-    return '<span class="tm ' + niv(m, sla) + '"><b>' + duree(m) + '</b><small>' + esc(cap || ('SLA ' + slaTxt(sla))) + '</small></span>';
-  }
-  function ouvert() { var n = Date.now(), p = partsP(n); return plagesJour(p.y, p.mo, p.d).some(function (x) { return n >= x[0] && n < x[1]; }); }
-  function tmO(v, sla, cap) {
-    var m = minsO(v);
-    return '<span class="tm ' + niv(m, sla) + '"><b>' + duree(m) + '</b><small>' + esc(cap || ('SLA ' + slaTxt(sla))) + '</small></span>';
-  }
   function tm(v, sla, cap) {
     var m = mins(v);
     return '<span class="tm ' + niv(m, sla) + '"><b>' + duree(m) + '</b><small>' + esc(cap || ('SLA ' + slaTxt(sla))) + '</small></span>';
@@ -569,17 +366,10 @@
   async function lancerPosteFlux(el, ctx, u, opt) {
     var api = /plateau-liste/i.test(hashCourant()) ? null : await plateauApi();
     if (!api) return posteVroom(el, ctx, u, opt);
-    var retour = function () { lancerPosteFlux(el, ctx, u, opt); };
-    return api.poste(el, ctx, { user: u,
-      liste: async function () {
-        await posteVroom(el, ctx, u, opt);
-        boutonRetour(el, 'Mode flux', retour);
-      },
-      // v86 : créer un lead et l'envoyer à un vendeur, puis revenir au flux.
-      creer: async function () {
-        await posteVroom(el, ctx, u, Object.assign({}, opt, { creer: true, retourFlux: retour }));
-        boutonRetour(el, 'Mode flux', retour);
-      } });
+    return api.poste(el, ctx, { user: u, liste: async function () {
+      await posteVroom(el, ctx, u, opt);
+      boutonRetour(el, 'Mode flux', function () { lancerPosteFlux(el, ctx, u, opt); });
+    } });
   }
   async function lancerSupervision(el, ctx, u, opt) {
     var api = /supervision-detail/i.test(hashCourant()) ? null : await plateauApi();
@@ -705,15 +495,12 @@
     var S = {
       tab: 'piscine', stock: false, age: 'frais', demoMode: false, univ: 'tous', per: periodeDefaut(), sources: null, campagne: null, miens: false,
       actions: null, actJours: 1, sitesCreation: null,   // v81
-      kpis: null, piscine: [], rappels: [], arriere: [], transferts: [], campagnes: null, stockListe: null,
+      kpis: null, piscine: [], rappels: [], transferts: [], campagnes: null, stockListe: null,
       ack: new Set(), vus: new Set(), frais: new Set(), premier: true,
       bacs: null,
       dr: null, // { sf, fiche, sites, vendeurs, site, envois }
-      charge: false, erreur: null,
-      rq: { q: '', res: null, err: null, seq: 0, t: null, focus: false },   // v104 : recherche
-      flt: {}, equipe: null   // v105 : filtres
+      charge: false, erreur: null
     };
-    try { S.flt = JSON.parse(FW.localStorage.getItem('lmtc-flt') || '{}') || {}; } catch (e) { S.flt = {}; }
     try { (JSON.parse(FW.localStorage.getItem('lmtc-ack') || '[]') || []).forEach(function (x) { S.ack.add(x); }); } catch (e) {}
     var MOI = null;
 
@@ -739,34 +526,13 @@
       return null;
     }
     function univCls(l) { var u = univ(l); return u === 'VN' ? ' vt-vn' : u === 'VO' ? ' vt-vo' : ''; }
-    // v101 : un lead atelier n'est jamais « frais » : son délai est le RDV atelier.
-    function frais(l) { if (l && l.traitement === 'atelier') return false; return mins(l.recu_le) < 1440 || minsB(l.recu_le) < 510; }
+    function frais(l) { return mins(l.recu_le) < 1440; }
     // v77 : le chef du plateau revient à sa supervision depuis le poste opérateur.
     function aSupervision() { try { return /poste-operateur/i.test(FW.location.hash || '') && S.superviseur === true; } catch (e) { return false; } }
     // v77 : type de traitement BACS. ch1 = « Demande client (1h) » pas encore
     // traité, reçu il y a moins de 24 h ; ch48 = « Relance concession (48h) ».
     function ch1(l) { return !!(l && l.chrono && l.traitement === '1h' && frais(l)); }
     function ch48(l) { return !!(l && l.chrono && l.traitement === '48h' && mins(l.recu_le) < 4320); }
-    // v101 : trafic atelier — l'échéance est le RDV d'atelier du client.
-    function chAt(l) { return !!(l && l.traitement === 'atelier'); }
-    function rdvAt(l) { return l.rdv_atelier || l.echeance || null; }
-    function ordreAt(a, b) {
-      var n = Date.now(), ta = ts(rdvAt(a)) || 0, tb = ts(rdvAt(b)) || 0, fa = ta >= n, fb = tb >= n;
-      if (fa !== fb) return fa ? -1 : 1;
-      return fa ? ta - tb : tb - ta;
-    }
-    function jourRdv(v) {
-      var d = new Date(v), j = ['dim.', 'lun.', 'mar.', 'mer.', 'jeu.', 'ven.', 'sam.'][d.getDay()];
-      return j + ' ' + String(d.getDate()).padStart(2, '0') + '/' + String(d.getMonth() + 1).padStart(2, '0') + ' ' + d.getHours() + 'h' + (d.getMinutes() ? String(d.getMinutes()).padStart(2, '0') : '');
-    }
-    function gaucheAtelier(l) {
-      var r = rdvAt(l);
-      if (!r) return '<span class="tm at"><b>RDV atelier ?</b><small>reçu le ' + esc(jour(l.recu_le)) + '</small></span>';
-      var m = (ts(r) - Date.now()) / 60000, q;
-      if (m >= 0) q = m < 60 ? 'dans ' + Math.max(1, Math.round(m)) + ' min' : m < 1440 ? 'dans ' + Math.round(m / 60) + ' h' : 'dans ' + Math.round(m / 1440) + ' j';
-      else q = -m < 1440 ? 'passé auj.' : 'passé (' + Math.round(-m / 1440) + ' j)';
-      return '<span class="tm at' + (m < 0 ? ' passe' : m < 1440 ? ' proche' : '') + '"><b>' + esc(jourRdv(r)) + '</b><small>RDV atelier · ' + esc(q) + '</small></span>';
-    }
     function reste(l) { return l.echeance ? (ts(l.echeance) - Date.now()) / 60000 : null; }
     function hms(m) {
       m = Math.max(0, m);
@@ -781,7 +547,6 @@
     }
     function tagTraitement(l) {
       if (!l || !l.traitement) return '';
-      if (l.traitement === 'atelier') return '<span class="tag at">Trafic atelier' + (l.rdv_atelier_type ? ' · ' + esc(String(l.rdv_atelier_type).toLowerCase()) : '') + '</span>';
       var t = l.traitement === '1h' ? 'Demande client (1h)' : 'Relance concession (48h)';
       return '<span class="tag ' + (l.traitement === '1h' ? 'crit' : 'warn') + '"' + (l.traitement_deduit ? ' title="Type de traitement déduit de la source : BACS ne l\'a pas encore transmis"' : '') + '>' + t + (l.traitement_deduit ? ' ?' : '') + '</span>';
     }
@@ -888,18 +653,14 @@
         S.stock ? rpc('plateau_file2', { p_vue: 'stock' }) : Promise.resolve(S.stockListe),
         S.tab === 'campagnes' ? rpc('plateau_campagnes', { p_jours: 90 }) : Promise.resolve(S.campagnes),
         rpc('plateau_bacs_etat').catch(function () { return S.bacs; }),
-        S.superviseur == null ? rpc('plateau_superviseur').catch(function () { return false; }) : Promise.resolve(S.superviseur),
-        rpc('plateau_file2', { p_vue: 'arriere' }).catch(function () { return null; })
+        S.superviseur == null ? rpc('plateau_superviseur').catch(function () { return false; }) : Promise.resolve(S.superviseur)
       ]);
-      if (Array.isArray(res[8])) S.arriere = res[8];
       S.superviseur = res[7] === true;
       S.bacs = res[6] || S.bacs;
       S.kpis = res[0] || {}; MOI = S.kpis.moi;
       S.piscine = res[1] || []; S.rappels = res[2] || []; S.transferts = res[3] || [];
       signalerArrivees();
-      // v101 : un rafraîchissement lancé avant le clic sur « Stock accepté » ne doit
-      // pas effacer le stock chargé entre-temps (restait sur « Chargement du stock… »).
-      S.stockListe = res[4] || S.stockListe || null; S.campagnes = res[5] || S.campagnes || null;
+      S.stockListe = res[4] || null; S.campagnes = res[5] || null;
       S.erreur = null; S.charge = true;
     }
     // v77 : un nouveau lead « Demande client (1h) » se signale (son,
@@ -972,7 +733,7 @@
           d: demande(l) + (l.site ? ' · ' + siteNom(l.site) : ''), a: [['Prendre', 'prendre', l.sf_lead_id]] });
       });
       // 3. Hors délai dans la piscine.
-      var hd = libres.filter(function (l) { return frais(l) && minsV(l.recu_le) >= (l.sla_min || 120); })
+      var hd = libres.filter(function (l) { return frais(l) && mins(l.recu_le) >= (l.sla_min || 120); })
         .sort(function (a, b) { return ts(a.recu_le) - ts(b.recu_le); });
       if (hd.length) out.push({ id: 'hd-' + hd.length + '-' + hd[0].sf_lead_id, niv: 'crit', k: 'Hors délai', t: hd[0].recu_le,
         titre: plural(hd.length, 'lead frais hors délai', 'leads frais hors délai') + ' dans le Pool',
@@ -1004,7 +765,7 @@
         var ls = parSite[s];
         out.push({ id: 'bloque-' + s + '-' + ls.length, niv: 'vr', k: 'Relais bloqué', t: ls[0].transfere_le || ls[0].derniere_action_le,
           titre: siteNom(s) + ' n\'a pas pris ' + (ls.length > 1 ? ls.length + ' transferts' : 'un transfert'),
-          d: ls.slice(0, 4).map(function (l) { return nomLead(l) + ' (' + duree(minsO(l.transfere_le || l.derniere_action_le)) + ')'; }).join(', ') + '. SLA du site : 2 h.',
+          d: ls.slice(0, 4).map(function (l) { return nomLead(l) + ' (' + duree(mins(l.transfere_le || l.derniere_action_le)) + ')'; }).join(', ') + '. SLA du site : 2 h.',
           a: [['Relancer le chef', 'relancer', ls.map(function (l) { return l.sf_lead_id; }).join(',')]] });
       });
       // 6. Les collègues au travail.
@@ -1042,13 +803,12 @@
       var libres = libresTous().filter(function (l) { return l.statut_eff === 'A affecter' || l.statut_eff === 'Nouveau'; });
       var fr = libres.filter(frais);
       if (fr.length) return fr.slice().sort(function (a, b) { return (mins(b.recu_le) - (b.sla_min || 120)) - (mins(a.recu_le) - (a.sla_min || 120)); })[0];
-      var at = libres.filter(chAt).sort(ordreAt); if (at.length) return at[0];
       return libres.slice().sort(function (a, b) { return ts(b.recu_le) - ts(a.recu_le); })[0] || null;
     }
     function renderSituation() {
       var k = S.kpis || {};
       var libres = libresTous(), fr = libres.filter(frais), vieux = libres.length - fr.length;
-      var hd = fr.filter(function (l) { return (l.statut_eff === 'A affecter' || l.statut_eff === 'Nouveau') && minsV(l.recu_le) >= (l.sla_min || 120); });
+      var hd = fr.filter(function (l) { return (l.statut_eff === 'A affecter' || l.statut_eff === 'Nouveau') && mins(l.recu_le) >= (l.sla_min || 120); });
       var nom = propre([user && user.prenom, user && user.nom].filter(Boolean).join(' ')) || (user && user.nomComplet) || '';
       var c1 = chronoLibres(), c1ok = c1.filter(function (l) { return reste(l) > 0; });
       var p = (c1.length ? '<b class="t-crit">' + plural(c1.length, 'lead « Demande client (1h) »', 'leads « Demande client (1h) »') + '</b> à prendre'
@@ -1064,7 +824,7 @@
       if (s) {
         var m = mins(s.recu_le), sla = s.sla_min || 120;
         cta = '<button type="button" class="cta' + (ch1(s) ? ' cta1' : '') + '" data-a="prendre" data-id="' + esc(s.sf_lead_id) + '"' + dis() + '>Prendre le suivant<small>'
-          + esc(nomLead(s)) + ' · ' + (ch1(s) ? 'Demande client (1h) · ' + texteChrono(s) : chAt(s) ? 'Trafic atelier · RDV ' + jourRdv(rdvAt(s)) : !frais(s) ? 'reçu le ' + jour(s.recu_le) : m >= sla ? 'hors délai de ' + duree(m - sla) : 'attend depuis ' + duree(m)) + '</small></button>';
+          + esc(nomLead(s)) + ' · ' + (ch1(s) ? 'Demande client (1h) · ' + texteChrono(s) : !frais(s) ? 'reçu le ' + jour(s.recu_le) : m >= sla ? 'hors délai de ' + duree(m - sla) : 'attend depuis ' + duree(m)) + '</small></button>';
       }
       var b = S.bacs || {};
       var voyant = !b.ecrire_bacs ? '' : '<span class="voyant ' + (b.canal !== 'moi' || b.echecs ? 'crit' : b.en_attente ? 'warn' : 'ok') + '">'
@@ -1080,7 +840,7 @@
     function nbDus() { return rappelsDus().length; }
     function onglets() {
       var fr = vus(libresTous()).filter(frais);
-      var hd = chronoLibres().length > 0 || fr.some(function (l) { return (l.statut_eff === 'A affecter' || l.statut_eff === 'Nouveau') && minsV(l.recu_le) >= (l.sla_min || 120); });
+      var hd = chronoLibres().length > 0 || fr.some(function (l) { return (l.statut_eff === 'A affecter' || l.statut_eff === 'Nouveau') && mins(l.recu_le) >= (l.sla_min || 120); });
       var tr = vus(S.transferts);
       return [['piscine', 'Pool BACS', fr.length, hd, 'v'],
               ['rappels', 'Rappels dus', nbDus(), nbDus() > 0, 'r'],
@@ -1089,8 +849,7 @@
               ['actions', 'Mes actions', null, false, 'b']];
     }
     function outilsVroom() {
-      return '<div class="outils"><input type="search" data-x="vr-q" autocomplete="off" aria-label="Rechercher un lead" placeholder="Rechercher un lead : nom, téléphone, e-mail…" value="' + esc(S.rq.q) + '" style="flex:1 1 260px;min-width:220px;font:inherit;font-size:13.5px;font-weight:700;color:#1F4A85;padding:8px 12px;border:1.5px solid #d6e2f2;border-radius:10px;background:#fff;outline:none">'
-        + '<button type="button" class="btn sm pri" data-a="nouveau">+ Nouveau lead</button><div class="seg-u" role="group" aria-label="Univers">' + [['tous', 'VN + VO'], ['VN', 'VN'], ['VO', 'VO']].map(function (o) {
+      return '<div class="outils"><button type="button" class="btn sm pri" data-a="nouveau">+ Nouveau lead</button><div class="seg-u" role="group" aria-label="Univers">' + [['tous', 'VN + VO'], ['VN', 'VN'], ['VO', 'VO']].map(function (o) {
         return '<button type="button" class="' + (S.univ === o[0] ? 'on' : '') + '" data-a="univ" data-id="' + o[0] + '" aria-pressed="' + (S.univ === o[0]) + '">' + (o[0] !== 'tous' ? '<i class="pt vt-' + o[0].toLowerCase() + '"></i>' : '') + o[1] + '</button>'; }).join('') + '</div>'
         + boutonPeriode(S.per) + '</div>';
     }
@@ -1143,31 +902,17 @@
     }
     function vuePiscine() {
       var k = S.kpis || {};
-      var base = F(vus(S.piscine).filter(okUniv), 'pool'), nFr = base.filter(frais).length;
+      var base = vus(S.piscine).filter(okUniv), nFr = base.filter(frais).length;
       var h = '<div class="barre"><div class="seg"><button type="button" class="' + (!S.stock && S.age === 'frais' ? 'on' : '') + '" data-a="age" data-id="frais">Moins de 24 h <span class="num">' + nFr + '</span></button>'
         + '<button type="button" class="' + (!S.stock && S.age === 'vieux' ? 'on' : '') + '" data-a="age" data-id="vieux">Plus de 24 h <span class="num">' + (base.length - nFr) + '</span></button>'
         + '<button type="button" class="' + (S.stock ? 'on' : '') + '" data-a="stock" data-id="1">Stock accepté <span class="num">' + (S.stockListe ? vus(S.stockListe).length : (k.stock_acceptes_anciens || 0)) + '</span></button></div>'
         + (!S.stock ? chipsSources() : '') + '</div><div class="list">';
-      var ls = S.stock ? F(vus(S.stockListe || []), 'pool') : base.filter(function (l) { return S.age === 'frais' ? frais(l) : !frais(l); });
+      var ls = S.stock ? vus(S.stockListe || []) : base.filter(function (l) { return S.age === 'frais' ? frais(l) : !frais(l); });
       if (!S.stock) ls.sort(S.age === 'frais' ? function (a, b) { return (mins(b.recu_le) - (b.sla_min || 120)) - (mins(a.recu_le) - (a.sla_min || 120)); } : function (a, b) { return ts(b.recu_le) - ts(a.recu_le); });
-      // v101 : trafic atelier regroupé, par date de RDV atelier (à venir d'abord).
-      var gAt = S.stock ? [] : ls.filter(chAt).sort(ordreAt);
-      if (gAt.length) ls = ls.filter(function (l) { return !chAt(l); });
-      function blocAtelier() {
-        if (!gAt.length) return '';
-        var t = '<p class="grp gat">Trafic atelier · par date de RDV atelier <span class="num">' + gAt.length + '</span></p>';
-        gAt.forEach(function (l) { t += ligneLead(l, gaucheAtelier(l), l.statut_eff === 'Accepté' ? 'Rappeler' : 'Prendre'); });
-        return t;
-      }
-      if (!S.stock && S.age === 'vieux' && gAt.length) {
-        h += blocAtelier();
-        if (ls.length) h += '<p class="grp g0">Autres leads de plus de 24 h</p>';
-        gAt = [];
-      }
       // v77 : les leads « Demande client (1h) » d'abord, quels que soient les
       // filtres VN / VO et la période ; puis les « Relance concession (48h) ».
       if (!S.stock && S.age === 'frais') {
-        var g1 = F(S.piscine, 'pool').filter(ch1).sort(function (a, b) { return ordreChrono(a) - ordreChrono(b); });
+        var g1 = S.piscine.filter(ch1).sort(function (a, b) { return ordreChrono(a) - ordreChrono(b); });
         var g48 = ls.filter(function (l) { return !ch1(l) && ch48(l); }).sort(function (a, b) { return ts(a.echeance) - ts(b.echeance); });
         var reste0 = ls.filter(function (l) { return !ch1(l) && !ch48(l); });
         if (g1.length) {
@@ -1178,23 +923,22 @@
           h += '<p class="grp g48">Relance concession (48h) <span class="num">' + g48.length + '</span></p>';
           g48.forEach(function (l) { h += ligneLead(l, gaucheChrono(l), l.statut_eff === 'Accepté' ? 'Rappeler' : 'Prendre'); });
         }
-        h += blocAtelier();
-        if ((g1.length || g48.length || gAt.length) && reste0.length) h += '<p class="grp g0">Autres leads de moins de 24 h</p>';
+        if ((g1.length || g48.length) && reste0.length) h += '<p class="grp g0">Autres leads de moins de 24 h</p>';
         ls = reste0;
-        if (!ls.length && (g1.length || g48.length || gAt.length)) return h + '</div><p class="foot">Prendre réserve le lead à votre nom ' + (k.verrou_minutes || 5) + ' min. Les leads « Demande client (1h) » sont pénalisés par le constructeur au-delà d\'une heure.</p>';
+        if (!ls.length && (g1.length || g48.length)) return h + '</div><p class="foot">Prendre réserve le lead à votre nom ' + (k.verrou_minutes || 5) + ' min. Les leads « Demande client (1h) » sont pénalisés par le constructeur au-delà d\'une heure.</p>';
       }
       if (S.stock && !S.stockListe) h += '<div class="empty">Chargement du stock…</div>';
-      else if (!ls.length && !(S.age === 'vieux' && h.indexOf('grp gat') > -1)) h += '<div class="empty">' + (S.campagne ? 'Aucun lead de cette campagne à traiter.' : S.stock ? 'Aucun lead en stock.' : S.age === 'frais' ? 'Aucun lead de moins de 24 h à prendre.' : 'Aucun lead de plus de 24 h dans le Pool BACS.') + '</div>';
+      else if (!ls.length) h += '<div class="empty">' + (S.campagne ? 'Aucun lead de cette campagne à traiter.' : S.stock ? 'Aucun lead en stock.' : S.age === 'frais' ? 'Aucun lead de moins de 24 h à prendre.' : 'Aucun lead de plus de 24 h dans le Pool BACS.') + '</div>';
       ls.forEach(function (l) {
         var gauche = S.stock || !frais(l)
           ? '<span class="tm crit"><b>' + duree(mins(l.recu_le)) + '</b><small>reçu le ' + jour(l.recu_le) + '</small></span>'
-          : tmV(l.recu_le, l.sla_min || 120);
+          : tm(l.recu_le, l.sla_min || 120);
         h += ligneLead(l, gauche, S.stock || l.statut_eff === 'Accepté' ? 'Rappeler' : 'Prendre');
       });
       return h + '</div><p class="foot">Prendre réserve le lead à votre nom ' + (k.verrou_minutes || 5) + ' min.' + (S.stock ? ' Stock : leads acceptés il y a plus de 14 jours, sans suite.' : '') + '</p>';
     }
     function vueRappels() {
-      var ls = F(fc(S.rappels), 'rappel').filter(function (l) { return okUniv(l) && (!S.miens || Number(l.derniere_action_par) === Number(MOI)); })
+      var ls = fc(S.rappels).filter(function (l) { return okUniv(l) && (!S.miens || Number(l.derniere_action_par) === Number(MOI)); })
         .sort(function (a, b) { return ts(a.rappel_le) - ts(b.rappel_le); });
       var h = '<div class="barre"><span class="lbl-s">' + plural(nbDus(), 'rappel dû', 'rappels dus') + ' sur ' + plural(fc(S.rappels).filter(okUniv).length, 'programmé', 'programmés') + '.</span><div class="ph-r"><div class="seg"><button type="button" class="' + (!S.miens ? 'on' : '') + '" data-a="miens" data-id="">Tout le plateau</button><button type="button" class="' + (S.miens ? 'on' : '') + '" data-a="miens" data-id="1">Les miens</button></div></div></div><div class="list">';
       if (!ls.length) h += '<div class="empty">' + (S.campagne ? 'Aucun rappel pour cette campagne.' : 'Aucun rappel programmé.') + '</div>';
@@ -1205,17 +949,6 @@
         var gauche = '<span class="tm ' + cls + '"><b>' + b + '</b><small>prévu ' + (quand(l.rappel_le).length > 5 ? 'le ' : 'à ') + esc(quand(l.rappel_le)) + '</small></span>';
         h += ligneLead(l, gauche, __lmPeutAppeler() ? 'Appeler' : 'Traiter').replace('<div class="tags">', '<div class="tags"><span class="tag ' + (l.statut_eff === 'Projet Long Terme' ? 'vr' : 'warn') + '">' + esc(libStatut(l.statut_eff)) + '</span>');
       });
-      // v102 : arriéré BACS — rappels promis avant l'arrivée de la Vroom Team dans
-      // One Data (06/11), hors compteur, servis en dernier par « Lead suivant ».
-      var arr = F(fc(S.arriere || []), 'rappel').filter(function (l) { return okUniv(l) && (!S.miens || Number(l.derniere_action_par) === Number(MOI)); })
-        .sort(function (a, b) { return ts(a.rappel_le) - ts(b.rappel_le); });
-      if (arr.length) {
-        h += '<p class="grp garr">Arriéré BACS · rappels promis avant le 06/11 <span class="num">' + arr.length + '</span></p>';
-        arr.forEach(function (l) {
-          var gauche = '<span class="tm arr"><b>' + esc(jour(l.rappel_le)) + '</b><small>promis il y a ' + esc(duree(mins(l.rappel_le))) + '</small></span>';
-          h += ligneLead(l, gauche, __lmPeutAppeler() ? 'Appeler' : 'Traiter').replace('<div class="tags">', '<div class="tags"><span class="tag">' + esc(libStatut(l.statut_eff)) + '</span>');
-        });
-      }
       return h + '</div>';
     }
     function etatTransfert(l) {
@@ -1229,13 +962,13 @@
       return '<span class="tag">En attente' + (l.od_vendeur ? ' chez ' + esc(propre(l.od_vendeur)) : ' sur le site') + '</span>';
     }
     function vueTransferts() {
-      var ls = F(vus(S.transferts), 'transfert').filter(function (l) { return !S.miens || Number(l.derniere_action_par) === Number(MOI); });
+      var ls = vus(S.transferts).filter(function (l) { return !S.miens || Number(l.derniere_action_par) === Number(MOI); });
       var h = '<div class="barre"><span class="lbl-s">Le site a 2 h pour prendre un transfert.</span><div class="ph-r"><div class="seg"><button type="button" class="' + (!S.miens ? 'on' : '') + '" data-a="miens" data-id="">Tout le plateau</button><button type="button" class="' + (S.miens ? 'on' : '') + '" data-a="miens" data-id="1">Les miens</button></div></div></div><div class="list">';
       if (!ls.length) h += '<div class="empty">' + (S.campagne ? 'Aucun transfert pour cette campagne sur la période.' : 'Aucun transfert sur la période.') + '</div>';
       ls.forEach(function (l) {
         var depuis = l.transfere_le || l.derniere_action_le;
         var attente = l.id_lead && !l.od_contact_le && ['recu', 'resolu', 'attribue'].indexOf(l.od_statut) !== -1 && depuis;
-        var gauche = attente ? tmO(depuis, SLA_SITE, 'sur le site · SLA 2 h')
+        var gauche = attente ? tm(depuis, SLA_SITE, 'sur le site · SLA 2 h')
           : '<span class="tm neutre"><b>' + esc(depuis ? jour(depuis) : jour(l.recu_le)) + '</b><small>' + (depuis ? 'transféré' : 'reçu') + '</small></span>';
         var q = resumeQualif(l.qualification);
         h += '<div class="lr' + univCls(l) + '" data-a="open" data-id="' + esc(l.sf_lead_id) + '" tabindex="0"><div>' + gauche + '</div>'
@@ -1272,9 +1005,7 @@
         + '</div></div></div><div class="list">';
       if (!S.actions) return h + '<div class="empty">Chargement de vos actions…</div></div>';
       if (!S.actions.length) return h + '<div class="empty">Aucune action sur la période.</div></div>';
-      var actF = F(S.actions, 'action');
-      if (!actF.length) h += '<div class="empty">Aucune action ne correspond aux filtres.</div>';
-      actF.forEach(function (a) {
+      S.actions.forEach(function (a) {
         var et = a.correction_attente ? '<span class="tag warn">Correction en attente du superviseur</span>'
           : a.etat_bacs === 'fait' ? '<span class="tag ok">Reporté dans BACS</span>'
           : a.etat_bacs === 'echec' ? '<span class="tag crit" title="' + esc(a.erreur_bacs || '') + '">Refusé par BACS</span>'
@@ -1296,105 +1027,7 @@
       render();
     }
 
-    // ── v104 : recherche d'un lead ─────────────────────────────────────────
-    var RQ_PRENABLE = { piscine: 1, rappels: 1, arriere: 1, stock: 1 };
-    function rqEtat(x) {
-      var st = libStatut(x.statut_eff || x.statut_bacs || '');
-      if (x.vue === 'piscine') return 'Pool BACS · ' + st;
-      if (x.vue === 'rappels') return 'Rappel promis ' + quand(x.rappel_le);
-      if (x.vue === 'arriere') return 'Arriéré BACS';
-      if (x.vue === 'stock') return 'Stock accepté';
-      if (x.vue === 'transferts') return 'Transmis' + (x.site ? ' à ' + siteNom(x.site) : '');
-      return 'Hors Pool · BACS : ' + (st || '?') + (x.proprio_bacs ? ' · ' + propre(x.proprio_bacs) : '');
-    }
-    function vueRecherche() {
-      var X = S.rq, ls = X.res || [];
-      var h = '<div class="barre"><span class="lbl-s">' + (X.err ? esc(X.err) : X.res == null ? 'Recherche en cours…'
-        : ls.length ? plural(ls.length, 'lead trouvé', 'leads trouvés') + ' pour « ' + esc(X.q.trim()) + ' » · dans le Pool et ailleurs' : 'Aucun lead ne correspond à « ' + esc(X.q.trim()) + ' ».')
-        + '</span><div class="ph-r"><button type="button" class="btn sm" data-a="rq-effacer">Effacer la recherche</button></div></div><div class="list">';
-      ls.forEach(function (x) {
-        var dem = [x.source_bacs, x.modele, x.site ? siteNom(x.site) : ''].filter(Boolean).join(' · ');
-        var act = RQ_PRENABLE[x.vue] ? actionLigne(x, x.vue === 'rappels' || x.vue === 'arriere' || x.vue === 'stock' || x.statut_eff === 'Accepté' ? 'Rappeler' : 'Prendre')
-          : '<button type="button" class="btn" data-a="open" data-id="' + esc(x.sf_lead_id) + '">Voir</button>';
-        h += '<div class="lr" data-a="open" data-id="' + esc(x.sf_lead_id) + '" tabindex="0">'
-          + '<div><span class="tm neutre"><b>' + esc(x.recu_le ? jour(x.recu_le) : '—') + '</b><small>reçu</small></span></div>'
-          + '<div><span class="lr-n">' + esc(nomLead(x)) + '</span> <span class="lr-v">' + esc(x.telephone || '') + '</span>'
-          + '<p class="lr-d">' + esc(dem) + '</p><div class="tags"><span class="tag' + (RQ_PRENABLE[x.vue] ? ' camp' : '') + '">' + esc(rqEtat(x)) + '</span>'
-          + (x.campagne ? '<span class="tag">' + esc(x.campagne.length > 52 ? x.campagne.slice(0, 50) + '…' : x.campagne) + '</span>' : '') + '</div></div>'
-          + '<div class="lr-a">' + act + '</div></div>';
-      });
-      return h + '</div><p class="foot">La recherche porte sur tous les leads BACS de la copie One Data (nom, téléphone, e-mail, identifiant BACS), quels que soient les filtres.</p>';
-    }
-    async function chercherRq() {
-      var X = S.rq, seq = ++X.seq, q = X.q.trim();
-      if (q.length < 2) { X.res = null; X.err = null; render(); return; }
-      X.res = null; X.err = null; render();
-      try { var r = await rpc('plateau_chercher', { p_q: q }); if (seq !== X.seq) return; X.res = Array.isArray(r) ? r : []; }
-      catch (e) { if (seq !== X.seq) return; X.res = []; X.err = messageErreur(e); }
-      render();
-    }
-    // ── v105 : filtres de la vue liste ──────────────────────────────────────
-    function perDefaut() { var p0 = periodeDefaut(); return S.per && S.per.du === p0.du && S.per.au === p0.au; }
-    function fActif() { var f = S.flt || {}; return !!(f.site || f.trt || f.src || f.delai || f.statut || f.op); }
-    function trtDe(l) { return l.traitement === '1h' ? '1h' : l.traitement === '48h' ? '48h' : l.traitement === 'atelier' ? 'atelier' : 'autre'; }
-    function delaiDe(l, kind) {
-      if (kind === 'rappel') return l.rappel_le && ts(l.rappel_le) <= Date.now() ? 'retard' : 'temps';
-      if (kind === 'transfert') {
-        var dep = l.transfere_le || l.derniere_action_le;
-        var att = l.id_lead && !l.od_contact_le && ['recu', 'resolu', 'attribue'].indexOf(l.od_statut) !== -1 && dep;
-        return !att ? 'sans' : mins(dep) >= SLA_SITE ? 'retard' : 'temps';
-      }
-      if (l.echeance) return ts(l.echeance) < Date.now() ? 'retard' : 'temps';
-      if (l.recu_le && l.sla_min) return minsV(l.recu_le) >= l.sla_min ? 'retard' : 'temps';
-      return 'sans';
-    }
-    function F(list, kind) {
-      var f = S.flt || {};
-      return (list || []).filter(function (l) {
-        if (kind === 'rappel' && !perDefaut() && !dansPeriode(l)) return false;
-        if (f.site && siteNom(l.site) !== f.site) return false;
-        if (f.statut && (kind === 'action' ? l.statut_actuel : l.statut_eff) !== f.statut) return false;
-        if (kind === 'action') return true;
-        if (f.trt && trtDe(l) !== f.trt) return false;
-        if (f.src) {
-          var k = f.src.slice(0, 2), val = f.src.slice(2);
-          if (k === 's:' && (l.source_libelle || l.source_bacs || '') !== val) return false;
-          if (k === 'c:' && (l.campagne || '') !== val) return false;
-        }
-        if (f.delai && delaiDe(l, kind) !== f.delai) return false;
-        if (f.op && String(l.derniere_action_par || '') !== f.op && String(l.verrou_par || '') !== f.op) return false;
-        return true;
-      });
-    }
-    function memoFlt() { try { FW.localStorage.setItem('lmtc-flt', JSON.stringify(S.flt || {})); } catch (e) {} }
-    function barreFiltres() {
-      if (['piscine', 'rappels', 'transferts', 'actions'].indexOf(S.tab) === -1 || S.rq.q.trim().length >= 2) return '';
-      var f = S.flt || {}, act = S.tab === 'actions';
-      var tout = (S.piscine || []).concat(S.rappels || [], S.arriere || [], S.transferts || [], S.stockListe || []);
-      var uniq = function (a) { return a.filter(function (x, i) { return x && a.indexOf(x) === i; }).sort(function (x, y) { return String(x).localeCompare(String(y), 'fr'); }); };
-      var sites = uniq(tout.map(function (l) { return siteNom(l.site); }).concat((S.actions || []).map(function (a) { return siteNom(a.site); })));
-      var srcs = uniq(tout.map(function (l) { return l.source_libelle || l.source_bacs; }));
-      var camps = uniq(tout.map(function (l) { return l.campagne; }));
-      var sts = uniq(act ? (S.actions || []).map(function (a) { return a.statut_actuel; }) : tout.map(function (l) { return l.statut_eff; }));
-      function sel(k, lab, opts) {
-        return '<select data-f="' + k + '" aria-label="' + esc(lab) + '"' + (f[k] ? ' class="on"' : '') + '><option value="">' + esc(lab) + '</option>'
-          + opts.map(function (o) { return '<option value="' + esc(o[0]) + '"' + (f[k] === o[0] ? ' selected' : '') + '>' + esc(o[1]) + '</option>'; }).join('') + '</select>';
-      }
-      var h = '<div class="fbar" role="group" aria-label="Filtres">' + sel('site', 'Toutes les concessions', sites.map(function (x) { return [x, x]; }));
-      if (!act) {
-        h += sel('trt', 'Tous les traitements', [['1h', 'Demande client (1h)'], ['48h', 'Relance concession (48h)'], ['atelier', 'Trafic atelier'], ['autre', 'Autres demandes']])
-          + '<select data-f="src" aria-label="Source ou campagne"' + (f.src ? ' class="on"' : '') + '><option value="">Toutes les sources et campagnes</option>'
-          + (srcs.length ? '<optgroup label="Sources">' + srcs.map(function (x) { return '<option value="s:' + esc(x) + '"' + (f.src === 's:' + x ? ' selected' : '') + '>' + esc(x) + '</option>'; }).join('') + '</optgroup>' : '')
-          + (camps.length ? '<optgroup label="Campagnes">' + camps.map(function (x) { return '<option value="c:' + esc(x) + '"' + (f.src === 'c:' + x ? ' selected' : '') + '>' + esc(x.length > 60 ? x.slice(0, 58) + '…' : x) + '</option>'; }).join('') + '</optgroup>' : '') + '</select>'
-          + sel('delai', 'Tous les délais', [['retard', 'En retard'], ['temps', 'Dans les temps'], ['sans', 'Sans échéance']]);
-      }
-      h += sel('statut', 'Tous les statuts BACS', sts.map(function (x) { return [x, libStatut(x)]; }));
-      if (!act) h += sel('op', 'Toutes les opératrices', (S.equipe || []).map(function (e) { return [String(e.id), propre(e.nom)]; }));
-      if (fActif()) h += '<button type="button" class="btn sm" data-a="flt-raz">Effacer les filtres</button>';
-      return h + (act ? '<span class="fn">Période : boutons ci-dessous</span>' : '<span class="fn">Période : bouton dates en haut à droite</span>') + '</div>';
-    }
     function renderPanel() {
-      if (S.rq.q.trim().length >= 2) return vueRecherche();
       if (S.tab === 'rappels') return vueRappels();
       if (S.tab === 'transferts') return vueTransferts();
       if (S.tab === 'campagnes') return vueCampagnes();
@@ -1410,19 +1043,17 @@
         return;
       }
       var y = (FW.scrollY || 0);
-      var ae = doc.activeElement, rqF = S.rq.focus || !!(ae && ae.getAttribute && ae.getAttribute('data-x') === 'vr-q');
       root.innerHTML = renderSituation() + bandeauBacs()
         + (S.erreur ? '<p class="alerte">' + esc(S.erreur) + ' Les données affichées datent du dernier chargement réussi.</p>' : '')
-        + bandeau1h() + '<div class="barre-o">' + renderTabs() + outilsVroom() + '</div>' + bandeauFiltre() + barreFiltres()
+        + bandeau1h() + '<div class="barre-o">' + renderTabs() + outilsVroom() + '</div>' + bandeauFiltre()
         + '<section class="act" aria-label="Leads"><div class="panel">' + renderPanel() + '</div></section>';
-      if (rqF) { var qi = root.querySelector('[data-x="vr-q"]'); if (qi) { try { qi.focus(); qi.setSelectionRange(qi.value.length, qi.value.length); } catch (e) {} } }
       try { if (FW.scrollY !== y) FW.scrollTo(0, y); } catch (e) {}
       setTimeout(function () { S.frais.clear(); }, 7000);
     }
 
     // ── Panneau latéral : la fiche du lead ────────────────────────────────
     function itemConnu(sf) {
-      return S.piscine.concat(S.rappels, S.arriere || [], S.transferts, S.stockListe || []).find(function (x) { return x.sf_lead_id === sf; }) || null;
+      return S.piscine.concat(S.rappels, S.transferts, S.stockListe || []).find(function (x) { return x.sf_lead_id === sf; }) || null;
     }
     function chipGroup(name, opts, val) {
       return '<div class="chips">' + opts.map(function (o, i) {
@@ -1467,31 +1098,6 @@
           : (l.campagne ? '<p class="dem-m">' + esc(l.campagne) + '</p>' : ''))
         + '</div>';
     }
-    // v97 : le client derrière le numéro (One Data, ou rapatrié de BACS)
-    function sectionClientVr(l) {
-      if (!l.telephone) return '';
-      var c = l.client_tel, rb = l.recherche_bacs;
-      if (c && c.idvu) {
-        var vs = (c.vehicules || []).slice(0, 4);
-        return '<section><h3>Client</h3><div class="clvr"><b>' + esc(propre(c.nom || 'Client')) + '</b>' + (c.ville ? '<small>' + esc(c.ville) + '</small>' : '')
-          + (vs.length ? '<ul>' + vs.map(function (v) { return '<li><em>' + esc(v.immat || '—') + '</em>' + esc(v.vehicule || '') + '</li>'; }).join('') + '</ul>'
-                       : '<p class="hint">Aucun véhicule connu.</p>')
-          + '<button type="button" class="btn sm ghost" data-a="fiche-vr" data-id="' + c.idvu + '">Ouvrir la fiche client</button></div></section>';
-      }
-      if (rb === 'a_faire' || rb === 'en_cours') return '<section><h3>Client</h3><p class="hint clvr-att">Numéro inconnu de One Data : recherche dans BACS en cours, la fiche s\'affichera ici d\'elle-même.</p></section>';
-      if (rb === 'rien') return '<section><h3>Client</h3><p class="hint">Inconnu de One Data et de BACS : nouveau client.</p></section>';
-      if (rb === 'erreur') return '<section><h3>Client</h3><p class="hint">Numéro inconnu de One Data ; la recherche dans BACS n\'a pas abouti.</p></section>';
-      return '<section><h3>Client</h3><p class="hint">Numéro inconnu de One Data.</p></section>';
-    }
-    function ficheClientVr(idClient) {
-      if (!idClient) return;
-      try { wwLib.wwVariable.updateValue('55490583-c88b-4748-916e-4d203db07742', { IDVu: Number(idClient) }); } catch (e) {}
-      try { FW.__odFicheTab = 0; } catch (e) {}
-      var edit = false; try { edit = (window.self !== window.top) || /-editor\.weweb\.io|weweb\.io/i.test(location.hostname); } catch (e) { edit = true; }
-      if (edit) { try { wwLib.wwApp.goTo('259f1951-a2d4-4b90-ac83-0b3febe1d4ec'); return; } catch (e) {} }
-      try { wwLib.goTo('/fr/fiche-client'); return; } catch (e) {}
-      try { FW.location.href = '/fr/fiche-client'; } catch (e) {}
-    }
     function renderDrawer() {
       var D = S.dr; if (!D) return;
       if (D.mode === 'creer') return renderCreer();     // v81
@@ -1509,9 +1115,9 @@
         + '<h2>' + esc(nomLead(l)) + '</h2><p class="dr-s">' + esc([l.ville, l.site ? 'site BACS : ' + siteNom(l.site) : null].filter(Boolean).join(' · ')) + '</p>' + demandeHautVr(l, fb) + '</div>'
         + '<button type="button" class="x" data-a="close" aria-label="Fermer"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg></button></header><div class="dr-b">';
       // Délais
-      h += '<section><h3>Délai</h3><div class="delais"><div><span>Depuis la réception BACS</span>' + (actif && l.statut_eff !== 'Accepté' && !l.rappel_le ? tmV(l.recu_le, l.sla_min) : '<span class="tm neutre"><b>' + duree(mins(l.recu_le)) + '</b><small>reçu le ' + esc(quand(l.recu_le)) + '</small></span>') + '</div>';
+      h += '<section><h3>Délai</h3><div class="delais"><div><span>Depuis la réception BACS</span>' + (actif && l.statut_eff !== 'Accepté' && !l.rappel_le ? tm(l.recu_le, l.sla_min) : '<span class="tm neutre"><b>' + duree(mins(l.recu_le)) + '</b><small>reçu le ' + esc(quand(l.recu_le)) + '</small></span>') + '</div>';
       if (l.rappel_le && actif) { var due = ts(l.rappel_le) - Date.now(); h += '<div><span>Rappel prévu</span><span class="tm ' + (due <= 0 ? 'crit' : 'ok') + '"><b>' + esc(quand(l.rappel_le)) + '</b><small>' + (due <= 0 ? 'retard ' + duree(-due / 60000) : 'dans ' + duree(due / 60000)) + '</small></span></div>'; }
-      if (l.transfere_le) h += '<div><span>Sur le site</span>' + (l.od_contact_le ? '<span class="tm ok"><b>' + duree(ouvrees(ts(l.transfere_le), ts(l.od_contact_le))) + '</b><small>avant contact</small></span>' : tmO(l.transfere_le, SLA_SITE, 'sans contact · SLA 2 h')) + '</div>';
+      if (l.transfere_le) h += '<div><span>Sur le site</span>' + (l.od_contact_le ? '<span class="tm ok"><b>' + duree((ts(l.od_contact_le) - ts(l.transfere_le)) / 60000) + '</b><small>avant contact</small></span>' : tm(l.transfere_le, SLA_SITE, 'sans contact · SLA 2 h')) + '</div>';
       if (mien) h += '<div><span>Réservé à votre nom</span><span class="tm ok"><b>jusqu\'à ' + hh(l.verrou_jusqu) + '</b><small>prolongé tant que la fiche est ouverte</small></span></div>';
       h += '</div></section>';
       // Contact
@@ -1519,7 +1125,6 @@
         + (l.email ? '<p class="mail">' + esc(l.email) + '</p>' : '')
         + '<div class="canaux">' + [['Appeler', 'appel', 'call', IC.phone], ['WhatsApp', 'wa', 'wa', IC.wa], ['Email', 'mail', 'mail', IC.mail], ['SMS', 'sms', 'sms', IC.sms]].filter(function (c) { return c[1] !== 'appel' || __lmPeutAppeler(); }).map(function (c) {
             return '<button type="button" class="fs-btn ' + c[2] + '" data-a="canal" data-id="' + c[1] + '"' + ((c[1] === 'mail' ? !l.email : !l.telephone) ? ' disabled' : '') + '>' + svgIc(c[3]) + c[0] + '</button>'; }).join('') + '</div></section>';
-      h += sectionClientVr(l);
       // Demande
       var oui = function (v) { return v === 'true' || v === true ? 'Oui' : v === 'false' || v === false ? 'Non' : v; };
       var dl = [['Type', fb.type_demande], ['Modèle', fb.modele], ['Marque', fb.marque], ['Échéance', fb.echeance], ['Reprise', oui(fb.reprise)],
@@ -1541,12 +1146,11 @@
         if (!D.sites) h += '<p class="hint">Chargement des sites…</p>';
         else if (!D.sites.length) h += '<p class="hint">Aucun site de vente trouvé pour cette marque.</p>';
         else {
-          var montrer = D.tousSites ? D.sites : D.sites.filter(function (s, i) { return s.rang < 4 || i < 3 || Number(s.id_site) === Number(D.site); });
+          var montrer = D.tousSites ? D.sites : D.sites.filter(function (s, i) { return s.rang < 3 || i < 3 || Number(s.id_site) === Number(D.site); });
           h += '<div class="sites">' + montrer.map(function (s) {
             return '<label class="site-o"><input type="radio" name="q-site" value="' + s.id_site + '"' + (Number(D.site) === Number(s.id_site) ? ' checked' : '') + '><span><b>' + esc(siteNom(s.site)) + '</b><small>' + esc(s.raison) + '</small></span><em>' + plural(Number(s.en_attente) || 0, 'lead', 'leads') + ' en attente</em></label>';
           }).join('') + '</div>' + (!D.tousSites && montrer.length < D.sites.length ? '<button type="button" class="btn sm ghost" data-a="tous-sites">Voir les ' + D.sites.length + ' sites</button>' : '');
-          var siteQ = D.sites.filter(function (s) { return Number(s.id_site) === Number(D.site); })[0] || {};
-          h += '<label class="q vend"><span>Attribution</span><select id="q-vendeur"><option value="">' + esc(siteQ.mode_libelle || 'Pool de la concession (règle d\'attribution du site)') + '</option>'
+          h += '<label class="q vend"><span>Vendeur</span><select id="q-vendeur"><option value="">Tour de rôle du site</option>'
             + (D.vendeurs || []).map(function (v) { return '<option value="' + v.id_user + '">' + esc(propre(v.nom)) + (Number(v.en_attente) ? ' · ' + v.en_attente + ' en attente' : '') + '</option>'; }).join('')
             + '</select></label>';
         }
@@ -1594,8 +1198,7 @@
           h += '<label class="hint" for="lt-date">Rappeler le</label><input type="date" id="lt-date" value="' + dateLocale(demainA(9, 30)).slice(0, 10) + '">'
             + '<button type="button" class="btn pri" data-a="long-terme"' + dis() + '>Programmer</button>';
         } else {
-          h += '<textarea id="a-com" rows="2" aria-label="Commentaire pour BACS" placeholder="Commentaire pour BACS : ce que le client a dit, pourquoi on arrête…" style="flex:1 1 100%;min-width:0;font:inherit;font-size:13px;border:1px solid #c9daf1;border-radius:8px;padding:8px 10px;resize:vertical">' + esc(D.comAb || '') + '</textarea>'
-            + '<select id="a-motif" aria-label="Motif d\'abandon BACS">' + MOTIFS_ABANDON.map(function (m) { return '<option>' + esc(m) + '</option>'; }).join('') + '</select>'
+          h += '<select id="a-motif" aria-label="Motif d\'abandon BACS">' + MOTIFS_ABANDON.map(function (m) { return '<option>' + esc(m) + '</option>'; }).join('') + '</select>'
             + '<button type="button" class="btn dang" data-a="abandonner"' + dis() + '>Abandonner</button>';
         }
         h += '</div><div class="row pied"><span class="hint">' + (bloque() ? 'Bloqué : ouvrez BACS dans un onglet et connectez-vous.' : ecritBacs() ? 'Le geste est reporté automatiquement dans BACS.' : 'Reportez aussi le statut dans BACS : l\'écriture automatique n\'est pas activée.') + '</span>'
@@ -1628,26 +1231,16 @@
     }
     async function ouvrirCreer() {
       fermerDrawer(true);
-      S.dr = { mode: 'creer', etape: 'client', form: { civilite: 'M.', origine: 'Prospection', nature: 'VN', type_demande: 'Essai', marque: 'Toyota', statut: 'Qualifié' }, vendeurs: [] };
+      S.dr = { mode: 'creer', form: { civilite: 'M.', origine: 'Prospection', nature: 'VN', type_demande: 'Essai', marque: 'Toyota', statut: 'Qualifié' }, vendeurs: [] };
       $scrim.hidden = false; $drawer.hidden = false;
       renderDrawer();
       if (!S.sitesCreation) {
         try { S.sitesCreation = await rpc('plateau_sites_creation') || []; } catch (e) { S.sitesCreation = []; toast(messageErreur(e), true); }
         if (S.dr && S.dr.mode === 'creer') renderCreer();
       }
-      if (siteUniqueCreer()) { renderCreer(); chargerVendeursCreer(); }
     }
     function renderCreer() {
       var D = S.dr, f = D.form || {};
-      $drawer.classList.toggle('pick', D.etape === 'client');
-      if (D.etape === 'client') {                       // v103 : recherche / création du client
-        if ($drawer.querySelector('.lm-pick')) return;  // déjà monté : ne pas perdre la recherche en cours
-        $drawer.innerHTML = '<header class="dr-h"><div><h2>Nouveau lead · le client</h2><p class="dr-s">Cherchez le client (particulier ou société). Introuvable ? Créez-le : il est créé dans One Data et dans BACS, puis vous saisissez sa demande.</p></div>' + XICON + '</header>'
-          + '<div class="dr-b"><div class="lm-pick" data-od-module="client-search" data-od-props="{&quot;picker&quot;:true}"></div></div>'
-          + '<footer class="dr-f"><div class="row"><button type="button" class="btn" data-a="close">Annuler</button></div></footer>';
-        try { var OD_ = (doc.defaultView || window).OD || window.OD; if (OD_ && OD_.mountAll) OD_.mountAll(); } catch (e) {}
-        return;
-      }
       var h = '<header class="dr-h"><div><h2>Nouveau lead</h2><p class="dr-s">Créé dans BACS sur la concession choisie, par votre onglet BACS.</p></div>' + XICON + '</header><div class="dr-b">';
       if (D.etape === 'suivi') {
         var e = D.etat || {}, st = e.statut || 'en_attente';
@@ -1657,19 +1250,15 @@
           + lig(e.pris_le ? true : (st === 'echec' ? false : null), 'Prise par votre onglet BACS', e.pris_le ? quand(e.pris_le) : 'BACS doit être ouvert dans ce navigateur')
           + lig(st === 'fait' ? true : (st === 'echec' || st === 'abandonne') ? false : null, st === 'fait' ? 'Créée dans BACS' : (st === 'echec' || st === 'abandonne') ? 'BACS a refusé la création' : 'Création dans BACS', st === 'fait' ? quand(e.fait_le) : (e.erreur || ''))
           + '</ol>'
-          + (st === 'fait' ? '<p class="hint">' + (D.vendeurNom ? esc(propre(D.vendeurNom)) + ' la recevra' : 'La concession la recevra (tour de rôle des vendeurs)')
-              + ' « Qualifiée par la Vroom Team », avec votre commentaire, d\'ici deux minutes (collecte BACS). Elle apparaît aussi dans « Mes actions ».</p>' : '')
+          + (st === 'fait' ? '<p class="hint">La demande apparaîtra dans le Pool et dans « Mes actions » d\'ici deux minutes (collecte BACS).</p>' : '')
           + ((st === 'echec' || st === 'abandonne') ? '<p class="hint">Corrigez la saisie puis recommencez : rien n\'a été créé dans BACS.</p>' : '')
           + (st === 'en_attente' && e.tentatives > 1 ? '<p class="hint">Nouvel essai en cours (' + e.tentatives + ').</p>' : '')
           + '</section></div><footer class="dr-f"><div class="row">'
           + ((st === 'echec' || st === 'abandonne') ? '<button type="button" class="btn pri" data-a="creer-retour">Reprendre la saisie</button>' : '')
-          + (opt && typeof opt.retourFlux === 'function' ? '<button type="button" class="btn' + (st === 'fait' ? ' pri' : '') + '" data-a="retour-flux">Revenir au flux</button>' : '<button type="button" class="btn" data-a="close">Fermer</button>')
-          + '<button type="button" class="btn ghost" data-a="nouveau">Créer un autre lead</button></div></footer>';
+          + '<button type="button" class="btn" data-a="close">Fermer</button><button type="button" class="btn ghost" data-a="nouveau">Créer un autre lead</button></div></footer>';
         $drawer.innerHTML = h; return;
       }
-      h += '<section><h3>Client</h3>'
-        + (D.client ? '<div class="row" style="display:flex;align-items:center;gap:10px;margin:0 0 10px"><span class="tag">' + (D.client.soc ? 'Société' : 'Particulier') + '</span><b>' + esc(propre(D.client.nom) || 'Client') + '</b><small class="hint">fiche One Data n° ' + esc(D.client.id) + '</small><button type="button" class="btn sm ghost" data-a="creer-client" style="margin-left:auto">Changer de client</button></div>' : '')
-        + '<div class="qf">'
+      h += '<section><h3>Client</h3><div class="qf">'
         + '<div class="q2"><label class="q"><span>Civilité *</span>' + fSel('c-civ', [['M.', 'M.'], ['MME.', 'Mme']], f.civilite) + '</label>'
         + '<label class="q"><span>Entreprise</span>' + fInp('c-ent', f.entreprise) + '</label></div>'
         + '<div class="q2"><label class="q"><span>Prénom *</span>' + fInp('c-prenom', f.prenom) + '</label><label class="q"><span>Nom *</span>' + fInp('c-nom', f.nom) + '</label></div>'
@@ -1679,18 +1268,17 @@
         + '<div class="q2"><label class="q"><span>Origine *</span>' + fSel('c-orig', ORIGINES_LOCALES, f.origine) + '</label><label class="q"><span>Nature *</span>' + fSel('c-nat', ['VN', 'VO', 'Entreprise'], f.nature) + '</label></div>'
         + '<div class="q2"><label class="q"><span>Type de demande *</span>' + fSel('c-type', ['Essai', 'Info', 'Offre'], f.type_demande) + '</label><label class="q"><span>Marque *</span>' + fSel('c-marque', ['Toyota', 'Lexus'], f.marque) + '</label></div>'
         + '<div class="q2"><label class="q"><span>Modèle souhaité *</span>' + fInp('c-modele', f.modele, 'Yaris Cross, NX…') + '</label><label class="q"><span>Rappel</span>' + fInp('c-rappel', f.rappel, '', 'datetime-local') + '</label></div>'
-        + '<label class="q"><span>Qualification pour le vendeur</span><textarea id="c-com" rows="3" placeholder="Projet, échéance, reprise, financement, disponibilités du client">' + esc(f.commentaire || '') + '</textarea></label>'
+        + '<label class="q"><span>Commentaire</span><textarea id="c-com" rows="3" placeholder="Ce que le client a demandé, ses disponibilités">' + esc(f.commentaire || '') + '</textarea></label>'
         + '<label class="q"><span>Statut de départ</span>' + fSel('c-statut', [['Qualifié', 'Qualifié : projet confirmé au téléphone'], ['Nouveau', 'Nouveau : à traiter par la concession']], f.statut) + '</label></div></section>';
       h += '<section><h3>Concession *</h3>';
       var ss = (S.sitesCreation || []).filter(function (s) { return String(s.marque || '').toUpperCase() === String(f.marque || '').toUpperCase(); });
       if (!S.sitesCreation) h += '<p class="hint">Chargement des concessions…</p>';
-      else if (!ss.length) h += '<p class="hint">Aucune concession pilote ' + esc(f.marque || '') + ' : la Vroom Team ne crée des leads que pour les concessions pilotes.</p>';
+      else if (!ss.length) h += '<p class="hint">Aucune concession ' + esc(f.marque || '') + ' trouvée.</p>';
       else {
         h += '<div class="sites">' + ss.map(function (s) {
-          return '<label class="site-o"><input type="radio" name="c-site" value="' + s.id_site + '"' + (String(f.id_site) === String(s.id_site) ? ' checked' : '') + '><span><b>' + esc(siteNom(s.site)) + '</b><small>' + plural(Number(s.vendeurs) || 0, 'vendeur', 'vendeurs') + (s.mode_attribution === 'libre' ? ' · Pool libre-service' : s.mode_attribution === 'auto' ? ' · attribution automatique' : s.mode_attribution === 'manuel' ? ' · attribution par le chef des ventes' : '') + (s.file_bacs ? '' : ' · file BACS inconnue : choisir un vendeur') + '</small></span><em>' + plural(Number(s.en_attente) || 0, 'lead', 'leads') + ' en attente</em></label>';
+          return '<label class="site-o"><input type="radio" name="c-site" value="' + s.id_site + '"' + (String(f.id_site) === String(s.id_site) ? ' checked' : '') + '><span><b>' + esc(siteNom(s.site)) + '</b><small>' + plural(Number(s.vendeurs) || 0, 'vendeur', 'vendeurs') + (s.file_bacs ? '' : ' · file BACS inconnue : choisir un vendeur') + '</small></span><em>' + plural(Number(s.en_attente) || 0, 'lead', 'leads') + ' en attente</em></label>';
         }).join('') + '</div>';
-        var siteC = ss.filter(function (s) { return String(s.id_site) === String(f.id_site); })[0] || {};
-        if (f.id_site) h += '<label class="q vend"><span>Attribution</span><select id="c-vend"><option value="">' + esc(siteC.mode_libelle || 'Pool de la concession (règle d\'attribution du site)') + '</option>'
+        if (f.id_site) h += '<label class="q vend"><span>Vendeur</span><select id="c-vend"><option value="">File de la concession (le chef des ventes répartit)</option>'
           + (D.vendeurs || []).map(function (v) { return '<option value="' + v.id_user + '"' + (String(f.id_vendeur) === String(v.id_user) ? ' selected' : '') + '>' + esc(propre(v.nom)) + (Number(v.en_attente) ? ' · ' + v.en_attente + ' en attente' : '') + '</option>'; }).join('') + '</select></label>';
       }
       h += '</section>';
@@ -1702,39 +1290,12 @@
       }
       h += '</div><footer class="dr-f"><div class="row">'
         + (D.doublons && D.doublons.length ? '<button type="button" class="btn pri" data-a="creer-forcer"' + dis() + '>Créer quand même</button>'
-          : '<button type="button" class="btn pri" data-a="creer-envoyer"' + dis() + '>' + (f.id_vendeur ? 'Créer et envoyer au vendeur' : 'Créer et envoyer à la concession') + '</button>')
+          : '<button type="button" class="btn pri" data-a="creer-envoyer"' + dis() + '>Créer dans BACS et affecter</button>')
         + '<button type="button" class="btn" data-a="close">Annuler</button></div>'
         + '<div class="row pied"><span class="hint">' + (bloque() ? 'Bloqué : ouvrez BACS dans un onglet de ce navigateur.' : 'Votre onglet BACS passe sur la concession le temps de la création, puis revient.') + '</span></div></footer>';
       var top = $drawer.scrollTop; $drawer.innerHTML = h; $drawer.scrollTop = top;
     }
-    // v94 : une seule concession pilote pour la marque -> choisie d'office.
-    function siteUniqueCreer() {
-      var D = S.dr; if (!D || D.mode !== 'creer' || !S.sitesCreation) return false;
-      var f = D.form || {};
-      var ss = S.sitesCreation.filter(function (s) { return String(s.marque || '').toUpperCase() === String(f.marque || '').toUpperCase(); });
-      if (ss.length === 1 && String(f.id_site) !== String(ss[0].id_site)) { f.id_site = String(ss[0].id_site); f.id_vendeur = null; return true; }
-      return false;
-    }
-    function memoCreer() { if (S.dr && S.dr.mode === 'creer' && S.dr.etape !== 'suivi' && S.dr.etape !== 'client') S.dr.form = lireCreer(); }
-    // v103 : client choisi (ou créé) dans la recherche -> la demande est pré-remplie.
-    function clientChoisi(c) {
-      var D = S.dr; if (!D || D.mode !== 'creer' || D.etape !== 'client' || !c || c.IDVu == null) return;
-      var soc = String(c.idmultivu) === '1', f = D.form || {};
-      var civ = String(c.CIVILITE || '').toUpperCase().replace(/\s/g, '');
-      var tel = c.TEl_MOB || c.TEL_MOB || c.tel_mob || c.mobile || '';
-      f.mobile = tel ? String(tel) : ''; f.email = c.EMAIL || '';
-      if (soc) { f.entreprise = c.NOM || ''; f.prenom = ''; f.nom = ''; f.nature = 'Entreprise'; }
-      else {
-        f.entreprise = ''; f.prenom = c.PRENOM || ''; f.nom = c.NOM || '';
-        f.civilite = /^(MME|MADAME|MLLE|MELLE|MADEMOISELLE)/.test(civ) ? 'MME.' : 'M.';
-        if (f.nature === 'Entreprise') f.nature = 'VN';
-      }
-      D.form = f;
-      D.client = { id: c.IDVu, soc: soc, nom: soc ? (c.NOM || '') : [c.PRENOM, c.NOM].filter(Boolean).join(' ') };
-      D.etape = null; D.doublons = null;
-      renderCreer();
-      if (soc) toast('Société choisie : saisissez le nom de votre interlocuteur.');
-    }
+    function memoCreer() { if (S.dr && S.dr.mode === 'creer' && S.dr.etape !== 'suivi') S.dr.form = lireCreer(); }
     async function chargerVendeursCreer() {
       var D = S.dr; if (!D || D.mode !== 'creer' || !D.form.id_site) return;
       var site = D.form.id_site;
@@ -1755,13 +1316,11 @@
       var p = { civilite: f.civilite, prenom: f.prenom, nom: f.nom, entreprise: f.entreprise, mobile: f.mobile, email: f.email,
                 origine: f.origine, nature: f.nature, type_demande: f.type_demande, marque: f.marque, modele: f.modele,
                 rappel_le: rappel ? rappel.toISOString() : null, commentaire: f.commentaire, statut: f.statut,
-                id_site: Number(f.id_site), id_vendeur: f.id_vendeur ? Number(f.id_vendeur) : null,
-                id_client: D.client ? Number(D.client.id) : null };
+                id_site: Number(f.id_site), id_vendeur: f.id_vendeur ? Number(f.id_vendeur) : null };
       return geste(async function () {
         var r = await rpc('plateau_lead_creer', { p: p, p_forcer: !!forcer });
         if (r && r.ok === false && r.doublons) { D.doublons = r.doublons; renderCreer(); toast('Ce client a déjà une demande ouverte.', true); return; }
         D.etape = 'suivi'; D.idSortant = r.id_sortant; D.siteNom = r.site; D.etat = { statut: 'en_attente' };
-        D.vendeurNom = p.id_vendeur ? ((D.vendeurs || []).filter(function (v) { return Number(v.id_user) === p.id_vendeur; })[0] || {}).nom : null;
         renderCreer(); reveillerBacs(); suivreCreation();
         S.actions = null; if (S.tab === 'actions') chargerActions();
       });
@@ -1874,7 +1433,7 @@
     // Aucun geste n'est enregistré (geste() et canal() refusent), rien n'est
     // réservé ni libéré dans BACS.
     async function ouvrirExemple(sfVoulu) {
-      var tous = [].concat(S.piscine || [], S.stockListe || [], S.rappels || [], S.arriere || [], S.transferts || []).filter(function (x) { return x && x.sf_lead_id; });
+      var tous = [].concat(S.piscine || [], S.stockListe || [], S.rappels || [], S.transferts || []).filter(function (x) { return x && x.sf_lead_id; });
       var cand = (sfVoulu && tous.find(function (x) { return x.sf_lead_id === sfVoulu; })) || tous[0];
       var fiche = null;
       if (cand) { try { fiche = await rpc('plateau_fiche', { p_sf_lead_id: cand.sf_lead_id }); } catch (e) { fiche = null; } }
@@ -1935,7 +1494,7 @@
     async function fermerDrawer(silencieux) {
       clearInterval(renouvellement); clearInterval(suiviCreation);
       var D = S.dr; S.dr = null;
-      $scrim.hidden = true; $drawer.hidden = true; $drawer.innerHTML = ''; $drawer.classList.remove('pick');
+      $scrim.hidden = true; $drawer.hidden = true; $drawer.innerHTML = '';
       // Fermer sans geste rend le lead aux collègues tout de suite.
       if (D && D.fiche && estMien(D.fiche) && !silencieux && !D.demo) {
         try { await rpc('plateau_liberer', { p_sf_lead_id: D.sf }); } catch (e) {}
@@ -2001,9 +1560,7 @@
     function abandonner() {
       var D = S.dr; if (!D) return;
       var motif = ($drawer.querySelector('#a-motif') || {}).value;
-      // v103 : le commentaire d'abandon part dans BACS (Description du lead).
-      var note = (($drawer.querySelector('#a-com') || {}).value || '').trim()
-              || (($drawer.querySelector('#q-note') || {}).value || '').trim() || null;
+      var note = (($drawer.querySelector('#q-note') || {}).value || '').trim() || null;
       return geste(async function () {
         await rpc('plateau_abandonner', { p_sf_lead_id: D.sf, p_motif: motif, p_note: note });
         apresGeste('Lead abandonné · ' + motif);
@@ -2079,10 +1636,8 @@
           });
         // v81
         case 'nouveau': return ouvrirCreer();
-        case 'creer-client': if (S.dr && S.dr.mode === 'creer') { memoCreer(); S.dr.etape = 'client'; renderCreer(); } return;
         case 'creer-envoyer': return envoyerCreer(false);
         case 'creer-forcer': return envoyerCreer(true);
-        case 'retour-flux': if (opt && typeof opt.retourFlux === 'function') { clearInterval(suiviCreation); fermerDrawer(true); opt.retourFlux(); } return;
         case 'creer-retour': if (S.dr) { S.dr.etape = null; S.dr.doublons = null; renderCreer(); } return;
         case 'corriger': return ouvrirCorriger(id);
         case 'corr-envoyer': return envoyerCorriger();
@@ -2093,14 +1648,12 @@
           if (id === 'campagnes' && !S.campagnes) { render(); try { S.campagnes = await rpc('plateau_campagnes', { p_jours: 90 }); } catch (e) { toast(messageErreur(e), true); S.campagnes = []; } }
           render(); return;
         case 'ack': S.ack.add(id); memoAck(); render(); return;
-        case 'flt-raz': S.flt = {}; memoFlt(); render(); return;
-        case 'rq-effacer': S.rq = { q: '', res: null, err: null, seq: S.rq.seq + 1, t: null, focus: false }; render(); return;
         case 'prendre': return prendre(id);
         case 'open': return ouvrir(id);
         case 'relancer': return relancer(id);
         case 'stock':
           S.tab = 'piscine'; S.stock = !!id; render();
-          if (S.stock && !S.stockListe) { try { S.stockListe = (await rpc('plateau_file2', { p_vue: 'stock' })) || []; } catch (e) { toast(messageErreur(e), true); S.stockListe = []; } render(); }
+          if (S.stock && !S.stockListe) { try { S.stockListe = await rpc('plateau_file2', { p_vue: 'stock' }); } catch (e) { toast(messageErreur(e), true); S.stockListe = []; } render(); }
           return;
         case 'source': {
           var src = (S.kpis && S.kpis.sources) || [];
@@ -2130,7 +1683,6 @@
         // Panneau
         case 'close': return fermerDrawer();
         case 'copier': try { await (FW.navigator || navigator).clipboard.writeText(id); toast('Numéro copié'); } catch (e) { toast(id); } return;
-        case 'fiche-vr': return ficheClientVr(id);
         case 'canal': return canal(id);
         case 'tous-sites': if (S.dr) { S.dr.tousSites = true; renderDrawerPreserve(); } return;
         case 'issue': if (S.dr) { S.dr.issue = id; renderDrawerPreserve(); } return;
@@ -2153,21 +1705,6 @@
     }
     root.addEventListener('click', surClic);
     ov.addEventListener('click', surClic);
-    ov.addEventListener('od:client-choisi', function (ev) { clientChoisi(ev && ev.detail); });   // v103
-    root.addEventListener('input', function (ev) {   // v104 : recherche
-      var t = ev.target; if (!t || !t.getAttribute || t.getAttribute('data-x') !== 'vr-q') return;
-      S.rq.q = t.value; S.rq.focus = true; clearTimeout(S.rq.t); S.rq.t = setTimeout(chercherRq, 350);
-    });
-    root.addEventListener('focusout', function (ev) { var t = ev.target; if (t && t.getAttribute && t.getAttribute('data-x') === 'vr-q') S.rq.focus = false; });
-    root.addEventListener('change', function (ev) {   // v105 : filtres
-      var t = ev.target, k = t && t.getAttribute && t.getAttribute('data-f'); if (!k) return;
-      if (t.value) S.flt[k] = t.value; else delete S.flt[k];
-      memoFlt(); render();
-    });
-    rpc('plateau_equipe_noms').then(function (r) { S.equipe = Array.isArray(r) ? r : []; if (S.charge) render(); }).catch(function () { S.equipe = []; });
-    ov.addEventListener('input', function (ev) {   // v103 : commentaire d'abandon conservé au re-rendu
-      var t = ev.target; if (t && t.id === 'a-com' && S.dr) S.dr.comAb = t.value;
-    });
     $scrim.addEventListener('click', function () { fermerDrawer(); });
     root.addEventListener('keydown', function (ev) {
       if ((ev.key === 'Enter' || ev.key === ' ') && ev.target.classList && ev.target.classList.contains('lr')) { ev.preventDefault(); ouvrir(ev.target.getAttribute('data-id')); }
@@ -2182,23 +1719,16 @@
         var d = $drawer.querySelector('#r-date'); if (d) d.hidden = t.value !== 'autre';
       } else if (S.dr && S.dr.mode === 'creer' && (t.name === 'c-site' || t.id === 'c-marque')) {   // v81
         memoCreer();
-        if (t.id === 'c-marque') { S.dr.form.id_site = null; S.dr.form.id_vendeur = null; siteUniqueCreer(); }
+        if (t.id === 'c-marque') { S.dr.form.id_site = null; S.dr.form.id_vendeur = null; }
         S.dr.vendeurs = []; S.dr.doublons = null; renderCreer();
-        if (t.name === 'c-site' || S.dr.form.id_site) await chargerVendeursCreer();
-      } else if (S.dr && S.dr.mode === 'creer' && t.id === 'c-vend') {   // v94 : libellé du bouton
-        memoCreer(); renderCreer();
+        if (t.name === 'c-site') await chargerVendeursCreer();
       } else if (S.dr && S.dr.mode === 'creer' && /^c-(tel|mail|prenom|nom)$/.test(t.id)) {
         memoCreer(); if (S.dr.doublons) { S.dr.doublons = null; renderCreer(); }
       } else if (S.dr && S.dr.mode === 'corriger' && t.id === 'k-statut') {
         S.dr.form = lireCorriger(); S.dr.form.rappel = null; renderCorriger();
       }
     });
-    function surTouche(ev) {
-      if (ev.key !== 'Escape' || !S.dr) return;
-      // v103 : Échap dans la fiche de création client (ou le panneau BACS) ne ferme pas tout.
-      if ($drawer.querySelector('.crs-modal-overlay') || doc.querySelector('.obc-ov')) return;
-      fermerDrawer();
-    }
+    function surTouche(ev) { if (ev.key === 'Escape' && S.dr) fermerDrawer(); }
     doc.addEventListener('keydown', surTouche);
     // Accès des visites guidées (module tours) : fiche d'exemple et fermeture.
     try { FW.__lmtcTour = { poste: 'vroom', exemple: ouvrirExemple, fermer: function () { if (S.dr) fermerDrawer(); } }; } catch (e) {}
@@ -2239,7 +1769,6 @@
     }, 1000);
 
     await rafraichir();
-    if (opt && opt.creer) ouvrirCreer();
   }
 
   // Met à jour les comptes à rebours d'un écran (data-ech = échéance ISO).
@@ -2279,8 +1808,7 @@
     var doc = el.ownerDocument || document;
     var sb = ctx.supabase;
     var FW = frontWindow();
-    var S = { d: null, erreur: null, charge: false, ack: new Set(), pop: null, flt: {}, eper: null };   // v105 : flt, eper
-    try { S.flt = JSON.parse(FW.localStorage.getItem('lmsv-flt') || '{}') || {}; } catch (e) { S.flt = {}; }
+    var S = { d: null, erreur: null, charge: false, ack: new Set(), pop: null };
     try { (JSON.parse(FW.localStorage.getItem('lmsv-ack') || '[]') || []).forEach(function (x) { S.ack.add(x); }); } catch (e) {}
 
     injecterCss(doc); injecterCssSup(doc);
@@ -2325,56 +1853,8 @@
     }
 
     // ── Les alertes, recalculées à chaque lecture ─────────────────────────
-    // ── v105 : filtres de la supervision ───────────────────────────────────
-    function svActif() { var f = S.flt || {}; return !!(f.site || f.trt || f.src || f.delai || f.statut || f.op || f.du || f.au || f.fam); }
-    function jourDe(v) { var d = new Date(v); return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'); }
-    function FS(list, kind) {
-      var f = S.flt || {};
-      return (list || []).filter(function (l) {
-        if (f.site && siteNom(l.site) !== f.site) return false;
-        var tr = kind === 'rappel' ? (l.tr || 'autre') : kind;
-        if (f.trt && tr !== f.trt) return false;
-        if (f.src) { var k = f.src.slice(0, 2), val = f.src.slice(2); if (k === 's:' && (l.source || '') !== val) return false; if (k === 'c:' && (l.campagne || '') !== val) return false; }
-        if (f.delai) { var r = kind === 'rappel' ? (ts(l.rappel_le) <= Date.now() ? 'retard' : 'temps') : (reste(l) != null && reste(l) <= 0 ? 'retard' : 'temps'); if (r !== f.delai) return false; }
-        if (f.statut && (l.statut || '') !== f.statut) return false;
-        if (f.op && propre(kind === 'rappel' ? l.operateur : l.pris_par) !== f.op) return false;
-        if ((f.du || f.au) && l.recu_le) { var j = jourDe(l.recu_le); if ((f.du && j < f.du) || (f.au && j > f.au)) return false; }
-        return true;
-      });
-    }
-    function Sf() {
-      var d = S.d || {}, f = S.flt || {}, o = Object.assign({}, d);
-      o.chrono = FS(d.chrono, '1h'); o.chrono_48h = FS(d.chrono_48h, '48h'); o.rappels_dus = FS(d.rappels_dus, 'rappel');
-      o.equipe = (d.equipe || []).filter(function (e) { return !f.op || propre(e.nom) === f.op; });
-      return o;
-    }
-    function memoSv() { try { FW.localStorage.setItem('lmsv-flt', JSON.stringify(S.flt || {})); } catch (e) {} }
-    function barreSv() {
-      var d = S.d || {}, f = S.flt || {};
-      var tout = (d.chrono || []).concat(d.chrono_48h || [], d.rappels_dus || []);
-      var uniq = function (a) { return a.filter(function (x, i) { return x && a.indexOf(x) === i; }).sort(function (x, y) { return String(x).localeCompare(String(y), 'fr'); }); };
-      function sel(k, lab, opts) {
-        return '<select data-sf="' + k + '" aria-label="' + esc(lab) + '"' + (f[k] ? ' class="on"' : '') + '><option value="">' + esc(lab) + '</option>'
-          + opts.map(function (o) { return '<option value="' + esc(o[0]) + '"' + (f[k] === o[0] ? ' selected' : '') + '>' + esc(o[1]) + '</option>'; }).join('') + '</select>';
-      }
-      var srcs = uniq(tout.map(function (l) { return l.source; })), camps = uniq(tout.map(function (l) { return l.campagne; }));
-      var fams = uniq(['Réactivité', 'Présence', 'Charge', 'Qualité', 'Transmission', 'BACS'].concat((S.famsVues || [])));
-      return '<div class="fbar" role="group" aria-label="Filtres">'
-        + sel('site', 'Toutes les concessions', uniq(tout.map(function (l) { return siteNom(l.site); })).map(function (x) { return [x, x]; }))
-        + sel('trt', 'Tous les traitements', [['1h', 'Demande client (1h)'], ['48h', 'Relance concession (48h)'], ['atelier', 'Trafic atelier'], ['autre', 'Autres demandes']])
-        + '<select data-sf="src" aria-label="Source ou campagne"' + (f.src ? ' class="on"' : '') + '><option value="">Toutes les sources et campagnes</option>'
-        + (srcs.length ? '<optgroup label="Sources">' + srcs.map(function (x) { return '<option value="s:' + esc(x) + '"' + (f.src === 's:' + x ? ' selected' : '') + '>' + esc(x) + '</option>'; }).join('') + '</optgroup>' : '')
-        + (camps.length ? '<optgroup label="Campagnes">' + camps.map(function (x) { return '<option value="c:' + esc(x) + '"' + (f.src === 'c:' + x ? ' selected' : '') + '>' + esc(x.length > 60 ? x.slice(0, 58) + '…' : x) + '</option>'; }).join('') + '</optgroup>' : '') + '</select>'
-        + sel('delai', 'Tous les délais', [['retard', 'En retard'], ['temps', 'Dans les temps']])
-        + sel('statut', 'Tous les statuts BACS', uniq(tout.map(function (l) { return l.statut; })).map(function (x) { return [x, x]; }))
-        + sel('op', 'Toutes les opératrices', (d.equipe || []).map(function (e) { return [propre(e.nom), propre(e.nom)]; }))
-        + sel('fam', 'Toutes les alertes', fams.map(function (x) { return [x, x]; }))
-        + '<label>Reçus du <input type="date" data-sf="du" value="' + esc(f.du || '') + '"' + (f.du ? ' class="on"' : '') + '></label>'
-        + '<label>au <input type="date" data-sf="au" value="' + esc(f.au || '') + '"' + (f.au ? ' class="on"' : '') + '></label>'
-        + (svActif() ? '<button type="button" class="btn sm" data-a="sv-raz">Effacer les filtres</button>' : '') + '</div>';
-    }
     function alertes() {
-      var d = Sf(), j = d.jour || {}, out = [];
+      var d = S.d || {}, j = d.jour || {}, out = [];
       var libres = (d.chrono || []).filter(function (l) { return !l.pris_par; });
       var att = cfg('1h_attention_min', 30), grave = cfg('1h_grave_min', 45);
       var hors1 = libres.filter(function (l) { return reste(l) <= 0; });
@@ -2432,8 +1912,7 @@
       if (d.derniere_synchro && mins(d.derniere_synchro) > 30) out.push({ id: 'sync-' + d.derniere_synchro, niv: 'o', fam: 'BACS', t: d.derniere_synchro,
         titre: 'BACS n\'a pas été relu depuis ' + duree(mins(d.derniere_synchro)), d: 'Les leads arrivés depuis ne sont pas encore ici. Une opératrice doit ouvrir BACS avec l\'extension One Data.', a: [] });
       var ordre = { r: 0, o: 1, b: 2 };
-      S.famsVues = out.map(function (a) { return a.fam; });
-      return out.filter(function (a) { return !S.ack.has(a.id) && (!S.flt.fam || a.fam === S.flt.fam); }).sort(function (a, b) { return ordre[a.niv] - ordre[b.niv]; });
+      return out.filter(function (a) { return !S.ack.has(a.id); }).sort(function (a, b) { return ordre[a.niv] - ordre[b.niv]; });
     }
 
     // ── Rendu ─────────────────────────────────────────────────────────────
@@ -2469,7 +1948,7 @@
         + '</div>';
     }
     function renderChrono() {
-      var d = Sf(), ch = d.chrono || [], c48 = d.chrono_48h || [];
+      var d = S.d, ch = d.chrono || [], c48 = d.chrono_48h || [];
       var h = '<div class="sv-pan"><div class="sv-ph"><h2>Demande client (1h), en direct <span class="cnt">' + ch.length + '</span></h2><small>se met à jour seul</small></div>';
       if (!ch.length) h += '<p class="sv-vide">Aucun lead « Demande client (1h) » en attente. Les nouveaux s\'affichent ici dès que BACS est relu.</p>';
       ch.slice().sort(function (a, b) { return (a.pris_par ? 1 : 0) - (b.pris_par ? 1 : 0) || ts(a.echeance) - ts(b.echeance); }).forEach(function (l) {
@@ -2487,8 +1966,8 @@
         });
         if (c48.length > 4) h += '<p class="sv-plus">et ' + (c48.length - 4) + ' autres dans le Pool BACS.</p>';
       }
-      var rd = (d.rappels_dus || []).slice(0, svActif() ? 30 : 8);
-      h += '<div class="sv-ph sv-ph2"><h3>Rappels dus <span class="cnt">' + (svActif() ? (d.rappels_dus || []).length : ((d.jour || {}).rappels_dus || 0)) + '</span></h3><small>' + (svActif() ? 'selon les filtres' : 'les plus anciens') + '</small></div>';
+      var rd = d.rappels_dus || [];
+      h += '<div class="sv-ph sv-ph2"><h3>Rappels dus <span class="cnt">' + ((d.jour || {}).rappels_dus || 0) + '</span></h3><small>les plus anciens</small></div>';
       if (!rd.length) h += '<p class="sv-vide">Aucun rappel dû.</p>';
       else h += '<div class="scroll"><table class="sv-t"><thead><tr><th>Client</th><th>Opératrice</th><th>Prévu</th><th>Tentatives</th></tr></thead><tbody>'
         + rd.map(function (r) { var ret = mins(r.rappel_le); return '<tr><td>' + esc(propre(r.nom) || 'Sans nom') + (r.nature ? ' · ' + esc(r.nature) : '') + '</td><td>' + esc(propre(r.operateur) || '—') + '</td><td class="' + (ret > 120 ? 'bad' : 'warn') + '">' + esc(quand(r.rappel_le)) + '</td><td>' + (r.tentatives || 0) + ' / 3</td></tr>'; }).join('')
@@ -2531,13 +2010,10 @@
       return '<svg class="sv-sp" width="' + w + '" height="' + ht + '" viewBox="0 0 ' + w + ' ' + ht + '" aria-hidden="true"><path d="' + dd + ' L' + (w - 2) + ' ' + (ht - 2) + ' L2 ' + (ht - 2) + ' Z" fill="#eaf1fa"/><path d="' + dd + '" fill="none" stroke="#2a5ea9" stroke-width="1.6"/><circle cx="' + last[0] + '" cy="' + last[1] + '" r="2.6" fill="#2a5ea9"/></svg>';
     }
     function renderEquipe() {
-      var eq = (Sf().equipe || []).slice().sort(function (a, b) {
+      var eq = (S.d.equipe || []).slice().sort(function (a, b) {
         var ea = etat(a), eb = etat(b); return (eb.actif ? 1 : 0) - (ea.actif ? 1 : 0) || (b.pris || 0) - (a.pris || 0) || String(a.nom).localeCompare(String(b.nom));
       });
-      var pe = S.eper, titreEq = pe ? 'L\'équipe du ' + pe.du.split('-').reverse().join('/') + ' au ' + pe.au.split('-').reverse().join('/') : 'L\'équipe aujourd\'hui';
-      var h = '<div class="sv-pan"><div class="sv-ph"><h2>' + esc(titreEq) + ' <span class="cnt">' + eq.length + '</span></h2><small><span class="fbar" style="margin:0;display:inline-flex">'
-        + '<label>Période du <input type="date" data-sf="edu" value="' + esc(pe ? pe.du : '') + '"></label><label>au <input type="date" data-sf="eau" value="' + esc(pe ? pe.au : '') + '"></label>'
-        + (pe ? '<button type="button" class="btn sm" data-a="eper-raz">Aujourd\'hui</button>' : '') + '</span></small></div>';
+      var h = '<div class="sv-pan"><div class="sv-ph"><h2>L\'équipe aujourd\'hui <span class="cnt">' + eq.length + '</span></h2><small>gestes faits dans One Data, chacune avec son compte</small></div>';
       if (!eq.length) return h + '<p class="sv-vide">Aucune opératrice rattachée à cette équipe.</p></div>';
       h += '<div class="scroll"><table class="sv-t sv-eq"><thead><tr><th>Opératrice</th><th>Maintenant</th><th>Pris</th><th>Leads 1h dans l\'heure</th><th>Prise médiane</th><th>Qualifiés</th><th>Rappels</th><th>Abandons</th><th>Activité depuis 8 h</th><th></th></tr></thead><tbody>';
       eq.forEach(function (e) {
@@ -2605,7 +2081,7 @@
       var y = FW.scrollY || 0;
       root.innerHTML = renderHaut()
         + (S.erreur ? '<p class="alerte">' + esc(S.erreur) + ' Les données affichées datent du dernier chargement réussi.</p>' : '')
-        + barreSv() + '<div class="sv-g2">' + renderChrono() + renderAlertes() + '</div>'
+        + '<div class="sv-g2">' + renderChrono() + renderAlertes() + '</div>'
         + renderCorrections()
         + renderEquipe()
         + '<div class="sv-g3">' + renderFlux() + renderSites() + renderMotifs() + '</div>' + renderNote();
@@ -2650,8 +2126,6 @@
           detruire();
           return posteVroom(el, ctx, user, { apercu: ROLES_APERCU.indexOf(opt.role) !== -1, role: opt.role });
         case 'ack': S.ack.add(id); try { FW.localStorage.setItem('lmsv-ack', JSON.stringify(Array.from(S.ack).slice(-300))); } catch (e) {} render(); return;
-        case 'sv-raz': S.flt = {}; memoSv(); render(); return;
-        case 'eper-raz': S.eper = null; render(); return charger(false);
         case 'confier': return popConfier(id);
         case 'prevenir': return popPrevenir(id);
         case 'corr-ok': case 'corr-ko':   // v81
@@ -2691,23 +2165,12 @@
     root.addEventListener('click', surClic);
     ov.addEventListener('click', surClic);
     $scrim.addEventListener('click', fermerPop);
-    root.addEventListener('change', function (ev) {   // v105 : filtres supervision
-      var t = ev.target, k = t && t.getAttribute && t.getAttribute('data-sf'); if (!k) return;
-      if (k === 'edu' || k === 'eau') {
-        var pe = S.eper || { du: '', au: '' }; pe[k === 'edu' ? 'du' : 'au'] = t.value;
-        if (pe.du && !pe.au) pe.au = pe.du; if (pe.au && !pe.du) pe.du = pe.au;
-        if (pe.du > pe.au) { var x = pe.du; pe.du = pe.au; pe.au = x; }
-        S.eper = pe.du ? pe : null; render(); return charger(false);
-      }
-      if (t.value) S.flt[k] = t.value; else delete S.flt[k];
-      memoSv(); render();
-    });
     function surTouche(ev) { if (ev.key === 'Escape' && S.pop) fermerPop(); }
     doc.addEventListener('keydown', surTouche);
 
     // ── Chargement et cycle de vie ────────────────────────────────────────
     async function charger(silencieux) {
-      try { S.d = await rpc('plateau_supervision', S.eper ? { p_du: S.eper.du, p_au: S.eper.au } : {}); S.charge = true; S.erreur = null; }
+      try { S.d = await rpc('plateau_supervision'); S.charge = true; S.erreur = null; }
       catch (e) { S.erreur = msgErr(e); if (!silencieux && S.charge) toast(S.erreur, true); }
       try { S.corr = await rpc('plateau_corrections_attente') || []; } catch (e) { S.corr = S.corr || []; }   // v81
       if (!S.pop) render();
@@ -2747,8 +2210,6 @@
 .lmsv .sv-k.good b{color:var(--m-vert)}
 .lmsv .sv-k.warn{background:var(--alerte-bg);border-color:#f0d9a0}.lmsv .sv-k.warn b{color:var(--m-orange)}
 .lmsv .sv-k.bad{background:var(--chaud-bg);border-color:#f2c4c4}.lmsv .sv-k.bad b{color:var(--m-rouge)}
-.lmsv .sv-k,.lmsv .sv-k.warn,.lmsv .sv-k.bad{background:#f5f8fc;border:0;border-radius:8px;box-shadow:none}
-.lmsv .sv-k span{color:#7a9cc4}.lmsv .sv-k b{color:#2a5ea9}.lmsv .sv-k.good b{color:#53bda7}.lmsv .sv-k.warn b,.lmsv .sv-k.bad b{color:#c7820a}
 .lmsv .sv-g2{display:grid;grid-template-columns:minmax(0,1.45fr) minmax(0,1fr);gap:14px;align-items:start;margin-bottom:14px}
 .lmsv .sv-g3{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px;align-items:start;margin-top:14px}
 .lmsv .sv-pan{background:var(--card);border:1px solid var(--line);border-radius:14px;box-shadow:var(--ombre);padding:14px;display:grid;gap:8px;min-width:0;align-content:start}
@@ -2862,7 +2323,7 @@
     var COLS = [['ok', 'Dans les temps'], ['warn', 'À risque'], ['crit', 'Hors délai'], ['stock', 'Ouverts + 24 h']];
 
     var S = {
-      tab: (POSTE === 'vendeur' || POSTE === 'chef') ? 'accueil' : 'pool',
+      tab: 'pool',
       sugg: {}, suggKey: null, regle: {}, perimOuvert: false, invitables: {},
       leads: [], stats: null, bacs: null, charge: false, erreur: null,
       site: null,              // site affiché (chef, direction après « Ouvrir »)
@@ -2873,10 +2334,6 @@
       ack: new Set(), vus: new Set(), frais: new Set(), premier: true,
       dr: null, modal: null,
       tous: [], univ: 'tous', comme: null, poste0: null,
-      // v97 : accueil des leads (vue v_lead_accueil_carte). accueil : id_lead
-      // → ligne de la vue ; accKO : heure du dernier échec (la vue n'existe
-      // pas encore, ou refuse) ; rappels : filtre « Rappels programmés ».
-      accueil: {}, accKO: null, rappels: false,
       per: (function () { var a = new Date(), d = new Date(Date.now() - 29 * 86400000); var f = function (x) { return x.getFullYear() + '-' + String(x.getMonth() + 1).padStart(2, '0') + '-' + String(x.getDate()).padStart(2, '0'); }; return { du: f(d), au: f(a) }; })()
     };
     try { (JSON.parse(FW.localStorage.getItem('lmtc-ack-site') || '[]') || []).forEach(function (x) { S.ack.add(x); }); } catch (e) {}
@@ -2889,16 +2346,7 @@
     function prenom(n) { return String(propre(n) || '').split(' ')[0]; }
     function arrive(l) { return S.depuis === 'bacs' ? l.recu_le : l.arrive_le; }
     function slaDe(l) { return S.depuis === 'bacs' ? (l.sla_min || 60) : (l.sla_site || l.sla_min || 60); }
-    // v97 : un lead dont le client a choisi un créneau n'est plus jugé sur le
-    // délai de rappel du site, mais sur son créneau : dans les temps jusqu'à
-    // la fin du créneau, hors délai ensuite.
-    function estCongele(l) { return l && l.attribution_regle === 'congelateur'; }
-    function niveau(l) {
-      if (estCongele(l)) return 'ok';   // v98 : repris du congélateur, aucun délai
-      var cr = creneauAcc(l);
-      if (cr) return cr.fin >= Date.now() ? 'ok' : 'crit';
-      return mins(arrive(l)) >= 1440 ? 'stock' : niv(minsO(arrive(l)), slaDe(l));
-    }
+    function niveau(l) { var m = mins(arrive(l)); return m >= 1440 ? 'stock' : niv(m, slaDe(l)); }
     function verrouAutre(l) { return l.verrou_par && Number(l.verrou_par) !== Number(MOI) && l.verrou_jusqu && ts(l.verrou_jusqu) > Date.now(); }
     function estMien(l) { return l.zone === 'vendeur' && Number(l.id_user_attribue) === Number(MOI); }
     function sitesStats() { return (S.stats && S.stats.sites) || []; }
@@ -2906,20 +2354,14 @@
     function manager(id) { var s = siteInfo(id); return !!(s && s.manager); }
     function vendeursDu(id) { return ((S.stats && S.stats.vendeurs) || []).filter(function (v) { return Number(v.id_site) === Number(id); }); }
     function leadsDu(id) { return S.leads.filter(function (l) { return Number(l.id_site) === Number(id); }); }
-    // v83 : le vendeur rattaché à plusieurs sites ne voit que le Pool du site
-    // choisi dans le sélecteur de site (en haut à droite).
-    function poolVendeurSite() { return POSTE === 'vendeur' && S.site != null && sitesVendeur().length > 1 ? Number(S.site) : null; }
-    function piscine(id) { if (id == null) id = poolVendeurSite(); return S.leads.filter(function (l) { return l.zone === 'piscine' && (id == null || Number(l.id_site) === Number(id)) && (!S.comme || S.comme.sites.indexOf(Number(l.id_site)) !== -1); }); }
+    function piscine(id) { return S.leads.filter(function (l) { return l.zone === 'piscine' && (id == null || Number(l.id_site) === Number(id)) && (!S.comme || S.comme.sites.indexOf(Number(l.id_site)) !== -1); }); }
     // ── v67 : univers VN / VO, vue d'un vendeur, période ──────────────────
     function sitesVendeur() { return S.comme ? sitesStats().filter(function (x) { return S.comme.sites.indexOf(Number(x.id_site)) !== -1; }) : sitesStats(); }
     function univDe(v) { var t = String(v || '').toUpperCase(); return t === 'VN' ? 'VN' : t === 'VO' ? 'VO' : 'tous'; }
     function univActif() { return S.comme ? univDe(S.comme.vnvo) : S.univ; }
     function filtrerUniv(ls) {
       var u = univActif();
-      var r = (ls || []).filter(function (l) { return u === 'tous' || !l.univers || l.univers === u || (S.comme && l.zone !== 'piscine'); });
-      // v97 : filtre « Rappels programmés » (aujourd'hui et demain), appliqué
-      // comme le filtre VN / VO : toute la page (compteurs compris) le suit.
-      return S.rappels && accDispo() ? r.filter(rappelProgramme) : r;
+      return (ls || []).filter(function (l) { return u === 'tous' || !l.univers || l.univers === u || (S.comme && l.zone !== 'piscine'); });
     }
     // v70 : VN / VO comme dans la gestion des ventes : un liseret à gauche,
     // vert pour le VN, orange pour le VO (plus de pastille).
@@ -2966,7 +2408,7 @@
     }
     function fmtPer() { return fmtPeriode(S.per); }
     function outils() {
-      return '<div class="outils">' + selComme() + segUniv() + boutonRappels()
+      return '<div class="outils">' + selComme() + segUniv()
         + '<button type="button" class="k-range" data-a="dates" title="Leads reçus sur la période">\ud83d\udcc5 <span class="k-range-t">' + esc(fmtPer()) + '</span> <span class="k-caret">\u25be</span></button></div>';
     }
     function bandeauComme() {
@@ -2992,7 +2434,7 @@
       POSTE = S.poste0 || POSTE; S.comme = null; S.poste0 = null; MOI = S.stats ? S.stats.moi : MOI;
       S.tab = 'pool'; S.cell = null; S.leads = filtrerUniv(S.tous); render(); chargerAide();
     }
-    var ACTIONS_APERCU = ['rappels', 'hist-open', 'tab', 'comme-off', 'comme', 'comme-menu', 'univ', 'dates', 'dem-plus', 'open', 'close', 'retour-liste', 'ack', 'reessayer', 'cell', 'fermer'];
+    var ACTIONS_APERCU = ['tab', 'comme-off', 'comme', 'comme-menu', 'univ', 'dates', 'dem-plus', 'open', 'close', 'retour-liste', 'ack', 'reessayer', 'cell', 'fermer'];
     function fermerDates() { fermerCalendrier(doc); }
     function appliquerDates(du, au) {
       fermerDates();
@@ -3003,30 +2445,7 @@
     function ouvrirDates(anchor) { ouvrirCalendrier(doc, FW, anchor, S.per.du, appliquerDates); }
     function libres(id) { return piscine(id).filter(function (l) { return !verrouAutre(l); }); }
     function mesLeads() {
-      return S.leads.filter(estMien).sort(function (a, b) { return cleUrgence(a) - cleUrgence(b); });
-    }
-    // v88 : minutes avant d'agir. Un lead « pas joint » attend son rappel ;
-    // les autres, la fin de leur délai.
-    function cleUrgence(l) {
-      if (estAsap(l)) return -1e9;                                   // v97 : le client attend l'appel
-      var cr = creneauAcc(l); if (cr) return (cr.deb - Date.now()) / 60000; // v97 : créneau choisi
-      return l.rappel_le ? (ts(l.rappel_le) - Date.now()) / 60000 : slaDe(l) - minsO(arrive(l));
-    }
-    function rappelDu(l) { return !!l.rappel_le && ts(l.rappel_le) <= Date.now(); }
-    function quandRappel(v) {
-      var d = new Date(v), n = new Date(), dem = new Date(); dem.setDate(n.getDate() + 1);
-      if (d.toDateString() === n.toDateString()) return 'aujourd\'hui ' + hh(v);
-      if (d.toDateString() === dem.toDateString()) return 'demain ' + hh(v);
-      return d.toLocaleDateString('fr-FR', { weekday: 'short' }) + ' ' + jour(v) + ' ' + hh(v);
-    }
-    function texteRappel(l) {
-      if (!l.rappel_le) return '';
-      return rappelDu(l) ? 'à rappeler depuis ' + duree(Math.max(1, mins(l.rappel_le))) : 'rappel prévu ' + quandRappel(l.rappel_le);
-    }
-    function tmRappel(l) {
-      if (creneauAcc(l)) return tmCreneau(l);   // v97
-      var du = rappelDu(l), d = new Date(l.rappel_le), auj = d.toDateString() === new Date().toDateString();
-      return '<span class="tm ' + (du ? 'crit' : 'rap') + '"><b>' + esc(auj ? hh(l.rappel_le) : jour(l.rappel_le) + ' ' + hh(l.rappel_le)) + '</b><small>' + (du ? 'rappel à faire' : 'rappel prévu') + '</small></span>';
+      return S.leads.filter(estMien).sort(function (a, b) { return (slaDe(a) - mins(arrive(a))) - (slaDe(b) - mins(arrive(b))); });
     }
     function prisSansAppel(l) { return l.zone === 'vendeur' && l.attribution_regle === 'prise_directe' && !l.tentatives && l.attribue_le && mins(l.attribue_le) > 20; }
     function marqueNorm(s) { return String(s || '').toUpperCase().replace(/[^A-Z]/g, ''); }
@@ -3050,146 +2469,6 @@
       if (aussiPlateau(l)) h += '<span class="tag">Aussi dans le Pool BACS</span>';
       if (l.statut_bacs === 'Abandonned') h += '<span class="tag crit">Abandonné dans BACS</span>';
       return h;
-    }
-
-    // ── v97 : accueil des leads (message automatique, créneau choisi) ─────
-    // Une ligne de v_lead_accueil_carte par lead (S.accueil). Tant que la vue
-    // ne répond pas, accDispo() est faux et chaque fonction ci-dessous rend
-    // la main au comportement v96 (chaîne vide, null, tri d'origine).
-    var ACC_COLS = 'id_lead,etat,canal,pastille_libelle,pastille_ton,creneau_debut,creneau_fin,envoye_le,remis_le,lu_le,lien_ouvert_le,repondu_le,choix_type,texte_reponse';
-    var ACC_TONS = { gris: 1, orange: 1, bleu: 1, rouge: 1, vert: 1 };
-    var ACC_CANAL = { rcs: 'RCS', sms: 'SMS', mail: 'e-mail' };
-    var ACC_CHOIX = { creneau: 'a choisi un créneau', asap: 'attend un appel maintenant', refus: 'ne souhaite pas être rappelé',
-                      texte_libre: 'a répondu par écrit', stop: 'a demandé à ne plus recevoir de message (STOP)' };
-    var ACC_PROCHE_MIN = 30;           // « créneau à moins de 30 min »
-    var ACC_PAUSE_MS = 10 * 60000;     // vue absente : on réessaie dans 10 min
-    function accDispo() { for (var k in S.accueil) { if (Object.prototype.hasOwnProperty.call(S.accueil, k)) return true; } return false; }
-    function accDe(l) { return (l && S.accueil[String(l.id_lead)]) || null; }
-    // Le créneau choisi par le client : { deb, fin } en ms, sinon null. Sans
-    // fin connue, le créneau dure 30 minutes.
-    function creneauAcc(l) {
-      var a = accDe(l);
-      if (!a || a.choix_type !== 'creneau' || !a.creneau_debut) return null;
-      var d = ts(a.creneau_debut);
-      if (d == null || isNaN(d)) return null;
-      var f = a.creneau_fin ? ts(a.creneau_fin) : null;
-      return { deb: d, fin: f != null && !isNaN(f) && f > d ? f : d + 30 * 60000 };
-    }
-    function estAsap(l) { var a = accDe(l); return !!(a && a.choix_type === 'asap'); }
-    function memeJour(ms, decalage) { var n = new Date(); n.setDate(n.getDate() + (decalage || 0)); return new Date(ms).toDateString() === n.toDateString(); }
-    // Filtre « Rappels programmés » : un créneau choisi par le client, ou un
-    // rappel daté par le vendeur (LEADS_EXTERNES.rappel_le), aujourd'hui ou demain.
-    function rappelProgramme(l) {
-      var cr = creneauAcc(l), t = cr ? cr.deb : (l.rappel_le ? ts(l.rappel_le) : null);
-      return t != null && !isNaN(t) && (memeJour(t, 0) || memeJour(t, 1));
-    }
-    function hhMs(ms) { var d = new Date(ms); return String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0'); }
-    function plageCreneau(cr) {
-      var j = memeJour(cr.deb, 0) ? '' : memeJour(cr.deb, 1) ? 'demain ' : jour(new Date(cr.deb).toISOString()) + ' ';
-      return j + hhMs(cr.deb) + '–' + hhMs(cr.fin);
-    }
-    // Ton du créneau : bleu s'il est loin, orange à moins de 30 min ou en
-    // cours, rouge une fois passé.
-    function tonCreneau(cr) {
-      var n = Date.now();
-      if (n > cr.fin) return 'rouge';
-      return (cr.deb - n) <= ACC_PROCHE_MIN * 60000 ? 'orange' : 'bleu';
-    }
-    function sousCreneau(cr) {
-      var n = Date.now();
-      if (n > cr.fin) return 'créneau manqué';
-      if (n >= cr.deb) return 'créneau en cours';
-      return 'rappel choisi par le client';
-    }
-    // Remplace le compte à rebours du délai : même gabarit (.tm), trois tons.
-    function tmCreneau(l) {
-      var cr = creneauAcc(l); if (!cr) return '';
-      return '<span class="tm acr acr-' + tonCreneau(cr) + '" title="Le client a choisi d\'être rappelé ' + esc(plageCreneau(cr)) + '"><b>' + esc(plageCreneau(cr)) + '</b><small>' + esc(sousCreneau(cr)) + '</small></span>';
-    }
-    // Pastille des pages d'accueil (.ac-p, 72 px) : l'heure du créneau seule.
-    function acCreneau(l) {
-      var cr = creneauAcc(l); if (!cr) return '';
-      return '<span class="ac-p acr-' + tonCreneau(cr) + '" title="Rappel choisi par le client : ' + esc(plageCreneau(cr)) + '">' + esc(hhMs(cr.deb)) + '</span>';
-    }
-    function quandAcc(v) {
-      if (!v) return '';
-      var d = new Date(v);
-      return (memeJour(d.getTime(), 0) ? 'aujourd\'hui' : memeJour(d.getTime(), -1) ? 'hier' : jour(v)) + ' à ' + hh(v);
-    }
-    // L'infobulle : l'historique horodaté du message automatique.
-    function infobulleAcc(a) {
-      var c = ACC_CANAL[a.canal] || null, t = [];
-      t.push('Message automatique' + (c ? ' (' + c + ')' : ''));
-      if (a.envoye_le) t.push('Envoyé ' + quandAcc(a.envoye_le));
-      if (a.remis_le) t.push('Remis ' + quandAcc(a.remis_le));
-      if (a.lu_le) t.push('Lu ' + quandAcc(a.lu_le));
-      if (a.lien_ouvert_le) t.push('Lien ouvert ' + quandAcc(a.lien_ouvert_le));
-      if (a.repondu_le) {
-        var r = 'Réponse ' + quandAcc(a.repondu_le);
-        if (a.choix_type && ACC_CHOIX[a.choix_type]) r += ' : le client ' + ACC_CHOIX[a.choix_type];
-        if (a.choix_type === 'creneau' && a.creneau_debut) { var cr = creneauAcc({ id_lead: a.id_lead }); if (cr) r += ' (' + plageCreneau(cr) + ')'; }
-        t.push(r);
-        if (a.texte_reponse) t.push('« ' + String(a.texte_reponse).replace(/\s+/g, ' ').trim().slice(0, 240) + ' »');
-      }
-      if (t.length === 1) t.push('Pas encore envoyé');
-      return t.join('\n');
-    }
-    function pastilleAcc(l) {
-      var a = accDe(l);
-      if (!a || !a.pastille_libelle) return '';
-      var ton = ACC_TONS[a.pastille_ton] ? a.pastille_ton : 'gris', tip = infobulleAcc(a);
-      return ' <span class="acc-p acc-' + ton + '" title="' + esc(tip) + '" aria-label="' + esc(a.pastille_libelle + '. ' + tip.replace(/\n/g, '. ')) + '">' + esc(a.pastille_libelle) + '</span>';
-    }
-    // Tri du Pool (v97) : 0 « attend un appel maintenant », 1 créneau à moins
-    // de 30 min (ou en cours, ou manqué), 2 sans créneau, 3 créneau plus loin.
-    function rangPool(l) {
-      if (estAsap(l)) return 0;
-      var cr = creneauAcc(l); if (!cr) return 2;
-      return (cr.deb - Date.now()) <= ACC_PROCHE_MIN * 60000 ? 1 : 3;
-    }
-    function parReste(a, b) { return reste(a) - reste(b); }
-    function trierPool(ls, defaut) {
-      var c = (ls || []).slice();
-      if (!accDispo()) return c.sort(defaut || parReste);
-      return c.sort(function (a, b) {
-        var ra = rangPool(a), rb = rangPool(b);
-        if (ra !== rb) return ra - rb;
-        if (ra === 0) { var x = accDe(a), y = accDe(b); return (ts(x.repondu_le || x.envoye_le) || 0) - (ts(y.repondu_le || y.envoye_le) || 0); }
-        if (ra === 1 || ra === 3) return creneauAcc(a).deb - creneauAcc(b).deb;
-        // Sans créneau : par ancienneté, le plus ancien d'abord.
-        return (ts(arrive(a)) || 0) - (ts(arrive(b)) || 0);
-      });
-    }
-    function boutonRappels() {
-      if (!accDispo() && !S.rappels) return '';
-      var n = filtrerUnivBrut(S.tous).filter(rappelProgramme).length;
-      return '<button type="button" class="k-range acc-f' + (S.rappels ? ' on' : '') + '" data-a="rappels" aria-pressed="' + !!S.rappels + '" title="Leads avec un rappel aujourd\'hui ou demain (créneau choisi par le client ou rappel daté)">Rappels programmés <span class="num">' + n + '</span></button>';
-    }
-    // L'univers VN / VO seul, sans le filtre « Rappels programmés » (pour son compteur).
-    function filtrerUnivBrut(ls) { var s = S.rappels; S.rappels = false; try { return filtrerUniv(ls); } finally { S.rappels = s; } }
-    var __accPause = 0;
-    async function chargerAccueil() {
-      if (__accPause && Date.now() < __accPause) return false;
-      var ids = (S.tous || []).filter(function (l) { return l.zone !== 'plateau' && l.id_lead != null; }).map(function (l) { return Number(l.id_lead); });
-      var avant = S.__accSig || '';
-      if (!ids.length) { S.accueil = {}; S.__accSig = ''; return avant !== ''; }
-      var nouv = {}, ok = true;
-      for (var i = 0; i < ids.length && ok; i += 200) {
-        try {
-          var r = await sb.from('v_lead_accueil_carte').select(ACC_COLS).in('id_lead', ids.slice(i, i + 200));
-          if (r.error) {
-            ok = false;
-            // Vue absente (pas encore livrée) : pause, sans bruit dans la console à chaque minute.
-            if (/PGRST205|42P01|does not exist|not find/i.test(String(r.error.code || '') + ' ' + String(r.error.message || ''))) __accPause = Date.now() + ACC_PAUSE_MS;
-            else { __accPause = Date.now() + 60000; try { console.warn('[lead-mgmt] v_lead_accueil_carte', r.error.message || r.error); } catch (e) {} }
-          } else (r.data || []).forEach(function (x) { if (x && x.id_lead != null) nouv[String(x.id_lead)] = x; });
-        } catch (e) { ok = false; __accPause = Date.now() + 60000; }
-      }
-      if (!ok) { S.accKO = Date.now(); nouv = {}; }
-      var sig = JSON.stringify(nouv);
-      S.accueil = nouv; S.__accSig = sig;
-      if (!accDispo() && S.rappels) S.rappels = false;
-      return sig !== avant;
     }
 
     async function rpc(nom, args) {
@@ -3229,11 +2508,7 @@
         rpc('bacs_canal_etat').catch(function () { return S.bacs; })
       ]);
       S.tous = res[0] || []; S.stats = res[1] || {}; S.bacs = res[2] || null;
-      // v98 : le congélateur (leads abandonnés par la Vroom Team). Un échec ne bloque jamais la page.
-      try { await chargerCong(); } catch (e) { S.cong = S.cong || null; }
       MOI = S.comme ? S.comme.id : S.stats.moi;
-      // v97 : état de l'accueil des leads. Un échec ne bloque jamais la page.
-      try { await chargerAccueil(); } catch (e) { S.accueil = {}; }
       S.leads = filtrerUniv(S.tous);
       if (POSTE === 'chef' && (S.site == null || !siteInfo(S.site))) {
         var gere = sitesStats().filter(function (s) { return s.manager; });
@@ -3304,12 +2579,7 @@
     function siteDuBus() { var b = busApi(); try { var v = b && b.getSiteId ? b.getSiteId() : null; return v == null ? null : Number(v); } catch (e) { return null; } }
     // Rend vrai si le périmètre a changé.
     function adopterSite(id) {
-      if (POSTE === 'vendeur') {
-        if (id == null || !sitesVendeur().some(function (s) { return Number(s.id_site) === Number(id); })) return false;
-        if (Number(S.site) === Number(id)) return false;
-        S.site = Number(id); S.cell = null; S.campagnes = null; S.suggKey = null;
-        return true;
-      }
+      if (POSTE === 'vendeur') return false;
       if (POSTE === 'chef') {
         if (id == null || !sitesStats().some(function (s) { return s.manager && Number(s.id_site) === Number(id); })) return false;
         if (Number(S.site) === Number(id)) return false;
@@ -3331,7 +2601,6 @@
     }
     function surBus() {
       if (__busEcrit || !S.charge) return;
-      if (S.dr && S.dr.id) rechargerFil();
       if (adopterSite(siteDuBus())) { render(); chargerAide(); if (S.tab === 'campagnes') chargerCampagnes().then(render); }
     }
 
@@ -3441,14 +2710,11 @@
     function aRappeler() { return mesLeads().filter(function (l) { return !l.tentatives; }); }
     function aRelancer() { return mesLeads().filter(function (l) { return l.tentatives > 0; }); }
     function poolNom(sid) {
-      if (sid == null) sid = poolVendeurSite();
       if (sid != null) return 'Pool ' + siteNom((siteInfo(sid) || {}).site);
       var ss = sitesVendeur();
       return ss.length === 1 ? 'Pool ' + siteNom(ss[0].site) : 'Pool de vos sites';
     }
-    // v97 : avec un créneau choisi par le client, le temps qui reste est celui
-    // qui sépare de la fin du créneau.
-    function reste(l) { var cr = creneauAcc(l); if (cr) return (cr.fin - Date.now()) / 60000; return slaDe(l) - minsO(arrive(l)); }
+    function reste(l) { return slaDe(l) - mins(arrive(l)); }
     function retardsEquipe(sid) { return S.leads.filter(function (l) { return l.zone === 'vendeur' && (sid == null || Number(l.id_site) === Number(sid)) && niveau(l) === 'crit'; }).length; }
     function libPerim() {
       var sid = sitePoste();
@@ -3493,14 +2759,14 @@
         lbl = esc(sitesVendeur().length === 1 ? siteNom(sitesVendeur()[0].site) : plural(sitesVendeur().length, 'site')) + ' · ' + esc(nom);
         p = '<b>' + plural(ml.length, 'lead à rappeler', 'leads à rappeler') + '</b>'
           + (crit ? ' · <b class="t-crit">' + crit + ' en retard</b>' : '')
-          + (s && !estCongele(s) && reste(s) > 0 ? ' · le prochain expire dans <b>' + duree(reste(s)) + '</b>' : '')
+          + (s && reste(s) > 0 ? ' · le prochain expire dans <b>' + duree(reste(s)) + '</b>' : '')
           + ' · <b>' + plural(li, 'lead libre', 'leads libres') + '</b> dans le ' + esc(poolNom()) + '.';
         if (s) {
           var rs = reste(s);
           cta = '<button type="button" class="cta" data-a="appeler" data-id="' + s.id_lead + '">' + (__lmPeutAppeler() ? 'Appeler le suivant' : 'Traiter le suivant')
-            + '<small>' + esc(nomLead(s)) + ' · ' + (estCongele(s) ? 'repris du congélateur' : rs < 0 ? 'en retard de ' + duree(-rs) : 'expire dans ' + duree(rs)) + '</small></button>';
+            + '<small>' + esc(nomLead(s)) + ' · ' + (rs < 0 ? 'en retard de ' + duree(-rs) : 'expire dans ' + duree(rs)) + '</small></button>';
         } else if (li) {
-          var o = trierPool(libres(null))[0];
+          var o = libres(null).slice().sort(function (a, b) { return reste(a) - reste(b); })[0];
           cta = '<button type="button" class="cta" data-a="prendre" data-id="' + o.id_lead + '">Prendre dans le Pool<small>' + esc(nomLead(o)) + ' · ' + esc(demandeDe(o)) + '</small></button>';
         }
       } else {
@@ -3529,24 +2795,16 @@
     // ── Filtres-pastilles ─────────────────────────────────────────────────
     function onglets() {
       if (POSTE === 'vendeur') {
-        return [['accueil', 'Accueil', null, false, 'b'], ['pool', poolNom(), libres(null).length, false, 'v'],
-                ['congelateur', 'Congélateur', congeles().length, false, 'b'],
+        return [['pool', poolNom(), libres(null).length, false, 'v'],
                 ['arappeler', 'À rappeler', aRappeler().length, aRappeler().some(function (l) { return niveau(l) === 'crit'; }), 'r'],
-                ['relances', 'Relances', aRelancer().length, aRelancer().some(rappelDu), 'b'],
-                ['campagnes', 'Campagnes', S.mesSollis ? S.mesSollis.length : null, false, 'b'],
-                ['suivis', 'Suivis', null, false, 'b'],
-                ['historique', 'Historique', null, false, 'b']].filter(function (o) { return !(S.comme && (o[0] === 'campagnes' || o[0] === 'historique')); });
+                ['relances', 'Relances', aRelancer().length, false, 'b'],
+                ['campagnes', 'Campagnes', S.mesSollis ? S.mesSollis.length : null, false, 'b']].filter(function (o) { return !(S.comme && o[0] === 'campagnes'); });
       }
       var sid = sitePoste(), pool = libres(sid);
       var t = [['pool', sid == null ? 'Pool' : poolNom(sid), pool.length, pool.some(function (l) { return niveau(l) === 'crit'; }), 'v']];
-      if (POSTE === 'chef' && sid != null) t.unshift(['accueil', 'Accueil', null, false, 'b']);
-      t.push(['congelateur', 'Congélateur', congeles(sid).length, false, 'b']);
       if (chefVend(sid)) { var mes = mesLeadsDu(sid); t.push(['mes', 'Mes leads', mes.length, mes.some(function (l) { return niveau(l) === 'crit'; }), 'r']); }
-      t = t.concat([['bloques', 'En souffrance', bloques(sid).length, bloques(sid).length > 0, 'r'],
+      return t.concat([['bloques', 'En souffrance', bloques(sid).length, bloques(sid).length > 0, 'r'],
               ['campagnes', 'Campagnes', null, false, 'b']]);
-      t.push(['suivis', 'Suivis', null, false, 'b']);
-      if (!S.comme) t.push(['historique', 'Historique', null, false, 'b']);
-      return t;
     }
     function renderTabs() {
       var analyse = ['mur', 'mursites', 'relais'].indexOf(S.tab) !== -1;
@@ -3559,11 +2817,9 @@
 
     // ── Lignes v62 : compte à rebours, qui, source, UN bouton ─────────────
     function rebours(l) {
-      if (estCongele(l)) return '<span class="tm froid"><b>Congélateur</b><small>sans délai</small></span>';
-      if (creneauAcc(l)) return tmCreneau(l);   // v97 : l'heure de rappel remplace le chronomètre
       var m = mins(arrive(l));
       if (m >= 1440) return '<span class="tm crit"><b>' + duree(m) + '</b><small>arrivé le ' + jour(arrive(l)) + '</small></span>';
-      var r = slaDe(l) - minsO(arrive(l));
+      var r = slaDe(l) - m;
       if (r <= 0) return '<span class="tm crit"><b>+' + duree(-r) + '</b><small>hors délai</small></span>';
       return '<span class="tm ' + (r <= slaDe(l) * 0.4 ? 'warn' : 'ok') + '"><b>' + duree(r) + '</b><small>avant le délai</small></span>';
     }
@@ -3574,12 +2830,11 @@
     function retourDans(l) {
       if (l.zone !== 'vendeur' || l.tentatives || l.attribue_par_nom || !l.attribue_le) return null;
       if (['libre', 'prise_directe', 'rendu', 'retour_pool', null, undefined, ''].indexOf(l.attribution_regle) === -1) return null;
-      var r = minRetour() - minsO(l.attribue_le);
+      var r = minRetour() - mins(l.attribue_le);
       return r > 0 && r <= minRetour() ? r : null;
     }
     function etatCourt(l) {
-      if (l.tentatives) return 'pas joint ×' + l.tentatives + (l.rappel_le ? ' · ' + texteRappel(l) : l.dernier_essai ? ', ' + quand(l.dernier_essai) : '');
-      if (estCongele(l)) return 'repris du congélateur';
+      if (l.tentatives) return 'pas joint ×' + l.tentatives + (l.dernier_essai ? ', ' + quand(l.dernier_essai) : '');
       var rt = retourDans(l); if (rt != null) return 'à traiter : retour au Pool dans ' + Math.ceil(rt) + ' min';
       if (l.par_plateau) return 'qualifié par la Vroom Team';
       if (l.zone === 'piscine') return 'libre';
@@ -3589,8 +2844,8 @@
       var a;
       if (act === 'prendre') a = verrouAutre(l) ? '<span class="resa-l">Réservé par ' + esc(propre(l.verrou_nom || 'un collègue')) + '</span>' : '<button type="button" class="btn vr" data-a="prendre" data-id="' + l.id_lead + '">Prendre</button>';
       else a = '<button type="button" class="btn pri" data-a="appeler" data-id="' + l.id_lead + '">' + (__lmPeutAppeler() ? (l.tentatives ? 'Rappeler' : 'Appeler') : 'Traiter') + '</button>';
-      return '<div class="lr v2' + univCls(l) + (rappelDu(l) ? ' rap-du' : '') + '" data-a="open" data-id="' + l.id_lead + '" tabindex="0"><div>' + ((l.rappel_le || creneauAcc(l)) && act !== 'prendre' ? tmRappel(l) : rebours(l)) + '</div>'
-        + '<div class="who"><span class="lr-n">' + esc(nomLead(l)) + '</span>' + pastilleAcc(l) + '<p class="lr-d">' + esc(demandeDe(l)) + ' · ' + esc(etatCourt(l)) + '</p></div>'
+      return '<div class="lr v2' + univCls(l) + '" data-a="open" data-id="' + l.id_lead + '" tabindex="0"><div>' + rebours(l) + '</div>'
+        + '<div class="who"><span class="lr-n">' + esc(nomLead(l)) + '</span><p class="lr-d">' + esc(demandeDe(l)) + ' · ' + esc(etatCourt(l)) + '</p></div>'
         + '<div class="src">' + univTag(l) + '<span class="tag">' + esc(l.source_libelle || l.source || 'Lead') + '</span></div>'
         + '<div class="lr-a">' + a + '</div></div>';
     }
@@ -3607,13 +2862,13 @@
         var ini = vn.split(/\s+/).filter(Boolean).slice(0, 2).map(function (x) { return x[0]; }).join('').toUpperCase();
         var depuis = (l.attribue_le ? 'depuis ' + duree(mins(l.attribue_le)) : '') + (l.tentatives ? ' · ' + plural(l.tentatives, 'tentative') : ' · pas encore appelé');
         return '<div class="lr v2 attr souf' + univCls(l) + '" data-a="open" data-id="' + l.id_lead + '" tabindex="0"><div>' + rebours(l) + '</div>'
-          + '<div class="who"><span class="lr-n">' + esc(nomLead(l)) + '</span>' + pastilleAcc(l) + (sitePoste() == null ? ' <span class="lr-v">' + esc(siteNom(l.site)) + '</span>' : '')
+          + '<div class="who"><span class="lr-n">' + esc(nomLead(l)) + '</span>' + (sitePoste() == null ? ' <span class="lr-v">' + esc(siteNom(l.site)) + '</span>' : '')
           + '<p class="lr-d">' + esc(demandeDe(l)) + ' · ' + esc(l.source_libelle || l.source || 'Lead') + '</p></div>'
           + '<div class="chez"><span class="av">' + esc(ini) + '</span><span class="chez-t"><small>En souffrance chez</small><b>' + esc(vn) + '</b><em>' + esc(depuis) + '</em></span></div>'
           + '<div class="lr-a">' + a + '</div></div>';
       }
       return '<div class="lr v2 attr' + univCls(l) + '" data-a="open" data-id="' + l.id_lead + '" tabindex="0"><div>' + rebours(l) + '</div>'
-        + '<div class="who"><span class="lr-n">' + esc(nomLead(l)) + '</span>' + pastilleAcc(l) + (sitePoste() == null ? ' <span class="lr-v">' + esc(siteNom(l.site)) + '</span>' : '')
+        + '<div class="who"><span class="lr-n">' + esc(nomLead(l)) + '</span>' + (sitePoste() == null ? ' <span class="lr-v">' + esc(siteNom(l.site)) + '</span>' : '')
         + '<p class="lr-d">' + esc(demandeDe(l)) + '</p>' + (why ? '<p class="why">' + esc(why) + '</p>' : '') + '</div>'
         + '<div class="src">' + univTag(l) + '<span class="tag">' + esc(l.source_libelle || l.source || 'Lead') + '</span></div>'
         + '<div class="lr-a">' + a + '</div></div>';
@@ -3632,7 +2887,7 @@
       return h;
     }
     function vuePiscineVendeur() {
-      var ls = trierPool(piscine(null));
+      var ls = piscine(null).sort(function (a, b) { return reste(a) - reste(b); });
       var h = '<div class="list">';
       if (!ls.length) h += '<div class="empty">Le Pool est vide.</div>';
       ls.forEach(function (l) { h += ligneAction(l, 'prendre'); });
@@ -3661,7 +2916,6 @@
     function bloques(sid) {
       return S.leads.filter(function (l) {
         if (l.zone !== 'vendeur' || (sid != null && Number(l.id_site) !== Number(sid))) return false;
-        if (estCongele(l)) return l.tentatives >= 3;
         return prisSansAppel(l) || niveau(l) === 'crit' || niveau(l) === 'stock' || l.tentatives >= 3;
       }).sort(function (a, b) { return reste(a) - reste(b); });
     }
@@ -3690,11 +2944,9 @@
         + (r.peut_modifier ? ' <button type="button" class="lien" data-a="regle-modifier" data-id="' + sid + '">Modifier la règle</button>' : '') + '</div></div>';
     }
     function ageLead(l) {
-      var cr = creneauAcc(l);   // v97 : créneau choisi par le client
-      if (cr) { var tn = tonCreneau(cr); return '<div class="age acr-' + tn + '" title="Rappel choisi par le client : ' + esc(plageCreneau(cr)) + '"><b>' + esc(hhMs(cr.deb)) + '</b><small>' + esc(tn === 'rouge' ? 'créneau manqué' : 'rappel ' + hhMs(cr.fin)) + '</small></div>'; }
-      var m = mins(arrive(l)), r = slaDe(l) - minsO(arrive(l));
+      var m = mins(arrive(l)), r = slaDe(l) - m;
       if (m >= 1440) return '<div class="age r"><b>' + duree(m) + '</b><small>en attente</small></div>';
-      if (r <= 0) return '<div class="age o"><b>' + duree(minsO(arrive(l))) + '</b><small>hors délai</small></div>';
+      if (r <= 0) return '<div class="age o"><b>' + duree(m) + '</b><small>hors délai</small></div>';
       return '<div class="age v"><b>' + duree(r) + '</b><small>avant le délai</small></div>';
     }
     function carteLead(l) {
@@ -3707,12 +2959,12 @@
         + '<button type="button" class="alt" data-a="choix" data-id="' + l.id_lead + '" title="Choisir un autre vendeur" aria-label="Choisir un autre vendeur">▾</button></div>';
       if (gere && chefVend(l.id_site) && !verrouAutre(l)) act = '<div class="act-c">' + act + '<button type="button" class="btn vr sm moi" data-a="prendre" data-id="' + l.id_lead + '" title="Le lead passe à votre nom, dans « Mes leads »">Je le prends</button></div>';
       return '<div class="carte-l' + univCls(l) + '" data-a="open" data-id="' + l.id_lead + '" tabindex="0">' + ageLead(l)
-        + '<div class="qui"><b>' + esc(nomLead(l)) + (sitePoste() == null ? ' <span class="lr-v">' + esc(siteNom(l.site)) + '</span>' : '') + pastilleAcc(l) + '</b><p>' + esc(demandeDe(l)) + '</p>' + univTag(l) + '<span class="src">' + esc(l.source_libelle || l.source || 'Lead') + '</span></div>'
+        + '<div class="qui"><b>' + esc(nomLead(l)) + (sitePoste() == null ? ' <span class="lr-v">' + esc(siteNom(l.site)) + '</span>' : '') + '</b><p>' + esc(demandeDe(l)) + '</p>' + univTag(l) + '<span class="src">' + esc(l.source_libelle || l.source || 'Lead') + '</span></div>'
         + act + '</div>';
     }
     function vuePool() {
       var sid = sitePoste();
-      var ls = trierPool(libres(sid));
+      var ls = libres(sid).slice().sort(function (a, b) { return reste(a) - reste(b); });
       var h = regleHtml(sid) + '<div class="cartes">';
       if (!ls.length) h += '<div class="vide">Le Pool est vide : chaque lead a son vendeur.</div>';
       ls.slice(0, 150).forEach(function (l) { h += carteLead(l); });
@@ -3849,12 +3101,11 @@
       var qui = opt2.qui && l.vendeur_nom ? ' · chez ' + propre(l.vendeur_nom) : '';
       var gauche = l.zone === 'plateau'
         ? '<span class="tm neutre"><b>' + duree(mins(l.recu_le)) + '</b><small>au plateau · ' + esc(l.statut_bacs || '') + '</small></span>'
-        : creneauAcc(l) ? tmCreneau(l)
         : mins(arrive(l)) >= 1440 ? '<span class="tm crit"><b>' + duree(mins(arrive(l))) + '</b><small>arrivé le ' + jour(arrive(l)) + '</small></span>'
-        : tmO(arrive(l), slaDe(l), (S.depuis === 'bacs' ? 'depuis la réception' : 'sur le site') + ' · SLA ' + slaTxt(slaDe(l)));
+        : tm(arrive(l), slaDe(l), (S.depuis === 'bacs' ? 'depuis la réception' : 'sur le site') + ' · SLA ' + slaTxt(slaDe(l)));
       return '<div class="lr' + (verrouAutre(l) ? ' resa' : '') + univCls(l) + '" data-a="open" data-id="' + l.id_lead + '" tabindex="0">'
         + '<div>' + gauche + '</div>'
-        + '<div><span class="lr-n">' + esc(nomLead(l)) + '</span>' + pastilleAcc(l) + ' <span class="lr-v">' + esc(siteNom(l.site) + qui) + '</span><p class="lr-d">' + esc(demandeDe(l)) + '</p><div class="tags">' + tagsLead(l) + '</div></div>'
+        + '<div><span class="lr-n">' + esc(nomLead(l)) + '</span> <span class="lr-v">' + esc(siteNom(l.site) + qui) + '</span><p class="lr-d">' + esc(demandeDe(l)) + '</p><div class="tags">' + tagsLead(l) + '</div></div>'
         + '<div class="lr-a">' + a + '</div></div>';
     }
 
@@ -3868,10 +3119,10 @@
         var sous = l.tentatives ? 'tentative ' + (l.tentatives + 1) + ' sur 3' : 'premier contact';
         var why = l.par_plateau ? 'Qualifié par ' + (l.transfere_par_nom ? propre(l.transfere_par_nom) + ' (Vroom Team)' : 'la Vroom Team') + (l.qualification ? ' : ' + l.qualification : '')
           : l.attribue_par_nom ? 'Attribué par ' + propre(l.attribue_par_nom) + (l.attribue_le ? ' il y a ' + duree(mins(l.attribue_le)) : '')
-          : l.tentatives ? 'Pas joint ×' + l.tentatives + (l.rappel_le ? ' · ' + texteRappel(l) : ', dernier essai ' + quand(l.dernier_essai)) : (l.message ? String(l.message).replace(/^\[[^\]]*\]\s*/, '').slice(0, 140) : (l.source_libelle || ''));
-        var gauche = (l.rappel_le || creneauAcc(l)) ? tmRappel(l) : mins(arrive(l)) >= 1440 ? '<span class="tm crit"><b>' + duree(mins(arrive(l))) + '</b><small>arrivé le ' + jour(arrive(l)) + '</small></span>' : tmO(arrive(l), slaDe(l), 'depuis l\'arrivée · SLA ' + slaTxt(slaDe(l)));
+          : l.tentatives ? 'Pas joint, dernier essai ' + quand(l.dernier_essai) : (l.message ? String(l.message).replace(/^\[[^\]]*\]\s*/, '').slice(0, 140) : (l.source_libelle || ''));
+        var gauche = mins(arrive(l)) >= 1440 ? '<span class="tm crit"><b>' + duree(mins(arrive(l))) + '</b><small>arrivé le ' + jour(arrive(l)) + '</small></span>' : tm(arrive(l), slaDe(l), 'depuis l\'arrivée · SLA ' + slaTxt(slaDe(l)));
         h += '<div class="todo" data-a="open" data-id="' + l.id_lead + '" tabindex="0"><div class="todo-v">' + verbe + '<small>' + sous + '</small></div>'
-          + '<div><span class="lr-n">' + esc(nomLead(l)) + '</span>' + pastilleAcc(l) + ' <span class="lr-v">' + esc(demandeDe(l)) + '</span><p class="why">' + esc(why) + '</p><div class="tags">' + tagsLead(l) + '</div></div>'
+          + '<div><span class="lr-n">' + esc(nomLead(l)) + '</span> <span class="lr-v">' + esc(demandeDe(l)) + '</span><p class="why">' + esc(why) + '</p><div class="tags">' + tagsLead(l) + '</div></div>'
           + '<div>' + gauche + '</div></div>';
       });
       (S.mesSollis || []).slice(0, 60).forEach(function (t) {
@@ -3885,7 +3136,7 @@
       return h;
     }
     function vuePiscineVendeur() {
-      var ls = trierPool(piscine(null), function (a, b) { return (slaDe(a) - minsO(arrive(a))) - (slaDe(b) - minsO(arrive(b))); });
+      var ls = piscine(null).sort(function (a, b) { return (slaDe(a) - mins(arrive(a))) - (slaDe(b) - mins(arrive(b))); });
       var h = '<div class="ph"><div><h2>' + esc(poolNom()) + '</h2><p>Libre-service : premier arrivé, premier servi. Prendre met le lead à votre nom ; s\'il ne vous concerne pas, rendez-le au Pool.<br><b>' + esc(texteRetour()) + '</b></p></div></div><div class="list">';
       if (!ls.length) h += '<div class="empty">Le Pool est vide.</div>';
       ls.forEach(function (l) { h += ligneLead(l); });
@@ -4006,12 +3257,7 @@
         .map(function (v) { return [v, charge(v.id_user, sid)]; })
         .sort(function (a, b) { return (a[0].exclu - b[0].exclu) || (a[1] - b[1]) || String(a[0].nom).localeCompare(String(b[0].nom), 'fr'); });
       if (choisi == null && vs.length) choisi = vs[0][0].id_user;
-      // v92 : le chef des ventes peut se l'attribuer.
-      var moi = '';
-      if (POSTE !== 'vendeur' && !S.comme && MOI != null && manager(sid) && String(MOI) !== String(exclu)
-          && !vs.some(function (x) { return String(x[0].id_user) === String(MOI); }))
-        moi = '<option value="' + MOI + '"' + (String(MOI) === String(choisi) ? ' selected' : '') + '>Moi · ' + charge(MOI, sid) + ' en cours</option>';
-      return moi + vs.map(function (x) { return '<option value="' + x[0].id_user + '"' + (String(x[0].id_user) === String(choisi) ? ' selected' : '') + '>' + esc(propre(x[0].nom)) + ' · ' + x[1] + ' en cours' + (x[0].exclu ? ' · écarté' : String(x[0].id_user) === String(choisi) ? ' · suggéré' : '') + '</option>'; }).join('');
+      return vs.map(function (x) { return '<option value="' + x[0].id_user + '"' + (String(x[0].id_user) === String(choisi) ? ' selected' : '') + '>' + esc(propre(x[0].nom)) + ' · ' + x[1] + ' en cours' + (x[0].exclu ? ' · écarté' : String(x[0].id_user) === String(choisi) ? ' · suggéré' : '') + '</option>'; }).join('');
     }
     function sitesRenvoi(l) {
       var m = marqueNorm(l.marque_lead);
@@ -4030,7 +3276,7 @@
           var a = '';
           if (!gere) a = '<button type="button" class="btn sm" data-a="open" data-id="' + l.id_lead + '">Ouvrir</button>';
           else if (g.act === 'attribuer') a = '<select id="sel-' + l.id_lead + '" aria-label="Vendeur">' + optionsVendeurs(l.id_site) + '</select><button type="button" class="btn sm pri" data-a="attribuer" data-id="' + l.id_lead + '">Attribuer</button>';
-          else if (g.act === 'liberer') a = '<button type="button" class="btn sm" data-a="rendre" data-id="' + l.id_lead + '">' + libRendre(l) + '</button><select id="sel-' + l.id_lead + '" aria-label="Vendeur">' + optionsVendeurs(l.id_site, l.id_user_attribue) + '</select><button type="button" class="btn sm pri" data-a="attribuer" data-id="' + l.id_lead + '">Attribuer</button>';
+          else if (g.act === 'liberer') a = '<button type="button" class="btn sm" data-a="rendre" data-id="' + l.id_lead + '">Rendre au Pool</button><select id="sel-' + l.id_lead + '" aria-label="Vendeur">' + optionsVendeurs(l.id_site, l.id_user_attribue) + '</select><button type="button" class="btn sm pri" data-a="attribuer" data-id="' + l.id_lead + '">Attribuer</button>';
           else if (g.act === 'renvoyer') a = '<select id="sit-' + l.id_lead + '" aria-label="Site">' + sitesRenvoi(l).map(function (s) { return '<option value="' + s.id_site + '">' + esc(siteNom(s.site)) + ' · ' + esc(propre(s.reseau || '')) + '</option>'; }).join('') + '</select><button type="button" class="btn sm pri" data-a="renvoyer" data-id="' + l.id_lead + '">Renvoyer</button>';
           else if (g.act === 'injoignable') a = (l.sf_lead_id && !sansPlateau(l) ? '<button type="button" class="btn sm vr" data-a="confier" data-id="' + l.id_lead + '">Confier à la Vroom Team</button>' : '') + '<button type="button" class="btn sm dang" data-a="clore-inj" data-id="' + l.id_lead + '">Clore</button>';
           var tsv = g.act === 'liberer' ? tm(l.attribue_le, 20, 'pris par ' + prenom(l.vendeur_nom)) : tm(arrive(l), slaDe(l));
@@ -4127,12 +3373,6 @@
     }
 
     function renderPanel() {
-      if (S.tab === 'suivis') return vueSuivis();
-      if (S.tab === 'historique') return vueHistorique();
-      if (S.tab === 'accueil' && POSTE === 'vendeur') return accueilVendeur();
-      if (S.tab === 'accueil' && POSTE === 'chef' && sitePoste() != null) return accueilChef();
-      if (S.tab === 'accueil') S.tab = 'pool';
-      if (S.tab === 'congelateur') return vueCongelateur();
       if (POSTE === 'vendeur') return S.tab === 'pool' ? vuePiscineVendeur() : S.tab === 'campagnes' ? vueCampagnesVendeur() : vueListeVendeur();
       if (S.tab === 'mes') return vueMesLeadsChef();
       if (S.tab === 'bloques') return vueBloques();
@@ -4142,178 +3382,6 @@
       if (S.tab === 'relais') return '<div class="seg-a"><button type="button" data-a="tab" data-id="mursites">Le mur des sites</button><button type="button" class="on" data-a="tab" data-id="relais">Le relais</button></div>' + vueRelais();
       return vuePool();
     }
-    // ── v88 : historique des leads traités par l'utilisateur ──────────────
-    var RES_LIB = { pas_joint: 'Pas joint', joint: 'Joint', joint_rdv: 'Joint · RDV posé', prise: 'Pris dans le Pool', attribution: 'Attribué',
-                    rendu: 'Rendu au Pool', plateau: 'Confié à la Vroom Team', rattachement_client: 'Fiche client rattachée', clos: 'Clos',
-                    pas_interesse: 'Clos · pas intéressé', injoignable: 'Clos · injoignable', concurrent: 'Clos · concurrence',
-                    doublon: 'Clos · doublon', spam: 'Clos · fausse demande', autre: 'Clos · autre' };
-    var ST_LIB = { recu: 'Nouveau', resolu: 'Nouveau', attribue: 'En cours', contacte: 'Contacté', perdu: 'Perdu', rejete: 'Écarté', converti: 'Vendu' };
-    var CANAL_LIB = { 'appel': 'appel', 'SMS': 'SMS', 'e-mail': 'e-mail', 'WhatsApp': 'WhatsApp', 'compte rendu': 'compte rendu' };
-    function resLib(h) {
-      if (h.resultat == null) return 'Contacté depuis la fiche client' + (h.canal ? ' · ' + (CANAL_LIB[h.canal] || h.canal) : '');
-      if (h.resultat === 'bacs') return 'Dans BACS · ' + (ST_LIB[h.resultat_statut] || h.resultat_statut || '').toLowerCase();
-      return RES_LIB[h.resultat] || String(h.resultat || '—').replace(/_/g, ' ');
-    }
-    function stLib(h) {
-      if (h.vendu_le) return 'Vendu';
-      if (h.statut === 'attribue' && !h.encore_a_moi) return h.hierarchie && h.attribue_nom ? 'En cours · ' + prenom(h.attribue_nom) : 'Chez un collègue';
-      return ST_LIB[h.statut] || h.statut || '—';
-    }
-    function stCls(h) { if (h.vendu_le) return 'ok'; return { attribue: 'enc', recu: 'enc', resolu: 'enc', contacte: 'ok', converti: 'ok', perdu: 'ko', rejete: 'ko' }[h.statut] || ''; }
-    function histEtat() {
-      if (!S.hist) {
-        var f = function (x) { return x.getFullYear() + '-' + String(x.getMonth() + 1).padStart(2, '0') + '-' + String(x.getDate()).padStart(2, '0'); };
-        S.hist = { du: f(new Date(Date.now() - 6 * 86400000)), au: f(new Date()), statut: '', res: '', source: '', vend: '', q: '', rows: null, err: null };
-      }
-      return S.hist;
-    }
-    async function chargerHistorique() {
-      var H = histEtat(); H.rows = null; H.err = null; render();
-      try { H.rows = await rpc('poste_historique', { p_du: H.du || null, p_au: H.au || null }) || []; }
-      catch (e) { H.rows = []; H.err = messageErreur(e); }
-      if (S.tab === 'historique') render();
-    }
-    function famRes(r) { return r == null ? 'fiche' : r === 'pas_joint' ? 'pas_joint' : (r === 'joint' || r === 'joint_rdv') ? 'joint' : r === 'bacs' ? 'bacs' : RES_LIB[r] && /^Clos/.test(RES_LIB[r]) ? 'clos' : 'autre'; }
-    function famSt(h) { if (h.vendu_le) return 'vendu'; return h.statut === 'attribue' && !h.encore_a_moi && !h.hierarchie ? 'collegue' : ({ recu: 'cours', resolu: 'cours', attribue: 'cours', contacte: 'contacte', converti: 'contacte', perdu: 'perdu', rejete: 'perdu' }[h.statut] || 'autre'); }
-    function vueHistorique() {
-      var H = histEtat(), tous = H.rows || [];
-      var hier = POSTE !== 'vendeur' || tous.some(function (x) { return x.hierarchie; });
-      // La hiérarchie lit le site de la barre du haut ; sans site : tout son périmètre.
-      var sidH = hier ? sitePoste() : null;
-      var rows = sidH == null ? tous : tous.filter(function (x) { return Number(x.id_site) === Number(sidH); });
-      var vends = [];
-      if (hier) rows.forEach(function (x) {
-        if (x.par_id_user == null) return;
-        var v = vends.find(function (z) { return Number(z.id) === Number(x.par_id_user); });
-        if (v) v.n++; else vends.push({ id: x.par_id_user, nom: propre(x.par_nom) || 'Utilisateur ' + x.par_id_user, n: 1 });
-      });
-      vends.sort(function (a, b) { return Number(b.id) === Number(MOI) ? 1 : Number(a.id) === Number(MOI) ? -1 : a.nom.localeCompare(b.nom, 'fr'); });
-      if (H.vend && !vends.some(function (v) { return String(v.id) === String(H.vend); })) H.vend = '';
-      if (H.vend) rows = rows.filter(function (x) { return String(x.par_id_user) === String(H.vend); });
-      var q = String(H.q || '').trim().toLowerCase();
-      var vis = rows.filter(function (h) {
-        if (H.statut && famSt(h) !== H.statut) return false;
-        if (H.res && famRes(h.resultat) !== H.res) return false;
-        if (H.source && (h.source_libelle || h.source || '') !== H.source) return false;
-        if (q && [h.nom, h.telephone, h.email, h.vehicule].join(' ').toLowerCase().indexOf(q) === -1) return false;
-        return true;
-      });
-      var sources = rows.map(function (h) { return h.source_libelle || h.source || ''; }).filter(function (x, i, a) { return x && a.indexOf(x) === i; }).sort();
-      var cnt = function (fn) { return rows.filter(fn).length; };
-      var opt = function (v, lib, cur) { return '<option value="' + esc(v) + '"' + (v === cur ? ' selected' : '') + '>' + esc(lib) + '</option>'; };
-      var h = '<div class="ph"><div><h2>Historique</h2><p>' + (hier
-          ? 'Les leads traités par votre équipe pendant la période' + (sidH != null ? ' sur ' + esc(siteNom((siteInfo(sidH) || {}).site)) : '') + ', avec le dernier geste et qui l\'a fait.'
-          : 'Les leads sur lesquels vous avez agi pendant la période, avec votre dernier geste.') + ' Un lead encore ouvert s\'ouvre ici ; un lead clos ouvre la fiche du client.</p></div></div>'
-        + '<div class="hist-f">'
-        + (hier ? '<label>Vendeur<select data-x="hist-vend">' + opt('', 'Toute l\'équipe', H.vend) + vends.map(function (v) { return opt(String(v.id), (Number(v.id) === Number(MOI) ? 'Moi' : v.nom) + ' · ' + v.n, H.vend); }).join('') + '</select></label>' : '')
-        + '<label>Du<input type="date" data-x="hist-du" value="' + esc(H.du || '') + '"></label>'
-        + '<label>Au<input type="date" data-x="hist-au" value="' + esc(H.au || '') + '"></label>'
-        + '<label>Statut<select data-x="hist-statut">' + opt('', 'Tous', H.statut) + opt('cours', (hier ? 'En cours · ' : 'En cours chez moi · ') + cnt(function (x) { return famSt(x) === 'cours'; }), H.statut)
-          + opt('vendu', 'Vendus · ' + cnt(function (x) { return famSt(x) === 'vendu'; }), H.statut)
-          + opt('contacte', 'Contactés · ' + cnt(function (x) { return famSt(x) === 'contacte'; }), H.statut) + opt('perdu', 'Perdus ou écartés · ' + cnt(function (x) { return famSt(x) === 'perdu'; }), H.statut)
-          + (hier ? '' : opt('collegue', 'Chez un collègue · ' + cnt(function (x) { return famSt(x) === 'collegue'; }), H.statut)) + '</select></label>'
-        + '<label>' + (hier ? 'Résultat' : 'Mon résultat') + '<select data-x="hist-res">' + opt('', 'Tous', H.res) + opt('pas_joint', 'Pas joint · ' + cnt(function (x) { return famRes(x.resultat) === 'pas_joint'; }), H.res)
-          + opt('joint', 'Joint · ' + cnt(function (x) { return famRes(x.resultat) === 'joint'; }), H.res)
-          + opt('fiche', 'Contact depuis la fiche client · ' + cnt(function (x) { return famRes(x.resultat) === 'fiche'; }), H.res) + opt('clos', 'Clos · ' + cnt(function (x) { return famRes(x.resultat) === 'clos'; }), H.res)
-          + opt('bacs', 'Traité dans BACS · ' + cnt(function (x) { return x.resultat === 'bacs'; }), H.res) + opt('autre', 'Autre geste · ' + cnt(function (x) { return famRes(x.resultat) === 'autre'; }), H.res) + '</select></label>'
-        + '<label>Source<select data-x="hist-source">' + opt('', 'Toutes', H.source) + sources.map(function (x) { return opt(x, x, H.source); }).join('') + '</select></label>'
-        + '<label class="q">Rechercher<input type="text" data-x="hist-q" placeholder="Nom, téléphone, véhicule…" value="' + esc(H.q || '') + '"></label>'
-        + '</div>';
-      if (H.err) return h + '<p class="alerte">' + esc(H.err) + '</p>';
-      if (H.rows == null) return h + '<div class="empty">Chargement de l\'historique…</div>';
-      if (!vis.length) return h + '<div class="empty">' + (rows.length ? 'Aucun lead pour ces filtres.' : 'Aucun lead traité sur cette période.') + '</div>';
-      h += '<p class="hist-n">' + plural(vis.length, 'lead') + (vis.length !== rows.length ? ' sur ' + rows.length : '') + '</p>'
-        + '<div class="hist-w"><table class="hist"><thead><tr><th>' + (hier ? 'Dernier geste' : 'Mon dernier geste') + '</th>' + (hier ? '<th>Par</th>' : '') + '<th>Client</th><th>Demande</th><th>Source</th><th>Site</th><th>Résultat</th><th>Statut du lead</th><th>Suite</th></tr></thead><tbody>';
-      vis.forEach(function (x) {
-        var suite = x.ouvert && (x.encore_a_moi || hier) && x.rappel_le ? '<span class="h-rap' + (ts(x.rappel_le) <= Date.now() ? ' du' : '') + '">' + esc(ts(x.rappel_le) <= Date.now() ? 'à rappeler' : 'rappel ' + quandRappel(x.rappel_le)) + '</span>'
-          : x.tentatives ? plural(x.tentatives, 'tentative') : '';
-        h += '<tr class="clic" data-a="hist-open" data-id="' + x.id_lead + '" tabindex="0">'
-          + '<td>' + esc(quand(x.resultat_le)) + '</td>'
-          + (hier ? '<td class="l">' + esc(Number(x.par_id_user) === Number(MOI) ? 'Moi' : propre(x.par_nom) || '—') + '</td>' : '')
-          + '<td class="l"><b>' + esc(propre(x.nom) || 'Sans nom') + '</b>' + (x.telephone ? '<small>' + esc(x.telephone) + '</small>' : '') + '</td>'
-          + '<td class="l">' + esc(x.vehicule || '—') + '<small>reçu le ' + esc(jour(x.recu_le)) + '</small></td>'
-          + '<td>' + esc(x.source_libelle || x.source || '—') + '</td>'
-          + '<td>' + esc(siteNom(x.site) || '—') + '</td>'
-          + '<td class="l">' + esc(resLib(x)) + (x.note ? '<small title="' + esc(x.note) + '">' + esc(String(x.note).slice(0, 60)) + '</small>' : '') + '</td>'
-          + '<td><span class="h-st ' + stCls(x) + '"' + (x.vendu_le ? ' title="Vente du ' + esc(jour(x.vendu_le)) + '"' : '') + '>' + esc(stLib(x)) + '</span>' + (x.vendu_le ? '<small>le ' + esc(jour(x.vendu_le)) + '</small>' : '') + '</td>'
-          + '<td>' + suite + '</td></tr>';
-      });
-      return h + '</tbody></table></div>';
-    }
-    // ── v100 : SUIVIS — où en est la demande d'un client, quel que soit le vendeur ──
-    var SUIVI_GESTE = { bacs: 'Mis à jour dans BACS', bacs_activite: 'Activité dans BACS', contact_detecte: 'Contact détecté', retour_pool: 'Revenu au Pool',
-                        congelateur: 'Mis au congélateur', congelateur_retour: 'Sorti du congélateur', apv: 'Orienté après-vente', reaffectation: 'Réattribué', stock_equipe: 'Réparti dans l\'équipe' };
-    function suiviEtat() { if (!S.suivis) S.suivis = { rows: null, err: null, q: '', t: null, seq: 0 }; return S.suivis; }
-    async function chargerSuivis() {
-      var X = suiviEtat(), seq = ++X.seq, sid = sitePoste();
-      X.err = null; if (X.rows == null || X.q) X.rows = null; render(); suiviFocus();
-      try {
-        var r = await rpc('poste_site_suivis', { p_sites: sid != null ? [Number(sid)] : null, p_q: X.q ? X.q : null }) || [];
-        if (seq !== X.seq) return;
-        X.rows = r;
-      } catch (e) { if (seq !== X.seq) return; X.rows = []; X.err = messageErreur(e); }
-      if (S.tab === 'suivis') { render(); suiviFocus(); }
-    }
-    function suiviFocus() {
-      var X = suiviEtat(); if (!X.focus) return;
-      var qi = root.querySelector('[data-x="suivi-q"]'); if (qi) { try { qi.focus(); qi.setSelectionRange(qi.value.length, qi.value.length); } catch (e) {} }
-    }
-    function suiviRecherche(v) {
-      var X = suiviEtat(); X.q = String(v || '').trim(); X.focus = true;
-      clearTimeout(X.t); X.t = setTimeout(chargerSuivis, 350);
-    }
-    function suiviOuvrir(id) {
-      var x = ((S.suivis && S.suivis.rows) || []).find(function (r) { return Number(r.id_lead) === Number(id); });
-      if (!x) return;
-      if (x.id_client) return ficheClient(x.id_client);
-      if (S.leads.some(function (l) { return Number(l.id_lead) === Number(id); })) return ouvrir(id);
-      toast('Pas encore de fiche client rattachée à cette demande.', true);
-    }
-    function suiviGeste(x) {
-      if (!x.dernier_geste) return x.premier_contact_le ? 'Premier contact' : '—';
-      return RES_LIB[x.dernier_geste] || SUIVI_GESTE[x.dernier_geste] || String(x.dernier_geste).replace(/_/g, ' ');
-    }
-    function suiviStCls(x) {
-      return x.statut === 'converti' ? 'vendu' : (x.statut === 'perdu' || x.statut === 'rejete') ? 'perdu' : x.statut === 'contacte' ? 'contacte' : 'cours';
-    }
-    function vueSuivis() {
-      var X = suiviEtat(), sid = sitePoste(), rows = X.rows || [];
-      var h = '<div class="ph"><div><h2>Suivis</h2><p>Quand un client rappelle : retrouvez sa demande et voyez où elle en est, même si un collègue la suit. '
-        + (X.q ? 'La recherche porte sur toutes les demandes' : 'Les demandes déjà prises en charge (60 derniers jours, ou encore ouvertes)')
-        + (sid != null ? ' de ' + esc(siteNom((siteInfo(sid) || {}).site)) : ' de votre périmètre') + '. Un clic ouvre la fiche du client.</p></div></div>'
-        + '<div class="hist-f"><label class="q">Rechercher un client<input type="search" data-x="suivi-q" placeholder="Nom, téléphone, e-mail, véhicule…" value="' + esc(X.q || '') + '"></label></div>';
-      if (X.err) return h + '<p class="alerte">' + esc(X.err) + '</p>';
-      if (X.rows == null) return h + '<div class="empty">Recherche des demandes…</div>';
-      if (!rows.length) return h + '<div class="empty">' + (X.q ? 'Aucune demande ne correspond à « ' + esc(X.q) + ' ».' : 'Aucune demande prise en charge sur cette période.') + '</div>';
-      h += '<p class="hist-n">' + plural(rows.length, 'demande') + (rows.length >= 300 ? ' (les 300 plus récentes : précisez la recherche)' : '') + '</p>'
-        + '<div class="hist-w"><table class="hist"><thead><tr><th>Client</th><th>Demande</th><th>Suivi par</th><th>Dernier geste</th><th>Statut</th><th>Suite</th></tr></thead><tbody>';
-      rows.forEach(function (x) {
-        var moi = Number(x.id_user_attribue) === Number(MOI);
-        var suite = x.rappel_le && ['converti', 'perdu', 'rejete'].indexOf(x.statut) === -1
-          ? '<span class="h-rap' + (ts(x.rappel_le) <= Date.now() ? ' du' : '') + '">' + esc(ts(x.rappel_le) <= Date.now() ? 'rappel en retard' : 'rappel ' + quandRappel(x.rappel_le)) + '</span>'
-          : (x.clos_le && ['perdu', 'rejete', 'converti'].indexOf(x.statut) !== -1 ? '<small>clos le ' + esc(jour(x.clos_le)) + '</small>' : '');
-        h += '<tr class="clic" data-a="suivi-open" data-id="' + x.id_lead + '" tabindex="0">'
-          + '<td class="l"><b>' + esc(propre(x.nom) || 'Sans nom') + '</b>' + (x.telephone ? '<small>' + esc(x.telephone) + '</small>' : '') + '</td>'
-          + '<td class="l">' + esc(x.vehicule || x.source_libelle || '—') + '<small>' + esc([x.vehicule ? x.source_libelle : null, 'reçu le ' + jour(x.recu_le), sid == null ? siteNom(x.site) : null].filter(Boolean).join(' · ')) + '</small></td>'
-          + '<td class="l">' + (x.vendeur_nom ? '<b>' + esc(moi ? 'Moi' : propre(x.vendeur_nom)) + '</b>' : '<span>Pool</span>') + '</td>'
-          + '<td class="l">' + esc(suiviGeste(x)) + '<small>' + esc([x.dernier_geste_le ? quand(x.dernier_geste_le) : (x.premier_contact_le ? quand(x.premier_contact_le) : ''), x.dernier_geste_par ? propre(x.dernier_geste_par) : ''].filter(Boolean).join(' · ')) + '</small></td>'
-          + '<td><span class="h-st ' + suiviStCls(x) + '">' + esc(ST_LIB[x.statut] || x.statut || '—') + '</span>' + (x.statut_bacs ? '<small>BACS : ' + esc(x.statut_bacs) + '</small>' : '') + '</td>'
-          + '<td>' + suite + '</td></tr>';
-      });
-      return h + '</tbody></table></div>';
-    }
-    function histOuvrir(id) {
-      var x = ((S.hist && S.hist.rows) || []).find(function (r) { return Number(r.id_lead) === Number(id); });
-      if (S.leads.some(function (l) { return Number(l.id_lead) === Number(id); })) return ouvrir(id);
-      if (x && x.id_client) return ficheClient(x.id_client);
-      toast('Ce lead est clos et n\'a pas de fiche client rattachée.', true);
-    }
-    function histFiltre(t) {
-      var H = histEtat(), k = t.getAttribute('data-x'), v = t.value;
-      if (k === 'hist-du' || k === 'hist-au') { H[k === 'hist-du' ? 'du' : 'au'] = v; if (H.du && H.au && H.du > H.au) { if (k === 'hist-du') H.au = v; else H.du = v; } chargerHistorique(); return; }
-      if (k === 'hist-q') { H.q = v; var y = FW.scrollY || 0; render(); var qi = root.querySelector('[data-x="hist-q"]'); if (qi) { try { qi.focus(); qi.setSelectionRange(v.length, v.length); } catch (e) {} } try { FW.scrollTo(0, y); } catch (e) {} return; }
-      H[{ 'hist-statut': 'statut', 'hist-res': 'res', 'hist-source': 'source', 'hist-vend': 'vend' }[k]] = v; render();
-    }
     function render() {
       if (!el.isConnected) return;
       if (!S.charge) {
@@ -4322,8 +3390,7 @@
         return;
       }
       var y = (FW.scrollY || 0);
-      var acc = S.tab === 'accueil' && (POSTE === 'vendeur' || (POSTE === 'chef' && sitePoste() != null));
-      root.innerHTML = bandeauComme() + (acc ? enteteAccueil() : renderSituation()) + bandeauBacsSite()
+      root.innerHTML = bandeauComme() + renderSituation() + bandeauBacsSite()
         + (S.erreur ? '<p class="alerte">' + esc(S.erreur) + ' Les données affichées datent du dernier chargement réussi.</p>' : '')
         + '<div class="barre-o">' + renderTabs() + outils() + '</div>'
         + '<section class="act" aria-label="Leads"><div class="panel">' + renderPanel() + '</div></section>';
@@ -4331,127 +3398,6 @@
       setTimeout(function () { S.frais.clear(); }, 7000);
     }
 
-    // ── v84 : pages d'accueil (vendeur « ma journée », chef « mon site ») ──
-    function sansPlateauSite(sid) { var si = siteInfo(sid); return !!si && /^LEXUS$/i.test(String(si.reseau || '').trim()); }
-    function dureeC(m) { return m < 1 ? '1 min' : duree(m); }
-    function pastille(l) {
-      if (creneauAcc(l)) return acCreneau(l);   // v97
-      if (l.rappel_le) {
-        var auj = new Date(l.rappel_le).toDateString() === new Date().toDateString();
-        return '<span class="ac-p ' + (rappelDu(l) ? 'crit' : 'rap') + '" title="' + esc(texteRappel(l)) + '">' + esc(auj ? hh(l.rappel_le) : jour(l.rappel_le)) + '</span>';
-      }
-      var m = mins(arrive(l)), r = slaDe(l) - minsO(arrive(l)), cl, t;
-      if (m >= 1440) { cl = 'crit'; t = dureeC(m); }
-      else if (r <= 0) { cl = 'crit'; t = '+' + dureeC(-r); }
-      else { cl = r <= slaDe(l) * 0.4 ? 'warn' : 'ok'; t = dureeC(r); }
-      return '<span class="ac-p ' + cl + '">' + esc(t) + '</span>';
-    }
-    function acLigne(l, bouton, avant) {
-      return '<div class="ac-l" data-a="open" data-id="' + l.id_lead + '" tabindex="0">' + pastille(l)
-        + '<div class="ac-x"><b>' + esc(nomLead(l)) + '</b><span>' + esc([avant, demandeDe(l), l.source_libelle].filter(Boolean).join(' · ')) + '</span>'
-        + (l.par_plateau ? '<em class="vr">Qualifié par la Vroom Team</em>' : l.tentatives ? '<em>' + esc(etatCourt(l)) + '</em>' : '')
-        + (accDe(l) && accDe(l).pastille_libelle ? '<div class="acc-w">' + pastilleAcc(l) + '</div>' : '') + '</div>'
-        + (bouton || '') + '</div>';
-    }
-    function kpiTuile(v, l, cl) { return '<div class="ac-k"><b class="' + (cl || '') + '">' + esc(String(v)) + '</b><span>' + esc(l) + '</span></div>'; }
-    function enteteAccueil() {
-      var nom = S.comme ? propre(S.comme.nom) : propre((S.stats && S.stats.nom) || [user && user.prenom, user && user.nom].filter(Boolean).join(' '));
-      var auj = new Date().toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long' });
-      if (POSTE === 'vendeur') {
-        var ml = mesLeads(), crit = ml.filter(function (x) { return niveau(x) === 'crit'; }).length, pool = libres(null);
-        var vr = ml.filter(function (x) { return x.par_plateau; }).length;
-        var sid = poolVendeurSite() != null ? poolVendeurSite() : (sitesVendeur()[0] || {}).id_site;
-        return '<section class="ac-h"><div class="ac-ht"><p class="ac-sup">' + esc((sid != null ? siteNom((siteInfo(sid) || {}).site) + ' · ' : '') + auj) + '</p>'
-          + '<h1>Bonjour ' + esc(prenom(nom) || '') + '</h1><p class="ac-sub">' + plural(ml.length, 'client à rappeler', 'clients à rappeler') + (crit ? ', dont ' + crit + ' en retard' : '') + ' · ' + plural(pool.length, 'lead libre', 'leads libres') + ' dans le ' + esc(poolNom()) + '</p></div>'
-          + '<div class="ac-ks">' + kpiTuile(ml.length, 'à rappeler') + kpiTuile(crit, 'en retard', crit ? 'r' : '') + kpiTuile(pool.length, 'dans le Pool', pool.length ? 'v' : '') + kpiTuile(vr, 'de la Vroom Team') + '</div></section>';
-      }
-      var s = sitePoste(), si = siteInfo(s) || {}, p = libres(s), hd = p.filter(function (x) { return niveau(x) === 'crit'; }).length;
-      var ouv = S.leads.filter(function (l) { return l.zone === 'vendeur' && Number(l.id_site) === Number(s); }), bl = bloques(s).length;
-      var vr2 = S.leads.filter(function (l) { return l.par_plateau && Number(l.id_site) === Number(s); }).length;
-      var pct = si.n30 ? Math.round(100 * (si.dans_sla30 || 0) / si.n30) : null;
-      return '<section class="ac-h"><div class="ac-ht">' + perimetreHtml() + '<p class="ac-sup">Chef des ventes · ' + esc(auj) + '</p>'
-        + '<h1>' + esc(siteNom(si.site)) + ' · aujourd\'hui</h1><p class="ac-sub">' + (p.length ? plural(p.length, 'lead attend', 'leads attendent') + ' un vendeur dans le Pool' : 'Le Pool est vide') + (bl ? ' · ' + plural(bl, 'lead demande', 'leads demandent') + ' votre intervention' : '') + '</p></div>'
-        + '<div class="ac-ks">' + kpiTuile(p.length, 'dans le Pool' + (hd ? ' · ' + hd + ' hors délai' : ''), hd ? 'r' : '') + kpiTuile(ouv.length, 'chez les vendeurs') + kpiTuile(bl, 'en souffrance', bl ? 'r' : '')
-        + (sansPlateauSite(s) ? '' : kpiTuile(vr2, 'de la Vroom Team')) + kpiTuile(pct == null ? '—' : pct + ' %', 'dans le délai · 30 j', pct == null ? '' : pct >= 80 ? 'v' : 'o') + '</div></section>';
-    }
-    function accueilVendeur() {
-      var ml = mesLeads(), s = ml[0], pool = trierPool(libres(null));
-      var h = '';
-      var cible = s || pool.filter(function (l) { return !verrouAutre(l); })[0];
-      if (cible) {
-        var rs = reste(cible), libre = cible.zone === 'piscine';
-        h += '<section class="ac-next"><div class="ac-nt"><p>' + (libre ? 'À prendre dans le Pool' : 'À appeler maintenant') + '</p><h2>' + esc(nomLead(cible)) + '</h2>'
-          + '<span>' + esc([demandeDe(cible), cible.par_plateau ? 'qualifié par la Vroom Team' : cible.source_libelle, rs < 0 ? 'en retard de ' + dureeC(-rs) : 'délai dans ' + dureeC(rs)].filter(Boolean).join(' · ')) + '</span></div>'
-          + '<div class="ac-nb">' + (libre ? '<button type="button" class="ac-go" data-a="prendre" data-id="' + cible.id_lead + '">Prendre</button>'
-            : ((__lmPeutAppeler() && cible.telephone ? '<button type="button" class="fs-btn call" data-a="appeler" data-id="' + cible.id_lead + '">' + svgIc(IC.phone) + 'Appeler</button>' : '')
-              + '<button type="button" class="ac-go" data-a="open" data-id="' + cible.id_lead + '">Ouvrir la fiche</button>')) + '</div></section>';
-      }
-      h += '<div class="ac-g v">';
-      h += '<section class="ac-c"><div class="ac-ch"><b>À rappeler · ' + ml.length + '</b><span>le plus urgent en haut · les « pas joint » à l\'heure de leur rappel</span></div>'
-        + (ml.length ? ml.slice(0, 8).map(function (l) { return acLigne(l); }).join('') + (ml.length > 8 ? '<button type="button" class="ac-plus" data-a="tab" data-id="arappeler">Voir les ' + ml.length + ' leads</button>' : '')
-          : '<p class="ac-vide">Rien à rappeler pour l\'instant.</p>') + '</section>';
-      var sidP = poolVendeurSite() != null ? poolVendeurSite() : (sitesVendeur().length === 1 ? sitesVendeur()[0].id_site : null);
-      h += '<section class="ac-c pool"><div class="ac-ch"><b>' + esc(poolNom()) + ' · ' + pool.length + '</b><span>premier arrivé, premier servi · les plus urgents en haut</span></div>'
-        + (pool.length ? pool.slice(0, 12).map(function (l) {
-            return acLigne(l, verrouAutre(l) ? '<span class="resa-l">Réservé par ' + esc(propre(l.verrou_nom || 'un collègue')) + '</span>' : '<button type="button" class="btn pri" data-a="prendre" data-id="' + l.id_lead + '">Prendre</button>'); }).join('')
-          + (pool.length > 12 ? '<button type="button" class="ac-plus" data-a="tab" data-id="pool">Voir les ' + pool.length + ' leads du Pool</button>' : '')
-          : '<p class="ac-vide">Le Pool est vide.</p>')
-        + '<p class="ac-pied">' + (sidP != null && !sansPlateauSite(sidP) ? 'Les demandes BACS de ce site vous arrivent par la Vroom Team ; le Pool reçoit le site web, Leboncoin, La Centrale et les e-mails. ' : '') + texteRetour() + '</p></section>';
-      var rel = aRelancer().length, camp = S.mesSollis ? S.mesSollis.length : null, avis = ml.filter(function (l) { return l.par_plateau; }).length;
-      h += '<aside class="ac-side"><section class="ac-c"><div class="ac-ch"><b>Aussi à faire</b></div>'
-        + '<button type="button" class="ac-r" data-a="tab" data-id="relances"><span>Relances (déjà essayé)</span><b>' + rel + '</b></button>'
-        + (S.comme ? '' : '<button type="button" class="ac-r" data-a="tab" data-id="campagnes"><span>Campagnes</span><b>' + (camp == null ? '›' : camp) + '</b></button>')
-        + (avis ? '<div class="ac-r"><span>Leads de la Vroom Team : donnez votre avis sur la qualification dans la fiche</span><b class="o">' + avis + '</b></div>' : '')
-        + '</section></aside>';
-      return h + '</div>';
-    }
-    function accueilChef() {
-      var sid = sitePoste(), gere = manager(sid);
-      var pool = trierPool(libres(sid));
-      var urg = bloques(sid).slice().sort(function (a, b) { return reste(a) - reste(b); });
-      var filtre = S.acFiltre || 'tous';
-      var estU = function (l, u) { return String(l.univers || '').toUpperCase().indexOf(u) !== -1; };
-      var vis = pool.filter(function (l) { return filtre === 'tous' || (filtre === 'hd' ? niveau(l) === 'crit' : filtre === 'vn' ? estU(l, 'VN') : estU(l, 'VO')); });
-      var n = function (f) { return pool.filter(f).length; };
-      var h = '<div class="ac-g c">';
-      h += '<section class="ac-c urg"><div class="ac-ch"><b>À traiter maintenant · ' + urg.length + '</b></div>'
-        + (urg.length ? urg.slice(0, 8).map(function (l) { return acLigne(l, '<button type="button" class="btn sm pri" data-a="open" data-id="' + l.id_lead + '">Agir</button>', l.vendeur_nom ? 'chez ' + propre(l.vendeur_nom) : ''); }).join('')
-            + (urg.length > 8 ? '<button type="button" class="ac-plus" data-a="tab" data-id="bloques">Voir les ' + urg.length + ' leads</button>' : '')
-          : '<p class="ac-vide">Aucun lead en souffrance chez vos vendeurs.</p>') + '</section>';
-      var aAttr = pool.filter(function (l) { var g = suggestion(l); return gere && g && g.id_user; }).length;
-      h += '<section class="ac-c pool"><div class="ac-ch wrap"><div><b>' + esc(poolNom(sid)) + ' · ' + pool.length + '</b><span>' + (sansPlateauSite(sid) ? 'site sans Vroom Team : toutes les demandes BACS arrivent ici' : 'site web, Leboncoin, La Centrale, e-mails · les demandes BACS passent par la Vroom Team') + '</span></div>'
-        + '<div class="ac-f">' + [['tous', 'Tous', pool.length], ['hd', 'Hors délai', n(function (l) { return niveau(l) === 'crit'; })], ['vn', 'VN', n(function (l) { return estU(l, 'VN'); })], ['vo', 'VO', n(function (l) { return estU(l, 'VO'); })]]
-            .map(function (x) { return '<button type="button" class="' + (filtre === x[0] ? 'on' : '') + (x[0] === 'hd' && x[2] ? ' r' : '') + '" data-a="ac-filtre" data-id="' + x[0] + '">' + x[1] + ' · ' + x[2] + '</button>'; }).join('') + '</div>'
-        + (aAttr > 1 ? '<button type="button" class="ac-go" data-a="tout-attribuer">Tout attribuer au vendeur suggéré</button>' : '') + '</div>'
-        + (vis.length ? vis.slice(0, 15).map(function (l) {
-            var g = suggestion(l), act;
-            if (!gere) act = '';
-            else if (verrouAutre(l)) act = '<span class="resa-l">Réservé par ' + esc(propre(l.verrou_nom || 'un collègue')) + '</span>';
-            else if (g && g.id_user) act = '<span class="ac-sg">suggéré : <b>' + esc(prenom(g.nom)) + '</b></span><button type="button" class="btn sm pri" data-a="attribuer-sugg" data-id="' + l.id_lead + '">Attribuer</button><button type="button" class="btn sm" data-a="open" data-id="' + l.id_lead + '">Autre…</button>';
-            else act = '<button type="button" class="btn sm pri" data-a="open" data-id="' + l.id_lead + '">Attribuer</button>';
-            if (gere && !verrouAutre(l) && !S.comme) act += '<button type="button" class="btn sm" data-a="pour-moi" data-id="' + l.id_lead + '">Pour moi</button>';
-            return acLigne(l, '<div class="ac-act">' + act + '</div>'); }).join('')
-          + (vis.length > 15 ? '<button type="button" class="ac-plus" data-a="tab" data-id="pool">Voir les ' + vis.length + ' leads</button>' : '')
-          : '<p class="ac-vide">' + (pool.length ? 'Aucun lead pour ce filtre.' : 'Le Pool est vide : chaque lead a son vendeur.') + '</p>') + '</section>';
-      var vs = vendeursDu(sid).filter(function (v) { return !v.exclu; }).map(function (v) {
-        var mesL = S.leads.filter(function (l) { return l.zone === 'vendeur' && Number(l.id_user_attribue) === Number(v.id_user) && Number(l.id_site) === Number(sid); });
-        return { v: v, o: mesL.length, r: mesL.filter(function (l) { return niveau(l) === 'crit'; }).length };
-      }).sort(function (a, b) { return b.r - a.r || b.o - a.o; });
-      var vrs = S.leads.filter(function (l) { return l.par_plateau && Number(l.id_site) === Number(sid); });
-      var st = stockDu(sid), r = S.regle[sid] || {}, MODES = { libre: 'libre-service', manuel: 'par le chef', auto: 'automatique' };
-      h += '<aside class="ac-side"><section class="ac-c"><div class="ac-ch"><b>Mon équipe</b><span>ouverts · en retard</span></div>'
-        + (vs.length ? vs.map(function (x) { return '<div class="ac-v"><i>' + esc(String(propre(x.v.nom) || '?').split(' ').map(function (w) { return w.charAt(0); }).slice(0, 2).join('')) + '</i><span>' + esc(propre(x.v.nom)) + '</span><b>' + x.o + '</b><b class="' + (x.r ? 'r' : 'z') + '">' + x.r + '</b></div>'; }).join('')
-          : '<p class="ac-vide">Aucun vendeur rattaché à ce site.</p>') + '</section>'
-        + (!sansPlateauSite(sid) ? '<section class="ac-c"><div class="ac-ch"><b>La Vroom Team et vous</b></div>'
-            + '<div class="ac-r"><span>Transmis par la Vroom Team</span><b>' + vrs.length + '</b></div>'
-            + '<div class="ac-r"><span>dont pas encore rappelés</span><b class="' + (vrs.filter(function (l) { return !l.tentatives; }).length ? 'o' : '') + '">' + vrs.filter(function (l) { return !l.tentatives; }).length + '</b></div></section>' : '')
-        + '<section class="ac-c"><div class="ac-ch"><b>Pilotage</b></div>'
-        + '<div class="ac-r"><span>Règle d\'attribution</span><b>' + esc(MODES[r.mode] || MODES[(siteInfo(sid) || {}).mode] || '—') + '</b></div>'
-        + '<button type="button" class="ac-r" data-a="tab" data-id="campagnes"><span>Campagnes</span><b>›</b></button>'
-        + (st && gere ? '<button type="button" class="ac-r" data-a="solder" data-id="' + sid + '"><span>Ouverts depuis plus de 24 h</span><b class="o">' + st + ' · solder</b></button>' : '')
-        + '</section></aside>';
-      return h + '</div>';
-    }
     // ── La fiche de traitement du lead (v83 : plein écran) ─────────────────
     function leadSuivant() {
       var D = S.dr; if (!D) return null;
@@ -4467,21 +3413,14 @@
     }
     function delaiTete(l) {
       if (l.zone === 'plateau') return '<div class="fx-del neutre"><b>À la Vroom Team</b><small>reçu ' + esc(quand(l.recu_le)) + '</small></div>';
-      if (estCongele(l)) return '<div class="fx-del neutre"><span><b>Repris du congélateur</b><small>sans délai · ' + (l.tentatives ? plural(l.tentatives, 'tentative') : 'pas encore appelé') + '</small></span></div>';
-      var crn = creneauAcc(l);   // v97 : le client a choisi l'heure de son rappel
-      if (crn) {
-        var tcr = tonCreneau(crn), clc = tcr === 'rouge' ? 'crit' : tcr === 'orange' ? 'warn' : 'neutre';
-        return '<div class="fx-del ' + clc + '"><span><b>' + (tcr === 'rouge' ? 'Créneau manqué : ' : 'Rappel ') + esc(plageCreneau(crn)) + '</b><small>créneau choisi par le client' + (accDe(l).repondu_le ? ' ' + esc(quandAcc(accDe(l).repondu_le)) : '') + '</small></span></div>';
-      }
-      if (estAsap(l)) return '<div class="fx-del warn"><span><b>Le client attend un appel maintenant</b><small>réponse au message automatique' + (accDe(l).repondu_le ? ' ' + esc(quandAcc(accDe(l).repondu_le)) : '') + '</small></span></div>';
       var dep = arrive(l); if (!dep) return '';
-      var sla = slaDe(l), fin = finOuvree(ts(dep), sla), now = Date.now(), rest = fin > now ? ouvrees(now, fin) : -ouvrees(fin, now);
+      var sla = slaDe(l), fin = ts(dep) + sla * 60000, rest = (fin - Date.now()) / 60000;
       if (l.tentatives > 0) return '<div class="fx-del ok"><b>' + plural(l.tentatives, 'tentative') + '</b><small>arrivé ' + esc(quand(dep)) + '</small></div>';
       var part = Math.max(0, Math.min(1, 1 - rest / sla)), cl = rest <= 0 ? 'crit' : part > 0.6 ? 'warn' : 'ok';
       var coul = cl === 'crit' ? '#e24b4a' : cl === 'warn' ? '#fac055' : '#53bda7', fond = cl === 'crit' ? '#f3d6d6' : cl === 'warn' ? '#f6e6bd' : '#dcefe9';
       var txt = rest > 0 ? (rest < 60 ? Math.ceil(rest) + "'" : Math.floor(rest / 60) + 'h' + String(Math.floor(rest % 60)).padStart(2, '0')) : '!';
       return '<div class="fx-del ' + cl + '"><i style="background:conic-gradient(' + coul + ' 0 ' + Math.round(part * 100) + '%,' + fond + ' ' + Math.round(part * 100) + '% 100%)"><em>' + txt + '</em></i>'
-        + '<span><b>' + (rest > 0 ? 'À rappeler avant ' + quand(fin) : -rest < 1 ? 'Délai dépassé' : 'Délai dépassé de ' + duree(-rest)) + '</b><small>délai de rappel du site : ' + slaTxt(sla) + ' ouvrées' + (POSTE === 'vendeur' ? ' · ensuite votre chef est prévenu' : '') + '</small></span></div>';
+        + '<span><b>' + (rest > 0 ? 'À rappeler avant ' + hh(fin) : -rest < 1 ? 'Délai dépassé' : 'Délai dépassé de ' + duree(-rest)) + '</b><small>délai de rappel du site : ' + slaTxt(sla) + (POSTE === 'vendeur' ? ' · ensuite votre chef est prévenu' : '') + '</small></span></div>';
     }
     var QLIB = { projet: 'Projet', echeance: 'Échéance', reprise: 'Reprise', financement: 'Financement', modele: 'Modèle' };
     function carteVroom(l, cx) {
@@ -4533,8 +3472,7 @@
         e.quoi = 'Lead ' + ODLIB[m[2]] + (m[3] && !/^(joint|prise)$/.test(m[3]) ? ' · ' + m[3].replace(/_/g, ' ') : '');
         return true;
       });
-      var sf = (cx.sites_fil || []).map(function (i) { var si = siteInfo(i); return si ? siteNom(si.site) : null; }).filter(Boolean);
-      return '<div class="fx-card"><div class="fx-th"><h3 class="fx-t">Fil du client</h3><small>' + (sf.length ? 'Contacts avec ' + esc(sf.join(', ')) + ' · ' : '') + 'BACS, One Data, Vroom Team, appels, messages, RDV, atelier</small></div>'
+      return '<div class="fx-card"><div class="fx-th"><h3 class="fx-t">Fil du client</h3><small>BACS, One Data, Vroom Team, appels, messages, RDV, atelier</small></div>'
         + (f.length ? f.slice(0, 12).map(function (e) {
             return '<div class="fx-fil"><span class="q">' + esc(quand(e.le)) + '</span><i style="background:' + (FIL_K[e.k] || '#acc5e4') + '"></i><span class="t">' + esc(e.quoi) + (e.par ? '<small>' + esc(propre(e.par)) + '</small>' : '') + '</span></div>'; }).join('')
           : '<p class="hint">' + (cx.fil ? 'Rien d\'autre que cette demande.' : 'Chargement…') + '</p>') + '</div>';
@@ -4558,7 +3496,7 @@
       var chez = l.vendeur_nom ? 'chez ' + propre(l.vendeur_nom) : l.zone === 'piscine' ? 'dans le Pool' : l.zone === 'plateau' ? 'à la Vroom Team' : '';
       var h = '<header class="fx-h">' + retour
         + '<div class="fx-id"><p class="fx-sup">' + esc([pos !== -1 ? 'Lead ' + (pos + 1) + ' sur ' + ml.length + ' à traiter' : null, siteNom(l.site), chez].filter(Boolean).join(' · ')) + '</p>'
-        + '<h2>' + esc(nomLead(l)) + (l.par_plateau ? ' <span class="fx-pill">Qualifié par la Vroom Team</span>' : '') + pastilleAcc(l) + '</h2></div>'
+        + '<h2>' + esc(nomLead(l)) + (l.par_plateau ? ' <span class="fx-pill">Qualifié par la Vroom Team</span>' : '') + '</h2></div>'
         + delaiTete(l)
         + (sv ? '<button type="button" class="fx-ret" data-a="suivant">Lead suivant<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg></button>' : '')
         + x + '</header>';
@@ -4583,15 +3521,14 @@
         + (D.cx ? carteConnu(cx) : '') + filClient(cx);
       // colonne 3 : délais et gestes
       var del = '';
-      if (l.zone !== 'plateau' && !estCongele(l)) {
-        if (l.transfere_le) del += '<div><span>Vroom Team</span><span class="tm ok"><b>transmis en ' + duree(ouvrees(ts(l.recu_le), ts(l.transfere_le), OUV_VROOM)) + '</b><small>après réception</small></span></div>';
-        del += '<div><span>Sur le site</span>' + (mins(l.arrive_le) >= 1440 ? '<span class="tm crit"><b>' + duree(mins(l.arrive_le)) + '</b><small>arrivé le ' + esc(quand(l.arrive_le)) + '</small></span>' : tmO(l.arrive_le, l.sla_site || 60, 'sans contact · SLA ' + slaTxt(l.sla_site || 60))) + '</div>';
-        if (l.zone === 'vendeur' && l.attribue_le) del += '<div><span>Chez ' + esc(prenom(l.vendeur_nom)) + ' depuis</span>' + tmO(l.attribue_le, 30, l.tentatives ? plural(l.tentatives, 'tentative') : 'sans appel') + '</div>';
+      if (l.zone !== 'plateau') {
+        if (l.transfere_le) del += '<div><span>Vroom Team</span><span class="tm ok"><b>transmis en ' + duree((ts(l.transfere_le) - ts(l.recu_le)) / 60000) + '</b><small>après réception</small></span></div>';
+        del += '<div><span>Sur le site</span>' + (mins(l.arrive_le) >= 1440 ? '<span class="tm crit"><b>' + duree(mins(l.arrive_le)) + '</b><small>arrivé le ' + esc(quand(l.arrive_le)) + '</small></span>' : tm(l.arrive_le, l.sla_site || 60, 'sans contact · SLA ' + slaTxt(l.sla_site || 60))) + '</div>';
+        if (l.zone === 'vendeur' && l.attribue_le) del += '<div><span>Chez ' + esc(prenom(l.vendeur_nom)) + ' depuis</span>' + tm(l.attribue_le, 30, l.tentatives ? plural(l.tentatives, 'tentative') : 'sans appel') + '</div>';
       }
       var c3 = '<div class="fx-card"><h3 class="fx-t">' + (POSTE === 'vendeur' || (mien && !gere) ? 'Résultat de l\'appel' : 'Que faire de ce lead ?') + '</h3>'
         + '<div class="dr-f fx-act">' + piedDrawer(l, gere, mien) + '</div></div>'
-        + (del ? '<div class="fx-card"><div class="fx-lab">Délais</div><div class="delais">' + del + '</div></div>' : '')
-        + (estCongele(l) && (mien || gere) ? '<div class="fx-card"><div class="fx-lab">Congélateur</div><p class="hint">Lead repris du congélateur : aucun délai, aucune alerte. S\'il n\'aboutit pas, remettez-le pour un collègue.</p><div class="row"><button type="button" class="btn" data-a="rendre" data-id="' + l.id_lead + '">Remettre au congélateur</button></div></div>' : '');
+        + (del ? '<div class="fx-card"><div class="fx-lab">Délais</div><div class="delais">' + del + '</div></div>' : '');
       h += '<div class="dr-b fx-g"><aside class="fx-c1">' + c1 + '</aside><section class="fx-c2">' + c2 + '</section><aside class="fx-c3">' + c3 + '</aside></div>';
       if (D.demo) h = h.replace('<div class="dr-b fx-g">', '<p class="demo">Fiche d\'exemple de la visite guidée : rien n\'est enregistré.</p><div class="dr-b fx-g">');
       var top = $drawer.scrollTop;
@@ -4632,7 +3569,7 @@
       if (mode === 'attribuer') {
         h += '<div class="row"><select id="dr-vendeur" aria-label="Vendeur">' + optionsVendeurs(l.id_site, l.id_user_attribue) + '</select><button type="button" class="btn pri" data-a="attribuer" data-id="' + l.id_lead + '|dr">' + (l.id_user_attribue ? 'Réattribuer' : 'Attribuer') + '</button></div>'
           + '<div class="row">' + (l.sf_lead_id && !sansPlateau(l) ? '<button type="button" class="btn vr" data-a="confier" data-id="' + l.id_lead + '">Confier à la Vroom Team</button>' : '')
-          + (l.id_user_attribue ? '<button type="button" class="btn" data-a="rendre" data-id="' + l.id_lead + '">' + libRendre(l) + '</button>' : '')
+          + (l.id_user_attribue ? '<button type="button" class="btn" data-a="rendre" data-id="' + l.id_lead + '">Rendre au Pool</button>' : '')
           + (!l.id_user_attribue && libre && chefVend(l.id_site) ? '<button type="button" class="btn vr" data-a="prendre" data-id="' + l.id_lead + '">Je le prends</button>' : '') + '</div>';
       } else if (mode === 'resultat') {
         h += piedResultat(l, true);
@@ -4658,31 +3595,13 @@
       } else if (r === 'joint') {
         h += '<input type="text" id="res-note" placeholder="Ce qui a été dit (facultatif)" aria-label="Note"><button type="button" class="btn pri" data-a="joint" data-id="' + l.id_lead + '">Enregistrer le contact</button>';
       } else if (r === 'pasjoint') {
-        h += '</div>' + formRappel(l) + '<div class="row">';
         h += '<input type="text" id="res-note" placeholder="Messagerie, numéro erroné…" aria-label="Note"><button type="button" class="btn pri" data-a="pasjoint" data-id="' + l.id_lead + '">Noter la tentative ' + ((l.tentatives || 0) + 1) + ' sur 3</button>';
       } else {
         return h + '</div>' + piedClore(l);
       }
       h += '</div>';
-      if (!dansChef) h += '<div class="row pied"><span class="hint">' + (l.sf_lead_id ? 'Lead BACS : le RDV et la clôture partent aussi dans BACS.' : 'Lead hors BACS : tout est enregistré dans One Data.') + '</span><button type="button" class="btn sm ghost" data-a="rendre" data-id="' + l.id_lead + '">' + libRendre(l) + '</button></div>';
+      if (!dansChef) h += '<div class="row pied"><span class="hint">' + (l.sf_lead_id ? 'Lead BACS : le RDV et la clôture partent aussi dans BACS.' : 'Lead hors BACS : tout est enregistré dans One Data.') + '</span><button type="button" class="btn sm ghost" data-a="rendre" data-id="' + l.id_lead + '">Rendre au Pool</button></div>';
       return h;
-    }
-    // v88 : la prochaine tentative, choisie par le vendeur.
-    function dansMin(m) { var d = new Date(Date.now() + m * 60000); d.setSeconds(0, 0); d.setMinutes(Math.ceil(d.getMinutes() / 5) * 5); return d; }
-    function aujA(hr) { var d = new Date(); d.setHours(hr, 0, 0, 0); return d; }
-    function rappelsRapides() {
-      var n = new Date(), t = [['Dans 1 h', dansMin(60)], ['Dans 2 h', dansMin(120)]];
-      if (n.getHours() < 17) t.push(['Ce soir 18:00', aujA(18)]);
-      t.push(['Demain 09:00', demainA(9)], ['Demain 14:00', demainA(14)]);
-      return t;
-    }
-    function formRappel(l) {
-      var D = S.dr;
-      if (!D.rappel) D.rappel = dateLocale(dansMin(120));
-      return '<div class="rdvf rap-f"><div class="q"><span>Prochaine tentative</span><div class="chips">' + rappelsRapides().map(function (x) {
-          var v = dateLocale(x[1]); return '<button type="button" class="qk' + (D.rappel === v ? ' on' : '') + '" data-a="rappel-quand" data-id="' + v + '">' + x[0] + '</button>'; }).join('') + '</div>'
-        + '<div class="row"><input type="datetime-local" id="res-rappel" value="' + esc(D.rappel) + '" min="' + esc(dateLocale(new Date())) + '" aria-label="Date et heure du prochain appel">'
-        + '<span class="hint">Le lead reste dans vos leads à rappeler, rangé à cette heure.</span></div></div></div>';
     }
     // ── v62 : modèles de messages adaptés au lead ─────────────────────────
     // v79 : réseaux sans plateau VROOM (Lexus).
@@ -4803,6 +3722,7 @@
     function samediProchain() { var d = new Date(); var k = (6 - d.getDay() + 7) % 7 || 7; return creneau(k, 10); }
     function formRdv(l) {
       var D = S.dr, f = D.rdvF || (D.rdvF = { objet: estVO(l) ? 'Essai' : 'RDV Vente', date: dateLocale(creneau(1, 10)), duree: '60', inv: [], com: '' });
+      var rapides = [['Demain 10:00', creneau(1, 10)], ['Demain 14:00', creneau(1, 14)], ['Samedi 10:00', samediProchain()]];
       var invS = S.invitables[l.id_site];
       if (!invS) chargerInvitables(l.id_site);
       var inv = (invS || []).filter(function (u) { return Number(u.id_user) !== Number(l.id_user_attribue || MOI); });
@@ -4810,7 +3730,8 @@
       var h = '<div class="rdvf">'
         + '<div class="q"><span>Objet <em class="bacs-tag">libellés BACS</em></span><div class="chips">' + OBJETS_RDV.map(function (o) {
             return '<button type="button" class="qk' + (f.objet === o ? ' on' : '') + '" data-a="rdv-objet" data-id="' + esc(o) + '">' + esc(o) + '</button>'; }).join('') + '</div></div>'
-        + '<div class="q"><span>Quand</span>'
+        + '<div class="q"><span>Quand</span><div class="chips">' + rapides.map(function (x) {
+            var v = dateLocale(x[1]); return '<button type="button" class="qk' + (f.date === v ? ' on' : '') + '" data-a="rdv-quand" data-id="' + v + '">' + x[0] + '</button>'; }).join('') + '</div>'
         + '<div class="row"><input type="datetime-local" id="rdv-date" value="' + esc(f.date) + '" aria-label="Date et heure"><select id="rdv-duree" aria-label="Durée">'
         + [['30', '30 min'], ['60', '1h00'], ['90', '1h30'], ['120', '2h00']].map(function (d) { return '<option value="' + d[0] + '"' + (f.duree === d[0] ? ' selected' : '') + '>' + d[1] + '</option>'; }).join('') + '</select></div></div>'
         + '<div class="q"><span>Inviter un collègue</span><div class="inv-l">'
@@ -4923,7 +3844,7 @@
     function demainA(hr, j) { var d = new Date(); d.setDate(d.getDate() + (j || 1)); d.setHours(hr, 0, 0, 0); return d; }
     function lireForm() {
       var g = function (s) { var x2 = $drawer.querySelector(s); return x2 ? x2.value : null; };
-      return { vendeur: g('#dr-vendeur'), site: g('#dr-site'), note: g('#res-note'), motif: g('#clore-motif'), cnote: g('#clore-note'), rappel: g('#res-rappel') };
+      return { vendeur: g('#dr-vendeur'), site: g('#dr-site'), note: g('#res-note'), motif: g('#clore-motif'), cnote: g('#clore-note') };
     }
     function lireCompose() {
       var D = S.dr; if (!D || !D.canal) return;
@@ -4960,7 +3881,6 @@
       Object.keys(v).forEach(function (k) {
         if (v[k] == null) return;
         var sel = { vendeur: '#dr-vendeur', site: '#dr-site', note: '#res-note', motif: '#clore-motif', cnote: '#clore-note' }[k];
-        if (!sel) return;
         var x2 = $drawer.querySelector(sel); if (x2) x2.value = v[k];
       });
     }
@@ -4982,12 +3902,6 @@
       $scrim.hidden = false; $drawer.hidden = false;
       renderDrawer();
     }
-    // v88 : le fil du client se lit pour l'affaire du site de la barre du haut.
-    function siteFil(l) { var b = siteDuBus(); if (b != null) return b; if (S.site != null) return Number(S.site); return l && l.id_site != null ? Number(l.id_site) : null; }
-    async function rechargerFil() {
-      var D0 = S.dr; if (!D0 || !D0.id || D0.demo) return;
-      try { var cx = await rpc('poste_lead_contexte', { p_id_lead: Number(D0.id), p_id_site: siteFil(D0.l) }); if (S.dr === D0) { D0.cx = cx || {}; renderDrawerPreserve(); } } catch (e) {}
-    }
     async function ouvrir(id) {
       var l = S.leads.find(function (x) { return Number(x.id_lead) === Number(id); });
       if (!l) { toast('Ce lead n\'est plus ouvert.', true); return; }
@@ -4998,7 +3912,7 @@
       var D0 = S.dr;
       var rs = await Promise.all([
         rpc('poste_bacs_envois', { p_id_lead: Number(id) }).catch(function () { return []; }),
-        rpc('poste_lead_contexte', { p_id_lead: Number(id), p_id_site: siteFil(l) }).catch(function () { return {}; })
+        rpc('poste_lead_contexte', { p_id_lead: Number(id) }).catch(function () { return {}; })
       ]);
       if (S.dr !== D0) return;
       D0.envois = rs[0] || []; D0.cx = rs[1] || {};
@@ -5127,76 +4041,6 @@
     function reveillerBacs() { try { if (OD.bacs && typeof OD.bacs.demander === 'function') OD.bacs.demander('vider_file', {}, 4000); } catch (e) {} }
     function apres(msg, garder) { reveillerBacs(); toast(msg); if (!garder) fermerDrawer(); return rafraichir(true); }
     function leadDe(id) { return S.leads.find(function (x) { return Number(x.id_lead) === Number(id); }) || {}; }
-    // ── v98 : CONGÉLATEUR ─────────────────────────────────────────────────
-    // Les leads BACS abandonnés par la Vroom Team, avec le motif d'abandon.
-    function congeles(sid) {
-      if (sid == null && POSTE === 'vendeur') sid = poolVendeurSite();
-      var u = univActif();
-      return (S.cong || []).filter(function (c) {
-        return (sid == null || Number(c.id_site) === Number(sid))
-          && (!S.comme || S.comme.sites.indexOf(Number(c.id_site)) !== -1)
-          && (u === 'tous' || !c.univers || c.univers === u);
-      });
-    }
-    // Période : 30 jours par défaut, 90 / 120 jours, ou « depuis le » une date choisie.
-    function isoJour(d) { return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'); }
-    function congDepuis() {
-      if (S.congDu) return S.congDu;
-      var d = new Date(); d.setDate(d.getDate() - (S.congJ || 30)); return isoJour(d);
-    }
-    async function chargerCong() {
-      var r = await rpc('poste_congelateur', { p_sites: null, p_depuis: congDepuis() });
-      S.cong = r || [];
-    }
-    async function congPeriode(j, du) {
-      S.congJ = j || null; S.congDu = du || null; S.cong = null; render();
-      try { await chargerCong(); } catch (e) { S.cong = []; toast(messageErreur(e), true); }
-      render();
-    }
-    function barreCong() {
-      var j = S.congDu ? 0 : (S.congJ || 30), auj = new Date(), min = new Date();
-      min.setDate(min.getDate() - 400);
-      return '<div class="barre"><span class="lbl-s">Abandons reçus depuis :</span><div class="seg">' + [30, 90, 120].map(function (n) {
-          return '<button type="button" class="' + (j === n ? 'on' : '') + '" data-a="cg-jours" data-id="' + n + '" aria-pressed="' + (j === n) + '">' + n + ' jours</button>'; }).join('')
-        + '</div><label class="cg-du' + (S.congDu ? ' on' : '') + '">ou depuis le <input type="date" data-x="cg-du" value="' + esc(congDepuis()) + '" min="' + isoJour(min) + '" max="' + isoJour(auj) + '"></label></div>';
-    }
-    function vueCongelateur() {
-      var sid = POSTE === 'vendeur' ? null : sitePoste();
-      var ls = congeles(sid).slice().sort(function (a, b) { return ts(b.recu_le) - ts(a.recu_le); });
-      var h = '<div class="ph"><div><h2>Congélateur</h2><p>Les leads que la Vroom Team a abandonnés dans BACS, avec le motif. Libre-service : « Prendre » met le lead à votre nom et le repasse « Accepté » dans BACS.<br><b>Ici, pas de délai : un lead repris du congélateur ne revient pas au Pool et ne déclenche aucune alerte.</b></p></div></div>' + barreCong() + '<div class="list">';
-      if (S.cong == null) h += '<div class="empty">Chargement du congélateur…</div>';
-      else if (!ls.length) h += '<div class="empty">Le congélateur est vide.</div>';
-      ls.forEach(function (c) {
-        var verrou = c.verrou_par && Number(c.verrou_par) !== Number(MOI);
-        var dem = [c.modele, c.campagne || c.source_bacs].filter(Boolean).join(' · ') || 'Demande BACS';
-        var a = verrou ? '<span class="resa-l">Réservé par ' + esc(propre(c.verrou_nom || 'un collègue')) + '</span>'
-          : '<button type="button" class="btn vr" data-a="cg-prendre" data-id="' + esc(c.sf) + '"' + (S.comme ? ' disabled' : '') + '>Prendre</button>';
-        h += '<div class="lr v2 cg' + univCls(c) + '"><div><span class="tm froid"><b>' + esc(jour(c.recu_le)) + '</b><small>reçu</small></span></div>'
-          + '<div class="who"><span class="lr-n">' + esc(propre(c.nom) || 'Sans nom') + '</span>' + (sid == null && POSTE !== 'vendeur' ? ' <span class="lr-v">' + esc(siteNom(c.site)) + '</span>' : '')
-          + '<p class="lr-d">' + esc(dem) + (c.abandonne_le ? ' · abandonné le ' + esc(jour(c.abandonne_le)) : '') + '</p>'
-          + '<p class="why">Motif : <b>' + esc(c.motif || 'non renseigné') + '</b>' + (c.abandonne_par ? ' · ' + esc(propre(c.abandonne_par)) : '') + (c.commentaire ? ' · « ' + esc(String(c.commentaire).slice(0, 120)) + ' »' : '') + '</p>'
-          + (c.remis_le ? '<p class="why">Remis au congélateur par <b>' + esc(propre(c.remis_par || 'un collègue')) + '</b> le ' + esc(jour(c.remis_le)) + (c.remis_commentaire ? ' · « ' + esc(String(c.remis_commentaire).slice(0, 160)) + ' »' : '') + '</p>' : '') + '</div>'
-          + '<div class="src"><span class="tag">' + esc(c.source_bacs || 'BACS') + '</span></div>'
-          + '<div class="lr-a">' + a + '</div></div>';
-      });
-      return h + '</div>';
-    }
-    function prendreCongele(sf) {
-      return geste(async function () {
-        var r = await rpc('poste_congelateur_prendre', { p_sf: String(sf) });
-        if (r && r.action === 'reserve') {
-          await rafraichir(true);
-          if (POSTE === 'chef') { S.tab = 'mes'; toast('Lead repris du congélateur : il est dans « Mes leads ».'); }
-          else { S.tab = 'arappeler'; toast('Lead repris du congélateur : il est dans « À rappeler ».'); }
-          render(); return ouvrir(r.id_lead);
-        }
-        if (r && r.action === 'occupe') toast('Déjà repris par ' + propre(r.par_nom || 'un collègue') + '.', true);
-        else if (r && r.action === 'clos') toast('Ce lead n\'est plus abandonné dans BACS' + (r.statut ? ' (' + r.statut + ')' : '') + '.', true);
-        else if (r && r.action === 'univers') toast('Ce lead ' + r.univers + ' est réservé aux vendeurs ' + r.univers + '.', true);
-        else toast('Lead introuvable dans la copie BACS.', true);
-        rafraichir(true);
-      });
-    }
     function prendre(id) {
       return geste(async function () {
         var r = await rpc('poste_prendre', { p_id_lead: Number(id) });
@@ -5205,14 +4049,6 @@
         else if (r && r.action === 'clos') toast('Ce lead est déjà traité.', true);
         else if (r && r.action === 'univers') toast('Ce lead ' + r.univers + ' est réservé aux vendeurs ' + r.univers + '.', true);
         rafraichir(true);
-      });
-    }
-    function attribuerMoi(id) {
-      var l = leadDe(id);
-      return geste(async function () {
-        var r = await rpc('poste_attribuer', { p_id_lead: Number(id), p_id_user: Number(MOI) });
-        if (r && r.ok === false) { toast(r.motif || 'Attribution impossible.', true); return; }
-        apres(nomLead(l) + ' est à vous : il est dans « Mes leads ».', true);
       });
     }
     function attribuer(v) {
@@ -5243,15 +4079,8 @@
     function resultat(id, res) {
       var f = lireForm(), l = leadDe(id);
       return geste(async function () {
-        var quandR = null;
-        if (res === 'pas_joint') {
-          var dv = f.rappel || (S.dr && S.dr.rappel), d = dv ? new Date(dv) : null;
-          if (!d || isNaN(d.getTime())) { toast('Choisissez la date et l\'heure de la prochaine tentative.', true); return; }
-          if (d.getTime() < Date.now() - 60000) { toast('La prochaine tentative doit être dans le futur.', true); return; }
-          quandR = d.toISOString();
-        }
-        var r = await rpc('poste_resultat', { p_id_lead: Number(id), p_resultat: res, p_note: (f.note || '').trim() || null, p_rappel_le: quandR });
-        if (res === 'pas_joint') apres('Tentative ' + ((r && r.tentatives) || '') + ' notée. Rappel prévu ' + quandRappel((r && r.rappel_le) || quandR) + '. ' + (r && r.tentatives >= 3 ? 'Trois essais : pensez à clore ou à confier le lead.' : 'Le lead reste dans vos leads à rappeler.'));
+        var r = await rpc('poste_resultat', { p_id_lead: Number(id), p_resultat: res, p_note: (f.note || '').trim() || null });
+        if (res === 'pas_joint') apres('Tentative ' + ((r && r.tentatives) || '') + ' notée. ' + (r && r.tentatives >= 3 ? 'Trois essais : pensez à clore ou à confier le lead.' : 'Le lead reste dans « À faire ».'));
         else apres('Contact enregistré : ' + nomLead(l) + ' sort de vos leads à appeler.');
       });
     }
@@ -5262,26 +4091,8 @@
         apres(nomLead(l) + ' clos' + (r && r.vers_bacs ? ', et abandonné dans BACS' : '') + '.');
       });
     }
-    // v98 : un lead repris du congélateur y retourne (BACS repasse « Abandonné »).
-    function libRendre(l) { return estCongele(l) ? 'Remettre au congélateur' : 'Rendre au Pool'; }
-    function modalRemettre(id) {
-      var l = leadDe(id);
-      ouvrirModal('<div class="mb-h"><div><h2>Remettre ' + esc(nomLead(l)) + ' au congélateur</h2><p>Le lead quitte votre liste et redevient libre au congélateur. Dans BACS, il repasse « Abandonné » avec son motif d\'origine, au nom du compte Vroom qui l\'avait abandonné.</p></div><button type="button" class="x" data-a="modal-close" aria-label="Fermer">' + X_SVG + '</button></div>'
-        + '<div class="mb-b"><div class="fg"><label class="full">Commentaire pour les collègues (facultatif)<textarea id="cg-com" maxlength="500" placeholder="Ex. : injoignable 3 fois, rappeler en janvier"></textarea></label></div></div>'
-        + '<div class="mb-f"><button type="button" class="btn ghost" data-a="modal-close">Annuler</button><button type="button" class="btn pri" data-a="cg-remettre-ok" data-id="' + esc(id) + '">Remettre au congélateur</button></div>');
-    }
-    function remettreCongele(id) {
-      var l = leadDe(id), t = $modal.querySelector('#cg-com'), com = t ? t.value : '';
-      return geste(async function () {
-        var r = await rpc('poste_congelateur_remettre', { p_id_lead: Number(id), p_commentaire: com || null });
-        if (r && r.ok === false) { toast(r.motif || 'Impossible de remettre ce lead au congélateur.', true); return; }
-        fermerModal();
-        apres(nomLead(l) + ' est de retour au congélateur.');
-      });
-    }
     function rendre(id) {
       var l = leadDe(id);
-      if (estCongele(l)) return modalRemettre(id);
       return geste(async function () {
         await rpc('poste_rendre', { p_id_lead: Number(id), p_motif: null });
         apres(nomLead(l) + ' est de nouveau dans le Pool' + (POSTE !== 'vendeur' && l.vendeur_nom ? ' (repris à ' + prenom(l.vendeur_nom) + ')' : '') + '.');
@@ -5429,24 +4240,16 @@
     function memoAck() { try { FW.localStorage.setItem('lmtc-ack-site', JSON.stringify(Array.from(S.ack).slice(-200))); } catch (e) {} }
     async function action(a, id) {
       switch (a) {
-        case 'suivi-open': return suiviOuvrir(id);
         case 'tab':
           S.tab = id; S.cell = null; render();
           if (id === 'campagnes' && !S.campagnes) { await chargerCampagnes(); render(); }
-          if (id === 'historique') chargerHistorique();
-          if (id === 'suivis') chargerSuivis();
           if (id === 'relais' && !S.relais) { try { S.relais = await rpc('poste_relais', { p_jours: 30 }) || []; } catch (e) { S.relais = []; toast(messageErreur(e), true); } render(); }
           return;
         case 'ack': S.ack.add(id); memoAck(); render(); return;
         case 'open': return ouvrir(id);
         case 'appeler': await ouvrir(id); if (S.dr && Number(S.dr.id) === Number(id)) canal('appel'); return;
         case 'prendre': return prendre(id);
-        case 'cg-prendre': return prendreCongele(id);
-        case 'cg-jours': return congPeriode(Number(id) || 30, null);
-        case 'cg-remettre-ok': return remettreCongele(id);
         case 'tout-attribuer': return toutAttribuer();
-        case 'ac-filtre': S.acFiltre = id; render(); return;
-        case 'rappels': S.rappels = !S.rappels && accDispo(); S.leads = filtrerUniv(S.tous); S.suggKey = null; render(); if (POSTE !== 'vendeur') chargerAide(); return;
         case 'univ': S.univ = id || 'tous'; S.leads = filtrerUniv(S.tous); S.suggKey = null; render(); if (POSTE !== 'vendeur') chargerAide(); return;
         case 'comme-off': S.commeMenu = false; S.commeQ = ''; if (S.comme) return sortirComme(); render(); return;
         case 'comme-menu': S.commeMenu = !S.commeMenu; S.commeQ = ''; render(); if (S.commeMenu) { var qi = root.querySelector('.k-vsearch'); if (qi) try { qi.focus(); } catch (e) {} } return;
@@ -5491,7 +4294,6 @@
         case 'solder-ok': return solder(id);
         case 'modal-close': return fermerModal();
         case 'attribuer': return attribuer(id);
-        case 'pour-moi': return attribuerMoi(id);
         case 'attribuer-regle': return attribuerRegle();
         case 'rendre': return rendre(id);
         case 'confier': return confier(id);
@@ -5523,8 +4325,6 @@
         case 'joint': return resultat(id, 'joint');
         case 'rattacher': return rattacher(id);
         case 'pasjoint': return resultat(id, 'pas_joint');
-        case 'rappel-quand': if (S.dr) { S.dr.rappel = id; renderDrawerPreserve(); } return;
-        case 'hist-open': return histOuvrir(id);
         case 'clore': return clore(id);
         case 'bacs-relancer':
           return geste(async function () {
@@ -5565,25 +4365,17 @@
     });
     root.addEventListener('input', function (ev) {
       if (ev.target.getAttribute && ev.target.getAttribute('data-x') === 'comme-q') { S.commeQ = ev.target.value; var li = root.querySelector('.k-vlist'); if (li) li.innerHTML = listeComme(); }
-      if (ev.target.getAttribute && ev.target.getAttribute('data-x') === 'hist-q') histFiltre(ev.target);
-      if (ev.target.getAttribute && ev.target.getAttribute('data-x') === 'suivi-q') suiviRecherche(ev.target.value);
-    });
-    root.addEventListener('change', function (ev) {
-      var k = ev.target.getAttribute && ev.target.getAttribute('data-x');
-      if (k && k.indexOf('hist-') === 0 && k !== 'hist-q') histFiltre(ev.target);
-      if (k === 'cg-du' && ev.target.value) congPeriode(null, ev.target.value);
     });
     $scrim.addEventListener('click', function () { if (S.modal) fermerModal(); else fermerTout(); });
     root.addEventListener('keydown', function (ev) {
       var t = ev.target;
-      if ((ev.key === 'Enter' || ev.key === ' ') && t.classList && (t.classList.contains('lr') || t.classList.contains('todo') || (t.classList.contains('clic') && t.tagName !== 'INPUT') || t.classList.contains('carte-l') || t.classList.contains('l'))) { ev.preventDefault(); action(t.getAttribute('data-a'), t.getAttribute('data-id')); }
+      if ((ev.key === 'Enter' || ev.key === ' ') && t.classList && (t.classList.contains('lr') || t.classList.contains('todo') || t.classList.contains('clic') || t.classList.contains('carte-l') || t.classList.contains('l'))) { ev.preventDefault(); action(t.getAttribute('data-a'), t.getAttribute('data-id')); }
     });
     ov.addEventListener('keydown', function (ev) {
       var t = ev.target;
       if ((ev.key === 'Enter' || ev.key === ' ') && t.classList && t.classList.contains('lr')) { ev.preventDefault(); action(t.getAttribute('data-a'), t.getAttribute('data-id')); }
     });
     ov.addEventListener('change', function (ev) {
-      if (ev.target.id === 'res-rappel' && S.dr) { S.dr.rappel = ev.target.value; renderDrawerPreserve(); return; }
       if (ev.target.id === 'rdv-inv-plus' && S.dr && S.dr.rdvF && ev.target.value) { lireRdvF(); var n3 = Number(ev.target.value); if (S.dr.rdvF.inv.indexOf(n3) === -1) S.dr.rdvF.inv.push(n3); renderDrawerPreserve(); return; }
       if (ev.target.id === 'c-aff' || ev.target.id === 'c-site') majVendeursCamp();
       if (ev.target.closest && ev.target.closest('.mb')) { var go = $modal.querySelector('#c-go'); if (go && ev.target.id !== 'c-nom') { go.disabled = true; go.removeAttribute('data-confirme'); go.textContent = 'Lancer la campagne'; } }
@@ -5757,10 +4549,6 @@
 .lmtc .tag.ok{background:var(--ok-bg);color:var(--m-vert);font-weight:700}
 .lmtc .tag.crit{background:var(--chaud-bg);color:var(--m-rouge);font-weight:700}
 .lmtc .tag.warn{background:var(--alerte-bg);color:var(--m-orange);font-weight:700}
-.lmtc .tag.at{background:#E6F0FA;color:#2557A1;font-weight:700}
-.lmtc .tm.at b{color:#2557A1}.lmtc .tm.at.proche b{color:#B25E00}.lmtc .tm.at.passe b{color:#5a7196}
-.lmtc .grp.gat{color:#2557A1}
-.lmtc .grp.garr{color:#5a7196}.lmtc .tm.arr b{color:#5a7196}
 .lmtc .tags{display:flex;flex-wrap:wrap;gap:5px;margin-top:6px}
 
 /* Minuteurs */
@@ -5769,25 +4557,6 @@
 .lmtc .tm.warn b{background:var(--alerte-bg);color:var(--m-orange)}
 .lmtc .tm.crit b{background:var(--chaud-bg);color:var(--m-rouge)}
 .lmtc .tm.neutre b{background:var(--calme-bg);color:var(--ink-2)}
-.lmtc .tm.froid b{background:#E6F0FA;color:#2557A1}
-.lmtc .tm.rap b{background:#e9f0fb;color:#2a5ea9}
-.lmtc .lr.rap-du{background:#fdf6f5}
-.lmtc .ac-p.rap{background:#e9f0fb;color:#2a5ea9}
-.lmtc .hist-f{display:flex;flex-wrap:wrap;gap:10px 12px;align-items:flex-end;margin:0 0 12px}
-.lmtc .hist-f label{display:grid;gap:4px;font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:.05em;color:var(--ink-3)}
-.lmtc .hist-f label.q{flex:1 1 200px}
-.lmtc .hist-f label.q input{width:100%}
-.lmtc .hist-n{font-size:12px;font-weight:700;color:var(--ink-3);margin:0 0 6px}
-.lmtc .hist-w{overflow-x:auto}
-.lmtc table.hist{min-width:860px}
-.lmtc table.hist td{font-size:13px}
-.lmtc table.hist td.l{text-align:left;max-width:240px}
-.lmtc table.hist td small{display:block;font-size:11.5px;font-weight:600;color:var(--ink-3);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.lmtc table.hist tr.clic{cursor:pointer}
-.lmtc table.hist tr.clic:hover td{background:#f5f8fd}
-.lmtc .h-st{display:inline-block;border-radius:999px;padding:3px 9px;font-size:11.5px;font-weight:800;background:var(--calme-bg);color:var(--ink-2);white-space:nowrap}
-.lmtc .h-st.enc{background:#e9f0fb;color:#2a5ea9}.lmtc .h-st.ok{background:#eaf7f4;color:#2c7a68}.lmtc .h-st.ko{background:#fdeeee;color:#b23433}
-.lmtc .h-rap{font-size:12px;font-weight:800;color:#2a5ea9;white-space:nowrap}.lmtc .h-rap.du{color:#b23433}
 .lmtc .tm small{font-size:10.5px;color:var(--ink-3);font-weight:600;white-space:nowrap}
 
 /* Lignes de lead */
@@ -5808,9 +4577,6 @@
 .lmtc .seg button{border:0;background:#fff;padding:7px 12px;font-size:12px;font-weight:700;color:var(--mut);cursor:pointer}
 .lmtc .seg button:not(:last-child){border-right:1.5px solid var(--line-in)}
 .lmtc .seg button.on{background:var(--bleu);color:#fff}
-.lmtc .cg-du{display:inline-flex;align-items:center;gap:6px;font-size:12px;font-weight:700;color:var(--mut)}
-.lmtc .cg-du input{border:1.5px solid var(--line-in);border-radius:10px;padding:5px 8px;font:inherit;color:var(--ink,#16294A);background:#fff}
-.lmtc .cg-du.on input{border-color:var(--bleu);background:#E6F0FA;color:var(--bleu)}
 .lmtc .seg .num{font-size:11px;margin-left:4px;opacity:.8}
 .lmtc .filtres{display:flex;flex-wrap:wrap;gap:6px}
 .lmtc .fchip{font-size:12.5px;font-weight:600;padding:6px 12px;border-radius:9px;border:1px solid var(--line);background:var(--card);color:var(--ink-2);cursor:pointer}
@@ -5845,8 +4611,8 @@
 .lmtc .filtre-actif .btn{margin-left:auto}
 
 /* Panneau latéral */
-.lmtc-ov .scrim{position:fixed;inset:0;background:rgba(42,94,169,.18);z-index:9980}
-.lmtc-ov .drawer{position:fixed;top:0;right:0;bottom:0;width:min(540px,100%);background:#fff;z-index:9981;box-shadow:0 16px 50px rgba(42,94,169,.22);display:flex;flex-direction:column;border-radius:16px 0 0 16px;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+.lmtc-ov .scrim{position:fixed;inset:0;background:rgba(42,94,169,.18);z-index:9990}
+.lmtc-ov .drawer{position:fixed;top:0;right:0;bottom:0;width:min(540px,100%);background:#fff;z-index:9991;box-shadow:0 16px 50px rgba(42,94,169,.22);display:flex;flex-direction:column;border-radius:16px 0 0 16px;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
 .lmtc-ov .dr-h{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;padding:16px 18px 12px;border-bottom:1.5px solid #eef2f8}
 .lmtc-ov .dr-h h2{font-size:20px;font-weight:800;letter-spacing:-.01em;color:var(--bleu-dk)}
 .lmtc-ov .dr-s{font-size:12.5px;color:var(--mut);font-weight:600;margin-top:2px}
@@ -5861,12 +4627,6 @@
 .lmtc-ov .dl dt{color:var(--ink-3);font-weight:600}
 .lmtc-ov .dl dd{margin:0;font-weight:700;color:var(--ink)}
 .lmtc-ov .tel{display:flex;flex-wrap:wrap;gap:10px;align-items:center}
-.lmtc-ov .clvr{display:flex;flex-direction:column;gap:4px;align-items:flex-start}
-.lmtc-ov .clvr>b{font-size:14px;font-weight:800;color:var(--bleu-dk)}
-.lmtc-ov .clvr>small{font-size:12px;color:var(--mut);font-weight:600}
-.lmtc-ov .clvr ul{list-style:none;margin:4px 0;padding:0;display:flex;flex-direction:column;gap:3px;font-size:13px;color:var(--ink-2)}
-.lmtc-ov .clvr li em{font-style:normal;font-weight:800;font-variant-numeric:tabular-nums;color:var(--ink);margin-right:8px}
-.lmtc-ov .clvr-att{color:var(--bleu-dk)}
 .lmtc-ov .tel b{font-size:17px;font-weight:800;color:var(--bleu-dk);font-variant-numeric:tabular-nums;user-select:all}
 .lmtc-ov .mail{font-size:13px;color:var(--mut);font-weight:600;word-break:break-all}
 .lmtc-ov .quote{font-size:13px;color:var(--ink-2);border-left:2px solid var(--line-2);padding-left:10px;white-space:pre-line;font-style:italic}
@@ -5893,8 +4653,6 @@
 .lmtc-ov .env small.err{color:#a32d2d}
 .lmtc-ov .dr-f{border-top:1.5px solid #eef2f8;padding:14px 18px;display:grid;gap:10px;background:#fff;border-radius:0 0 0 16px}
 .lmtc-ov .dr-f .row{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
-.lmtc-ov .drawer.pick{width:min(1080px,100%)}
-.lmtc-ov .drawer .lm-pick{min-height:320px}
 .lmtc-ov .dr-f .row.pied{justify-content:space-between;flex-wrap:nowrap}
 .lmtc-ov .dr-f .row.inj-msg{gap:16px;margin-top:6px}
 .lmtc-ov .dr-f .row.inj-msg label{display:inline-flex;align-items:center;gap:6px;cursor:pointer;color:var(--ink,#1F4A85)}
@@ -6014,7 +4772,7 @@
 .lmtc-ov .issues button.on.clore{background:var(--m-rouge)}
 .lmtc-ov .issues button.on.rdv{background:var(--vert)}
 /* Fenêtres */
-.lmtc-ov .modal{position:fixed;inset:0;z-index:9982;display:grid;place-items:center;padding:16px;pointer-events:none}
+.lmtc-ov .modal{position:fixed;inset:0;z-index:9992;display:grid;place-items:center;padding:16px;pointer-events:none}
 .lmtc-ov .modal[hidden]{display:none}
 .lmtc-ov .mb{pointer-events:auto;background:#fff;border-radius:16px;box-shadow:0 16px 50px rgba(42,94,169,.22);width:min(660px,100%);max-height:calc(100vh - 32px);display:flex;flex-direction:column}
 .lmtc-ov .mb-h{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;padding:16px 18px 12px;border-bottom:1.5px solid #eef2f8}
@@ -6158,7 +4916,6 @@
 .lmtc-ov .rdvf .row{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
 .lmtc-ov .qk{border:1.5px solid var(--line-in);background:#fff;color:var(--ink-2);border-radius:999px;padding:6px 12px;font:inherit;font-size:12.5px;font-weight:700;cursor:pointer}
 .lmtc-ov .qk.on{border-color:var(--vert);background:var(--ok-bg);color:var(--m-vert)}
-.lmtc-ov .rap-f{margin:8px 0}
 .lmtc-ov .bacs-tag{font-style:normal;text-transform:none;letter-spacing:0;font-size:10.5px;font-weight:800;color:var(--bleu);background:var(--sel);border-radius:999px;padding:1px 7px;margin-left:6px}
 .lmtc-ov .rdvf textarea{min-height:52px}
 .lmtc-ov label.chk{display:inline-flex;align-items:center;gap:8px;cursor:pointer;color:var(--ink-2);font-size:12.5px}
@@ -6209,11 +4966,6 @@
 .lmtc .barre-o{display:flex;align-items:flex-end;justify-content:space-between;gap:10px 16px;flex-wrap:wrap;border-bottom:1px solid var(--line);margin:0 0 18px}
 .lmtc .barre-o .tabs{border-bottom:0;margin:0;flex:1 1 auto}
 .lmtc .outils{display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:0 0 9px}
-.lmtc .fbar{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin:-6px 0 14px}
-.lmtc .fbar select,.lmtc .fbar input{font:inherit;font-size:12.5px;font-weight:700;color:#1F4A85;border:1.5px solid #d6e2f2;border-radius:9px;padding:6px 8px;background:#fff;max-width:240px}
-.lmtc .fbar select.on,.lmtc .fbar input.on{border-color:#2a5ea9;background:#eef4fc}
-.lmtc .fbar label{font-size:12px;font-weight:700;color:#5c7aa8;display:inline-flex;gap:6px;align-items:center}
-.lmtc .fbar .fn{font-size:12px;font-weight:700;color:#5c7aa8}
 .lmtc .seg-u{display:inline-flex;border:1px solid #ece9e1;border-radius:10px;overflow:hidden;background:#fff}
 .lmtc .seg-u button{border:0;background:none;padding:7px 11px;font:inherit;font-size:12px;font-weight:700;color:var(--ink-2);cursor:pointer}
 .lmtc .seg-u button+button{border-left:1px solid #ece9e1}
@@ -6225,7 +4977,6 @@
 :is(.lmtc,.lmtc-ov) .k-vend-btn{background:#fff;border:1px solid #ece9e1;border-radius:10px;padding:5px 12px;cursor:pointer;text-align:left;font-family:inherit}
 :is(.lmtc,.lmtc-ov) .k-vend-btn:hover{border-color:#2a5ea9}
 :is(.lmtc,.lmtc-ov) .k-vpanel{position:absolute;top:calc(100% + 6px);right:0;z-index:30;width:300px;max-height:380px;overflow-y:auto;background:#fff;border:1px solid #ece9e1;border-radius:12px;box-shadow:0 12px 32px rgba(42,94,169,.16);padding:8px;text-align:left}
-@media (max-width:760px){:is(.lmtc,.lmtc-ov) .k-vend-sel .k-vpanel{left:0;right:auto;width:min(300px,calc(100vw - 32px))}}
 :is(.lmtc,.lmtc-ov) .k-vsearch{width:100%;border:1px solid #ece9e1;border-radius:8px;padding:8px 11px;font-family:inherit;font-size:13px;color:#1c2b45;box-sizing:border-box;margin-bottom:6px}
 :is(.lmtc,.lmtc-ov) .k-vsearch:focus{outline:none;border-color:#2a5ea9}
 :is(.lmtc,.lmtc-ov) .k-vgroup{font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:.04em;color:#888780;padding:8px 8px 4px}
@@ -6328,48 +5079,6 @@
 .lmtc .b1h-n small{font-weight:600;color:var(--ink-2);margin-left:8px}
 .lmtc .b1h .lien{justify-self:start;font-size:12.5px}
 
-/* v84 : pages d'accueil vendeur / chef */
-.lmtc .ac-h{display:flex;flex-wrap:wrap;align-items:flex-end;gap:16px 24px;margin:6px 0 18px}
-.lmtc .ac-ht{flex:1 1 320px;min-width:0}.lmtc .ac-sup{font-size:12px;font-weight:900;letter-spacing:.07em;text-transform:uppercase;color:#4b5563;margin:0}
-.lmtc .ac-h h1{font-size:30px;font-weight:900;color:var(--bleu-dk);margin:4px 0 2px;letter-spacing:-.01em}.lmtc .ac-sub{font-size:15px;color:#4b5563;margin:0}
-.lmtc .ac-ks{display:flex;gap:12px;flex-wrap:wrap}.lmtc .ac-k{background:#fff;border:1px solid #dce6f3;border-radius:16px;padding:12px 18px;min-width:118px}
-.lmtc .ac-k b{display:block;font-size:24px;font-weight:900;color:var(--bleu-dk);line-height:1.2}.lmtc .ac-k b.r{color:#b23433}.lmtc .ac-k b.v{color:#2c7a68}.lmtc .ac-k b.o{color:#8a5a00}
-.lmtc .ac-k span{font-size:12px;font-weight:800;color:#4b5563}
-.lmtc .ac-next{background:var(--bleu-dk);color:#fff;border-radius:20px;padding:20px 24px;display:flex;flex-wrap:wrap;align-items:center;gap:16px 24px;margin-bottom:22px}
-.lmtc .ac-nt{flex:1 1 300px;min-width:0}.lmtc .ac-nt p{font-size:12px;font-weight:900;letter-spacing:.07em;text-transform:uppercase;color:#c9daf1;margin:0}
-.lmtc .ac-nt h2{font-size:22px;font-weight:900;color:#fff;margin:2px 0}.lmtc .ac-nt span{font-size:13.5px;color:#dce8f7}
-.lmtc .ac-nb{display:flex;gap:8px;flex-wrap:wrap}.lmtc .ac-nb .fs-btn{display:inline-flex;align-items:center;gap:8px;border:1.5px solid #c9d9ee;background:#fff;color:var(--bleu);border-radius:11px;padding:10px 16px;font:inherit;font-size:13.5px;font-weight:800;min-height:46px;cursor:pointer}
-.lmtc .ac-nb .fs-btn svg{width:17px;height:17px}
-.lmtc .ac-go{font:inherit;font-size:14px;font-weight:900;padding:10px 20px;border-radius:11px;border:0;background:#53bda7;color:#0f3d33;min-height:44px;cursor:pointer}
-.lmtc .ac-go:hover{background:#46a892}
-.lmtc .ac-g{display:grid;gap:22px;align-items:start}
-.lmtc .ac-g.v{grid-template-columns:minmax(0,.85fr) minmax(0,1.35fr) minmax(0,300px)}
-.lmtc .ac-g.c{grid-template-columns:minmax(0,330px) minmax(0,1fr) minmax(0,310px)}
-@media (max-width:1240px){.lmtc .ac-g.v,.lmtc .ac-g.c{grid-template-columns:minmax(0,1fr) minmax(0,1fr)}.lmtc .ac-g .pool{grid-column:1/-1;order:-1}}
-@media (max-width:760px){.lmtc .ac-g.v,.lmtc .ac-g.c{grid-template-columns:minmax(0,1fr)}.lmtc .ac-h h1{font-size:24px}.lmtc .ac-l{flex-wrap:wrap}.lmtc .ac-act{width:100%}}
-.lmtc .ac-c{background:#fff;border:1px solid #dce6f3;border-radius:18px;overflow:hidden}
-.lmtc .ac-c.urg{border:2px solid #e24b4a}.lmtc .ac-c.urg .ac-ch{background:#fdeeee}.lmtc .ac-c.urg .ac-ch b{color:#b23433}
-.lmtc .ac-side{display:flex;flex-direction:column;gap:18px;min-width:0}
-.lmtc .ac-ch{padding:15px 20px;border-bottom:1px solid #eef2f8;display:flex;justify-content:space-between;align-items:baseline;gap:10px}
-.lmtc .ac-ch.wrap{flex-wrap:wrap;align-items:center}.lmtc .ac-ch.wrap>div:first-child{flex:1 1 240px}
-.lmtc .ac-ch b{font-size:16px;font-weight:900;color:var(--bleu-dk)}.lmtc .ac-c.pool .ac-ch b{font-size:18px}.lmtc .ac-ch span{display:block;font-size:12px;color:#4b5563}
-.lmtc .ac-f{display:flex;gap:6px;flex-wrap:wrap}.lmtc .ac-f button{font:inherit;font-size:12.5px;font-weight:800;padding:6px 12px;border-radius:999px;border:0;background:var(--sel);color:var(--bleu-dk);cursor:pointer}
-.lmtc .ac-f button.on{background:var(--bleu);color:#fff}.lmtc .ac-f button.r:not(.on){background:#fdeeee;color:#b23433}
-.lmtc .ac-l{display:flex;gap:14px;align-items:center;padding:12px 20px;border-bottom:1px solid #f0f4fa;cursor:pointer}.lmtc .ac-l:hover{background:#f6f9fd}
-.lmtc .ac-p{flex:0 0 72px;text-align:center;padding:6px;border-radius:10px;font-weight:900;font-size:12.5px;font-variant-numeric:tabular-nums}
-.lmtc .ac-p.ok{background:#eaf7f4;color:#2c7a68}.lmtc .ac-p.warn{background:#fff6e0;color:#8a5a00}.lmtc .ac-p.crit{background:#fdeeee;color:#b23433}
-.lmtc .ac-x{flex:1;min-width:0}.lmtc .ac-x b{display:block;font-size:14.5px;font-weight:900;color:#1c2b45;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.lmtc .ac-x span{display:block;font-size:12.5px;color:#4b5563;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.lmtc .ac-x em{display:inline-block;margin-top:4px;font-style:normal;font-size:11.5px;font-weight:800;padding:2px 8px;border-radius:999px;background:#f2f6fc;color:#4b5563}.lmtc .ac-x em.vr{background:var(--sel);color:var(--bleu)}
-.lmtc .ac-act{display:flex;gap:6px;align-items:center;flex-wrap:wrap;justify-content:flex-end}.lmtc .ac-sg{font-size:12px;color:#4b5563}.lmtc .ac-sg b{color:var(--bleu-dk)}
-.lmtc .ac-plus{display:block;width:100%;font:inherit;font-size:13px;font-weight:800;padding:12px;border:0;background:#f6f9fd;color:var(--bleu);cursor:pointer}
-.lmtc .ac-vide{padding:18px 20px;margin:0;font-size:13px;color:#4b5563;font-style:italic}
-.lmtc .ac-pied{padding:12px 20px;margin:0;font-size:12.5px;color:#4b5563;background:#f6f9fd}
-.lmtc .ac-r{display:flex;justify-content:space-between;gap:12px;align-items:center;width:100%;box-sizing:border-box;padding:11px 20px;border:0;border-bottom:1px solid #f0f4fa;background:#fff;font:inherit;font-size:13.5px;color:#1c2b45;text-align:left}
-.lmtc button.ac-r{cursor:pointer}.lmtc button.ac-r:hover{background:#f6f9fd}.lmtc .ac-r b{font-weight:900;color:var(--bleu-dk);white-space:nowrap}.lmtc .ac-r b.o{color:#8a5a00}
-.lmtc .ac-v{display:flex;align-items:center;gap:10px;padding:9px 20px;border-bottom:1px solid #f0f4fa;font-size:13.5px}
-.lmtc .ac-v i{width:30px;height:30px;border-radius:50%;background:var(--sel);color:var(--bleu-dk);font-style:normal;font-weight:900;font-size:11px;display:flex;align-items:center;justify-content:center;flex:0 0 auto}
-.lmtc .ac-v span{flex:1;min-width:0}.lmtc .ac-v b{min-width:24px;text-align:right;color:var(--bleu-dk)}.lmtc .ac-v b.r{color:#b23433}.lmtc .ac-v b.z{color:#acc5e4}
 /* v83 : fiche de traitement plein écran (vendeur, chef des ventes) */
 .lmtc-ov .drawer.full{left:0;width:auto;border-radius:0;background:#eef3fa;box-shadow:none}
 .lmtc-ov .drawer.full .fx-h{position:sticky;top:0;z-index:2;display:flex;flex-wrap:wrap;align-items:center;gap:12px 20px;padding:14px 28px;background:#fff;border-bottom:1px solid #dce6f3}
@@ -6407,7 +5116,6 @@
 .lmtc-ov .fx-tiles{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}
 .lmtc-ov .fx-tiles>div{border:1px solid #e6eef8;border-radius:14px;padding:14px 16px;display:grid;gap:3px}.lmtc-ov .fx-tiles span{font-size:11px;font-weight:900;letter-spacing:.06em;text-transform:uppercase;color:#4b5563}
 .lmtc-ov .fx-tiles b{font-size:14.5px;font-weight:900;color:#1c2b45}.lmtc-ov .fx-tiles small{font-size:12.5px;color:#4b5563}
-.lmtc-ov .fx-tiles>div{background:#f5f8fc;border:0;border-radius:8px}.lmtc-ov .fx-tiles span{color:#7a9cc4}.lmtc-ov .fx-tiles b{color:#1F4A85}.lmtc-ov .fx-tiles small{color:#4a6a8a}
 @media (max-width:620px){.lmtc-ov .fx-delco,.lmtc-ov .fx-tiles{grid-template-columns:minmax(0,1fr)}}
 .lmtc-ov .fx-fil{display:flex;gap:12px;padding:8px 0;border-bottom:1px solid #f0f4fa;font-size:13px;align-items:flex-start}.lmtc-ov .fx-fil:last-child{border-bottom:0}
 .lmtc-ov .fx-fil .q{flex:0 0 92px;color:#4b5563;font-weight:700}.lmtc-ov .fx-fil i{flex:0 0 auto;width:8px;height:8px;border-radius:50%;margin-top:6px}
@@ -6415,35 +5123,6 @@
 .lmtc-ov .drawer.full .dr-f.fx-act{border:0;padding:0;background:transparent;border-radius:0;max-height:none;overflow:visible}
 .lmtc-ov .drawer.full .dem-h{margin:0}
 .lmtc-ov .drawer.full .compose{background:#fff;border:1px solid #dce6f3;border-radius:18px;padding:18px 20px}
-/* v97 : accueil des leads — pastille d'état du message automatique et
-   créneau de rappel choisi par le client. Tons imposés par la charte One Data
-   (fond / texte) ; texte #16294A, jamais de noir ; Nunito Sans hérité. */
-.lmtc,.lmtc-ov{--acc-gris-bg:#EDF1F6;--acc-gris:#5D6B80;--acc-orange-bg:#FDF1D6;--acc-orange:#B97C06;--acc-bleu-bg:#E5EDF8;--acc-bleu:#2557A1;
-  --acc-rouge-bg:#FBE6E4;--acc-rouge:#C03F38;--acc-vert-bg:#E0F3F1;--acc-vert:#2A9C92;--acc-ink:#16294A}
-.lmtc .acc-p,.lmtc-ov .acc-p{display:inline-flex;align-items:center;gap:5px;vertical-align:middle;margin-left:6px;font-family:"Nunito Sans",system-ui,sans-serif;font-size:11px;font-weight:800;line-height:1.2;letter-spacing:.01em;padding:3px 9px;border-radius:999px;white-space:nowrap;cursor:help;text-transform:none}
-.lmtc .acc-p::before,.lmtc-ov .acc-p::before{content:'';width:6px;height:6px;border-radius:50%;background:currentColor;flex:0 0 auto}
-.lmtc .acc-gris,.lmtc-ov .acc-gris{background:var(--acc-gris-bg);color:var(--acc-gris)}
-.lmtc .acc-orange,.lmtc-ov .acc-orange{background:var(--acc-orange-bg);color:var(--acc-orange)}
-.lmtc .acc-bleu,.lmtc-ov .acc-bleu{background:var(--acc-bleu-bg);color:var(--acc-bleu)}
-.lmtc .acc-rouge,.lmtc-ov .acc-rouge{background:var(--acc-rouge-bg);color:var(--acc-rouge)}
-.lmtc .acc-vert,.lmtc-ov .acc-vert{background:var(--acc-vert-bg);color:var(--acc-vert)}
-.lmtc-ov .fx-id h2 .acc-p{font-size:12.5px;padding:3px 10px}
-.lmtc .ac-x .acc-w{margin-top:4px}.lmtc .ac-x .acc-w .acc-p{margin-left:0}
-.lmtc .carte-l .qui b .acc-p{font-weight:800}
-.lmtc .tm.acr b{font-variant-numeric:tabular-nums}
-.lmtc .tm.acr-bleu b{background:var(--acc-bleu-bg);color:var(--acc-bleu)}
-.lmtc .tm.acr-orange b{background:var(--acc-orange-bg);color:var(--acc-orange)}
-.lmtc .tm.acr-rouge b{background:var(--acc-rouge-bg);color:var(--acc-rouge)}
-.lmtc .age.acr-bleu{background:var(--acc-bleu-bg)}.lmtc .age.acr-bleu b{color:var(--acc-bleu)}
-.lmtc .age.acr-orange{background:var(--acc-orange-bg)}.lmtc .age.acr-orange b{color:var(--acc-orange)}
-.lmtc .age.acr-rouge{background:var(--acc-rouge-bg)}.lmtc .age.acr-rouge b{color:var(--acc-rouge)}
-.lmtc .ac-p.acr-bleu{background:var(--acc-bleu-bg);color:var(--acc-bleu)}
-.lmtc .ac-p.acr-orange{background:var(--acc-orange-bg);color:var(--acc-orange)}
-.lmtc .ac-p.acr-rouge{background:var(--acc-rouge-bg);color:var(--acc-rouge)}
-.lmtc .k-range.acc-f{color:var(--acc-bleu)}
-.lmtc .k-range.acc-f .num{display:inline-block;min-width:18px;text-align:center;font-size:11px;font-weight:800;padding:1px 6px;border-radius:999px;background:var(--acc-bleu-bg);color:var(--acc-bleu)}
-.lmtc .k-range.acc-f.on{background:#2557A1;border-color:#2557A1;color:#fff}
-.lmtc .k-range.acc-f.on .num{background:#fff;color:#2557A1}
 @media (prefers-reduced-motion:reduce){.lmtc *{animation:none!important;transition:none!important}}
 `;
     (doc.head || doc.documentElement).appendChild(st);
