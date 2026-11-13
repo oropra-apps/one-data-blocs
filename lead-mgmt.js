@@ -1,6 +1,11 @@
 // ============================================================================
 //  LEAD MANAGEMENT — module One Data (OD.define 'lead-mgmt')
-//  VERSION TEAM COLIN (v113) — déploiement CIBLÉ (publish-targets :
+//  VERSION TEAM COLIN (v114) — déploiement CIBLÉ (publish-targets :
+//  v114 (13/11/2026) : CAMPAGNES EN LIBRE-SERVICE côté vendeur — une campagne lancée
+//    sans répartition (sollicitations sans vendeur, ex. « Lexus Black Friday » à Sceaux)
+//    s'affiche dans l'onglet Campagnes avec « Je prends » : comme un lead du Pool, le
+//    vendeur prend le client, qui passe dans ses relances ; « Rendre » le remet en commun.
+//    RPC campagne_libres, campagne_prendre, campagne_rendre.
 //  v113 (13/11/2026) : Pool — le CRÉNEAU DE RAPPEL choisi par le client
 //    (« demain 09:00–09:30 ») débordait de sa colonne de 76 px et chevauchait le
 //    nom du client. Le jour passe au-dessus de l'heure, la plage peut revenir à
@@ -2947,7 +2952,7 @@
       site: null,              // site affiché (chef, direction après « Ouvrir »)
       vueSite: null,           // direction : site ouvert
       depuis: 'site', cell: null, autresVendeurs: false, autresSites: false,
-      campagnes: null, campVend: null, campOuverte: null, mesSollis: null,
+      campagnes: null, campVend: null, campOuverte: null, mesSollis: null, campLibres: null,
       relais: null,
       ack: new Set(), vus: new Set(), frais: new Set(), premier: true,
       dr: null, modal: null,
@@ -3350,6 +3355,8 @@
             rpc('get_campagne_detail', { p_viewer_id_user: Number(MOI), p_date_from: de, p_date_to: a, p_campagne: null, p_filtre: 'a_traiter', p_site_ids: null, p_id_user: Number(MOI), p_limit: 300 })
           ]);
           S.campagnes = r[0] || []; S.mesSollis = r[1] || [];
+          try { S.campLibres = await rpc('campagne_libres', { p_viewer_id_user: Number(MOI), p_site_ids: null }) || []; }
+          catch (e2) { S.campLibres = []; }
         } else {
           var r2 = await Promise.all([
             rpc('get_campagnes_sollicitation', { p_viewer_id_user: Number(MOI), p_date_from: de, p_date_to: a, p_site_ids: sites, p_id_user: null }),
@@ -3621,7 +3628,7 @@
                 ['congelateur', 'Congélateur', congeles().length, false, 'b'],
                 ['arappeler', 'À rappeler', aRappeler().length, aRappeler().some(function (l) { return niveau(l) === 'crit'; }), 'r'],
                 ['relances', 'Relances', aRelancer().length, aRelancer().some(rappelDu), 'b'],
-                ['campagnes', 'Campagnes', S.mesSollis ? S.mesSollis.length : null, false, 'b'],
+                ['campagnes', 'Campagnes', S.mesSollis ? S.mesSollis.length + (S.campLibres || []).length : null, false, 'b'],
                 ['suivis', 'Suivis', null, false, 'b'],
                 ['historique', 'Historique', null, false, 'b']].filter(function (o) { return !(S.comme && (o[0] === 'campagnes' || o[0] === 'historique')); });
       }
@@ -3980,20 +3987,46 @@
       return h + '</div>';
     }
     function vueCampagnesVendeur() {
-      var h = '<div class="ph"><div><h2>Mes campagnes</h2><p>Les clients que votre chef vous a confiés dans une campagne. Ouvrez la fiche du client pour l\'appeler et faire votre compte rendu : la relance est alors comptée comme traitée.</p></div></div>';
+      var h = '<div class="ph"><div><h2>Mes campagnes</h2><p>Libre-service, comme le Pool : prenez un client à relancer, il passe à votre nom. Ouvrez ensuite sa fiche pour l\'appeler et faire votre compte rendu : la relance est alors comptée comme traitée. S\'il ne vous concerne pas, rendez-le.</p></div></div>';
       if (!S.campagnes) return h + '<div class="empty">Chargement des campagnes…</div>';
-      if (!S.campagnes.length) return h + '<div class="empty">Aucune campagne ne vous a été confiée ces 90 derniers jours.</div>';
-      S.campagnes.forEach(function (c) {
-        var cibles = (S.mesSollis || []).filter(function (t) { return t.campagne === c.campagne; });
-        h += '<div class="sub"><h3>' + esc(c.campagne) + '</h3><p>' + plural(Number(c.nb_sollicitations) || 0, 'client') + ' pour vous · ' + (c.nb_traitees || 0) + ' traités · ' + (c.nb_a_traiter || 0) + ' à relancer'
-          + (Number(c.nb_propales) ? ' · ' + plural(c.nb_propales, 'proposition') : '') + (Number(c.nb_bdc) ? ' · ' + plural(c.nb_bdc, 'commande') : '') + '.</p><div class="list">';
-        cibles.slice(0, 80).forEach(function (t) {
-          h += '<div class="todo" data-a="fiche" data-id="' + esc(t.id_client) + '" tabindex="0"><div class="todo-v">Relancer<small>sans réponse</small></div><div><span class="lr-n">' + esc(propre(t.client_nom)) + '</span><p class="why">' + esc(siteNom(t.nom_site)) + '</p></div>'
-            + '<div><span class="tm ' + (t.anciennete_j >= 3 ? 'warn' : 'ok') + '"><b>' + (t.anciennete_j ? plural(t.anciennete_j, 'jour') : 'aujourd\'hui') + '</b><small>depuis le lancement</small></span></div></div>';
+      var libres = S.campLibres || [], noms = [];
+      S.campagnes.forEach(function (c) { if (noms.indexOf(c.campagne) < 0) noms.push(c.campagne); });
+      libres.forEach(function (t) { if (noms.indexOf(t.campagne) < 0) noms.push(t.campagne); });
+      if (!noms.length) return h + '<div class="empty">Aucune campagne en cours sur votre site ces 90 derniers jours.</div>';
+      noms.forEach(function (nom) {
+        var c = S.campagnes.find(function (x) { return x.campagne === nom; }) || {};
+        var cibles = (S.mesSollis || []).filter(function (t) { return t.campagne === nom; });
+        var dispo = libres.filter(function (t) { return t.campagne === nom; });
+        h += '<div class="sub"><h3>' + esc(nom) + '</h3><p>' + plural(dispo.length, 'client') + ' à prendre · ' + plural(Number(c.nb_sollicitations) || 0, 'client') + ' pris par vous · ' + (c.nb_traitees || 0) + ' traités'
+          + (Number(c.nb_propales) ? ' · ' + plural(c.nb_propales, 'proposition') : '') + (Number(c.nb_bdc) ? ' · ' + plural(c.nb_bdc, 'commande') : '') + '.</p>';
+        if (cibles.length) {
+          h += '<h4 class="camp-st">À relancer par vous</h4><div class="list">';
+          cibles.slice(0, 80).forEach(function (t) {
+            h += '<div class="lr" data-a="fiche" data-id="' + esc(t.id_client) + '" tabindex="0"><div><span class="tm ' + (t.anciennete_j >= 3 ? 'warn' : 'ok') + '"><b>' + (t.anciennete_j ? plural(t.anciennete_j, 'jour') : 'aujourd\'hui') + '</b><small>depuis le lancement</small></span></div>'
+              + '<div><span class="lr-n">' + esc(propre(t.client_nom)) + '</span><p class="lr-d">' + esc(siteNom(t.nom_site)) + '</p><div class="tags"><span class="tag camp">Campagne</span></div></div>'
+              + '<div class="lr-a"><button type="button" class="btn pri" data-a="fiche" data-id="' + esc(t.id_client) + '">Ouvrir la fiche</button> <button type="button" class="btn ghost sm" data-a="camp-rendre" data-id="' + esc(t.id_rapport) + '">Rendre</button></div></div>';
+          });
+          h += '</div>';
+        }
+        h += '<h4 class="camp-st">À prendre</h4><div class="list">';
+        if (!dispo.length) h += '<div class="empty">Tous les clients de cette campagne ont été pris.</div>';
+        dispo.slice(0, 120).forEach(function (t) {
+          h += '<div class="lr" tabindex="0"><div><span class="tm ' + (t.anciennete_j >= 3 ? 'warn' : 'ok') + '"><b>' + (t.anciennete_j ? plural(t.anciennete_j, 'jour') : 'aujourd\'hui') + '</b><small>depuis le lancement</small></span></div>'
+            + '<div><span class="lr-n">' + esc(propre(t.client_nom)) + '</span><p class="lr-d">' + esc([siteNom(t.nom_site), t.ville].filter(Boolean).join(' · ')) + '</p><div class="tags"><span class="tag camp">Campagne</span></div></div>'
+            + '<div class="lr-a"><button type="button" class="btn pri" data-a="camp-prendre" data-id="' + esc(t.id_rapport) + '">Je prends</button></div></div>';
         });
         h += '</div></div>';
       });
       return h;
+    }
+
+    async function campagneGeste(fn, id, okMsg) {
+      try {
+        var r = await rpc(fn, { p_id_rapport: Number(id) }) || {};
+        if (r.ok === false) toast(r.motif ? r.motif.charAt(0).toUpperCase() + r.motif.slice(1) + '.' : 'Action impossible.', true);
+        else toast(okMsg);
+      } catch (e) { toast(messageErreur(e), true); }
+      await chargerCampagnes(); render();
     }
 
     // ── Vues : chef des ventes (et direction sur un site) ─────────────────
@@ -5587,6 +5620,8 @@
         case 'renvoyer': return renvoyer(id);
         case 'clore-inj': if (S.dr) fermerDrawer(); await ouvrir(id); if (S.dr) { S.dr.mode = 'clore'; renderDrawer(); var mm = $drawer.querySelector('#clore-motif'); if (mm) mm.value = 'injoignable'; } return;
         case 'fiche': return ficheClient(id);
+        case 'camp-prendre': return campagneGeste('campagne_prendre', id, 'Client pris : il est dans vos relances de campagne.');
+        case 'camp-rendre': return campagneGeste('campagne_rendre', id, 'Client rendu : il est de nouveau à prendre.');
         case 'ancien':
           detruire();
           var legacy = await chargerLegacy();
@@ -6041,6 +6076,7 @@
 @media (max-width:600px){.lmtc .todo{grid-template-columns:minmax(0,1fr)}}
 .lmtc .sub{margin-top:16px;display:grid;gap:4px}
 .lmtc .sub h3{font-size:14px;font-weight:800;color:var(--bleu-dk)}
+.lmtc .camp-st{font-size:12px;font-weight:700;color:var(--bleu-dk);margin:14px 0 6px;letter-spacing:.02em}
 .lmtc .sub > p{font-size:12.5px;color:var(--mut);font-weight:600}
 /* Le mur */
 .lmtc table.mur{min-width:640px}
