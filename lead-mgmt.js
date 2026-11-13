@@ -1,6 +1,8 @@
 // ============================================================================
 //  LEAD MANAGEMENT — module One Data (OD.define 'lead-mgmt')
-//  VERSION TEAM COLIN (v120) — déploiement CIBLÉ (publish-targets :
+//  VERSION TEAM COLIN (v121) — déploiement CIBLÉ (publish-targets :
+//  v121 (13/11/2026) : le filtre Particuliers / Pros et l'étiquette « Pro »
+//    s'appliquent aussi au CONGÉLATEUR (RPC lead_clienteles_sf).
 //  v120 (13/11/2026) : PARTICULIER / PRO — étiquette « Pro » sur les leads
 //    professionnels (Nature Entreprise, SIRET, société, compte Entreprise :
 //    LEADS_EXTERNES.clientele via lead_clienteles()) et filtre
@@ -3036,7 +3038,7 @@
     // v70 : VN / VO comme dans la gestion des ventes : un liseret à gauche,
     // vert pour le VN, orange pour le VO (plus de pastille).
     // v120 : particulier / pro — seule l'étiquette « Pro » s'affiche.
-    function estPro(l) { return !!l && (l.clientele === 'pro' || (S.pros || {})[String(l.id_lead)] === 'pro'); }
+    function estPro(l) { return !!l && (l.clientele === 'pro' || (S.pros || {})[String(l.id_lead)] === 'pro' || (!!l.sf && (S.prosSf || {})[String(l.sf)] === 'pro')); }
     function univTag(l) { return estPro(l) ? '<span class="tag pro" title="Client professionnel (société, SIRET ou demande Entreprise dans BACS)">Pro</span>' : ''; }
     function univCls(l) { return l && l.univers === 'VN' ? ' vt-vn' : l && l.univers === 'VO' ? ' vt-vo' : ''; }
     function segCli() {
@@ -5498,7 +5500,8 @@
       return (S.cong || []).filter(function (c) {
         return (sid == null || Number(c.id_site) === Number(sid))
           && (!S.comme || S.comme.sites.indexOf(Number(c.id_site)) !== -1)
-          && (u === 'tous' || !c.univers || c.univers === u);
+          && (u === 'tous' || !c.univers || c.univers === u)
+          && (S.cli === 'tous' || (estPro(c) ? 'pro' : 'part') === S.cli);   // v121
       });
     }
     // Période : 30 jours par défaut, 90 / 120 jours, ou « depuis le » une date choisie.
@@ -5510,6 +5513,11 @@
     async function chargerCong() {
       var r = await rpc('poste_congelateur', { p_sites: null, p_depuis: congDepuis() });
       S.cong = r || [];
+      // v121 : particulier / pro des leads du congélateur
+      try {
+        var sfs = S.cong.map(function (c) { return c.sf; }).filter(Boolean);
+        S.prosSf = sfs.length ? (await rpc('lead_clienteles_sf', { p_sfs: sfs }) || {}) : {};
+      } catch (e) { S.prosSf = S.prosSf || {}; }
     }
     async function congPeriode(j, du) {
       S.congJ = j || null; S.congDu = du || null; S.cong = null; render();
@@ -5539,7 +5547,7 @@
           + '<p class="lr-d">' + esc(dem) + (c.abandonne_le ? ' · abandonné le ' + esc(jour(c.abandonne_le)) : '') + '</p>'
           + '<p class="why">Motif : <b>' + esc(c.motif || 'non renseigné') + '</b>' + (c.abandonne_par ? ' · ' + esc(propre(c.abandonne_par)) : '') + (c.commentaire ? ' · « ' + esc(String(c.commentaire).slice(0, 120)) + ' »' : '') + '</p>'
           + (c.remis_le ? '<p class="why">Remis au congélateur par <b>' + esc(propre(c.remis_par || 'un collègue')) + '</b> le ' + esc(jour(c.remis_le)) + (c.remis_commentaire ? ' · « ' + esc(String(c.remis_commentaire).slice(0, 160)) + ' »' : '') + '</p>' : '') + '</div>'
-          + '<div class="src"><span class="tag">' + esc(c.source_bacs || 'BACS') + '</span></div>'
+          + '<div class="src">' + univTag(c) + '<span class="tag">' + esc(c.source_bacs || 'BACS') + '</span></div>'
           + '<div class="lr-a">' + a + '</div></div>';
       });
       return h + '</div>';
