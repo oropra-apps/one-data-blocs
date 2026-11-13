@@ -1,5 +1,8 @@
 // ============================================================================
-//  VROOM TEAM (plateau) — module One Data (OD.define 'plateau')  v10
+//  VROOM TEAM (plateau) — module One Data (OD.define 'plateau')  v11
+//  v11 (13/11/2026) : ALERTE BACS EN GRAND — quand BACS refuse un geste de la
+//    Vroom Team, grand bandeau rouge (client, geste, raison) + bouton « Signaler
+//    au support » (O « Ça bug », détails copiés) et mail du support.
 //  v10 (12/11/2026) : RECHERCHE d'un lead dans l'écran d'attente (nom,
 //    téléphone, e-mail, identifiant BACS) : un client rappelle ou un lead est
 //    signalé → l'opératrice le trouve et le prend directement (plateau_chercher,
@@ -167,6 +170,12 @@
       '.odpl .pill{padding:4px 12px;border-radius:999px;font-weight:800;font-size:12.5px;white-space:nowrap}',
       '.odpl .pill.r{background:var(--robg);color:var(--ro2)}.odpl .pill.o{background:var(--orbg);color:var(--or2)}.odpl .pill.b{background:var(--bgb);color:var(--bl2)}.odpl .pill.v{background:var(--vebg);color:var(--ve2)}',
       // bandeaux
+      '.odpl .ba{margin:18px 28px 0;background:#FDECEA;border:2px solid #B42318;border-radius:14px;padding:16px 18px;color:#7A1F14}',
+      '.odpl .ba-t{display:flex;gap:12px;align-items:flex-start}.odpl .ba-i{flex:0 0 34px;height:34px;border-radius:50%;background:#B42318;color:#fff;font-weight:900;font-size:20px;display:flex;align-items:center;justify-content:center}',
+      '.odpl .ba-t b{display:block;font-size:19px;font-weight:900;color:#B42318;margin-bottom:2px}.odpl .ba-t span{font-size:14px;font-weight:700}',
+      '.odpl .ba ul{margin:12px 0 0 46px;padding:0;list-style:disc;font-size:14px}.odpl .ba li{margin:4px 0}.odpl .ba li small{display:block;color:#8a3a2e;font-size:12.5px}',
+      '.odpl .ba-a{display:flex;flex-wrap:wrap;gap:8px 14px;align-items:center;margin:14px 0 0 46px;font-size:13.5px}.odpl .ba a{color:#B42318;font-weight:800}',
+      '.odpl .ba-b{background:#B42318;border:0;color:#fff;font:inherit;font-weight:800;padding:9px 16px;border-radius:10px;cursor:pointer}',
       '.odpl .ban{margin:18px 28px 0;padding:14px 18px;border-radius:14px;display:flex;flex-wrap:wrap;gap:8px 16px;align-items:center;font-size:13.5px}',
       '.odpl .ban.warn{background:var(--orbg);color:#5c3d00;border:1px solid #f3dca2}.odpl .ban.err{background:var(--robg);color:var(--ro2);border:1px solid #f3c4c3}',
       // grille principale
@@ -461,9 +470,47 @@
         + '<div class="who"><i>' + esc(initiales(user.nomComplet || ((user.prenom || '') + ' ' + (user.nom || '')))) + '</i><div><b>' + esc(propre(user.prenom || user.nomComplet || 'Moi')) + '</b>'
         + (b.ecrire_bacs ? (b.canal === 'moi' ? '<small>BACS ✓</small>' : '<small class="ko">BACS fermé</small>') : '<small>BACS non requis</small>') + '</div></div></header>';
     }
+    // v11 : refus de BACS, en grand
+    var GESTE_LIB = { lead_creer: 'Création du lead dans BACS', statut: 'Mise à jour du lead dans BACS', injoignable: 'Injoignable dans BACS',
+      rdv: 'RDV dans BACS', evt_creer: 'RDV dans l\'agenda BACS', evt_maj: 'Modification de RDV dans BACS', relance: 'Relance dans BACS' };
+    function texteRefus(b) {
+      return 'Gestes refusés par BACS :\n' + ((b && b.refus) || []).map(function (x) {
+        return '- ' + (x.client || 'Client') + (x.site ? ' (' + x.site + ')' : '') + ' : ' + (GESTE_LIB[x.geste] || x.geste)
+          + ' · envoi n°' + x.id + (x.sf ? ' · lead BACS ' + x.sf : '') + (x.erreur ? ' · ' + x.erreur : '');
+      }).join('\n');
+    }
+    function alerteRefus() {
+      var b = S.bacs, ls = (b && b.refus) || [];
+      if (!ls.length) return '';
+      var mail = b.support_email || '';
+      var h = '<section class="ba" role="alert"><div class="ba-t"><span class="ba-i">!</span><div><b>'
+        + (ls.length > 1 ? ls.length + ' gestes refusés par BACS' : '1 geste refusé par BACS')
+        + '</b><span>Ces leads ne sont PAS à jour dans BACS. Ne les retraitez pas : signalez-les au support, il les corrige.</span></div></div><ul>';
+      ls.slice(0, 5).forEach(function (x) {
+        h += '<li><b>' + esc(x.client || 'Client') + '</b>' + (x.site ? ' · ' + esc(x.site) : '') + ' · ' + esc(GESTE_LIB[x.geste] || x.geste)
+          + (x.le ? ' · ' + esc(new Date(x.le).toLocaleString('fr-FR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })) : '')
+          + (x.par ? ' · par ' + esc(x.par) : '') + (x.erreur ? '<small>' + esc(x.erreur) + '</small>' : '') + '</li>';
+      });
+      if (ls.length > 5) h += '<li><small>… et ' + (ls.length - 5) + ' autre(s).</small></li>';
+      return h + '</ul><div class="ba-a"><button type="button" class="ba-b" data-a="bacs-signaler">Signaler au support</button>'
+        + (mail ? '<span>ou écrivez à <a href="mailto:' + esc(mail) + '?subject=' + encodeURIComponent('Refus BACS (One Data)') + '&body=' + encodeURIComponent(texteRefus(b)) + '">' + esc(mail) + '</a></span>' : '')
+        + '</div></section>';
+    }
+    function signalerRefus() {
+      var FW = frontWindow(), txt = texteRefus(S.bacs), o = null;
+      try { FW.navigator.clipboard.writeText(txt); } catch (e) {}
+      o = odGlobal();
+      if (o && o.retours && typeof o.retours.ouvrir === 'function') {
+        try { o.retours.ouvrir('bug'); toast(doc, 'Le détail des refus est copié : collez-le dans le message (Ctrl+V), puis Envoyer.'); return; } catch (e) {}
+      }
+      var mail = (S.bacs && S.bacs.support_email) || '';
+      if (mail) { try { FW.location.href = 'mailto:' + mail + '?subject=' + encodeURIComponent('Refus BACS (One Data)') + '&body=' + encodeURIComponent(txt); } catch (e) {} }
+      else toast(doc, 'Le détail des refus est copié dans le presse-papiers.');
+    }
     function bandeBacs() {
-      if (!bacsBloque()) return '';
-      return '<div class="ban warn" role="status"><b>BACS est fermé sur ce poste.</b><span>Chaque lead servi est accepté dans BACS à votre nom : ouvrez BACS dans un onglet de ce navigateur, avec l\'extension One Data. Le poste se débloque dès qu\'il répond.</span></div>';
+      var ar = alerteRefus();
+      if (!bacsBloque()) return ar;
+      return ar + '<div class="ban warn" role="status"><b>BACS est fermé sur ce poste.</b><span>Chaque lead servi est accepté dans BACS à votre nom : ouvrez BACS dans un onglet de ce navigateur, avec l\'extension One Data. Le poste se débloque dès qu\'il répond.</span></div>';
     }
     function pilule(f) {
       var r = RAISON[f.raison] || RAISON.pool, txt;
@@ -906,6 +953,7 @@
       switch (a) {
         case 'servir': return servir();
         case 'servir-sf': return servir(id);
+        case 'bacs-signaler': return signalerRefus();   // v11
         case 'servir-q': return servirRecherche(id);
         case 'voir-rappels': S.voirRappels = !S.voirRappels; render(); return;
         case 'pause':
