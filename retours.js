@@ -1,3 +1,6 @@
+// v13 (13/11/2026) : les conversations se replient. Repliée, une conversation ne montre
+// que son premier message (2 lignes), sa date, son statut et le nombre d'échanges ;
+// un clic la déplie ou la replie. Dépliées d'office : celles qui ont une réponse non lue.
 // v12 (13/11/2026) : chaque retour s'affiche comme une conversation (le message
 // d'origine en premier, puis les échanges), les plus récentes en tête. L'utilisateur
 // peut supprimer une conversation de son fil (elle reste visible de l'équipe).
@@ -38,7 +41,7 @@
 // ============================================================================
 OD.define('retours', {
   mount(__anchor, ctx) {
-    const VERSION = 12;   // v5 : écran courant fourni par pulse (plus grande surface visible, accessoires exclus)
+    const VERSION = 13;   // v5 : écran courant fourni par pulse (plus grande surface visible, accessoires exclus)
                          // v4 : « Montrer l'endroit » nomme la zone désignée (titre du bloc, colonne, champ, type)
     const W = window;
 
@@ -254,7 +257,15 @@ textarea:focus{border-color:#1F4A85;outline:none}
 .rpz .rpa{flex-basis:100%}
 .lkb.sup{color:#8A5300;font-weight:600}
 .cf{flex-basis:100%;display:flex;flex-wrap:wrap;align-items:center;gap:8px;font-size:12.5px;color:#14305A}
-.it.chat p{display:none}
+.it.chat .tete{all:unset;display:block;cursor:pointer;border-radius:8px}
+.it.chat .tete:focus-visible{outline:2px solid #1F4A85;outline-offset:2px}
+.it.chat .tete p{-webkit-line-clamp:2}
+.it.chat.ouv .tete p{display:none}
+.it.chat .nb{display:inline-flex;align-items:center;gap:3px;font-weight:700;color:#1F4A85}
+.it.chat .nb svg{width:12px;height:12px;transition:transform .15s}
+.it.chat.ouv .nb svg{transform:rotate(180deg)}
+.it.chat .conv{display:none}
+.it.chat.ouv .conv{display:block}
 .rpz textarea{min-height:64px}
 .rpa{display:flex;gap:8px;justify-content:flex-end;align-items:center;margin-top:6px}
 .rpa small{margin-right:auto;font-size:12px;color:#B3261E}
@@ -978,6 +989,16 @@ textarea:focus{border-color:#1F4A85;outline:none}
       }
     }
 
+    // Conversations dépliées ou repliées à la main, gardées le temps de la session.
+    const convOuvertes = new Set(), convFermees = new Set();
+    function basculerConversation(el) {
+      if (!el) return;
+      const id = el.dataset.conv, ouvert = !el.classList.contains('ouv');
+      el.classList.toggle('ouv', ouvert);
+      const t = el.querySelector('.tete'); if (t) t.setAttribute('aria-expanded', String(ouvert));
+      if (ouvert) { convOuvertes.add(id); convFermees.delete(id); } else { convFermees.add(id); convOuvertes.delete(id); }
+    }
+
     let chargement = null;
     async function chargerMesRetours() {
       if (chargement) return chargement;
@@ -998,12 +1019,17 @@ textarea:focus{border-color:#1F4A85;outline:none}
           } else {
             liste.innerHTML = items.map(it => {
               const h = HUM[it.humeur] || HUM.idee;
-              return `<div class="it chat${it.non_lu ? ' nl' : ''}">
+              const ouvert = convOuvertes.has(it.id) || (!convFermees.has(it.id) && it.non_lu);
+              if (ouvert) convOuvertes.add(it.id);
+              const n = 1 + (Array.isArray(it.messages) ? it.messages.length : (it.reponse ? 1 : 0));
+              return `<div class="it chat${it.non_lu ? ' nl' : ''}${ouvert ? ' ouv' : ''}" data-conv="${esc(it.id)}">
                 <span class="ic" style="--c:${h.c};--f:${h.f}" title="${esc(h.label)}">${I[h.id]}</span>
                 <div>
-                  <p>${esc(it.extrait || h.label)}</p>
-                  <div class="mt"><span>${esc(ilya(it.cree_le))}</span>${it.module ? `<span>${esc(libelleModule(it.module))}</span>` : ''}<span class="st ${esc(it.statut)}">${esc(STATUTS[it.statut] || it.statut)}</span></div>
-                  ${filHtml(it)}
+                  <button type="button" class="tete" data-a="conv-basculer" aria-expanded="${ouvert}">
+                    <p>${esc(it.extrait || h.label)}</p>
+                    <div class="mt"><span>${esc(ilya(it.cree_le))}</span>${it.module ? `<span>${esc(libelleModule(it.module))}</span>` : ''}<span class="st ${esc(it.statut)}">${esc(STATUTS[it.statut] || it.statut)}</span><span class="nb">${n} message${n > 1 ? 's' : ''}<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg></span></div>
+                  </button>
+                  <div class="conv">${filHtml(it)}</div>
                 </div>
               </div>`;
             }).join('');
@@ -1172,6 +1198,7 @@ textarea:focus{border-color:#1F4A85;outline:none}
       else if (a === 'cible-suppr') { br.cible = null; rendrePJ(); majEcran(); }
       else if (a === 'pk-annuler') finPick();
       else if (a === 'envoyer') envoyer();
+      else if (a === 'conv-basculer') basculerConversation(b.closest('.it'));
       else if (a === 'rep-ouvrir') ouvrirReponse(b.closest('.rpz'));
       else if (a === 'rep-annuler' || a === 'sup-annuler') { const z = b.closest('.rpz'); z.outerHTML = actionsHtml(z.dataset.retour); }
       else if (a === 'sup-demander') demanderSuppression(b.closest('.rpz'));
