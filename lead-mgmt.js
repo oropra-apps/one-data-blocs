@@ -1,6 +1,13 @@
 // ============================================================================
 //  LEAD MANAGEMENT — module One Data (OD.define 'lead-mgmt')
-//  VERSION TEAM COLIN (v117) — déploiement CIBLÉ (publish-targets :
+//  VERSION TEAM COLIN (v118) — déploiement CIBLÉ (publish-targets :
+//  v118 (13/11/2026) : CAMPAGNES — PANNEAU DE TRAITEMENT à droite, comme un lead.
+//    « Je prends » ouvre le panneau ; un clic sur un client « À relancer par vous »
+//    aussi. On y trouve les numéros (appel 3CX / One Data / tel:), l'e-mail, le
+//    véhicule, les raisons, puis le résultat : RDV pris (pose le RDV dans l'agenda),
+//    à rappeler (relance datée), messagerie (relance le lendemain 10 h), pas
+//    intéressé, déjà équipé, ne plus appeler. « Rendre » passe dans le panneau.
+//    RPC campagne_contact, campagne_traiter.
 //  v117 (13/11/2026) : la pastille de l'onglet « Campagnes » passe en VERT (comme
 //    la nouvelle pastille campagnes de la barre de navigation, topnav v45).
 //  v116 (13/11/2026) : CAMPAGNES (vendeur) — indicateurs de suivi en tête de chaque
@@ -4032,7 +4039,7 @@
       var dejaSimu = ((x && x.raisons) || []).some(function (r) { return /^Simulation/.test(r); });
       var faits = [inf.simulation_bacs && !dejaSimu ? 'Simulation BACS le ' + dt(inf.simulation_bacs) : '', inf.ca_atelier_6m ? nb(Math.round(Number(inf.ca_atelier_6m))) + ' € HT d\'atelier sur 6 mois' : '',
                    coord.length ? 'Joignable par ' + coord.join(', ') : 'Aucune coordonnée'].filter(Boolean).join(' · ');
-      return '<div class="lr cp-l"' + (cliquable ? ' data-a="fiche" data-id="' + esc(t.id_client) + '"' : '') + ' tabindex="0"><div>' + gauche + '</div>'
+      return '<div class="lr cp-l"' + (cliquable ? ' data-a="' + (cliquable === true ? 'fiche' : cliquable) + '" data-id="' + esc(cliquable === true ? t.id_client : t.id_rapport) + '"' : '') + ' tabindex="0"><div>' + gauche + '</div>'
         + '<div><span class="lr-n">' + esc(propre(t.client_nom)) + '</span>' + (inf.segment === 'pro' ? ' <span class="tag">PRO</span>' : '') + '<p class="lr-d">' + esc(lieu) + '</p>'
         + vehs + (rais ? '<div class="cp-rs">' + rais + '</div>' : '') + (x ? '<p class="cp-f">' + esc(faits) + '</p>' : '') + '</div>'
         + '<div class="lr-a">' + actions + '</div></div>';
@@ -4086,7 +4093,7 @@
           h += '<h4 class="camp-st">À relancer par vous' + (filtre ? ' · ' + cibles.length + ' sur ' + toutesMiennes.length : '') + '</h4><div class="list">';
           if (!cibles.length) h += '<div class="empty">Aucun de vos clients ne correspond aux filtres.</div>';
           cibles.slice(0, 80).forEach(function (t) {
-            h += ligneCamp(t, '<button type="button" class="btn pri" data-a="fiche" data-id="' + esc(t.id_client) + '">Ouvrir la fiche</button> <button type="button" class="btn ghost sm" data-a="camp-rendre" data-id="' + esc(t.id_rapport) + '">Rendre</button>', true);
+            h += ligneCamp(t, '<button type="button" class="btn pri" data-a="camp-traiter" data-id="' + esc(t.id_rapport) + '">Traiter</button>', 'camp-traiter');
           });
           h += '</div>';
         }
@@ -4119,13 +4126,130 @@
     }
 
     async function campagneGeste(fn, id, okMsg) {
+      var ok = false;
       try {
         var r = await rpc(fn, { p_id_rapport: Number(id) }) || {};
         if (r.ok === false) toast(r.motif ? r.motif.charAt(0).toUpperCase() + r.motif.slice(1) + '.' : 'Action impossible.', true);
-        else toast(okMsg);
+        else { toast(okMsg); ok = true; }
       } catch (e) { toast(messageErreur(e), true); }
+      if (fn === 'campagne_rendre' && S.cdr) fermerTout();
       await chargerCampagnes(); render();
+      if (ok && fn === 'campagne_prendre') await campOuvrir(id);
     }
+
+    // ── v118 : panneau de traitement d'un client de campagne ──────────────
+    var CD_RES = [['rdv', 'RDV pris', 'ok'], ['rappeler', 'À rappeler', ''], ['messagerie', 'Messagerie', ''],
+                  ['pas_interesse', 'Pas intéressé', 'neg'], ['deja_equipe', 'Déjà équipé', 'neg'], ['ne_plus_appeler', 'Ne plus appeler', 'neg']];
+    function cdDate(d) { var p = function (n) { return (n < 10 ? '0' : '') + n; }; return d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate()); }
+    async function campOuvrir(id) {
+      var t = (S.mesSollis || []).find(function (x) { return Number(x.id_rapport) === Number(id); });
+      if (!t) { toast('Ce client n\'est plus dans vos relances.', true); return; }
+      fermerTout();
+      S.cdr = { id: Number(id), t: t, ct: null, mode: null, com: '', busy: false };
+      $scrim.hidden = false; $drawer.hidden = false;
+      renderCampDrawer();
+      try {
+        var ct = await rpc('campagne_contact', { p_id_rapport: Number(id) }) || {};
+        if (S.cdr && S.cdr.id === Number(id)) { S.cdr.ct = ct; renderCampDrawer(); }
+      } catch (e) { if (S.cdr) { S.cdr.ct = { ok: false, motif: messageErreur(e) }; renderCampDrawer(); } }
+    }
+    function renderCampDrawer() {
+      var D = S.cdr; if (!D) return;
+      var t = D.t, x = campInfo(t) || {}, inf = x.infos || {}, ct = D.ct || {};
+      var X = '<button type="button" class="x" data-a="close" aria-label="Fermer"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg></button>';
+      var sc = x.priorite != null ? Number(x.priorite) : null;
+      var h = '<header class="dr-h"><div class="cd-hd">' + (sc != null ? '<div class="cp-prio ' + (sc >= 45 ? 'haut' : sc >= 25 ? 'moy' : 'bas') + '">' + sc + '<small>PRIO</small></div>' : '')
+        + '<div><h2>' + esc(propre(t.client_nom)) + '</h2><p class="cd-sous">' + esc(t.campagne) + ' · ' + esc(siteNom(t.nom_site)) + (inf.segment === 'pro' ? ' · PRO' : '') + '</p></div></div>' + X + '</header><div class="dr-b">';
+      // Joindre
+      h += '<section><h3>Joindre le client</h3>';
+      if (!D.ct) h += '<p class="cd-mut">Chargement des coordonnées…</p>';
+      else if (ct.ok === false) h += '<p class="cd-mut">' + esc(ct.motif || 'Coordonnées indisponibles') + '</p>';
+      else {
+        var b = '';
+        if (ct.mobile) b += '<button type="button" class="btn pri" data-a="cd-appel" data-id="' + esc(ct.mobile) + '">Appeler le mobile · ' + esc(fTelCd(ct.mobile)) + '</button>';
+        if (ct.fixe) b += '<button type="button" class="btn" data-a="cd-appel" data-id="' + esc(ct.fixe) + '">Appeler le fixe · ' + esc(fTelCd(ct.fixe)) + '</button>';
+        if (ct.email) b += '<a class="btn ghost" href="mailto:' + esc(ct.email) + '">' + esc(ct.email) + '</a>';
+        h += '<div class="cd-btns">' + (b || '<span class="cd-mut">Aucune coordonnée.</span>') + '</div>'
+          + '<button type="button" class="lien" data-a="fiche" data-id="' + esc(t.id_client) + '">Ouvrir la fiche client ›</button>';
+      }
+      h += '</section>';
+      // Pourquoi
+      var vehs = (x.vehicules || []).map(function (v) {
+        var mod = [String(v.marque || '').toUpperCase() === 'LEXUS' ? 'Lexus' : (v.marque || ''), v.modele || ''].filter(Boolean).join(' ') || 'Véhicule';
+        var an = v.pmec ? (v.pmec_estimee ? '≈ ' : '') + String(v.pmec).slice(0, 4) : '';
+        return '<div class="cp-veh"><b>' + esc(mod) + '</b> · ' + esc([v.immat, an, v.km ? Number(v.km).toLocaleString('fr-FR') + ' km' : ''].filter(Boolean).join(' · ')) + '</div>';
+      }).join('');
+      var rais = (x.raisons || []).map(function (r) {
+        var cls = /^Commande|achat récent/.test(r) ? ' vigil' : /^Simulation|renouvellement/.test(r) ? ' fort' : '';
+        return '<span class="cp-r' + cls + '">' + esc(r) + '</span>';
+      }).join('');
+      if (vehs || rais) h += '<section><h3>Pourquoi l\'appeler</h3>' + vehs + (rais ? '<div class="cp-rs">' + rais + '</div>' : '')
+        + ((x.raisons || []).some(function (r) { return /^Simulation BACS .* par /.test(r); }) ? '<p class="cd-mut">Une simulation faite par un collègue apparaît sans détail dans P.Commerciales, rubrique « Chez vos collègues ».</p>' : '') + '</section>';
+      // Résultat
+      h += '<section><h3>Résultat de l\'appel</h3><div class="cd-res">' + CD_RES.map(function (r) {
+        return '<button type="button" class="cd-r ' + r[2] + (D.mode === r[0] ? ' on' : '') + '" data-a="cd-res" data-id="' + r[0] + '">' + r[1] + '</button>';
+      }).join('') + '</div>';
+      if (D.mode) {
+        var demain = new Date(Date.now() + 86400000);
+        if (D.mode === 'rdv' || D.mode === 'rappeler') {
+          h += '<div class="cd-form"><label>' + (D.mode === 'rdv' ? 'Date du rendez-vous' : 'Rappeler le') + '<input type="date" id="cd-date" value="' + esc(D.date || cdDate(demain)) + '" min="' + cdDate(new Date()) + '"></label>'
+            + '<label>' + (D.mode === 'rdv' ? 'Début' : 'Heure') + '<input type="time" id="cd-h1" value="' + esc(D.h1 || '10:00') + '" step="900"></label>'
+            + (D.mode === 'rdv' ? '<label>Fin<input type="time" id="cd-h2" value="' + esc(D.h2 || '11:00') + '" step="900"></label>' : '') + '</div>';
+        } else if (D.mode === 'messagerie') {
+          h += '<p class="cd-mut">Une relance est programmée demain à 10 h dans votre onglet « Relances ».</p>';
+        }
+        h += '<label class="cd-lab">Commentaire (facultatif)<textarea id="cd-com" rows="2" placeholder="Ce que le client a dit…">' + esc(D.com || '') + '</textarea></label>'
+          + '<div class="cd-btns"><button type="button" class="btn pri" data-a="cd-valider"' + (D.busy ? ' disabled' : '') + '>' + (D.busy ? 'Enregistrement…' : 'Enregistrer') + '</button></div>';
+      }
+      h += '</section></div><footer class="dr-f"><div class="row pied"><span class="cd-mut">Pas pour vous ? Remettez-le à disposition de l\'équipe.</span><button type="button" class="btn ghost sm" data-a="camp-rendre" data-id="' + D.id + '">Rendre</button></div></footer>';
+      $drawer.innerHTML = h;
+    }
+    function fTelCd(n) {
+      var s2 = String(n || '').replace(/\s/g, '');
+      if (/^\+33\d{9}$/.test(s2)) s2 = '0' + s2.slice(3);
+      return /^0\d{9}$/.test(s2) ? s2.replace(/(\d{2})(?=\d)/g, '$1 ') : String(n || '');
+    }
+    function campAppeler(num) {
+      var D = S.cdr; if (!D) return;
+      var nom = propre(D.t.client_nom), client = { IDVu: D.t.id_client, TEl_MOB: num, EMAIL: (D.ct || {}).email, nom: nom, prenom: '' };
+      try {
+        if (__lmPeutAppeler()) {
+          var cx = pick3cx(), n = normTel(num);
+          if (cx && n) { cx.appeler(n, { nom: nom, idvu: D.t.id_client }); return; }
+          var w = (window.parent && window.parent.__VOIP_UI__) || window.__VOIP_UI__ || FW.__VOIP_UI__;
+          if (w && w.call) { w.call(num, client); return; }
+        }
+        FW.open('tel:' + String(num || '').replace(/[^0-9+]/g, ''), '_self');
+      } catch (e) { toast('Appel impossible : ' + messageErreur(e), true); }
+    }
+    function cdLire() {
+      var D = S.cdr; if (!D) return;
+      var q = function (sel) { var e = $drawer.querySelector(sel); return e ? e.value : null; };
+      if (q('#cd-com') != null) D.com = q('#cd-com');
+      if (q('#cd-date') != null) D.date = q('#cd-date');
+      if (q('#cd-h1') != null) D.h1 = q('#cd-h1');
+      if (q('#cd-h2') != null) D.h2 = q('#cd-h2');
+    }
+    async function cdValider() {
+      var D = S.cdr; if (!D || !D.mode || D.busy) return;
+      cdLire();
+      var deb = null, fin = null;
+      if (D.mode === 'rdv' || D.mode === 'rappeler') {
+        if (!D.date || !D.h1) { toast('Indiquez la date et l\'heure.', true); return; }
+        deb = D.date + ' ' + D.h1 + ':00';
+        if (D.mode === 'rdv') { fin = D.date + ' ' + (D.h2 || D.h1) + ':00'; if (fin <= deb) { toast('La fin du rendez-vous doit suivre son début.', true); return; } }
+        if (new Date(D.date + 'T' + D.h1 + ':00') < new Date()) { toast('Choisissez une date à venir.', true); return; }
+      }
+      D.busy = true; renderCampDrawer();
+      try {
+        var r = await rpc('campagne_traiter', { p_id_rapport: D.id, p_resultat: D.mode, p_debut: deb, p_fin: fin, p_commentaire: D.com || null }) || {};
+        if (r.ok === false) { D.busy = false; renderCampDrawer(); toast(r.motif ? r.motif.charAt(0).toUpperCase() + r.motif.slice(1) + '.' : 'Enregistrement impossible.', true); return; }
+        var lib = { rdv: 'Rendez-vous posé dans votre agenda.', rappeler: 'Relance programmée dans « Relances ».', messagerie: 'Relance programmée demain à 10 h.' }[D.mode] || 'Résultat enregistré.';
+        fermerTout(); toast(lib);
+        await chargerCampagnes(); render();
+      } catch (e) { D.busy = false; renderCampDrawer(); toast(messageErreur(e), true); }
+    }
+    ov.addEventListener('input', function (ev) { if (S.cdr && ev.target && ev.target.id === 'cd-com') S.cdr.com = ev.target.value; });
 
     // ── Vues : chef des ventes (et direction sur un site) ─────────────────
     function compter(liste) {
@@ -5227,7 +5351,7 @@
     function fermerDrawer() { if (S.cell) { S.dr = null; renderVolet(); return; } fermerTout(); }
     function fermerTout() {
       var avait = !!S.cell;
-      S.dr = null; S.cell = null; $scrim.hidden = !S.modal; $drawer.hidden = true; $drawer.innerHTML = ''; $drawer.classList.remove('full');
+      S.dr = null; S.cdr = null; S.cell = null; $scrim.hidden = !S.modal; $drawer.hidden = true; $drawer.innerHTML = ''; $drawer.classList.remove('full');
       if (avait) render();
     }
 
@@ -5721,6 +5845,10 @@
         case 'camp-prendre': return campagneGeste('campagne_prendre', id, 'Client pris : il est dans vos relances de campagne.');
         case 'camp-rendre': return campagneGeste('campagne_rendre', id, 'Client rendu : il est de nouveau à prendre.');
         case 'cp-raz': S.cf = { q: '', mod: '', flt: '' }; render(); return;
+        case 'camp-traiter': return campOuvrir(id);
+        case 'cd-appel': return campAppeler(id);
+        case 'cd-res': if (S.cdr) { cdLire(); S.cdr.mode = S.cdr.mode === id ? null : id; renderCampDrawer(); } return;
+        case 'cd-valider': return cdValider();
         case 'ancien':
           detruire();
           var legacy = await chargerLegacy();
@@ -6190,6 +6318,32 @@
 .lmtc .cp-r.fort{border-color:var(--bleu);color:var(--bleu-dk);font-weight:700}
 .lmtc .cp-r.vigil{border-color:var(--rouge);color:var(--m-rouge);font-weight:700}
 .lmtc .cp-f{margin-top:6px;font-size:12px;color:var(--ink-3)}
+.lmtc-ov .cd-hd{display:flex;gap:12px;align-items:center}
+.lmtc-ov .cd-hd .cp-prio{margin:0;width:48px;height:48px;font-size:18px}
+.lmtc-ov .cd-sous{font-size:12.5px;color:var(--ink-2);margin-top:2px}
+.lmtc-ov .cd-mut{font-size:12.5px;color:var(--ink-3)}
+.lmtc-ov .cd-btns{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.lmtc-ov .cd-res{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}
+.lmtc-ov .cd-r{font:inherit;font-size:13px;font-weight:700;border:1.5px solid var(--line-2);background:var(--card);color:var(--bleu-dk);border-radius:10px;padding:10px 8px;cursor:pointer}
+.lmtc-ov .cd-r.ok{border-color:var(--vert);color:var(--m-vert)}
+.lmtc-ov .cd-r.neg{color:var(--m-rouge)}
+.lmtc-ov .cd-r.on{background:var(--bleu);border-color:var(--bleu);color:#fff}
+.lmtc-ov .cd-r.ok.on{background:var(--m-vert);border-color:var(--m-vert)}
+.lmtc-ov .cd-r.neg.on{background:var(--m-rouge);border-color:var(--m-rouge)}
+.lmtc-ov .cd-form{display:flex;flex-wrap:wrap;gap:10px;margin-top:4px}
+.lmtc-ov .cd-form label,.lmtc-ov .cd-lab{display:grid;gap:4px;font-size:12px;font-weight:700;color:var(--ink-2)}
+.lmtc-ov .cd-form input,.lmtc-ov .cd-lab textarea{font:inherit;font-size:13.5px;color:var(--ink);border:1px solid var(--line-2);border-radius:9px;padding:8px 10px;background:var(--card)}
+.lmtc-ov .cd-lab textarea{resize:vertical;min-height:56px}
+.lmtc-ov .cp-veh{margin-top:2px;background:var(--calme-bg);border-radius:8px;padding:6px 10px;font-size:12.5px;color:var(--ink-2)}
+.lmtc-ov .cp-veh b{color:var(--bleu-dk)}
+.lmtc-ov .cp-rs{display:flex;flex-wrap:wrap;gap:5px}
+.lmtc-ov .cp-r{font-size:11.5px;border:1px solid var(--line-2);border-radius:999px;padding:2px 9px;color:var(--ink-2);background:var(--card)}
+.lmtc-ov .cp-r.fort{border-color:var(--bleu);color:var(--bleu-dk);font-weight:700}
+.lmtc-ov .cp-r.vigil{border-color:var(--rouge);color:var(--m-rouge);font-weight:700}
+.lmtc-ov .cp-prio{display:flex;flex-direction:column;align-items:center;justify-content:center;border-radius:12px;background:var(--bleu);color:#fff;font-weight:800;line-height:1}
+.lmtc-ov .cp-prio small{font-size:8.5px;font-weight:700;letter-spacing:.06em;margin-top:3px}
+.lmtc-ov .cp-prio.moy{background:var(--mut)}.lmtc-ov .cp-prio.bas{background:var(--bleu-clair);color:var(--bleu-dk)}
+@media (max-width:600px){.lmtc-ov .cd-res{grid-template-columns:repeat(2,minmax(0,1fr))}}
 .lmtc .cp-flt{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin:4px 0 14px}
 .lmtc .cp-flt input,.lmtc .cp-flt select{font:inherit;font-size:13px;color:var(--ink);background:var(--card);border:1px solid var(--line-2);border-radius:9px;padding:8px 11px;min-height:38px}
 .lmtc .cp-flt input{flex:1 1 240px;min-width:0}
