@@ -1,5 +1,9 @@
 // ============================================================================
-//  TOP NAV — module One Data (OD.define)  v44 — SÉLECTEUR DE PÉRIMÈTRE
+//  TOP NAV — module One Data (OD.define)  v45 — SÉLECTEUR DE PÉRIMÈTRE
+//  v45 (13/11/2026) : à droite de la pastille du Pool (Leads), une pastille VERTE
+//    compte les clients à relancer dans les campagnes du site choisi : ceux à
+//    prendre en libre-service et ceux déjà pris par l'utilisateur, non traités
+//    (RPC campagne_compte(p_id_site)). Même rafraîchissement que le Pool.
 //  v44 (06/11/2026) : Vroom Team (rôle 10) — plus de page Notifications
 //    (« On vous attend ») ni de pastille sur « Clients » : ses rappels sont
 //    dans son poste (« Rappels dus »). Pastille « Clients » aussi retirée
@@ -469,6 +473,7 @@ OD.define('topnav', {
 .od-pill[data-feu="calme"]{background:#8b99b0;color:#fff}
 .od-pill[data-feu="tiede"]{background:#fac055;color:#5a3d05}
 .od-pill[data-feu="chaud"]{background:#e24b4a;color:#fff}
+.od-pill.od-camp-pill{background:#00997f;color:#fff;margin-left:4px}
 .od-pill[data-bat="1"]{position:relative}
 .od-pill[data-bat="1"]::after{content:'';position:absolute;inset:-3px;border-radius:12px;border:2px solid #e24b4a;opacity:.45;animation:od-pouls 2.4s ease-out infinite;pointer-events:none}
 @keyframes od-pouls{0%{transform:scale(.82);opacity:.5}100%{transform:scale(1.4);opacity:0}}
@@ -623,11 +628,11 @@ OD.define('topnav', {
         if (__masque.indexOf(it.p) !== -1) return;
         items += '<a data-page="' + it.p + '"' + (it.vue ? ' data-vue="' + it.vue + '"' : '') + '>' + esc(it.t) +
           (it.badge ? '<span class="od-pill od-notifs-pill" style="display:none"></span>' : '') +
-          (it.leads && __leadsBadge ? '<span class="od-pill od-leads-pill" style="display:none"></span>' : '') + '</a>';
+          (it.leads && __leadsBadge ? '<span class="od-pill od-leads-pill" style="display:none"></span><span class="od-pill od-camp-pill" style="display:none"></span>' : '') + '</a>';
       });
       menusHtml += '<div class="od-m" data-mi="' + mi + '"><button data-toggle="' + mi + '">' + esc(m.label) +
         (m.badge && __masque.indexOf(P.notifs) === -1 ? '<span class="od-pill od-notifs-pill" style="display:none"></span>' : '') +
-        (m.leads && __leadsBadge ? '<span class="od-pill od-leads-pill" style="display:none"></span>' : '') +
+        (m.leads && __leadsBadge ? '<span class="od-pill od-leads-pill" style="display:none"></span><span class="od-pill od-camp-pill" style="display:none"></span>' : '') +
         '</button><div class="od-drop">' + items + '</div></div>';
     });
 
@@ -861,6 +866,15 @@ OD.define('topnav', {
         p.setAttribute('title', n + (n > 1 ? ' leads libres' : ' lead libre') + ' dans le Pool' + (Number(c.hors_delai || 0) > 0 ? ', dont ' + c.hors_delai + ' hors délai' : ''));
       } else { p.style.display = 'none'; }
     });
+    var cc = window.__odCampCompte || null;
+    (root() ? root().querySelectorAll('.od-camp-pill') : []).forEach(function (p) {
+      var n = cc ? Number(cc.n || 0) : 0;
+      if (n > 0) {
+        p.textContent = n > 99 ? '99+' : String(n); p.style.display = '';
+        p.setAttribute('title', n + (n > 1 ? ' clients' : ' client') + ' à relancer dans les campagnes'
+          + (Number(cc.libres || 0) > 0 ? ' (' + cc.libres + ' à prendre' + (Number(cc.miens || 0) > 0 ? ', ' + cc.miens + ' pris par vous' : '') + ')' : ''));
+      } else { p.style.display = 'none'; }
+    });
   }
   async function refreshLeads(depuisCache) {
     peindreLeads();
@@ -877,6 +891,10 @@ OD.define('topnav', {
       try { var api = getSiteApi(); var v = api && api.getSiteId ? api.getSiteId() : null; sid = v == null || v === '' ? null : Number(v); } catch (e) {}
       var r = sid != null && !isNaN(sid) ? await sb.rpc('lead_pool_compte', { p_id_site: sid }) : await sb.rpc('lead_pool_compte');
       if (!r.error && r.data) { __leadsCompte = r.data; window.__odLeadsCompte = r.data; }
+      try {
+        var rc = sid != null && !isNaN(sid) ? await sb.rpc('campagne_compte', { p_id_site: sid }) : await sb.rpc('campagne_compte');
+        if (!rc.error && rc.data) window.__odCampCompte = rc.data;
+      } catch (e2) {}
     } catch (e) {}
     __leadsEnCours = false;
     peindreLeads();
