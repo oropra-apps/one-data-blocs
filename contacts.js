@@ -1,4 +1,10 @@
 // CONTACTS — module One Data (OD.define) v1 (Lot B)
+// v15 (13/11/2026) : société et interlocuteur partagent leurs échanges. Sur la
+//   fiche d'une société, l'onglet montre aussi les échanges en cours de ses
+//   interlocuteurs actifs ; sur la fiche d'un particulier, ceux des sociétés
+//   dont il est l'interlocuteur (RPC contacts_clients_lies). Chaque échange
+//   venu de l'autre fiche porte la mention « Fiche de … » (cas ROSSEEL : la
+//   commande sur la société, le lead, les appels et les mails sur Mme Rosseel).
 // v14 (13/11/2026) : les pièces jointes des e-mails s'affichent toujours. Elles
 //   n'apparaissaient que si la liste arrivait déjà décodée : selon le module
 //   chargé en premier sur la fiche (historique, rdv…), elle restait en texte et
@@ -501,15 +507,25 @@ OD.define('contacts', {
     if (idvu == null) { state.rows = []; state.clos = []; state.loading = false; return; }
     try {
       var site = readVar(VAR_SITE);
-      var cq = sb.from('CYCLE_COM').select('id_cycle_com').eq('id_client', idvu).ilike('status', '%Ouvert%').order('id_cycle_com', { ascending: false }).limit(1);
+      // v15 : fiches liées (société <-> interlocuteur) — leurs cycles en cours aussi.
+      var lies = [];
+      try { var rl = await sb.rpc('contacts_clients_lies', { p_id_client: idvu }); lies = (rl && !rl.error && Array.isArray(rl.data)) ? rl.data : []; } catch (e4) { lies = []; }
+      var ids = [idvu].concat(lies.map(function (l) { return Number(l.id_client); }).filter(Boolean));
+      var cq = sb.from('CYCLE_COM').select('id_cycle_com, id_client').in('id_client', ids).ilike('status', '%Ouvert%').order('id_cycle_com', { ascending: false });
       if (site != null && site !== '') cq = cq.eq('id_site', Number(site));
-      var cyc = await cq.maybeSingle();
-      var idCycle = cyc && cyc.data ? cyc.data.id_cycle_com : null;
+      var cycs = await cq;
+      var parClient = {};
+      ((cycs && cycs.data) || []).forEach(function (c) { if (parClient[c.id_client] == null) parClient[c.id_client] = c.id_cycle_com; });
+      var idCycle = parClient[idvu] != null ? parClient[idvu] : null;
+      var viaCycle = {};
+      lies.forEach(function (l) { var cy = parClient[Number(l.id_client)]; if (cy != null) viaCycle[cy] = l; });
+      var cycleIds = Object.keys(parClient).map(function (k) { return parClient[k]; });
       try { var lc = await sb.rpc('client_leads_clotures', { p_id_client: idvu, p_cycle_en_cours: idCycle }); state.clos = (lc && !lc.error && Array.isArray(lc.data)) ? lc.data : []; } catch (e2) { state.clos = []; }
-      if (idCycle == null) { state.rows = []; state.loading = false; return; }
+      if (!cycleIds.length) { state.rows = []; state.loading = false; return; }
       var res = await sb.from('v_contacts_client')
         .select('id_ligne, id_cycle_com, date_contact, media, sens, statut, contenu_texte, agent, voip_recording_url, voip_summary, voip_duration_seconds, delivery_status, email_subject, email_snippet, email_body_html, email_has_attachments, attachments, canal_contact, resultat, dt_activation, note_chatgpt, origine_echange, vehicule_interet, phone_from')
-        .eq('id_cycle_com', idCycle).order('date_contact', { ascending: false });
+        .in('id_cycle_com', cycleIds).order('date_contact', { ascending: false });
+      if (!res.error) (res.data || []).forEach(function (r) { var l = viaCycle[r.id_cycle_com]; if (l) r.__via = l; });
       if (res.error) throw res.error;
       await window.__odSignRows(sb, res.data || []);
       // Une seule définition du filtre dans ce module : celle exposée plus
@@ -524,6 +540,13 @@ OD.define('contacts', {
   }
 
   var STYLE = '<style>#oropra-contacts-root{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}.ct-wrap{display:flex;flex-direction:column;gap:10px;padding:2px}.ct-msg{text-align:center;padding:44px 20px;color:#7a98c5;font-size:14px}.ct-err{color:#e24b4a}</style>';
+  // v15 : échange venu de la fiche liée (société ou interlocuteur).
+  function renderItemVia(r) {
+    var h = renderItem(r);
+    if (!r || !r.__via) return h;
+    var lib = (r.__via.nature === 'societe' ? 'Fiche de la société ' : 'Fiche de ') + (r.__via.nom || ('n° ' + r.__via.id_client));
+    return '<div style="font-size:11px;font-weight:700;color:#7a98c5;margin:2px 4px -6px;">\u21b3 ' + esc(lib) + '</div>' + h;
+  }
   function render() {
     var root = getRoot();
     if (!root) return;
@@ -532,7 +555,7 @@ OD.define('contacts', {
     var clos = state.clos || [];
     if ((!state.rows || !state.rows.length) && !clos.length) { root.innerHTML = STYLE + '<div class="ct-msg">Aucun \u00e9change sur le cycle en cours.</div>'; return; }
     var hClos = clos.length ? '<div style="margin:14px 2px 2px;font-size:11px;font-weight:800;letter-spacing:.06em;text-transform:uppercase;color:#7a98c5;">Leads cl\u00f4tur\u00e9s (' + clos.length + ')</div>' + clos.map(renderItem).join('') : '';
-    root.innerHTML = STYLE + '<div class="ct-wrap">' + ((state.rows && state.rows.length) ? state.rows.map(renderItem).join('') : '<div class="ct-msg" style="padding:18px 20px">Aucun \u00e9change sur le cycle en cours.</div>') + hClos + '</div>';
+    root.innerHTML = STYLE + '<div class="ct-wrap">' + ((state.rows && state.rows.length) ? state.rows.map(renderItemVia).join('') : '<div class="ct-msg" style="padding:18px 20px">Aucun \u00e9change sur le cycle en cours.</div>') + hClos + '</div>';
     // Les leads affichés sans leur détail le reçoivent, puis on redessine.
     window.__oropraLeadHydrate(sb, (state.rows || []).concat(clos), render);
   }
