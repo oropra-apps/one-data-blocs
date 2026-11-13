@@ -1,5 +1,10 @@
 // ============================================================================
-//  NOTIFICATIONS — module One Data (OD.define)   v11 — PROFIL TEAM COLIN
+//  NOTIFICATIONS — module One Data (OD.define)   v12 — PROFIL TEAM COLIN
+//
+//  v12 (13/11/2026) : « Commande signée » parmi les motifs de classement, sur
+//   « On m'attend » et sur les relances promises (bon de commande signé, pas
+//   encore validé : le cycle reste ouvert, la notification s'en va).
+//   Prérequis SQL : notif_classer accepte le motif commande_signee.
 //
 //  v11 (04/11/2026) : INCONNUS, retours terrain.
 //   * Classés du plus ANCIEN au plus récent (le plus vieux attend le plus).
@@ -949,11 +954,13 @@ OD.define('notifications', {
 
     // v9 : classer, avec un motif. Pas de champ libre : un clic, comme le report.
     const MOTIFS = {
-      client: [['echange_clos', 'Le client a clos l’échange'],
+      client: [['commande_signee', 'Commande signée'],
+               ['echange_clos', 'Le client a clos l’échange'],
                ['autre_canal', 'J’ai répondu par un autre moyen'],
                ['pas_pour_moi', 'Ce n’est pas pour moi'],
                ['non_client', 'Expéditeur non client']],
-      rpv:    [['test', 'Test'],
+      rpv:    [['commande_signee', 'Commande signée'],
+               ['test', 'Test'],
                ['deja_traite', 'Déjà traité hors One Data'],
                ['abandon', 'Client injoignable ou projet abandonné']],
       orphan: [['sans_interet', 'Sans intérêt'],
