@@ -1,6 +1,11 @@
 // ============================================================================
 //  LEAD MANAGEMENT — module One Data (OD.define 'lead-mgmt')
-//  VERSION TEAM COLIN (v115) — déploiement CIBLÉ (publish-targets :
+//  VERSION TEAM COLIN (v116) — déploiement CIBLÉ (publish-targets :
+//  v116 (13/11/2026) : CAMPAGNES (vendeur) — indicateurs de suivi en tête de chaque
+//    campagne (à prendre, pris, traités, propositions, commandes, mes clients, barre
+//    d'avancement) et filtres : recherche (nom, ville, immatriculation), modèle,
+//    critère (simulation BACS, renouvellement, 100 000 km, passage atelier récent,
+//    joignable sur mobile, sans commande récente). Seule la liste se redessine.
 //  v115 (13/11/2026) : CAMPAGNES — fiche de décision avant « Je prends » : indice de
 //    priorité, véhicule(s) (modèle, immatriculation, année, km, passages atelier),
 //    raisons de la priorité, dernier passage atelier, coordonnées disponibles.
@@ -2956,7 +2961,7 @@
       site: null,              // site affiché (chef, direction après « Ouvrir »)
       vueSite: null,           // direction : site ouvert
       depuis: 'site', cell: null, autresVendeurs: false, autresSites: false,
-      campagnes: null, campVend: null, campOuverte: null, mesSollis: null, campLibres: null, campInfos: {},
+      campagnes: null, campVend: null, campOuverte: null, mesSollis: null, campLibres: null, campInfos: {}, campTot: [], cf: { q: '', mod: '', flt: '' },
       relais: null,
       ack: new Set(), vus: new Set(), frais: new Set(), premier: true,
       dr: null, modal: null,
@@ -3361,6 +3366,8 @@
           S.campagnes = r[0] || []; S.mesSollis = r[1] || [];
           try { S.campLibres = await rpc('campagne_libres', { p_viewer_id_user: Number(MOI), p_site_ids: null }) || []; }
           catch (e2) { S.campLibres = []; }
+          try { S.campTot = await rpc('get_campagnes_sollicitation', { p_viewer_id_user: Number(MOI), p_date_from: de, p_date_to: a, p_site_ids: null, p_id_user: null }) || []; }
+          catch (e4) { S.campTot = []; }
           var idsInfos = S.campLibres.concat(S.mesSollis).map(function (t) { return Number(t.id_rapport); }).filter(Boolean);
           S.campInfos = {};
           if (idsInfos.length) {
@@ -4029,37 +4036,84 @@
         + '<div class="lr-a">' + actions + '</div></div>';
     }
 
-    function vueCampagnesVendeur() {
-      var h = '<div class="ph"><div><h2>Mes campagnes</h2><p>Libre-service, comme le Pool : prenez un client à relancer, il passe à votre nom. Ouvrez ensuite sa fiche pour l\'appeler et faire votre compte rendu : la relance est alors comptée comme traitée. S\'il ne vous concerne pas, rendez-le.</p></div></div>';
-      if (!S.campagnes) return h + '<div class="empty">Chargement des campagnes…</div>';
-      var libres = S.campLibres || [], noms = [];
+    function campInfo(t) { return (S.campInfos || {})[t.id_rapport] || null; }
+    function campModele(t) { var x = campInfo(t), v = x && x.vehicules && x.vehicules[0]; return v && v.modele ? 'Lexus ' + v.modele : ''; }
+    function campPasse(t) {
+      var f = S.cf || {}, x = campInfo(t), inf = (x && x.infos) || {}, rs = (x && x.raisons) || [], vs = (x && x.vehicules) || [];
+      if (f.mod && campModele(t) !== f.mod) return false;
+      if (f.q) {
+        var q = f.q.toLowerCase().trim(), qi = q.replace(/[\s-]/g, '');
+        var h = [t.client_nom, t.ville, inf.ville, inf.code_postal].concat(vs.map(function (v) { return (v.modele || '') + ' ' + (v.immat || ''); })).join(' ').toLowerCase();
+        var im = vs.map(function (v) { return String(v.immat || '').replace(/-/g, '').toLowerCase(); }).join(' ');
+        if (h.indexOf(q) < 0 && !(qi.length >= 3 && im.indexOf(qi) >= 0)) return false;
+      }
+      var a = function (re) { return rs.some(function (r) { return re.test(r); }); };
+      switch (f.flt) {
+        case 'simu': return a(/^Simulation/);
+        case 'reno': return a(/renouvellement/);
+        case 'km': return vs.some(function (v) { return Number(v.km) >= 100000; });
+        case 'atelier': return !!inf.dernier_passage && (Date.now() - new Date(inf.dernier_passage)) / 86400000 <= 90;
+        case 'mobile': return !!inf.a_mobile;
+        case 'sans': return !a(/^Commande|achat récent/);
+      }
+      return true;
+    }
+    function campBlocs() {
+      var libres = S.campLibres || [], noms = [], h = '';
       S.campagnes.forEach(function (c) { if (noms.indexOf(c.campagne) < 0) noms.push(c.campagne); });
       libres.forEach(function (t) { if (noms.indexOf(t.campagne) < 0) noms.push(t.campagne); });
-      if (!noms.length) return h + '<div class="empty">Aucune campagne en cours sur votre site ces 90 derniers jours.</div>';
+      if (!noms.length) return '<div class="empty">Aucune campagne en cours sur votre site ces 90 derniers jours.</div>';
+      var prio = function (t) { var x = campInfo(t); return x && x.priorite != null ? Number(x.priorite) : -1; };
       noms.forEach(function (nom) {
         var c = S.campagnes.find(function (x) { return x.campagne === nom; }) || {};
-        var cibles = (S.mesSollis || []).filter(function (t) { return t.campagne === nom; });
-        var dispo = libres.filter(function (t) { return t.campagne === nom; });
-        var prio = function (t) { var x = (S.campInfos || {})[t.id_rapport]; return x && x.priorite != null ? Number(x.priorite) : -1; };
-        dispo.sort(function (a, b) { return prio(b) - prio(a) || Number(a.id_rapport) - Number(b.id_rapport); });
-        cibles.sort(function (a, b) { return prio(b) - prio(a); });
-        h += '<div class="sub"><h3>' + esc(nom) + '</h3><p>' + plural(dispo.length, 'client') + ' à prendre · ' + plural(Number(c.nb_sollicitations) || 0, 'client') + ' pris par vous · ' + (c.nb_traitees || 0) + ' traités'
-          + (Number(c.nb_propales) ? ' · ' + plural(c.nb_propales, 'proposition') : '') + (Number(c.nb_bdc) ? ' · ' + plural(c.nb_bdc, 'commande') : '') + '.</p>';
-        if (cibles.length) {
-          h += '<h4 class="camp-st">À relancer par vous</h4><div class="list">';
+        var tot = (S.campTot || []).find(function (x) { return x.campagne === nom; }) || {};
+        var toutesMiennes = (S.mesSollis || []).filter(function (t) { return t.campagne === nom; });
+        var toutesDispo = libres.filter(function (t) { return t.campagne === nom; });
+        var n = Number(tot.nb_sollicitations) || (toutesDispo.length + (Number(c.nb_sollicitations) || 0));
+        var tr = Number(tot.nb_traitees) || 0, pris = Math.max(0, n - toutesDispo.length), pct = n ? Math.round(100 * tr / n) : 0;
+        var k = function (val, lib, cls) { return '<div class="cp-k' + (cls ? ' ' + cls : '') + '"><b>' + val + '</b><small>' + lib + '</small></div>'; };
+        h += '<div class="sub"><h3>' + esc(nom) + '</h3>'
+          + '<div class="cp-kpis">' + k(toutesDispo.length, 'à prendre', toutesDispo.length ? 'alerte' : '') + k(pris, 'pris par l\'équipe') + k(tr, 'traités')
+          + k(Number(tot.nb_propales) || 0, 'propositions') + k((Number(tot.nb_bdc) || 0), 'commandes', Number(tot.nb_bdc) ? 'ok' : '')
+          + k((Number(c.nb_sollicitations) || 0) + (Number(c.nb_traitees) ? ' · ' + c.nb_traitees + ' traités' : ''), 'mes clients') + '</div>'
+          + '<div class="cp-av"><span class="bar' + (pct < 40 ? ' low' : '') + '"><i style="width:' + pct + '%"></i></span><span>' + pct + ' % de la campagne traitée · ' + plural(n, 'client') + ' au total</span></div>';
+        var cibles = toutesMiennes.filter(campPasse).sort(function (a, b) { return prio(b) - prio(a); });
+        var dispo = toutesDispo.filter(campPasse).sort(function (a, b) { return prio(b) - prio(a) || Number(a.id_rapport) - Number(b.id_rapport); });
+        var filtre = (S.cf.q || S.cf.mod || S.cf.flt);
+        if (toutesMiennes.length) {
+          h += '<h4 class="camp-st">À relancer par vous' + (filtre ? ' · ' + cibles.length + ' sur ' + toutesMiennes.length : '') + '</h4><div class="list">';
+          if (!cibles.length) h += '<div class="empty">Aucun de vos clients ne correspond aux filtres.</div>';
           cibles.slice(0, 80).forEach(function (t) {
             h += ligneCamp(t, '<button type="button" class="btn pri" data-a="fiche" data-id="' + esc(t.id_client) + '">Ouvrir la fiche</button> <button type="button" class="btn ghost sm" data-a="camp-rendre" data-id="' + esc(t.id_rapport) + '">Rendre</button>', true);
           });
           h += '</div>';
         }
-        h += '<h4 class="camp-st">À prendre</h4><div class="list">';
-        if (!dispo.length) h += '<div class="empty">Tous les clients de cette campagne ont été pris.</div>';
+        h += '<h4 class="camp-st">À prendre' + (filtre ? ' · ' + dispo.length + ' sur ' + toutesDispo.length : '') + '</h4><div class="list">';
+        if (!toutesDispo.length) h += '<div class="empty">Tous les clients de cette campagne ont été pris.</div>';
+        else if (!dispo.length) h += '<div class="empty">Aucun client à prendre ne correspond aux filtres.</div>';
         dispo.slice(0, 150).forEach(function (t) {
           h += ligneCamp(t, '<button type="button" class="btn pri" data-a="camp-prendre" data-id="' + esc(t.id_rapport) + '">Je prends</button>', false);
         });
         h += '</div></div>';
       });
       return h;
+    }
+    function campMajListe() { var z = root.querySelector('#cp-zone'); if (z) z.innerHTML = campBlocs(); }
+    function vueCampagnesVendeur() {
+      var h = '<div class="ph"><div><h2>Mes campagnes</h2><p>Libre-service, comme le Pool : prenez un client à relancer, il passe à votre nom. Ouvrez ensuite sa fiche pour l\'appeler et faire votre compte rendu : la relance est alors comptée comme traitée. S\'il ne vous concerne pas, rendez-le.</p></div></div>';
+      if (!S.campagnes) return h + '<div class="empty">Chargement des campagnes…</div>';
+      var tous = (S.campLibres || []).concat(S.mesSollis || []), mods = [];
+      tous.forEach(function (t) { var m = campModele(t); if (m && mods.indexOf(m) < 0) mods.push(m); });
+      mods.sort();
+      var f = S.cf, opt = function (v, l, cur) { return '<option value="' + esc(v) + '"' + (v === cur ? ' selected' : '') + '>' + esc(l) + '</option>'; };
+      if (tous.length) {
+        h += '<div class="cp-flt"><input type="search" data-x="cp-q" placeholder="Nom, ville, immatriculation…" value="' + esc(f.q) + '" autocomplete="off">'
+          + '<select data-x="cp-mod">' + opt('', 'Tous les modèles', f.mod) + mods.map(function (m) { return opt(m, m, f.mod); }).join('') + '</select>'
+          + '<select data-x="cp-flt">' + opt('', 'Tous les clients', f.flt) + opt('simu', 'Simulation BACS sans commande', f.flt) + opt('reno', 'Fenêtre de renouvellement', f.flt)
+          + opt('km', '100 000 km et plus', f.flt) + opt('atelier', 'Passé à l\'atelier depuis 90 jours', f.flt) + opt('mobile', 'Joignable sur mobile', f.flt) + opt('sans', 'Sans commande ni achat récent', f.flt) + '</select>'
+          + ((f.q || f.mod || f.flt) ? '<button type="button" class="btn ghost sm" data-a="cp-raz">Effacer les filtres</button>' : '') + '</div>';
+      }
+      return h + '<div id="cp-zone">' + campBlocs() + '</div>';
     }
 
     async function campagneGeste(fn, id, okMsg) {
@@ -5664,6 +5718,7 @@
         case 'fiche': return ficheClient(id);
         case 'camp-prendre': return campagneGeste('campagne_prendre', id, 'Client pris : il est dans vos relances de campagne.');
         case 'camp-rendre': return campagneGeste('campagne_rendre', id, 'Client rendu : il est de nouveau à prendre.');
+        case 'cp-raz': S.cf = { q: '', mod: '', flt: '' }; render(); return;
         case 'ancien':
           detruire();
           var legacy = await chargerLegacy();
@@ -5733,11 +5788,13 @@
       if (ev.target.getAttribute && ev.target.getAttribute('data-x') === 'comme-q') { S.commeQ = ev.target.value; var li = root.querySelector('.k-vlist'); if (li) li.innerHTML = listeComme(); }
       if (ev.target.getAttribute && ev.target.getAttribute('data-x') === 'hist-q') histFiltre(ev.target);
       if (ev.target.getAttribute && ev.target.getAttribute('data-x') === 'suivi-q') suiviRecherche(ev.target.value);
+      if (ev.target.getAttribute && ev.target.getAttribute('data-x') === 'cp-q') { S.cf.q = ev.target.value; campMajListe(); }
     });
     root.addEventListener('change', function (ev) {
       var k = ev.target.getAttribute && ev.target.getAttribute('data-x');
       if (k && k.indexOf('hist-') === 0 && k !== 'hist-q') histFiltre(ev.target);
       if (k === 'cg-du' && ev.target.value) congPeriode(null, ev.target.value);
+      if (k === 'cp-mod' || k === 'cp-flt') { S.cf[k === 'cp-mod' ? 'mod' : 'flt'] = ev.target.value; render(); }
     });
     $scrim.addEventListener('click', function () { if (S.modal) fermerModal(); else fermerTout(); });
     root.addEventListener('keydown', function (ev) {
@@ -6131,6 +6188,21 @@
 .lmtc .cp-r.fort{border-color:var(--bleu);color:var(--bleu-dk);font-weight:700}
 .lmtc .cp-r.vigil{border-color:var(--rouge);color:var(--m-rouge);font-weight:700}
 .lmtc .cp-f{margin-top:6px;font-size:12px;color:var(--ink-3)}
+.lmtc .cp-flt{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin:4px 0 14px}
+.lmtc .cp-flt input,.lmtc .cp-flt select{font:inherit;font-size:13px;color:var(--ink);background:var(--card);border:1px solid var(--line-2);border-radius:9px;padding:8px 11px;min-height:38px}
+.lmtc .cp-flt input{flex:1 1 240px;min-width:0}
+.lmtc .cp-flt select{flex:0 1 auto;max-width:100%}
+.lmtc .cp-kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(110px,1fr));gap:8px;margin:10px 0 8px}
+.lmtc .cp-k{background:var(--calme-bg);border-radius:10px;padding:9px 12px;display:flex;flex-direction:column}
+.lmtc .cp-k b{font-size:20px;font-weight:800;color:var(--bleu-dk);line-height:1.1}
+.lmtc .cp-k small{font-size:11.5px;color:var(--ink-2);margin-top:2px}
+.lmtc .cp-k.alerte{background:var(--alerte-bg)}
+.lmtc .cp-k.ok{background:var(--ok-bg)}.lmtc .cp-k.ok b{color:var(--m-vert)}
+.lmtc .cp-av{display:flex;align-items:center;gap:10px;font-size:12px;color:var(--ink-2);margin-bottom:6px}
+.lmtc .cp-av .bar{flex:0 0 180px;height:8px;border-radius:99px;background:var(--line);overflow:hidden;display:block}
+.lmtc .cp-av .bar i{display:block;height:100%;background:var(--vert)}
+.lmtc .cp-av .bar.low i{background:var(--orange)}
+@media (max-width:600px){.lmtc .cp-av{flex-direction:column;align-items:flex-start}.lmtc .cp-av .bar{flex-basis:auto;width:100%}}
 @media (max-width:600px){.lmtc .cp-prio{margin:0}}
 .lmtc .sub > p{font-size:12.5px;color:var(--mut);font-weight:600}
 /* Le mur */
