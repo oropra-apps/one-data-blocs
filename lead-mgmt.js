@@ -1,6 +1,10 @@
 // ============================================================================
 //  LEAD MANAGEMENT — module One Data (OD.define 'lead-mgmt')
-//  VERSION TEAM COLIN (v118) — déploiement CIBLÉ (publish-targets :
+//  VERSION TEAM COLIN (v119) — déploiement CIBLÉ (publish-targets :
+//  v119 (13/11/2026) : la pastille de l'onglet Campagnes reprend EXACTEMENT celle de la
+//    barre de navigation (vert #00997f, texte blanc, 18 px) — la règle t-b l'écrasait.
+//    « Affaire ouverte dans BACS » (opportunité sans simulation) distinguée d'une
+//    simulation : puce, filtre dédié, et explication dans le panneau.
 //  v118 (13/11/2026) : CAMPAGNES — PANNEAU DE TRAITEMENT à droite, comme un lead.
 //    « Je prends » ouvre le panneau ; un clic sur un client « À relancer par vous »
 //    aussi. On y trouve les numéros (appel 3CX / One Data / tel:), l'e-mail, le
@@ -4031,7 +4035,7 @@
         return '<div class="cp-veh"><b>' + esc(mod) + '</b>' + (bits.length ? ' · ' + esc(bits.join(' · ')) : '') + ' · ' + esc(pass) + '</div>';
       }).join('');
       var rais = ((x && x.raisons) || []).map(function (r) {
-        var cls = /^Commande|achat récent/.test(r) ? ' vigil' : /^Simulation|renouvellement/.test(r) ? ' fort' : '';
+        var cls = /^Commande|achat récent/.test(r) ? ' vigil' : /^Simulation|^Affaire ouverte|renouvellement/.test(r) ? ' fort' : '';
         return '<span class="cp-r' + cls + '">' + esc(r) + '</span>';
       }).join('');
       var coord = [inf.a_mobile ? 'mobile' : '', inf.a_fixe ? 'fixe' : '', inf.a_email ? 'e-mail' : ''].filter(Boolean);
@@ -4059,6 +4063,7 @@
       var a = function (re) { return rs.some(function (r) { return re.test(r); }); };
       switch (f.flt) {
         case 'simu': return a(/^Simulation/);
+        case 'affaire': return a(/^Affaire ouverte/);
         case 'reno': return a(/renouvellement/);
         case 'km': return vs.some(function (v) { return Number(v.km) >= 100000; });
         case 'atelier': return !!inf.dernier_passage && (Date.now() - new Date(inf.dernier_passage)) / 86400000 <= 90;
@@ -4118,7 +4123,7 @@
       if (tous.length) {
         h += '<div class="cp-flt"><input type="search" data-x="cp-q" placeholder="Nom, ville, immatriculation…" value="' + esc(f.q) + '" autocomplete="off">'
           + '<select data-x="cp-mod">' + opt('', 'Tous les modèles', f.mod) + mods.map(function (m) { return opt(m, m, f.mod); }).join('') + '</select>'
-          + '<select data-x="cp-flt">' + opt('', 'Tous les clients', f.flt) + opt('simu', 'Simulation BACS sans commande', f.flt) + opt('reno', 'Fenêtre de renouvellement', f.flt)
+          + '<select data-x="cp-flt">' + opt('', 'Tous les clients', f.flt) + opt('simu', 'Simulation BACS sans commande', f.flt) + opt('affaire', 'Affaire ouverte dans BACS', f.flt) + opt('reno', 'Fenêtre de renouvellement', f.flt)
           + opt('km', '100 000 km et plus', f.flt) + opt('atelier', 'Passé à l\'atelier depuis 90 jours', f.flt) + opt('mobile', 'Joignable sur mobile', f.flt) + opt('sans', 'Sans commande ni achat récent', f.flt) + '</select>'
           + ((f.q || f.mod || f.flt) ? '<button type="button" class="btn ghost sm" data-a="cp-raz">Effacer les filtres</button>' : '') + '</div>';
       }
@@ -4180,11 +4185,12 @@
         return '<div class="cp-veh"><b>' + esc(mod) + '</b> · ' + esc([v.immat, an, v.km ? Number(v.km).toLocaleString('fr-FR') + ' km' : ''].filter(Boolean).join(' · ')) + '</div>';
       }).join('');
       var rais = (x.raisons || []).map(function (r) {
-        var cls = /^Commande|achat récent/.test(r) ? ' vigil' : /^Simulation|renouvellement/.test(r) ? ' fort' : '';
+        var cls = /^Commande|achat récent/.test(r) ? ' vigil' : /^Simulation|^Affaire ouverte|renouvellement/.test(r) ? ' fort' : '';
         return '<span class="cp-r' + cls + '">' + esc(r) + '</span>';
       }).join('');
       if (vehs || rais) h += '<section><h3>Pourquoi l\'appeler</h3>' + vehs + (rais ? '<div class="cp-rs">' + rais + '</div>' : '')
-        + ((x.raisons || []).some(function (r) { return /^Simulation BACS .* par /.test(r); }) ? '<p class="cd-mut">Une simulation faite par un collègue apparaît sans détail dans P.Commerciales, rubrique « Chez vos collègues ».</p>' : '') + '</section>';
+        + ((x.raisons || []).some(function (r) { return /^Simulation BACS .* par /.test(r); }) ? '<p class="cd-mut">Une simulation faite par un collègue apparaît sans détail dans P.Commerciales, rubrique « Chez vos collègues ».</p>' : '')
+        + ((x.raisons || []).some(function (r) { return /^Affaire ouverte/.test(r); }) ? '<p class="cd-mut">L\'affaire existe dans BACS mais sans simulation ni commande : elle n\'apparaît pas dans P.Commerciales.</p>' : '') + '</section>';
       // Résultat
       h += '<section><h3>Résultat de l\'appel</h3><div class="cd-res">' + CD_RES.map(function (r) {
         return '<button type="button" class="cd-r ' + r[2] + (D.mode === r[0] ? ' on' : '') + '" data-a="cd-res" data-id="' + r[0] + '">' + r[1] + '</button>';
@@ -6684,6 +6690,7 @@
 .lmtc .tabs button.t-r .cnt{background:var(--chaud-bg);color:var(--m-rouge)}
 .lmtc .tabs button.t-b .cnt{background:var(--sel);color:var(--bleu)}
 .lmtc .tabs button.t-v .cnt.z,.lmtc .tabs button.t-r .cnt.z,.lmtc .tabs button.t-b .cnt.z{background:var(--calme-bg);color:var(--ink-3)}
+.lmtc .tabs button .cnt.g,.lmtc .tabs button.t-b .cnt.g,.lmtc .tabs button.on .cnt.g,.lmtc .tabs button.t-b.on .cnt.g{min-width:18px;height:18px;padding:0 5px;border-radius:9px;background:#00997f;color:#fff;font-size:10px;font-weight:700;display:inline-flex;align-items:center;justify-content:center;line-height:1}
 .lmtc .tabs button.t-v:hover{color:var(--m-vert)}
 .lmtc .tabs button.t-r:hover{color:var(--m-rouge)}
 .lmtc .tabs button.t-b:hover{color:var(--bleu)}
