@@ -420,7 +420,7 @@ OD.define('sms', {
         (modelesDispo() ? '<button class="sms-fbtn" data-act="modeles" title="Insérer un modèle">' + IC_TPL + '</button>' : '') +
         (dictSupported() ? '<button class="sms-fbtn ' + (state.dictating ? 'sms-dict-on' : '') + '" data-act="dict" title="Dictée vocale">' + IC_DICT + '</button>' : '') +
         '<textarea class="sms-inp" data-act="input" rows="1" placeholder="' + (state.dictating ? 'Parlez…' : 'Saisir le texte') + '">' + esc(state.input || '') + '</textarea>' +
-        '<button class="sms-fbtn sms-send' + (canSend ? ' on' : '') + '" data-act="send" title="Envoyer">' + (state.sending ? '<span class="sms-spin"></span>' : IC_SEND) + '</button>' +
+        '<button class="sms-fbtn sms-send' + (canSend ? ' on' : '') + '" data-act="send" title="Envoyer (Ctrl+Entrée)">' + (state.sending ? '<span class="sms-spin"></span>' : IC_SEND) + '</button>' +
       '</div>' +
     '</div>';
     bindEvents();
@@ -498,7 +498,8 @@ OD.define('sms', {
     if (input) {
       autoGrow(input);
       input.addEventListener('input', () => { state.input = input.value; autoGrow(input); syncSendBtn(); });
-      input.addEventListener('keydown', (e) => { if (state.dictating) stopDictation(); if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendSms(); } });
+      // Entrée = retour à la ligne (comportement natif du textarea) ; Ctrl/Cmd+Entrée = envoi.
+      input.addEventListener('keydown', (e) => { if (state.dictating) stopDictation(); if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); sendSms(); } });
       if (!state.dictating) setTimeout(() => { try { input.focus(); } catch (e) {} }, 30);
     }
   }
