@@ -1,6 +1,9 @@
 // ============================================================================
 //  LEAD MANAGEMENT — module One Data (OD.define 'lead-mgmt')
-//  VERSION TEAM COLIN (v107) — déploiement CIBLÉ (publish-targets :
+//  VERSION TEAM COLIN (v108) — déploiement CIBLÉ (publish-targets :
+//  v108 (13/11/2026) : accueil du chef des ventes — le bloc « La Vroom Team et vous »
+//    ne s'affiche que lorsque plus de 10 leads transmis par la Vroom Team sont en
+//    attente (demande d'Antoine ; il affichait 0 / 0 en début de pilote).
 //  v107 (13/11/2026) : republication de la v106 (la v106 publiée était une ancienne copie, v83).
 //  v106 (13/11/2026) : Vroom Team (poste et supervision) — ALERTE BACS EN GRAND :
 //    quand BACS refuse un geste de la Vroom Team (création, statut, propriétaire…),
@@ -4488,7 +4491,7 @@
       h += '<aside class="ac-side"><section class="ac-c"><div class="ac-ch"><b>Mon équipe</b><span>ouverts · en retard</span></div>'
         + (vs.length ? vs.map(function (x) { return '<div class="ac-v"><i>' + esc(String(propre(x.v.nom) || '?').split(' ').map(function (w) { return w.charAt(0); }).slice(0, 2).join('')) + '</i><span>' + esc(propre(x.v.nom)) + '</span><b>' + x.o + '</b><b class="' + (x.r ? 'r' : 'z') + '">' + x.r + '</b></div>'; }).join('')
           : '<p class="ac-vide">Aucun vendeur rattaché à ce site.</p>') + '</section>'
-        + (!sansPlateauSite(sid) ? '<section class="ac-c"><div class="ac-ch"><b>La Vroom Team et vous</b></div>'
+        + (!sansPlateauSite(sid) && vrs.length > 10 ? '<section class="ac-c"><div class="ac-ch"><b>La Vroom Team et vous</b></div>'
             + '<div class="ac-r"><span>Transmis par la Vroom Team</span><b>' + vrs.length + '</b></div>'
             + '<div class="ac-r"><span>dont pas encore rappelés</span><b class="' + (vrs.filter(function (l) { return !l.tentatives; }).length ? 'o' : '') + '">' + vrs.filter(function (l) { return !l.tentatives; }).length + '</b></div></section>' : '')
         + '<section class="ac-c"><div class="ac-ch"><b>Pilotage</b></div>'
