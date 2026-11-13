@@ -1,4 +1,11 @@
 // ============================================================================
+//  v54 (13/11/2026) : RAPPEL DEMANDÉ PAR LE CLIENT (accueil des leads).
+//    get_calendar_events renvoie, pour le vendeur qui a pris le lead, le
+//    créneau choisi par le client (source rpv, extra.accueil = true, type 6).
+//    Fenêtre dédiée « Rappel demandé par le client » : bouton « Ouvrir le
+//    lead » (page lead management, même chemin que le tableau de bord), nom
+//    du client → fiche client, téléphone. Fixe : c'est le client qui a choisi
+//    le créneau. Libellés propres (plus de « Rapport vendeur »).
 //  v53 (09/11/2026) : bouton « Choisir un jour » à côté de « Aujourd'hui »
 //    (demande des vendeurs). Il ouvre un calendrier ; le jour choisi s'affiche
 //    en vue Jour. Sur mobile aussi.
@@ -448,7 +455,7 @@ OD.define('agenda', {
   function normTs(x) { return (typeof x === 'string') ? x.slice(0,16).replace('T',' ') : ''; }
   function isPastSlot(ts) { const n = normTs(ts); return n !== '' && n < agNowMin(); }
   function clientName(e) { return [e.civilite, e.nom, e.prenom].filter(Boolean).join(' ').trim(); }
-  function typeLabel(e) { if (e.source_type === 'rdv') return e.title || 'RDV'; if (e.source_type === 'bilat') return 'Bilatérale'; if (e.source_type === 'rpv') return 'Rapport vendeur'; return ''; }
+  function typeLabel(e) { if (estAccueil(e)) return 'Rappel demandé par le client'; if (e.source_type === 'rdv') return e.title || 'RDV'; if (e.source_type === 'bilat') return 'Bilatérale'; if (e.source_type === 'rpv') return 'Rapport vendeur'; return ''; }
   function composeTitle(e) {
     const cn = clientName(e);
     if (estNeutre(e)) {
@@ -907,6 +914,8 @@ OD.define('agenda', {
   let typesActifs = TYPES_EVT.map(x => x.cle);
 
   function estNeutre(e) { return !!(e && e.extra && e.extra.neutre); }
+  // v54 : créneau de rappel choisi par le client (accueil des leads).
+  function estAccueil(e) { return !!(e && e.extra && e.extra.accueil); }
   // v52 : relance à venir, pas encore faite -> déplaçable.
   function relanceDeplacable(e) {
     return !!(e && e.source_type === 'rpv' && e.can_edit !== false && e.extra && e.extra.resultat_rdv === 'Relance'
@@ -916,6 +925,7 @@ OD.define('agenda', {
   function raisonVerrou(e) {
     if (!e || e._provisoire || e._groupe) return null;
     if (estNeutre(e)) return 'Activité BACS : elle se déplace dans BACS.';
+    if (estAccueil(e)) return 'Créneau choisi par le client : il ne se déplace pas.';
     if (e.source_type === 'rpv' && !relanceDeplacable(e)) return (e.extra && e.extra.resultat_rdv === 'Relance')
       ? 'Relance échue ou faite : elle ne se déplace plus.' : 'Rapport vendeur : il ne se déplace pas dans l\u2019agenda.';
     if (e.source_type === 'bilat' && !e.can_edit) return 'Bilatérale : seul le manager qui l\u2019a posée peut la déplacer.';
@@ -1189,6 +1199,7 @@ OD.define('agenda', {
   }
   // v52 : fenêtre d'une relance (rapport vendeur) — date, heure, durée.
   function ouvrirRelance(p, ev) {
+    if (estAccueil(p)) { ouvrirRappelClient(p, ev); return; }
     const d = frontDoc(); try { hideTip(); } catch (e) {}
     let ov = d.getElementById('agenda-rel-ov'); if (ov) ov.remove();
     const ok = relanceDeplacable(p);
@@ -2092,6 +2103,60 @@ OD.define('agenda', {
   function hideTip() { annulerMasquage(); if (tipEl) tipEl.style.display = 'none'; }
   // Fiche client : variable « client sélectionné » lue par toute la fiche, puis
   // navigation vers la page (même chemin que lead-mgmt et le tableau de bord).
+  // v54 : ouvre un lead dans la page lead management (même mécanisme que le
+  // tableau de bord : sessionStorage « od-lead-ouvrir », lu par lead-mgmt).
+  function ouvrirLead(id) {
+    if (!id) return;
+    let FW = frontWin(); try { FW = (wwLib.getFrontWindow && wwLib.getFrontWindow()) || FW; } catch (e) {}
+    try { FW.sessionStorage.setItem('od-lead-ouvrir', String(id)); } catch (e) {}
+    let editeur = false;
+    try { editeur = window.self !== window.top; } catch (e) { editeur = true; }
+    if (editeur) { try { wwLib.wwApp.goTo('99519997-f935-471a-9147-b0118191b991'); return; } catch (e) {} return; }
+    try { wwLib.goTo('/fr/marketing'); return; } catch (e) {}
+    try { FW.location.href = '/fr/marketing#lead=' + encodeURIComponent(id); } catch (e) {}
+  }
+  // v54 : fenêtre d'un rappel demandé par le client (accueil des leads).
+  function ouvrirRappelClient(p, ev) {
+    const d = frontDoc(); try { hideTip(); } catch (e) {}
+    let ov = d.getElementById('agenda-rel-ov'); if (ov) ov.remove();
+    const x = p.extra || {};
+    const nomCli = clientName(p);
+    const tel = String(x.tel || '').trim();
+    const passe = isPastSlot(p.event_end_time || p.event_start_time || '');
+    const hm = (ts) => String(toFc(ts) || '').slice(11, 16).replace(':', 'h');
+    const st = 'position:fixed;inset:0;z-index:99990;background:rgba(31,74,133,.28);display:flex;align-items:center;justify-content:center;padding:16px;font-family:"Nunito Sans",system-ui,sans-serif';
+    let h = '<style>'
+      + '#agenda-rel-ov .arl{background:#fff;border-radius:16px;box-shadow:0 16px 50px rgba(42,94,169,.25);width:min(460px,100%);color:#1F4A85}'
+      + '#agenda-rel-ov .arl-h{display:flex;justify-content:space-between;align-items:center;padding:14px 18px;border-bottom:1.5px solid #eef2f8;font-size:12.5px;font-weight:800;text-transform:uppercase;letter-spacing:.04em}'
+      + '#agenda-rel-ov .arl-x{border:0;background:#f2f6fc;color:#2a5ea9;border-radius:8px;width:30px;height:30px;font-size:17px;cursor:pointer}'
+      + '#agenda-rel-ov .arl-c{padding:14px 18px;display:grid;gap:12px}'
+      + '#agenda-rel-ov .arl-cli{border:0;background:none;padding:0;font:800 17px "Nunito Sans",system-ui,sans-serif;color:#2a5ea9;cursor:pointer;text-align:left}#agenda-rel-ov .arl-cli:hover{text-decoration:underline}'
+      + '#agenda-rel-ov .arl-l{font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:.05em;color:#5f7aa3;margin-bottom:4px}'
+      + '#agenda-rel-ov .arl-tel{color:#2a5ea9;font-weight:800;text-decoration:none}#agenda-rel-ov .arl-tel:hover{text-decoration:underline}'
+      + '#agenda-rel-ov .arl-n{font-size:12.5px;font-weight:700;color:#1F4A85;background:#eef4fc;border-radius:10px;padding:9px 12px}'
+      + '#agenda-rel-ov .arl-w{font-size:12.5px;font-weight:700;color:#7a5208;background:#fff8ec;border-radius:10px;padding:9px 12px}'
+      + '#agenda-rel-ov .arl-f{display:flex;gap:10px;justify-content:flex-end;padding:12px 18px;border-top:1.5px solid #eef2f8}'
+      + '#agenda-rel-ov .arl-f button{border:1.5px solid #d6e2f2;background:#fff;color:#2a5ea9;border-radius:10px;padding:10px 14px;font:800 13px "Nunito Sans",system-ui,sans-serif;cursor:pointer}'
+      + '#agenda-rel-ov .arl-f button.pri{background:#2a5ea9;border-color:#2a5ea9;color:#fff}'
+      + '</style><div class="arl" role="dialog" aria-modal="true" aria-label="Rappel demandé par le client">'
+      + '<div class="arl-h"><span>\ud83d\udcde Rappel demandé par le client</span><button type="button" class="arl-x" data-x aria-label="Fermer">\u00d7</button></div><div class="arl-c">'
+      + '<div>' + (Number(p.id_client) > 0 ? '<button type="button" class="arl-cli" data-fiche title="Ouvrir la fiche client">' + esc(nomCli || 'Client') + ' \u203a</button>' : '<b>' + esc(nomCli || '\u2014') + '</b>') + '</div>'
+      + '<div><div class="arl-l">Créneau choisi</div><b>' + esc(String(dateLongue(p.event_start_time)).split(' · ')[0]) + '</b> \u00b7 entre ' + esc(hm(p.event_start_time)) + ' et ' + esc(hm(p.event_end_time)) + '</div>'
+      + (tel ? '<div><div class="arl-l">Téléphone</div><a href="tel:' + esc(tel) + '" class="arl-tel" data-tel="' + esc(tel) + '">' + esc(tel) + '</a></div>' : '')
+      + (passe ? '<div class="arl-w">Le créneau est passé. Si l\u2019appel est fait, notez le contact sur le lead.</div>'
+               : '<div class="arl-n">Appelez le client dans ce créneau. Dès que le contact est noté sur le lead, ce rappel quitte l\u2019agenda.</div>')
+      + '</div><div class="arl-f">'
+      + (x.id_lead ? '<button type="button" class="pri" data-lead>Ouvrir le lead</button>' : '') + '<button type="button" data-x>Fermer</button></div></div>';
+    ov = d.createElement('div'); ov.id = 'agenda-rel-ov'; ov.style.cssText = st; ov.innerHTML = h;
+    (d.body || d.documentElement).appendChild(ov);
+    const close = () => { try { ov.remove(); } catch (e) {} };
+    ov.addEventListener('mousedown', (e) => { if (e.target === ov) close(); });
+    ov.querySelectorAll('[data-x]').forEach(b => b.addEventListener('click', close));
+    const bf = ov.querySelector('[data-fiche]'); if (bf) bf.addEventListener('click', () => { close(); ouvrirFicheClient(p.id_client); });
+    const bl = ov.querySelector('[data-lead]'); if (bl) bl.addEventListener('click', () => { close(); ouvrirLead(x.id_lead); });
+    const bt = ov.querySelector('[data-tel]');
+    if (bt) bt.addEventListener('click', (e) => { try { if (appelerNumero(bt.getAttribute('data-tel'), nomCli, p.id_client)) e.preventDefault(); } catch (er) {} close(); });
+  }
   function ouvrirFicheClient(id) {
     const n = Number(id); if (!(n > 0)) return;
     let FW = frontWin(); try { FW = (wwLib.getFrontWindow && wwLib.getFrontWindow()) || FW; } catch (e) {}
