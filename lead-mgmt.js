@@ -1,6 +1,10 @@
 // ============================================================================
 //  LEAD MANAGEMENT — module One Data (OD.define 'lead-mgmt')
-//  VERSION TEAM COLIN (v114) — déploiement CIBLÉ (publish-targets :
+//  VERSION TEAM COLIN (v115) — déploiement CIBLÉ (publish-targets :
+//  v115 (13/11/2026) : CAMPAGNES — fiche de décision avant « Je prends » : indice de
+//    priorité, véhicule(s) (modèle, immatriculation, année, km, passages atelier),
+//    raisons de la priorité, dernier passage atelier, coordonnées disponibles.
+//    Liste « À prendre » triée par priorité. RPC campagne_infos (sollicitation_detail).
 //  v114 (13/11/2026) : CAMPAGNES EN LIBRE-SERVICE côté vendeur — une campagne lancée
 //    sans répartition (sollicitations sans vendeur, ex. « Lexus Black Friday » à Sceaux)
 //    s'affiche dans l'onglet Campagnes avec « Je prends » : comme un lead du Pool, le
@@ -2952,7 +2956,7 @@
       site: null,              // site affiché (chef, direction après « Ouvrir »)
       vueSite: null,           // direction : site ouvert
       depuis: 'site', cell: null, autresVendeurs: false, autresSites: false,
-      campagnes: null, campVend: null, campOuverte: null, mesSollis: null, campLibres: null,
+      campagnes: null, campVend: null, campOuverte: null, mesSollis: null, campLibres: null, campInfos: {},
       relais: null,
       ack: new Set(), vus: new Set(), frais: new Set(), premier: true,
       dr: null, modal: null,
@@ -3357,6 +3361,12 @@
           S.campagnes = r[0] || []; S.mesSollis = r[1] || [];
           try { S.campLibres = await rpc('campagne_libres', { p_viewer_id_user: Number(MOI), p_site_ids: null }) || []; }
           catch (e2) { S.campLibres = []; }
+          var idsInfos = S.campLibres.concat(S.mesSollis).map(function (t) { return Number(t.id_rapport); }).filter(Boolean);
+          S.campInfos = {};
+          if (idsInfos.length) {
+            try { (await rpc('campagne_infos', { p_ids: idsInfos }) || []).forEach(function (x) { S.campInfos[x.id_rapport] = x; }); }
+            catch (e3) { S.campInfos = {}; }
+          }
         } else {
           var r2 = await Promise.all([
             rpc('get_campagnes_sollicitation', { p_viewer_id_user: Number(MOI), p_date_from: de, p_date_to: a, p_site_ids: sites, p_id_user: null }),
@@ -3986,6 +3996,39 @@
       ls.forEach(function (l) { h += ligneLead(l); });
       return h + '</div>';
     }
+    function ligneCamp(t, actions, cliquable) {
+      var x = (S.campInfos || {})[t.id_rapport] || null, inf = (x && x.infos) || {};
+      var dt = function (d) { if (!d) return ''; var p = String(d).slice(0, 10).split('-'); return p.length === 3 ? p[2] + '/' + p[1] + '/' + p[0] : ''; };
+      var nb = function (n) { return Number(n).toLocaleString('fr-FR'); };
+      var gauche;
+      if (x && x.priorite != null) {
+        var sc = Number(x.priorite);
+        gauche = '<div class="cp-prio ' + (sc >= 45 ? 'haut' : sc >= 25 ? 'moy' : 'bas') + '" title="Indice de priorité sur 100">' + sc + '<small>PRIO</small></div>';
+      } else {
+        gauche = '<span class="tm ' + (t.anciennete_j >= 3 ? 'warn' : 'ok') + '"><b>' + (t.anciennete_j ? plural(t.anciennete_j, 'jour') : 'aujourd\'hui') + '</b><small>depuis le lancement</small></span>';
+      }
+      var vehs = ((x && x.vehicules) || []).map(function (v) {
+        var mod = [String(v.marque || '').toUpperCase() === 'LEXUS' ? 'Lexus' : (v.marque || ''), v.modele || ''].filter(Boolean).join(' ') || 'Véhicule';
+        var an = v.pmec ? (v.pmec_estimee ? '≈ ' : '') + String(v.pmec).slice(0, 4) : '';
+        var bits = [v.immat, an, v.km ? nb(v.km) + ' km' : ''].filter(Boolean);
+        var pass = v.dernier_passage ? (v.nb_passages ? plural(Number(v.nb_passages), 'passage') + ' atelier depuis 01/2025, dernier le ' : 'dernier passage atelier le ') + dt(v.dernier_passage) : 'pas de passage atelier connu';
+        return '<div class="cp-veh"><b>' + esc(mod) + '</b>' + (bits.length ? ' · ' + esc(bits.join(' · ')) : '') + ' · ' + esc(pass) + '</div>';
+      }).join('');
+      var rais = ((x && x.raisons) || []).map(function (r) {
+        var cls = /^Commande|achat récent/.test(r) ? ' vigil' : /^Simulation|renouvellement/.test(r) ? ' fort' : '';
+        return '<span class="cp-r' + cls + '">' + esc(r) + '</span>';
+      }).join('');
+      var coord = [inf.a_mobile ? 'mobile' : '', inf.a_fixe ? 'fixe' : '', inf.a_email ? 'e-mail' : ''].filter(Boolean);
+      var lieu = [siteNom(t.nom_site), [inf.code_postal, t.ville || inf.ville].filter(Boolean).join(' ')].filter(Boolean).join(' · ');
+      var dejaSimu = ((x && x.raisons) || []).some(function (r) { return /^Simulation/.test(r); });
+      var faits = [inf.simulation_bacs && !dejaSimu ? 'Simulation BACS le ' + dt(inf.simulation_bacs) : '', inf.ca_atelier_6m ? nb(Math.round(Number(inf.ca_atelier_6m))) + ' € HT d\'atelier sur 6 mois' : '',
+                   coord.length ? 'Joignable par ' + coord.join(', ') : 'Aucune coordonnée'].filter(Boolean).join(' · ');
+      return '<div class="lr cp-l"' + (cliquable ? ' data-a="fiche" data-id="' + esc(t.id_client) + '"' : '') + ' tabindex="0"><div>' + gauche + '</div>'
+        + '<div><span class="lr-n">' + esc(propre(t.client_nom)) + '</span>' + (inf.segment === 'pro' ? ' <span class="tag">PRO</span>' : '') + '<p class="lr-d">' + esc(lieu) + '</p>'
+        + vehs + (rais ? '<div class="cp-rs">' + rais + '</div>' : '') + (x ? '<p class="cp-f">' + esc(faits) + '</p>' : '') + '</div>'
+        + '<div class="lr-a">' + actions + '</div></div>';
+    }
+
     function vueCampagnesVendeur() {
       var h = '<div class="ph"><div><h2>Mes campagnes</h2><p>Libre-service, comme le Pool : prenez un client à relancer, il passe à votre nom. Ouvrez ensuite sa fiche pour l\'appeler et faire votre compte rendu : la relance est alors comptée comme traitée. S\'il ne vous concerne pas, rendez-le.</p></div></div>';
       if (!S.campagnes) return h + '<div class="empty">Chargement des campagnes…</div>';
@@ -3997,23 +4040,22 @@
         var c = S.campagnes.find(function (x) { return x.campagne === nom; }) || {};
         var cibles = (S.mesSollis || []).filter(function (t) { return t.campagne === nom; });
         var dispo = libres.filter(function (t) { return t.campagne === nom; });
+        var prio = function (t) { var x = (S.campInfos || {})[t.id_rapport]; return x && x.priorite != null ? Number(x.priorite) : -1; };
+        dispo.sort(function (a, b) { return prio(b) - prio(a) || Number(a.id_rapport) - Number(b.id_rapport); });
+        cibles.sort(function (a, b) { return prio(b) - prio(a); });
         h += '<div class="sub"><h3>' + esc(nom) + '</h3><p>' + plural(dispo.length, 'client') + ' à prendre · ' + plural(Number(c.nb_sollicitations) || 0, 'client') + ' pris par vous · ' + (c.nb_traitees || 0) + ' traités'
           + (Number(c.nb_propales) ? ' · ' + plural(c.nb_propales, 'proposition') : '') + (Number(c.nb_bdc) ? ' · ' + plural(c.nb_bdc, 'commande') : '') + '.</p>';
         if (cibles.length) {
           h += '<h4 class="camp-st">À relancer par vous</h4><div class="list">';
           cibles.slice(0, 80).forEach(function (t) {
-            h += '<div class="lr" data-a="fiche" data-id="' + esc(t.id_client) + '" tabindex="0"><div><span class="tm ' + (t.anciennete_j >= 3 ? 'warn' : 'ok') + '"><b>' + (t.anciennete_j ? plural(t.anciennete_j, 'jour') : 'aujourd\'hui') + '</b><small>depuis le lancement</small></span></div>'
-              + '<div><span class="lr-n">' + esc(propre(t.client_nom)) + '</span><p class="lr-d">' + esc(siteNom(t.nom_site)) + '</p><div class="tags"><span class="tag camp">Campagne</span></div></div>'
-              + '<div class="lr-a"><button type="button" class="btn pri" data-a="fiche" data-id="' + esc(t.id_client) + '">Ouvrir la fiche</button> <button type="button" class="btn ghost sm" data-a="camp-rendre" data-id="' + esc(t.id_rapport) + '">Rendre</button></div></div>';
+            h += ligneCamp(t, '<button type="button" class="btn pri" data-a="fiche" data-id="' + esc(t.id_client) + '">Ouvrir la fiche</button> <button type="button" class="btn ghost sm" data-a="camp-rendre" data-id="' + esc(t.id_rapport) + '">Rendre</button>', true);
           });
           h += '</div>';
         }
         h += '<h4 class="camp-st">À prendre</h4><div class="list">';
         if (!dispo.length) h += '<div class="empty">Tous les clients de cette campagne ont été pris.</div>';
-        dispo.slice(0, 120).forEach(function (t) {
-          h += '<div class="lr" tabindex="0"><div><span class="tm ' + (t.anciennete_j >= 3 ? 'warn' : 'ok') + '"><b>' + (t.anciennete_j ? plural(t.anciennete_j, 'jour') : 'aujourd\'hui') + '</b><small>depuis le lancement</small></span></div>'
-            + '<div><span class="lr-n">' + esc(propre(t.client_nom)) + '</span><p class="lr-d">' + esc([siteNom(t.nom_site), t.ville].filter(Boolean).join(' · ')) + '</p><div class="tags"><span class="tag camp">Campagne</span></div></div>'
-            + '<div class="lr-a"><button type="button" class="btn pri" data-a="camp-prendre" data-id="' + esc(t.id_rapport) + '">Je prends</button></div></div>';
+        dispo.slice(0, 150).forEach(function (t) {
+          h += ligneCamp(t, '<button type="button" class="btn pri" data-a="camp-prendre" data-id="' + esc(t.id_rapport) + '">Je prends</button>', false);
         });
         h += '</div></div>';
       });
@@ -6077,6 +6119,19 @@
 .lmtc .sub{margin-top:16px;display:grid;gap:4px}
 .lmtc .sub h3{font-size:14px;font-weight:800;color:var(--bleu-dk)}
 .lmtc .camp-st{font-size:12px;font-weight:700;color:var(--bleu-dk);margin:14px 0 6px;letter-spacing:.02em}
+.lmtc .cp-l{align-items:start}
+.lmtc .cp-prio{display:flex;flex-direction:column;align-items:center;justify-content:center;width:56px;height:56px;border-radius:14px;background:var(--bleu);color:#fff;font-weight:800;font-size:20px;line-height:1;margin:2px auto 0}
+.lmtc .cp-prio small{font-size:9px;font-weight:700;letter-spacing:.06em;margin-top:3px;opacity:.9}
+.lmtc .cp-prio.moy{background:var(--mut)}
+.lmtc .cp-prio.bas{background:var(--bleu-clair);color:var(--bleu-dk)}
+.lmtc .cp-veh{margin-top:6px;background:var(--calme-bg);border-radius:8px;padding:6px 10px;font-size:12.5px;color:var(--ink-2);line-height:1.4}
+.lmtc .cp-veh b{color:var(--bleu-dk)}
+.lmtc .cp-rs{display:flex;flex-wrap:wrap;gap:5px;margin-top:7px}
+.lmtc .cp-r{font-size:11.5px;border:1px solid var(--line-2);border-radius:999px;padding:2px 9px;color:var(--ink-2);background:var(--card)}
+.lmtc .cp-r.fort{border-color:var(--bleu);color:var(--bleu-dk);font-weight:700}
+.lmtc .cp-r.vigil{border-color:var(--rouge);color:var(--m-rouge);font-weight:700}
+.lmtc .cp-f{margin-top:6px;font-size:12px;color:var(--ink-3)}
+@media (max-width:600px){.lmtc .cp-prio{margin:0}}
 .lmtc .sub > p{font-size:12.5px;color:var(--mut);font-weight:600}
 /* Le mur */
 .lmtc table.mur{min-width:640px}
