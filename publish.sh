@@ -21,6 +21,10 @@
 #    --unpin <slug>      détache ce tenant (il resuit la version par défaut)
 #    --republish         autorise la publication alors que le fichier n'a pas
 #                        changé (reprise après un échec de vérification CDN)
+#    --ecraser-correctif-agent
+#                        publie MÊME si la version en ligne d'un tenant contient
+#                        un correctif absent du dépôt (agent de résolution non
+#                        fusionné). À n'utiliser qu'après avoir repris ce correctif.
 #
 #  Exemples :
 #    ./publish.sh dashboard v34               # Team Colin seul (cible auto)
@@ -41,6 +45,7 @@ SET_DEFAULT=1
 FORCE_DEFAULT=0
 EXPLICIT_NO_DEFAULT=0
 REPUBLISH=0
+ECRASER_AGENT=0
 PIN=""
 UNPIN=""
 while [ $# -gt 0 ]; do
@@ -48,6 +53,7 @@ while [ $# -gt 0 ]; do
     --no-default)    SET_DEFAULT=0; EXPLICIT_NO_DEFAULT=1; shift ;;
     --force-default) FORCE_DEFAULT=1; shift ;;
     --republish)     REPUBLISH=1; shift ;;
+    --ecraser-correctif-agent) ECRASER_AGENT=1; shift ;;
     --pin)           PIN="${2:?--pin attend un slug}"; shift 2 ;;
     --unpin)         UNPIN="${2:?--unpin attend un slug}"; shift 2 ;;
     *) echo "❌ option inconnue : $1"; exit 1 ;;
@@ -143,6 +149,43 @@ if git ls-files --error-unmatch -- "$FILE" >/dev/null 2>&1 \
     exit 1
   fi
   echo "⚠️  fichier inchangé, publication forcée (--republish)"
+fi
+
+# Garde-fou (13/11/2026) : ne jamais écraser un correctif mis en ligne hors du dépôt.
+# L'agent de résolution épingle chez un client une version construite sur sa branche
+# (agent/ticket-N). Tant que sa pull request n'est pas fusionnée, la publication
+# suivante, faite depuis main, effaçait le correctif (menu « Vendeur » d'Alan, perdu
+# à la v104). On vérifie donc, pour chaque tenant visé, que le commit de la version
+# en ligne est bien contenu dans HEAD, et qu'aucune pull request d'agent n'est
+# ouverte sur ce fichier.
+if [ "$ECRASER_AGENT" != "1" ]; then
+  BLOQUE=0
+  for slug in $(printf '%s' "${AUTO_TARGETS},${PIN}" | tr ',' ' '); do
+    [ -n "$slug" ] || continue
+    EN_LIGNE="$(cp_curl "${CP_URL}/rest/v1/tenant_module?module_key=eq.${MODULE}&tenant_id=eq.$(jval id "$(cp_curl "${CP_URL}/rest/v1/tenant?slug=eq.${slug}&select=id")")&select=version:code_version(label,cdn_url)" 2>/dev/null || true)"
+    URL_EN_LIGNE="$(printf '%s' "$EN_LIGNE" | grep -o 'https://cdn.jsdelivr.net/gh/[^"]*' | head -n1 || true)"
+    SHA_EN_LIGNE="$(printf '%s' "$URL_EN_LIGNE" | sed -n 's#.*@\([0-9a-f]\{7,40\}\)/.*#\1#p')"
+    [ -n "$SHA_EN_LIGNE" ] || continue
+    git cat-file -e "${SHA_EN_LIGNE}^{commit}" 2>/dev/null || git fetch -q origin "$SHA_EN_LIGNE" 2>/dev/null || true
+    if ! git merge-base --is-ancestor "$SHA_EN_LIGNE" HEAD 2>/dev/null; then
+      echo "❌ ${slug} est servi par une version de ${FILE} construite HORS du dépôt"
+      echo "   (commit ${SHA_EN_LIGNE:0:7}, absent de main) : très probablement un correctif"
+      echo "   de l'agent de résolution dont la pull request n'est pas fusionnée."
+      echo "   Publier maintenant l'effacerait. Reprends d'abord ce correctif (fusionne la"
+      echo "   pull request), puis relance. En dernier recours : --ecraser-correctif-agent"
+      BLOQUE=1
+    fi
+  done
+  PR_AGENT="$(curl -fsS -m 15 "https://api.github.com/repos/${REPO}/pulls?state=open&per_page=50" 2>/dev/null \
+              | grep -o '"ref": *"agent/[^"]*"' | sed 's/.*"agent\//agent\//; s/"$//' | sort -u || true)"
+  for br in $PR_AGENT; do
+    if curl -fsS -m 15 "https://api.github.com/repos/${REPO}/compare/main...${br}" 2>/dev/null | grep -q "\"filename\": *\"${FILE}\""; then
+      echo "❌ une pull request d'agent est ouverte sur ${FILE} (branche ${br})."
+      echo "   Fusionne-la ou ferme-la avant de publier. En dernier recours : --ecraser-correctif-agent"
+      BLOQUE=1
+    fi
+  done
+  [ "$BLOQUE" = "0" ] || { echo "Publication annulée."; exit 1; }
 fi
 
 # Immuabilité : un tag existant n'est réutilisable que s'il pointe déjà sur HEAD
