@@ -1,6 +1,8 @@
 // ============================================================================
 //  LEAD MANAGEMENT — module One Data (OD.define 'lead-mgmt')
-//  VERSION TEAM COLIN (v116) — déploiement CIBLÉ (publish-targets :
+//  VERSION TEAM COLIN (v117) — déploiement CIBLÉ (publish-targets :
+//  v117 (13/11/2026) : la pastille de l'onglet « Campagnes » passe en VERT (comme
+//    la nouvelle pastille campagnes de la barre de navigation, topnav v45).
 //  v116 (13/11/2026) : CAMPAGNES (vendeur) — indicateurs de suivi en tête de chaque
 //    campagne (à prendre, pris, traités, propositions, commandes, mes clients, barre
 //    d'avancement) et filtres : recherche (nom, ville, immatriculation), modèle,
@@ -1177,7 +1179,7 @@
       return '<div class="tabs" role="tablist">' + onglets().map(function (o) {
         var on = o[0] === S.tab;
         return '<button type="button" role="tab" aria-selected="' + on + '" class="' + (on ? 'on' : '') + (o[4] ? ' t-' + o[4] : '') + '" data-a="tab" data-id="' + o[0] + '">' + esc(o[1])
-          + (o[2] != null ? ' <span class="cnt ' + (o[2] === 0 ? 'z' : (o[3] ? 'c' : '')) + '">' + o[2] + '</span>' : '') + '</button>';
+          + (o[2] != null ? ' <span class="cnt ' + (o[2] === 0 ? 'z' : (o[0] === 'campagnes' ? 'g' : (o[3] ? 'c' : ''))) + '">' + o[2] + '</span>' : '') + '</button>';
       }).join('') + '</div>';
     }
     function fc(list) { return S.campagne ? (list || []).filter(function (l) { return l.campagne === S.campagne; }) : (list || []); }
@@ -3665,7 +3667,7 @@
       return '<div class="tabs" role="tablist">' + (analyse ? '<button type="button" data-a="tab" data-id="pool">← Retour au Pool</button>' : '') + onglets().map(function (o) {
         var on = o[0] === S.tab;
         return '<button type="button" role="tab" aria-selected="' + on + '" class="' + (on ? 'on' : '') + (o[4] ? ' t-' + o[4] : '') + '" data-a="tab" data-id="' + o[0] + '">' + esc(o[1])
-          + (o[2] != null ? ' <span class="cnt ' + (o[2] === 0 ? 'z' : (o[3] ? 'c' : '')) + '">' + o[2] + '</span>' : '') + '</button>';
+          + (o[2] != null ? ' <span class="cnt ' + (o[2] === 0 ? 'z' : (o[0] === 'campagnes' ? 'g' : (o[3] ? 'c' : ''))) + '">' + o[2] + '</span>' : '') + '</button>';
       }).join('') + '</div>';
     }
 
@@ -6428,6 +6430,7 @@
 .lmtc .tabs .cnt.c,.lmtc .tabs button.on .cnt.c{background:var(--chaud-bg);color:var(--m-rouge)}
 .lmtc .tabs button.on .cnt{background:var(--sel);color:var(--bleu)}
 .lmtc .tabs .cnt.z{background:var(--calme-bg);color:var(--ink-3)}
+.lmtc .tabs .cnt.g,.lmtc .tabs button.on .cnt.g{background:var(--m-vert);color:#fff}
 .lmtc .act:has(.cartes,.vend,.panel > .vide){background:none;border:0;box-shadow:none}
 .lmtc .act:has(.cartes,.vend,.panel > .vide) .panel{padding:0}
 .lmtc .bacs-l{display:flex;flex-wrap:wrap;gap:4px 10px;align-items:baseline;background:var(--card);border:1px solid var(--line);border-left:4px solid var(--m-rouge);border-radius:12px;padding:10px 14px;margin-bottom:18px;font-size:13px;color:var(--ink-2)}
