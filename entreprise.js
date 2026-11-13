@@ -1,4 +1,12 @@
-// ENTREPRISE — module One Data (OD.define) v8 (06/11/2026)
+// ENTREPRISE — module One Data (OD.define) v9 (13/11/2026)
+//
+// v9 : la nature de la fiche (société ou particulier) est lue en base, et non
+//   plus dans la variable « client sélectionné ». Ouverte depuis un lien qui ne
+//   pose que l'identifiant (tableau de bord, lead, agenda…), la fiche était
+//   d'abord prise pour un particulier : ses rattachements de particulier
+//   (aucun) étaient chargés, puis l'écran se redessinait en société avec
+//   « Aucun interlocuteur désigné » alors que l'interlocuteur existait
+//   (société ROSSEEL NATHALIE, 13/11).
 //
 // v8 : module partagé oropra-bacs-client v7 (plus de demande de consentement
 //   par SMS à la création). Aucun autre changement.
@@ -97,8 +105,17 @@ function currentClient() {
   return c && typeof c === 'object' ? c : null;
 }
 function currentIdvu() { const c = currentClient(); return c && c.IDVu != null ? Number(c.IDVu) : null; }
-function isParticulier() { const c = currentClient(); return c ? (c.idmultivu === 0 || c.idmultivu === '0') : false; }
-function isSociete() { const c = currentClient(); return c ? (c.idmultivu === 1 || c.idmultivu === '1') : false; }
+// Nature lue en base pour la fiche affichée (loadList) ; la variable WeWeb ne
+// sert que tant que la base n'a pas répondu.
+function natureConnue() { return state.natureId != null && state.natureId === currentIdvu(); }
+function isParticulier() {
+  if (natureConnue()) return state.natureSoc === false;
+  const c = currentClient(); return c ? (c.idmultivu === 0 || c.idmultivu === '0') : false;
+}
+function isSociete() {
+  if (natureConnue()) return state.natureSoc === true;
+  const c = currentClient(); return c ? (c.idmultivu === 1 || c.idmultivu === '1') : false;
+}
 function societeName(c) {
   if (!c) return '';
   return [c.CIVILITE, c.NOM, c.PRENOM].filter(Boolean).join(' ').trim();
@@ -128,6 +145,11 @@ async function loadList() {
   if (id == null) { state.list = []; render(); return; }
   state.loading = true; render();
   try {
+    if (state.natureId !== id) {
+      const t = await supa().from('CLIENT').select('idmultivu').eq('IDVu', id).maybeSingle();
+      if (t && !t.error && t.data) { state.natureId = id; state.natureSoc = (t.data.idmultivu === 1 || t.data.idmultivu === '1'); }
+    }
+    if (currentIdvu() !== id) return;
     if (isSociete()) {
       const r = await supa().rpc('get_interlocuteurs_societe', { p_id_societe: id });
       if (r.error) throw r.error;
