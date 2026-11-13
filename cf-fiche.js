@@ -1,4 +1,8 @@
 // ============================================================================
+//  v14 (13/11/2026) : picto « copier » à droite de l'e-mail et du portable
+//    (fiche en lecture) : un clic met la valeur dans le presse-papiers, comme
+//    Ctrl+C. Le portable part au format 0601020304 (chiffres seuls, +33 ramené
+//    à 0). Le picto passe au vert « Copié » une seconde et demie.
 //  v13 (06/11/2026) : retours vendeurs.
 //    · CONSENTEMENTS : chaque marque affiche sa date de mise à jour dans BACS
 //      (Optin_LastSavingDate / Optin_Date, client_consentement_synthese v2)
@@ -534,6 +538,9 @@ const STYLE = `<style>
 #oropra-client-fiche .cf-val{font-size:14px;font-weight:700;color:#1F4A85;line-height:1.35;overflow-wrap:anywhere;min-height:19px}
 #oropra-client-fiche .cf-val a{color:#2a5ea9;text-decoration:none}
 #oropra-client-fiche .cf-val a:hover{text-decoration:underline}
+#oropra-client-fiche .cf-copier{display:inline-flex;align-items:center;justify-content:center;width:24px;height:24px;margin-left:6px;vertical-align:-5px;border:1px solid #d9e3f2;border-radius:6px;background:#fff;color:#7a98c5;cursor:pointer;padding:0}
+#oropra-client-fiche .cf-copier:hover{color:#2a5ea9;border-color:#2a5ea9}
+#oropra-client-fiche .cf-copier.ok{color:#53bda7;border-color:#53bda7}
 #oropra-client-fiche .cf-val.multi{white-space:pre-wrap;font-weight:600;font-size:13.5px}
 #oropra-client-fiche .cf-vide{color:#c4d2e7;font-weight:600}
 #oropra-client-fiche .cf-ok-mini{display:inline-block;font-size:11px;font-weight:800;color:#2f8f77;background:#e9f7f3;border-radius:6px;padding:1px 6px;margin-left:6px;vertical-align:1px}
@@ -665,6 +672,28 @@ function dateHeureFr(v) {
   return d.toLocaleDateString('fr-FR') + ' à ' + d.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' }).replace(':', 'h');
 }
 function vide(v) { return v == null || String(v).trim() === ''; }
+// v14 : copie au presse-papiers. Portable au format 0601020304.
+const ICON_COPIER = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>';
+const ICON_COPIE_OK = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>';
+function telCopie(t) {
+  let d = cleanDigits(t);
+  if (/^33\d{9}$/.test(d)) d = '0' + d.slice(2);
+  else if (/^0033\d{9}$/.test(d)) d = '0' + d.slice(4);
+  return d;
+}
+function boutonCopier(valeur, titre) {
+  if (!valeur) return '';
+  return `<button type="button" class="cf-copier" data-cf-copier="${esc(valeur)}" title="${esc(titre)}" aria-label="${esc(titre)}">${ICON_COPIER}</button>`;
+}
+async function copierTexte(t) {
+  let W = window; try { W = (window.wwLib && wwLib.getFrontWindow && wwLib.getFrontWindow()) || window; } catch (e) {}
+  try { if (W.navigator && W.navigator.clipboard && W.isSecureContext) { await W.navigator.clipboard.writeText(t); return true; } } catch (e) {}
+  try {
+    const D = W.document, ta = D.createElement('textarea');
+    ta.value = t; ta.setAttribute('readonly', ''); ta.style.position = 'fixed'; ta.style.top = '-1000px';
+    D.body.appendChild(ta); ta.select(); const ok = D.execCommand('copy'); ta.remove(); return ok;
+  } catch (e) { return false; }
+}
 function valeurLue(field, type, opts, v) {
   if (type === 'checkbox') return v ? 'Oui' : 'Non';
   if (vide(v)) return '<span class="cf-vide">—</span>';
@@ -672,8 +701,11 @@ function valeurLue(field, type, opts, v) {
     const o = (opts.options || []).find(x => String(x.value) === String(v));
     return esc(o ? o.label : v);
   }
-  if (field === 'TEl_MOB' || field === 'TEL_FIXE') return peutAppeler() ? `<a href="#" data-cf-tel="${esc(String(v).replace(/[^0-9+]/g, ''))}" title="Appeler">${esc(telLisible(v))}</a>` : esc(telLisible(v));
-  if (field === 'EMAIL') return `<a href="mailto:${esc(v)}">${esc(v)}</a>`;
+  if (field === 'TEl_MOB' || field === 'TEL_FIXE') {
+    const lien = peutAppeler() ? `<a href="#" data-cf-tel="${esc(String(v).replace(/[^0-9+]/g, ''))}" title="Appeler">${esc(telLisible(v))}</a>` : esc(telLisible(v));
+    return field === 'TEl_MOB' ? lien + boutonCopier(telCopie(v), 'Copier le portable') : lien;
+  }
+  if (field === 'EMAIL') return `<a href="mailto:${esc(v)}">${esc(v)}</a>` + boutonCopier(String(v).trim(), 'Copier l’e-mail');
   if (type === 'date') return esc(dateFr(v));
   if (type === 'number' && /^\d+$/.test(String(v))) return esc(Number(v).toLocaleString('fr-FR'));
   return esc(v);
@@ -1124,6 +1156,13 @@ function bindEvents() {
   const root = getRoot();
   if (!root) return;
   root.querySelectorAll('[data-cf-tel]').forEach(el => el.addEventListener('click', ev => { ev.preventDefault(); appelerNumero(el.getAttribute('data-cf-tel')); }));
+  root.querySelectorAll('[data-cf-copier]').forEach(el => el.addEventListener('click', async ev => {
+    ev.preventDefault(); ev.stopPropagation();
+    const ok = await copierTexte(el.getAttribute('data-cf-copier'));
+    el.classList.toggle('ok', ok); el.innerHTML = ok ? ICON_COPIE_OK : ICON_COPIER;
+    el.title = ok ? 'Copié' : 'Copie impossible : sélectionnez la valeur puis Ctrl+C';
+    clearTimeout(el.__t); el.__t = setTimeout(() => { el.classList.remove('ok'); el.innerHTML = ICON_COPIER; }, 1500);
+  }));
   root.querySelectorAll('[data-cf-action="enter-edit"]').forEach(el => el.addEventListener('click', enterEdit));
   root.querySelectorAll('[data-cf-action="cancel-edit"]').forEach(el => el.addEventListener('click', cancelEdit));
   root.querySelectorAll('[data-cf-action="save-edit"]').forEach(el => el.addEventListener('click', saveEdit));
