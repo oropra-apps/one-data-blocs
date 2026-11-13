@@ -1,3 +1,7 @@
+// v11 (13/11/2026) : « Mes retours » devient une conversation. Chaque retour montre
+// tout le fil (réponses de l'équipe et de l'utilisateur) et un bouton « Répondre » :
+// l'utilisateur répond dans le même retour au lieu d'en ouvrir un nouveau
+// (edge function pulse, route retour-repondre).
 // v10 (27/10/2026) : zone de texte du panneau « Ton avis » en 16 px sur mobile.
 // iPhone : un champ dont le texte fait moins de 16 px déclenche un ZOOM
 // automatique de Safari au toucher. La page entière devient alors plus grande que
@@ -31,7 +35,7 @@
 // ============================================================================
 OD.define('retours', {
   mount(__anchor, ctx) {
-    const VERSION = 10;   // v5 : écran courant fourni par pulse (plus grande surface visible, accessoires exclus)
+    const VERSION = 11;   // v5 : écran courant fourni par pulse (plus grande surface visible, accessoires exclus)
                          // v4 : « Montrer l'endroit » nomme la zone désignée (titre du bloc, colonne, champ, type)
     const W = window;
 
@@ -240,6 +244,14 @@ textarea:focus{border-color:#1F4A85;outline:none}
 .st.en_cours{background:#FFF1CC;color:#8A5300}.st.fait{background:#E3F2EA;color:#2F7D55}.st.ecarte{background:#F1F2F4;color:#667085}
 .rp{margin-top:8px;padding:8px 11px;border-radius:3px 12px 12px 12px;background:#1F4A85;color:#fff;font-size:13px;line-height:1.45;overflow-wrap:anywhere}
 .rp em{display:block;font-style:normal;font-size:11px;font-weight:700;opacity:.72;margin-bottom:2px}
+.rp.ut{margin-left:22px;border-radius:12px 3px 12px 12px;background:#E8EEF7;color:#14305A}
+.rp.ut em{opacity:1;color:#5A72A0}
+.rpz{margin-top:8px}
+.rpz textarea{min-height:64px}
+.rpa{display:flex;gap:8px;justify-content:flex-end;align-items:center;margin-top:6px}
+.rpa small{margin-right:auto;font-size:12px;color:#B3261E}
+.lkb{border:0;background:none;padding:4px 0;margin-top:6px;font:inherit;font-size:12.5px;font-weight:700;color:#1F4A85;cursor:pointer}
+.lkb:hover{text-decoration:underline}
 .vide{font-size:13.5px;line-height:1.5;color:#5A72A0;text-align:center;padding:26px 10px}
 
 .cd{position:fixed;right:48px;bottom:22px;width:min(340px,calc(100vw - 64px));padding:15px 16px 14px;background:#fff;color:#14305A;border-radius:14px;border:1px solid #E3EAF4;box-shadow:0 14px 40px rgba(20,48,90,.22);transform:translateY(14px);opacity:0;visibility:hidden;transition:transform .22s ease,opacity .22s ease,visibility 0s linear .22s}
@@ -893,6 +905,45 @@ textarea:focus{border-color:#1F4A85;outline:none}
       if (d < 7 * 86400) return `il y a ${Math.floor(d / 86400)} jours`;
       return new Date(ts).toLocaleDateString('fr-FR', { day: 'numeric', month: 'short' });
     };
+    // Fil d'un retour : messages de l'équipe et de l'utilisateur, puis « Répondre ».
+    function filHtml(it) {
+      const msgs = Array.isArray(it.messages) && it.messages.length
+        ? it.messages
+        : (it.reponse ? [{ auteur: 'equipe', texte: it.reponse, le: it.reponse_le }] : []);
+      if (!msgs.length) return '';
+      const bulles = msgs.map(m => m.auteur === 'utilisateur'
+        ? `<div class="rp ut"><em>Ta réponse, ${esc(ilya(m.le))}</em>${esc(m.texte)}</div>`
+        : `<div class="rp"><em>Équipe One Data, ${esc(ilya(m.le))}</em>${esc(m.texte)}</div>`).join('');
+      return `${bulles}<div class="rpz" data-retour="${esc(it.id)}"><button type="button" class="lkb" data-a="rep-ouvrir">Répondre</button></div>`;
+    }
+    function ouvrirReponse(zone) {
+      zone.innerHTML = `<textarea rows="3" maxlength="4000" aria-label="Ta réponse"></textarea>
+        <div class="rpa"><small></small><button type="button" class="bt sec" data-a="rep-annuler">Annuler</button><button type="button" class="bt" data-a="rep-envoyer">Envoyer</button></div>`;
+      const t = zone.querySelector('textarea');
+      setTimeout(() => { try { t.focus(); } catch (e) {} }, 20);
+    }
+    async function envoyerReponse(zone, bouton) {
+      const t = zone.querySelector('textarea'), err = zone.querySelector('small');
+      const texte = (t && t.value || '').trim();
+      if (!texte) { if (err) err.textContent = 'Écris ta réponse.'; return; }
+      bouton.disabled = true; bouton.textContent = 'Envoi…'; if (err) err.textContent = '';
+      try {
+        const jeton = await Pz().jeton();
+        const r = await fetch(endpoint() + '?a=retour-repondre', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + jeton },
+          body: JSON.stringify({ tenant_id: tenant.id, retour_id: zone.dataset.retour, texte }),
+        });
+        const j = await r.json().catch(() => ({}));
+        if (!r.ok || !j.ok) throw new Error(j.erreur || ('HTTP ' + r.status));
+        await chargerMesRetours();
+      } catch (e) {
+        bouton.disabled = false; bouton.textContent = 'Envoyer';
+        if (err) err.textContent = 'Envoi impossible pour le moment, réessaie.';
+        console.warn('[retours] retour-repondre KO', e && e.message);
+      }
+    }
+
     let chargement = null;
     async function chargerMesRetours() {
       if (chargement) return chargement;
@@ -918,7 +969,7 @@ textarea:focus{border-color:#1F4A85;outline:none}
                 <div>
                   <p>${esc(it.extrait || h.label)}</p>
                   <div class="mt"><span>${esc(ilya(it.cree_le))}</span>${it.module ? `<span>${esc(libelleModule(it.module))}</span>` : ''}<span class="st ${esc(it.statut)}">${esc(STATUTS[it.statut] || it.statut)}</span></div>
-                  ${it.reponse ? `<div class="rp"><em>Réponse de l'équipe One Data, ${esc(ilya(it.reponse_le))}</em>${esc(it.reponse)}</div>` : ''}
+                  ${filHtml(it)}
                 </div>
               </div>`;
             }).join('');
@@ -1087,6 +1138,9 @@ textarea:focus{border-color:#1F4A85;outline:none}
       else if (a === 'cible-suppr') { br.cible = null; rendrePJ(); majEcran(); }
       else if (a === 'pk-annuler') finPick();
       else if (a === 'envoyer') envoyer();
+      else if (a === 'rep-ouvrir') ouvrirReponse(b.closest('.rpz'));
+      else if (a === 'rep-annuler') { const z = b.closest('.rpz'); z.innerHTML = '<button type="button" class="lkb" data-a="rep-ouvrir">Répondre</button>'; }
+      else if (a === 'rep-envoyer') envoyerReponse(b.closest('.rpz'), b);
       else if (a === 'nouveau') { reinitialiser(); setTimeout(() => { try { grille.querySelector('button').focus(); } catch (x) {} }, 20); }
       else if (a === 'notice-ok') { ecrireLS(cleUid('od_retours_notice'), '1'); masquerCarte(); }
       else if (a === 'carte-fermer') masquerCarte();
