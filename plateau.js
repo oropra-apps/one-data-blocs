@@ -1,5 +1,7 @@
 // ============================================================================
-//  VROOM TEAM (plateau) — module One Data (OD.define 'plateau')  v12
+//  VROOM TEAM (plateau) — module One Data (OD.define 'plateau')  v13
+//  v13 (13/11/2026) : PARTICULIER / PRO — étiquette « Pro » (+ société et SIRET
+//    connus) dans l'en-tête du lead. RPC plateau_clientele. Aucune affectation.
 //  v12 (13/11/2026) : DEMANDES DU MÊME CLIENT — quand le client a d'autres demandes
 //    ouvertes sur le même site (même cycle commercial), la case « Clore aussi les N
 //    autres demandes » (cochée) s'affiche sous l'issue : qualifié ou RDV → les autres
@@ -297,7 +299,7 @@
       '.odpl .hx{display:flex;gap:6px;font-size:10.5px;color:var(--tx2);margin-top:4px}.odpl .hx span{flex:1;text-align:center}',
       '.odpl .qi{display:flex;gap:10px;align-items:flex-start;padding:10px 0;border-bottom:1px solid var(--ln2);font-size:12.5px}.odpl .qi:last-child{border-bottom:0}',
       '.odpl .qi .x{flex:1}.odpl .qi .x b{display:block}',
-      '.odpl .tag{font-size:10.5px;font-weight:900;letter-spacing:.04em;text-transform:uppercase;padding:2px 7px;border-radius:6px;background:var(--orbg);color:var(--or2);white-space:nowrap}.odpl .tag.r{background:var(--robg);color:var(--ro2)}',
+      '.odpl .tag{font-size:10.5px;font-weight:900;letter-spacing:.04em;text-transform:uppercase;padding:2px 7px;border-radius:6px;background:var(--orbg);color:var(--or2);white-space:nowrap}.odpl .tag.r{background:var(--robg);color:var(--ro2)}.odpl .tag.pro{background:#2a5ea9;color:#fff;vertical-align:middle;font-size:11px}',
       // fenêtre
       '.odpl-ov{position:fixed;inset:0;background:rgba(28,43,69,.38);z-index:99990;display:flex;align-items:center;justify-content:center;padding:16px;font-family:"Nunito Sans",system-ui,sans-serif}',
       '.odpl-ov .bx{background:#fff;border-radius:18px;max-width:520px;width:100%;max-height:86vh;overflow:auto;padding:22px 24px;box-shadow:0 20px 50px rgba(31,74,133,.3);color:#1c2b45}',
@@ -438,6 +440,7 @@
         ]);
         S.fiche = d[0] || {}; S.cx = d[1] || {}; S.sites = d[2] || [];
         rpc('plateau_soeurs', { p_sf_lead_id: r.sf }).then(function (x) { if (S.cur && S.cur.sf === r.sf) { S.soeurs = x || []; render(); } }).catch(function () {});   // v12
+        S.cli = null; rpc('plateau_clientele', { p_sf_lead_id: r.sf }).then(function (x) { if (S.cur && S.cur.sf === r.sf) { S.cli = x || null; render(); } }).catch(function () {});   // v13
         S.site = S.sites.length ? String(S.sites[0].id_site) : null;
         S.modele = modeleAff(S.fiche.modele || (r.lead && r.lead.modele) || '');
         var dem = String(S.fiche.type_demande || '').toLowerCase();
@@ -664,7 +667,8 @@
       var dem = [f.type_demande, f.modele && modeleAff(f.modele)].filter(Boolean).join(' · ');
       var h = '<div class="card who-lead"><div style="display:flex;justify-content:space-between;gap:10px;align-items:flex-start"><span class="lab ' + r[1] + '" style="margin:0">' + esc(r[0]) + '</span>'
         + '<span class="small muted" style="font-weight:800;text-align:right">' + esc(f.source_bacs || '') + '</span></div>'
-        + '<h1>' + esc(propre(f.nom) || 'Sans nom') + '</h1><div class="small muted">' + esc([siteNom(f.site), f.nature, f.marque].filter(Boolean).join(' · ')) + '</div>'
+        + '<h1>' + esc(propre(f.nom) || 'Sans nom') + (S.cli && S.cli.clientele === 'pro' ? ' <span class="tag pro" title="Client professionnel">Pro</span>' : '') + '</h1><div class="small muted">' + esc([siteNom(f.site), f.nature, f.marque].filter(Boolean).join(' · ')) + '</div>'
+        + (S.cli && S.cli.clientele === 'pro' && (S.cli.societe || S.cli.siret) ? '<div class="small" style="font-weight:800;color:var(--bleu,#2a5ea9)">' + esc([S.cli.societe, S.cli.siret ? 'SIRET ' + S.cli.siret : ''].filter(Boolean).join(' · ')) + '</div>' : '')   // v13
         + anneau()
         + '<div class="ask"><b>Ce qu\'il a demandé</b>' + esc(dem || 'Demande sans précision')
         + (f.commentaire ? '<div style="margin-top:6px">« ' + esc(String(f.commentaire).slice(0, 400)) + ' »</div>' : '')
