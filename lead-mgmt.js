@@ -1,6 +1,10 @@
 // ============================================================================
 //  LEAD MANAGEMENT — module One Data (OD.define 'lead-mgmt')
-//  VERSION TEAM COLIN (v112) — déploiement CIBLÉ (publish-targets :
+//  VERSION TEAM COLIN (v113) — déploiement CIBLÉ (publish-targets :
+//  v113 (13/11/2026) : Pool — le CRÉNEAU DE RAPPEL choisi par le client
+//    (« demain 09:00–09:30 ») débordait de sa colonne de 76 px et chevauchait le
+//    nom du client. Le jour passe au-dessus de l'heure, la plage peut revenir à
+//    la ligne, la légende devient « choisi par le client » sur deux lignes.
 //  v112 (13/11/2026) : Vroom Team, vue liste — DEMANDES DU MÊME CLIENT : case
 //    « Clore aussi les N autres demandes » (cochée) au transfert et à l'abandon quand le
 //    client a d'autres demandes ouvertes sur le site (doublon / même motif, One Data et
@@ -3179,12 +3183,14 @@
       var n = Date.now();
       if (n > cr.fin) return 'créneau manqué';
       if (n >= cr.deb) return 'créneau en cours';
-      return 'rappel choisi par le client';
+      return 'choisi par le client';
     }
     // Remplace le compte à rebours du délai : même gabarit (.tm), trois tons.
     function tmCreneau(l) {
       var cr = creneauAcc(l); if (!cr) return '';
-      return '<span class="tm acr acr-' + tonCreneau(cr) + '" title="Le client a choisi d\'être rappelé ' + esc(plageCreneau(cr)) + '"><b>' + esc(plageCreneau(cr)) + '</b><small>' + esc(sousCreneau(cr)) + '</small></span>';
+      // v113 : jour au-dessus, plage sécable après le tiret (colonne de 76 px).
+      var j = memeJour(cr.deb, 0) ? '' : memeJour(cr.deb, 1) ? 'demain' : jour(new Date(cr.deb).toISOString());
+      return '<span class="tm acr acr-' + tonCreneau(cr) + '" title="Le client a choisi d\'être rappelé ' + esc(plageCreneau(cr)) + '"><b>' + (j ? '<i>' + esc(j) + '</i>' : '') + esc(hhMs(cr.deb)) + '–<wbr>' + esc(hhMs(cr.fin)) + '</b><small>' + esc(sousCreneau(cr)) + '</small></span>';
     }
     // Pastille des pages d'accueil (.ac-p, 72 px) : l'heure du créneau seule.
     function acCreneau(l) {
@@ -6524,6 +6530,10 @@
 .lmtc .ac-x .acc-w{margin-top:4px}.lmtc .ac-x .acc-w .acc-p{margin-left:0}
 .lmtc .carte-l .qui b .acc-p{font-weight:800}
 .lmtc .tm.acr b{font-variant-numeric:tabular-nums}
+.lmtc .tm.acr{max-width:100%;min-width:0}
+.lmtc .tm.acr b{white-space:normal;font-size:12.5px;line-height:1.25;padding:4px 7px;text-align:center;max-width:100%;box-sizing:border-box}
+.lmtc .tm.acr b i{display:block;font-style:normal;font-size:10.5px;font-weight:800;text-transform:uppercase;letter-spacing:.04em;opacity:.85}
+.lmtc .tm.acr small{white-space:normal;line-height:1.2;max-width:100%}
 .lmtc .tm.acr-bleu b{background:var(--acc-bleu-bg);color:var(--acc-bleu)}
 .lmtc .tm.acr-orange b{background:var(--acc-orange-bg);color:var(--acc-orange)}
 .lmtc .tm.acr-rouge b{background:var(--acc-rouge-bg);color:var(--acc-rouge)}
