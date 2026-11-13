@@ -1,6 +1,10 @@
 // ============================================================================
 //  LEAD MANAGEMENT — module One Data (OD.define 'lead-mgmt')
-//  VERSION TEAM COLIN (v111) — déploiement CIBLÉ (publish-targets :
+//  VERSION TEAM COLIN (v112) — déploiement CIBLÉ (publish-targets :
+//  v112 (13/11/2026) : Vroom Team, vue liste — DEMANDES DU MÊME CLIENT : case
+//    « Clore aussi les N autres demandes » (cochée) au transfert et à l'abandon quand le
+//    client a d'autres demandes ouvertes sur le site (doublon / même motif, One Data et
+//    BACS). Nouveau lead : « Traiter cette demande » sur les demandes déjà ouvertes.
 //  v111 (13/11/2026) : menu « Vendeur » (aperçu du chef) ouvert vers la DROITE : il
 //    sortait de l'écran à gauche (signalé par Alan, ticket support n°6). Reprise du
 //    correctif de l'agent (branche agent/ticket-6), perdu à la v104 faute de fusion.
@@ -1655,6 +1659,12 @@
             + '<select id="a-motif" aria-label="Motif d\'abandon BACS">' + MOTIFS_ABANDON.map(function (m) { return '<option>' + esc(m) + '</option>'; }).join('') + '</select>'
             + '<button type="button" class="btn dang" data-a="abandonner"' + dis() + '>Abandonner</button>';
         }
+        if ((issue === 'qualifier' || issue === 'abandon') && (D.soeurs || []).length) {   // v112
+          var nS = D.soeurs.length;
+          h += '</div><div class="row"><label class="hint" style="font-weight:700;display:block"><input type="checkbox" id="x-soeurs" checked> '
+            + (issue === 'abandon' ? 'Abandonner aussi (même motif) ' : 'Clore aussi comme doublon ') + (nS > 1 ? 'les ' + nS + ' autres demandes' : 'l\'autre demande') + ' de ce client sur le site'
+            + D.soeurs.map(function (x) { return '<small style="display:block;font-weight:600">' + esc((x.source || 'Demande') + (x.recu_le ? ' · reçue le ' + jour(x.recu_le) : '') + (x.statut_bacs ? ' · BACS : ' + x.statut_bacs : '') + (x.vendeur ? ' · ' + propre(x.vendeur) : '')) + '</small>'; }).join('') + '</label>';
+        }
         h += '</div><div class="row pied"><span class="hint">' + (bloque() ? 'Bloqué : ouvrez BACS dans un onglet et connectez-vous.' : ecritBacs() ? 'Le geste est reporté automatiquement dans BACS.' : 'Reportez aussi le statut dans BACS : l\'écriture automatique n\'est pas activée.') + '</span>'
           + '<button type="button" class="btn sm ghost" data-a="liberer">Libérer</button></div>';
       }
@@ -1754,7 +1764,7 @@
       if (D.doublons && D.doublons.length) {
         h += '<section class="dbl"><h3>Ce client a déjà une demande ouverte</h3><ul class="env">' + D.doublons.map(function (d) {
           return '<li><div><b>' + esc(propre(d.nom) || 'Client') + '</b><small>' + esc([d.source, d.site ? siteNom(d.site) : null, d.cree_le ? 'reçue le ' + jour(d.cree_le) : null].filter(Boolean).join(' · ')) + '</small></div>'
-            + '<span class="tag">' + esc(libStatut(d.statut)) + '</span><button type="button" class="btn sm" data-a="open" data-id="' + esc(d.sf_lead_id) + '">Ouvrir</button></li>'; }).join('') + '</ul>'
+            + '<span class="tag">' + esc(libStatut(d.statut)) + '</span><button type="button" class="btn sm pri" data-a="open" data-id="' + esc(d.sf_lead_id) + '">Traiter cette demande</button></li>'; }).join('') + '</ul>'
           + '<p class="hint">Traitez plutôt la demande existante. Si c\'est bien une nouvelle demande, créez-la quand même.</p></section>';
       }
       h += '</div><footer class="dr-f"><div class="row">'
@@ -1955,6 +1965,7 @@
         S.dr.fiche = await rpc('plateau_fiche', { p_sf_lead_id: sf });
         if (!S.dr.fiche) { toast('Lead introuvable dans la copie BACS.', true); fermerDrawer(); return; }
       } catch (e) { toast(messageErreur(e), true); fermerDrawer(); return; }
+      try { S.dr.soeurs = await rpc('plateau_soeurs', { p_sf_lead_id: sf }) || []; } catch (e) { if (S.dr) S.dr.soeurs = []; }   // v112
       await chargerEnvois();
       renderDrawer();
       if (estMien(S.dr.fiche)) { chargerSites(); armerRenouvellement(); }
@@ -2027,8 +2038,10 @@
       if (!v.site) { toast('Choisissez le site vers lequel orienter le lead.', true); return; }
       var qualif = {};
       ['projet', 'modele', 'echeance', 'reprise', 'financement', 'note'].forEach(function (k) { if (v[k] && String(v[k]).trim()) qualif[k] = String(v[k]).trim(); });
+      var soeurs = !!($drawer.querySelector('#x-soeurs') || {}).checked;   // v112
       return geste(async function () {
         var r = await rpc('plateau_qualifier', { p_sf_lead_id: D.sf, p_id_site: Number(v.site), p_qualif: qualif, p_id_user_cible: v.vendeur ? Number(v.vendeur) : null });
+        if (soeurs && !(r && r.ok === false)) { try { await rpc('plateau_cloturer_soeurs', { p_sf_lead_id: D.sf, p_motif: 'Doublon' }); } catch (e) { toast('Les autres demandes du client n\'ont pas pu être closes : ' + messageErreur(e), true); } }
         var site = (D.sites || []).find(function (s) { return Number(s.id_site) === Number(v.site); });
         if (r && r.ok === false) { toast('Qualifié, mais le transfert a échoué : ' + (r.motif || r.erreur || 'raison inconnue') + '.', true); fermerDrawer(true); rafraichir(true); return; }
         var vend = v.vendeur ? (D.vendeurs || []).find(function (x) { return String(x.id_user) === String(v.vendeur); }) : null;
@@ -2061,8 +2074,10 @@
       // v103 : le commentaire d'abandon part dans BACS (Description du lead).
       var note = (($drawer.querySelector('#a-com') || {}).value || '').trim()
               || (($drawer.querySelector('#q-note') || {}).value || '').trim() || null;
+      var soeurs = !!($drawer.querySelector('#x-soeurs') || {}).checked;   // v112
       return geste(async function () {
         await rpc('plateau_abandonner', { p_sf_lead_id: D.sf, p_motif: motif, p_note: note });
+        if (soeurs) { try { await rpc('plateau_cloturer_soeurs', { p_sf_lead_id: D.sf, p_motif: motif }); } catch (e) { toast('Les autres demandes du client n\'ont pas pu être closes : ' + messageErreur(e), true); } }
         apresGeste('Lead abandonné · ' + motif);
       });
     }
