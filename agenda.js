@@ -1,4 +1,10 @@
 // ============================================================================
+//  v55 (16/11/2026) : ORDRE DU JOUR des bilatérales. À la planification (et
+//    en modification, et pour « Mener l'entretien maintenant »), le chef
+//    choisit des points en pastilles — ses points les plus utilisés d'abord
+//    (bilat_odj_suggestions), puis une liste type — et/ou écrit un texte
+//    libre. Enregistré par bilat_odj_poser ; repris, modifiable, dans la
+//    fiche de réalisation, et visible en direct par le vendeur.
 //  v54 (13/11/2026) : RAPPEL DEMANDÉ PAR LE CLIENT (accueil des leads).
 //    get_calendar_events renvoie, pour le vendeur qui a pris le lead, le
 //    créneau choisi par le client (source rpv, extra.accueil = true, type 6).
@@ -1900,6 +1906,12 @@ OD.define('agenda', {
 #agenda-ov .agm-now:hover{background:#eef4fc}
 #agenda-ov .agm-now:disabled{opacity:.55;cursor:default}
 #agenda-ov .agm-hint{font-size:11px;color:#7a98c5;font-weight:600;margin-top:6px;line-height:1.4}
+#agenda-ov .agm-odj{margin-top:12px}
+#agenda-ov .agm-odj-n{font-weight:600;text-transform:none;letter-spacing:0;color:#7a98c5;margin-left:4px}
+#agenda-ov .agm-odj-chips{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:8px}
+#agenda-ov .agm-odj-chips button{border:1.5px solid #e2eaf5;background:#fff;color:#1F4A85;font:700 12px "Nunito Sans",system-ui,sans-serif;padding:5px 10px;border-radius:999px;cursor:pointer;transition:border-color .12s,background .12s}
+#agenda-ov .agm-odj-chips button:hover{border-color:#2a5ea9}
+#agenda-ov .agm-odj-chips button.on{background:#2a5ea9;border-color:#2a5ea9;color:#fff}
 #agenda-ov .agm-rep{margin-top:10px}
 #agenda-ov .agm-rj{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
 #agenda-ov .agm-rj button{min-width:34px;height:34px;border:1.5px solid #e2eaf5;background:#fff;color:#7a98c5;border-radius:9px;font:800 12.5px "Nunito Sans",system-ui,sans-serif;cursor:pointer;padding:0 8px}
@@ -3675,7 +3687,7 @@ OD.define('agenda', {
     const proprio0 = vueSite() ? Number(CACHED_UID) : Number(currentCollabId());
     // v44 : depuis la grille, « Créneau libre » (type Autre) par défaut ; depuis la fiche client, RDV client.
     const modeDefaut = opts.mode || 'creneau';
-    cs = { editing: false, editId: null, idRpv: null, mode: modeDefaut, date, time, dur, idClient: null, clientLabel: '', client: null, origine: ORIGINES[0], physique: true, rdvType: null, creneauType: modeDefaut === 'creneau' ? 7 : null, bilatUser: null, bilatNom: '', comment: '', saving: false, err: '', invites: [], invitesInit: [], owner: proprio0, ownerInit: proprio0, rep: repDefaut(date) };
+    cs = { editing: false, editId: null, idRpv: null, mode: modeDefaut, date, time, dur, idClient: null, clientLabel: '', client: null, origine: ORIGINES[0], physique: true, rdvType: null, creneauType: modeDefaut === 'creneau' ? 7 : null, bilatUser: null, bilatNom: '', comment: '', odj: { points: [], texte: '' }, odjInit: null, saving: false, err: '', invites: [], invitesInit: [], owner: proprio0, ownerInit: proprio0, rep: repDefaut(date) };
     chargerInvitables().then(() => { if (cs) renderCreate(); });
     chargerMembresPour(siteCourant()).then(() => { if (cs) renderCreate(); });
     chargerAgendaBacs().then(() => { if (cs) { renderCreate(); suivreBacs(); } });
@@ -3728,7 +3740,7 @@ OD.define('agenda', {
       creneauType: (p.id_rdv_type != null ? Number(p.id_rdv_type) : null),
       bilatUser: (st === 'bilat' && p.id_user != null ? Number(p.id_user) : null),
       bilatNom: (st === 'bilat' ? (ev.title || '').replace(/^Bilat\s*/i, '') : ''),
-      comment: (st === 'bilat' ? '' : (p.description || '')), saving: false, err: '',
+      comment: (st === 'bilat' ? '' : (p.description || '')), odj: { points: [], texte: '' }, odjInit: null, saving: false, err: '',
       invites: ((p.extra && Array.isArray(p.extra.invites)) ? p.extra.invites : []).map(Number),
       invitesInit: ((p.extra && Array.isArray(p.extra.invites)) ? p.extra.invites : []).map(Number),
       idBacs: (p.extra && p.extra.id_bacs) || null, sync: null, serieId: (p.extra && p.extra.serie_id) || null, startInit: String(p.event_start_time || '').slice(0, 19),
@@ -3740,7 +3752,7 @@ OD.define('agenda', {
     chargerInvitables().then(() => { if (cs) renderCreate(); });
     if (st === 'rdv') chargerMembresPour(p.id_site != null ? Number(p.id_site) : siteCourant()).then(() => { if (cs) renderCreate(); });
     chargerAgendaBacs().then(() => { if (!cs) return; renderCreate(); suivreBacs(); if (st === 'rdv') chargerEtatSync(p.origin_id); });
-    if (st === 'bilat') chargerResumeBilat();
+    if (st === 'bilat') { chargerResumeBilat(); chargerOdj(p.origin_id); }
     loadRdvTypes().then(renderCreate);
     renderCreate();
   }
@@ -3907,6 +3919,7 @@ OD.define('agenda', {
     }
     return chips
       + '<div class="agm-grid">' + qui + quand + quoi + invites + '</div>' + repet
+      + (cs.mode === 'bilat' ? odjHtml() : '')
       + comment + sync + (cs.err ? '<div class="agm-err">' + esc(cs.err) + '</div>' : '');
   }
   function libDateCourte(dstr) { const a = String(dstr || '').split('-').map(Number); if (!a[0]) return '—'; return new Date(a[0], a[1] - 1, a[2]).toLocaleDateString('fr-FR', { weekday: 'short', day: 'numeric', month: 'short' }); }
@@ -3921,6 +3934,52 @@ OD.define('agenda', {
       if (r.jours.indexOf(iso) >= 0 && sem % (Number(r.intervalle) || 1) === 0) n++;
     }
     return n;
+  }
+  // ── v55 : ORDRE DU JOUR d'une bilatérale (16/11/2026) ──────────────────
+  // Points récurrents en pastilles (ceux que le chef utilise le plus d'abord,
+  // puis une liste type) + texte libre. Enregistré par bilat_odj_poser après
+  // la création / modification ; le vendeur le voit en temps réel dans son
+  // module Bilatérales.
+  const ODJ_TYPE = ['Engagements de la dernière fois', 'Commandes du mois', 'Affaires à relancer', 'Leads non contactés',
+    'RDV sans compte rendu', 'Livraisons en retard', 'Financements', 'Objectifs du mois', 'Accompagnement / formation', 'Organisation et planning'];
+  let odjSugg = null, odjSuggEnVol = false;
+  function chargerOdjSugg() {
+    if (odjSugg || odjSuggEnVol) return; odjSuggEnVol = true;
+    Promise.resolve(sb().rpc('bilat_odj_suggestions')).then(({ data, error }) => {
+      odjSugg = (!error && Array.isArray(data)) ? data : [];
+      if (cs && cs.mode === 'bilat' && frontDoc().getElementById('agenda-ov')) { syncInputs(); renderCreate(); }
+    }).catch(() => { odjSugg = []; }).finally(() => { odjSuggEnVol = false; });
+  }
+  function odjPastilles() {
+    const vus = {}, out = [];
+    (odjSugg || []).concat(ODJ_TYPE).concat((cs && cs.odj && cs.odj.points) || []).forEach(p => { const k = String(p || '').trim(); if (k && !vus[k.toLowerCase()]) { vus[k.toLowerCase()] = 1; out.push(k); } });
+    return out;
+  }
+  function chargerOdj(idBilat) {
+    if (idBilat == null) return;
+    Promise.resolve(sb().from('bilaterale_odj').select('points,texte').eq('id_bilaterales', Number(idBilat)).maybeSingle()).then(({ data }) => {
+      if (!cs || Number(cs.editId) !== Number(idBilat)) return;
+      cs.odj = { points: (data && Array.isArray(data.points)) ? data.points.slice() : [], texte: (data && data.texte) || '' };
+      cs.odjInit = JSON.stringify(cs.odj);
+      if (frontDoc().getElementById('agenda-ov')) { syncInputs(); renderCreate(); }
+    }).catch(() => {});
+  }
+  function odjHtml() {
+    chargerOdjSugg();
+    const sel = (cs.odj && cs.odj.points) || [];
+    const on = (p) => sel.some(x => String(x).toLowerCase() === String(p).toLowerCase());
+    return '<div class="agm-cell agm-odj"><div class="agm-lbl">Ordre du jour <span class="agm-odj-n">' + (sel.length ? sel.length + ' point' + (sel.length > 1 ? 's' : '') : 'facultatif') + '</span></div>'
+      + '<div class="agm-odj-chips">' + odjPastilles().map(p => '<button type="button" data-odj="' + esc(p) + '" class="' + (on(p) ? 'on' : '') + '">' + (on(p) ? '✓ ' : '+ ') + esc(p) + '</button>').join('') + '</div>'
+      + '<textarea class="agm-ta" id="agm-odj-txt" rows="2" placeholder="Autres points, précisions pour le vendeur…">' + esc((cs.odj && cs.odj.texte) || '') + '</textarea>'
+      + '<div class="agm-hint">Le vendeur voit l’ordre du jour dans son module Bilatérales, mis à jour en direct.</div></div>';
+  }
+  async function poserOdj(idBilat) {
+    if (idBilat == null || !cs || !cs.odj) return null;
+    const vide = !(cs.odj.points || []).length && !String(cs.odj.texte || '').trim();
+    if (vide && !cs.odjInit) return null;                       // rien saisi, rien à effacer
+    if (cs.odjInit && cs.odjInit === JSON.stringify(cs.odj)) return null;   // inchangé
+    const r = await sb().rpc('bilat_odj_poser', { p_id: Number(idBilat), p_points: cs.odj.points || [], p_texte: cs.odj.texte || null });
+    return r && r.error ? r.error : null;
   }
   function renderCreate() {
     const d = frontDoc(); let ov = d.getElementById('agenda-ov');
@@ -3961,6 +4020,7 @@ OD.define('agenda', {
     if (g('agm-time')) cs.time = g('agm-time').value;
     if (g('agm-dur')) cs.dur = Number(g('agm-dur').value);
     if (g('agm-comment')) cs.comment = g('agm-comment').value;
+    if (g('agm-odj-txt')) { cs.odj = cs.odj || { points: [], texte: '' }; cs.odj.texte = g('agm-odj-txt').value; }
     if (g('agm-ctype')) cs.creneauType = g('agm-ctype').value || null;
     if (g('agm-rtype')) cs.rdvType = g('agm-rtype').value || null;
     if (g('agm-bvend')) cs.bilatUser = g('agm-bvend').value || null;
@@ -3997,6 +4057,12 @@ OD.define('agenda', {
     if (g('agm-real-now')) g('agm-real-now').addEventListener('click', () => { if (cs && cs.editId != null) goBilaterale(cs.editId, true); });
     if (g('agm-start-now')) g('agm-start-now').addEventListener('click', demarrerBilatMaintenant);
     if (g('agm-bvend')) g('agm-bvend').addEventListener('change', () => { syncInputs(); });
+    d.querySelectorAll('#agenda-ov [data-odj]').forEach(b => b.addEventListener('click', () => {
+      syncInputs(); cs.odj = cs.odj || { points: [], texte: '' };
+      const p = b.getAttribute('data-odj'), i = cs.odj.points.findIndex(x => String(x).toLowerCase() === String(p).toLowerCase());
+      if (i >= 0) cs.odj.points.splice(i, 1); else cs.odj.points.push(p);
+      renderCreate();
+    }));
     // v36 : le commentaire s'agrandit avec son texte (il était coupé à 2 lignes).
     const ta = g('agm-comment');
     if (ta) { const ajuster = () => { ta.style.height = 'auto'; ta.style.height = Math.min(260, ta.scrollHeight + 4) + 'px'; }; ajuster(); ta.addEventListener('input', ajuster); }
@@ -4122,6 +4188,7 @@ OD.define('agenda', {
           if (!s.bilatUser) { s.err = 'S\u00e9lectionne le vendeur \u00e9valu\u00e9.'; return renderCreate(); }
           s.saving = true; renderCreate();
           res = await c.rpc('update_bilaterale', { p_id: s.editId, p_id_user: Number(s.bilatUser), p_start: startStr, p_end: endStr, p_duree: dur });
+          if (res && !res.error) { const eo = await poserOdj(s.editId); if (eo) toast('Bilatérale enregistrée, mais l’ordre du jour n’a pas été posé : ' + (eo.message || eo)); }
         } else {
           const type = s.mode === 'creneau' ? s.creneauType : s.rdvType;
           if (!type) { s.err = 'S\u00e9lectionne le type.'; return renderCreate(); }
@@ -4163,6 +4230,7 @@ OD.define('agenda', {
         if (!s.bilatUser) { s.err = 'S\u00e9lectionne le vendeur \u00e9valu\u00e9.'; return renderCreate(); }
         s.saving = true; renderCreate();
         res = await c.rpc('create_bilaterale', { p_id_user: Number(s.bilatUser), p_id_manager: Number(CACHED_UID), p_id_site: siteBilat(s.bilatUser), p_start: startStr, p_end: endStr, p_duree: dur });
+        if (res && !res.error && res.data != null) { const eo = await poserOdj(res.data); if (eo) toast('Bilatérale planifiée, mais l’ordre du jour n’a pas été posé : ' + (eo.message || eo)); }
       }
       if (res && res.error) throw res.error;
       // v28 : invités — posés après la création (la charge envoyée à BACS est
@@ -4205,6 +4273,7 @@ OD.define('agenda', {
         p_id_user: Number(s.bilatUser), p_id_site: siteBilat(s.bilatUser), p_duree_min: Number(s.dur) || 30 });
       if (error) throw error;
       resumeBilatT = 0;
+      try { await poserOdj(data); } catch (e) {}
       goBilaterale(data, false);
     } catch (e) {
       console.error('[agenda] bilat_creer_maintenant', e);
