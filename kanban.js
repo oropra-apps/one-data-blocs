@@ -1,4 +1,12 @@
 // ============================================================================
+//  v81 (16/11/2026) : VALIDATION MANUELLE PAR L'ENCADREMENT (Team Colin). Le
+//    chef des ventes (rôles 1, 2, 3, 6, 7, 8) peut glisser une commande de
+//    « Demande d'approbation » vers « Transmis TFR / Validée » quand BACS ne
+//    peut pas l'y mettre (véhicule non cessible d'une affaire à l'autre) : la
+//    vente compte aussitôt dans les performances du vendeur, AUCUN effet dans
+//    BACS (RPC kanban_forcer_validee). Chemin inverse possible, seulement pour
+//    une commande validée ainsi. Pastille « Validée dans One Data ». Si BACS
+//    finit par valider ou annuler la commande, BACS reprend la main.
 //  v80 (06/11/2026) : la PLAGE DE DATES choisie est retrouvée au retour sur la
 //    page (fiche client, simulation…) le jour même ; quand ce n'est pas le
 //    mois en cours, bandeau orange « Ce n'est pas le mois en cours » et bouton
@@ -264,18 +272,25 @@ OD.define('kanban', {
   // Tout le reste (edition, approbation, transmission, abandon) se fait dans
   // BACS ; One Data reflete. Un glisser-deposer de plus ferait diverger les
   // deux outils.
+  // 16/11/2026 (v81) : seule exception, la validation MANUELLE par
+  // l'encadrement (bdc -> win, et retour win -> bdc pour une commande validée
+  // ainsi), sans aucun effet dans BACS. Voir forcerValidee().
   const TRANSITIONS_BACS = {
     draft: { propale: 'V' },
     propale: {},
-    bdc: {},
-    win: {},
+    bdc: { win: 'M' },
+    win: { bdc: 'M' },
     lose: {}
   };
   function transitionLevel(from, to, bacs) {
     const T = bacs ? TRANSITIONS_BACS : TRANSITIONS;
     return (T[from] && T[from][to]) || null;
   }
-  function canMove(from, to, bacs) { const lvl = transitionLevel(from, to, bacs); if (!lvl) return false; if (lvl === 'M' && !peutValider()) return false; return true; }
+  function canMove(from, to, bacs, force) { const lvl = transitionLevel(from, to, bacs); if (!lvl) return false; if (lvl === 'M' && !peutValider()) return false;
+    // Retour en demande d'approbation : seulement une commande validée à la main.
+    if (bacs && from === 'win' && to === 'bdc' && !force) return false;
+    return true; }
+  function canMoveCard(c, to) { return !!c && canMove(c.status, to, estBacs(c), !!c.force_validee_le); }
   function estBacs(c) { return KAN_BACS && !!(c && (c.bacs_sf_id || c.id_affaire_bacs)); }
   function canArchive(status) { return status === 'draft' || status === 'propale'; }
 
@@ -378,10 +393,10 @@ OD.define('kanban', {
         const ids = state.cards.filter(estBacs).map(c => c.id_propale_bdc);
         if (ids.length) {
           const rb = await supabase.from('PROPALE_BDC')
-            .select('id_propale_bdc,statut_bacs,num_commande_constructeur,id_user_creation').in('id_propale_bdc', ids);
+            .select('id_propale_bdc,statut_bacs,num_commande_constructeur,id_user_creation,force_validee_le').in('id_propale_bdc', ids);
           const ix = {}; (rb.data || []).forEach(x => { ix[x.id_propale_bdc] = x; });
           state.cards.forEach(c => { const x = ix[c.id_propale_bdc];
-            if (x) { c.statut_bacs = x.statut_bacs; c.num_commande_constructeur = x.num_commande_constructeur;
+            if (x) { c.statut_bacs = x.statut_bacs; c.num_commande_constructeur = x.num_commande_constructeur; c.force_validee_le = x.force_validee_le || null;
                      c.id_user_creation = x.id_user_creation; } });
 
           // VD/VK (21/09) : filtré et coloré comme VN ou VO selon le vendeur.
@@ -818,7 +833,8 @@ OD.define('kanban', {
     'Closed':            ['Clôturée', '#5a6b86', '#eef2f8']
   };
   function pastilleBacs(c) {
-    const p = KAN_BACS ? PASTILLES_BACS[c.statut_bacs] : null;
+    const p = KAN_BACS ? (c.force_validee_le && c.status === 'win'
+      ? ['Validée dans One Data', '#1d6e5f', '#e1f5ee'] : PASTILLES_BACS[c.statut_bacs]) : null;
     let h = '';
     if (p) h += '<span style="display:inline-block;font-size:10.5px;font-weight:800;border-radius:999px;padding:2px 9px;'
       + 'margin:0 6px 6px 0;color:' + p[1] + ';background:' + p[2] + '">' + esc(p[0]) + '</span>';
@@ -871,7 +887,7 @@ OD.define('kanban', {
     const isPdf = (c.status === 'propale' || c.status === 'bdc' || c.status === 'win');
     const pdfType = (c.status === 'propale') ? 'propale' : 'bdc';
     const lecture = estMarque();   // v55 : marketing en consultation
-    let h = '<div class="kc-card vt-' + vt + (c._moving ? ' moving' : '') + '" draggable="' + (lecture ? 'false' : 'true') + '" data-card="' + c.id_propale_bdc + '" data-from="' + c.status + '" data-kbacs="' + (deBacs ? '1' : '') + '">';
+    let h = '<div class="kc-card vt-' + vt + (c._moving ? ' moving' : '') + '" draggable="' + (lecture ? 'false' : 'true') + '" data-card="' + c.id_propale_bdc + '" data-from="' + c.status + '" data-kbacs="' + (deBacs ? '1' : '') + '" data-kforce="' + (c.force_validee_le ? '1' : '') + '">';
     h += pastilleBacs(c);
     if (c._moving) h += '<div class="kc-spin"><span class="kc-spinner"></span></div>';
 
@@ -975,7 +991,7 @@ OD.define('kanban', {
   }
 
   function renderMoveMenu(c) {
-    const targets = COL_KEYS.filter(k => k !== c.status && canMove(c.status, k, estBacs(c)));
+    const targets = COL_KEYS.filter(k => k !== c.status && canMoveCard(c, k));
     let h = '<div class="kc-menu">';
     if (!targets.length) h += '<div class="kc-menu-empty">Aucun déplacement possible</div>';
     targets.forEach(k => { const col = COLS.find(x => x.key === k); h += '<button class="kc-menu-b" data-go="' + c.id_propale_bdc + ':' + k + '">→ ' + esc(col.label) + '</button>'; });
@@ -1192,6 +1208,46 @@ OD.define('kanban', {
     };
   }
 
+  // ── v81 : validation manuelle par l'encadrement, sans effet BACS ──────
+  function forcerValidee(c, valider) {
+    return new Promise((resolve) => {
+      const ov = doc.createElement('div');
+      ov.style.cssText = 'position:fixed;inset:0;background:rgba(28,43,69,.45);z-index:9999;display:flex;align-items:center;'
+        + 'justify-content:center;font-family:"Nunito Sans",sans-serif';
+      const fermer = (v) => { try { ov.remove(); } catch (e) {} resolve(v); };
+      const btn = (lib, attr, prim) => '<button type="button" ' + attr + ' style="border-radius:8px;padding:9px 18px;font:inherit;'
+        + 'font-size:13px;font-weight:700;cursor:pointer;border:1px solid ' + (prim ? '#2a5ea9;background:#2a5ea9;color:#fff' : '#acc5e4;background:#fff;color:#2a5ea9') + '">' + lib + '</button>';
+      const titre = valider ? 'Valider la commande dans One Data' : 'Remettre en demande d\u2019approbation';
+      const texte = valider
+        ? 'La commande passe en <b>Transmis TFR / Validée</b> dans One Data et compte aussitôt dans les performances du vendeur.'
+          + '<br><br><b>Rien ne change dans BACS</b> : la commande y reste en demande d\u2019approbation. À utiliser quand BACS ne peut pas'
+          + ' la valider (véhicule non cessible d\u2019une affaire à l\u2019autre). Si BACS la valide ou l\u2019annule plus tard, BACS reprend la main.'
+        : 'La commande revient en <b>Demande d\u2019approbation</b> et ne compte plus dans les performances du vendeur. Rien ne change dans BACS.';
+      ov.innerHTML = '<div style="background:#fff;border-radius:14px;width:min(520px,92vw);box-shadow:0 20px 50px rgba(28,43,69,.25);padding:20px 22px;color:#1c2b45">'
+        + '<div style="font-size:17px;font-weight:800;margin-bottom:4px;color:#2a5ea9">' + esc(titre) + '</div>'
+        + '<div style="font-size:13px;color:#7a9cc4;margin-bottom:14px">' + esc([c.client, c.vehicule].filter(Boolean).join(' · ')) + '</div>'
+        + '<div style="font-size:13.5px;line-height:1.5">' + texte + '</div>'
+        + '<div style="display:flex;justify-content:flex-end;gap:8px;margin-top:18px">' + btn('Annuler', 'data-kf-non', false) + btn(valider ? 'Valider dans One Data' : 'Remettre en approbation', 'data-kf-oui', true) + '</div></div>';
+      ov.addEventListener('click', (e) => { if (e.target === ov) fermer(false); });
+      doc.body.appendChild(ov);
+      ov.querySelector('[data-kf-non]').onclick = () => fermer(false);
+      ov.querySelector('[data-kf-oui]').onclick = async () => {
+        const b = ov.querySelector('[data-kf-oui]'); b.disabled = true; b.textContent = 'Enregistrement…';
+        try {
+          const r = await ctx.supabase.rpc('kanban_forcer_validee', { p_id: Number(c.id_propale_bdc), p_valider: !!valider });
+          if (r.error) throw r.error;
+          fermer(true);
+          toast(valider ? 'Commande validée dans One Data (BACS inchangé).' : 'Commande remise en demande d\u2019approbation.');
+          await loadData();
+        } catch (e) {
+          console.error('[kanban] kanban_forcer_validee', e);
+          fermer(false);
+          toast(humanError(e), true);
+        }
+      };
+    });
+  }
+
   async function doMove(id, to) {
     const c = findCard(id); if (!c) return;
     const from = c.status;
@@ -1199,8 +1255,9 @@ OD.define('kanban', {
     // Carte BACS : chaque déplacement est un geste BACS. On ne touche à la
     // carte qu'après confirmation de BACS — c'est la projection qui la range.
     if (estBacs(c) && to !== 'archived') {
-      if (!canMove(from, to, true)) {
-        toast(to === 'bdc' ? "La demande d'approbation part de BACS : éditez la commande dans BACS."
+      if (!canMoveCard(c, to)) {
+        toast(to === 'bdc' ? (from === 'win' ? 'Commande validée dans BACS : elle ne peut pas revenir en demande d\u2019approbation.'
+                                             : "La demande d'approbation part de BACS : éditez la commande dans BACS.")
                            : 'Déplacement interdit', true);
         return;
       }
@@ -1216,7 +1273,8 @@ OD.define('kanban', {
         else await ouvrirAbandon(id);
         return;
       }
-      if (to === 'win') { await ouvrirValidation(c); return; }
+      if (from === 'bdc' && to === 'win') { await forcerValidee(c, true); return; }
+      if (from === 'win' && to === 'bdc') { await forcerValidee(c, false); return; }
       return;
     }
     if (!canMove(from, to) && to !== 'archived') { toast('Déplacement interdit', true); return; }
@@ -3324,7 +3382,7 @@ OD.define('kanban', {
       if (!col || !e.target.closest('#kanban-root')) return;
       const dragging = doc.querySelector('#kanban-root .kc-card.dragging');
       if (!dragging) return;
-      if (canMove(dragging.getAttribute('data-from'), col.getAttribute('data-col'), dragging.getAttribute('data-kbacs') === '1')) { e.preventDefault(); col.classList.add('over'); }
+      if (canMove(dragging.getAttribute('data-from'), col.getAttribute('data-col'), dragging.getAttribute('data-kbacs') === '1', dragging.getAttribute('data-kforce') === '1')) { e.preventDefault(); col.classList.add('over'); }
     }, true);
     doc.addEventListener('dragleave', function (e) { const col = e.target.closest && e.target.closest('[data-col]'); if (col) col.classList.remove('over'); }, true);
     doc.addEventListener('drop', function (e) {
@@ -3335,7 +3393,7 @@ OD.define('kanban', {
       if (!raw) return;
       const [id, from] = raw.split('|'), to = col.getAttribute('data-col');
       const cd = findCard(Number(id));
-      if (canMove(from, to, estBacs(cd))) doMove(Number(id), to);
+      if (cd && canMoveCard(cd, to)) doMove(Number(id), to);
     }, true);
   }
   bindDnD();
