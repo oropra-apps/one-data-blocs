@@ -1,6 +1,9 @@
 // ============================================================================
 //  LEAD MANAGEMENT — module One Data (OD.define 'lead-mgmt')
-//  VERSION TEAM COLIN (v124) — déploiement CIBLÉ (publish-targets :
+//  VERSION TEAM COLIN (v125) — déploiement CIBLÉ (publish-targets :
+//  v125 (16/11/2026) : vendeur multisite — l'onglet Campagnes (et sa pastille)
+//    suit le site choisi en haut à droite, comme le Pool : une campagne de
+//    Lexus Sceaux n'apparaît plus quand on est sur L'Haÿ-les-Roses.
 //  v124 (16/11/2026) : Pool lisible (retours d'Arnaud Lefebvre, L'Haÿ) :
 //    - Accueil chef : les boutons passent SOUS le lead quand la colonne du
 //      Pool est étroite (portable ~1280 px) — plus de noms réduits à une
@@ -3490,14 +3493,16 @@
       var sites = POSTE === 'direction' && !S.vueSite ? null : (sitePoste() != null ? [Number(sitePoste())] : null);
       try {
         if (POSTE === 'vendeur') {
+          // v125 : vendeur multisite — les campagnes suivent le site choisi en haut à droite, comme le Pool.
+          var sitesV = poolVendeurSite() != null ? [Number(poolVendeurSite())] : null;
           var r = await Promise.all([
-            rpc('get_campagnes_sollicitation', { p_viewer_id_user: Number(MOI), p_date_from: de, p_date_to: a, p_site_ids: null, p_id_user: Number(MOI) }),
-            rpc('get_campagne_detail', { p_viewer_id_user: Number(MOI), p_date_from: de, p_date_to: a, p_campagne: null, p_filtre: 'a_traiter', p_site_ids: null, p_id_user: Number(MOI), p_limit: 300 })
+            rpc('get_campagnes_sollicitation', { p_viewer_id_user: Number(MOI), p_date_from: de, p_date_to: a, p_site_ids: sitesV, p_id_user: Number(MOI) }),
+            rpc('get_campagne_detail', { p_viewer_id_user: Number(MOI), p_date_from: de, p_date_to: a, p_campagne: null, p_filtre: 'a_traiter', p_site_ids: sitesV, p_id_user: Number(MOI), p_limit: 300 })
           ]);
           S.campagnes = r[0] || []; S.mesSollis = r[1] || [];
-          try { S.campLibres = await rpc('campagne_libres', { p_viewer_id_user: Number(MOI), p_site_ids: null }) || []; }
+          try { S.campLibres = await rpc('campagne_libres', { p_viewer_id_user: Number(MOI), p_site_ids: sitesV }) || []; }
           catch (e2) { S.campLibres = []; }
-          try { S.campTot = await rpc('get_campagnes_sollicitation', { p_viewer_id_user: Number(MOI), p_date_from: de, p_date_to: a, p_site_ids: null, p_id_user: null }) || []; }
+          try { S.campTot = await rpc('get_campagnes_sollicitation', { p_viewer_id_user: Number(MOI), p_date_from: de, p_date_to: a, p_site_ids: sitesV, p_id_user: null }) || []; }
           catch (e4) { S.campTot = []; }
           var idsInfos = S.campLibres.concat(S.mesSollis).map(function (t) { return Number(t.id_rapport); }).filter(Boolean);
           S.campInfos = {};
