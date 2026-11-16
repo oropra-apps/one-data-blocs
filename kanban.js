@@ -1,4 +1,10 @@
 // ============================================================================
+//  v82 (16/11/2026) : après un déplacement par glisser-déposer, la carte
+//    restait dans sa colonne d'origine jusqu'au clic suivant. Cause : les
+//    écouteurs de glisser-déposer, posés une fois par fenêtre, appelaient
+//    l'instance du module montée AVANT la dernière navigation (tableau
+//    détaché). Ils passent désormais par l'instance courante ; la carte
+//    validée à la main change aussi de colonne dès la confirmation.
 //  v81 (16/11/2026) : VALIDATION MANUELLE PAR L'ENCADREMENT (Team Colin). Le
 //    chef des ventes (rôles 1, 2, 3, 6, 7, 8) peut glisser une commande de
 //    « Demande d'approbation » vers « Transmis TFR / Validée » quand BACS ne
@@ -1236,7 +1242,9 @@ OD.define('kanban', {
         try {
           const r = await ctx.supabase.rpc('kanban_forcer_validee', { p_id: Number(c.id_propale_bdc), p_valider: !!valider });
           if (r.error) throw r.error;
-          fermer(true);
+          // La carte change de colonne tout de suite ; le rechargement confirme.
+          c.status = valider ? 'win' : 'bdc'; c.force_validee_le = valider ? new Date().toISOString() : null;
+          fermer(true); render();
           toast(valider ? 'Commande validée dans One Data (BACS inchangé).' : 'Commande remise en demande d\u2019approbation.');
           await loadData();
         } catch (e) {
@@ -3392,10 +3400,16 @@ OD.define('kanban', {
       let raw = ''; try { raw = e.dataTransfer.getData('text/plain'); } catch (x) { }
       if (!raw) return;
       const [id, from] = raw.split('|'), to = col.getAttribute('data-col');
-      const cd = findCard(Number(id));
-      if (cd && canMoveCard(cd, to)) doMove(Number(id), to);
+      // v82 : les écouteurs sont posés UNE fois par fenêtre ; après un retour
+      // sur la page, ils appartenaient à l'instance précédente du module, qui
+      // rechargeait et dessinait un tableau détaché — la carte restait dans sa
+      // colonne jusqu'au clic suivant. On passe par l'instance montée.
+      const K = window.__kanCourant || {};
+      const cd = K.findCard ? K.findCard(Number(id)) : null;
+      if (cd && K.canMoveCard(cd, to)) K.doMove(Number(id), to);
     }, true);
   }
+  window.__kanCourant = { findCard: findCard, canMoveCard: canMoveCard, doMove: doMove };
   bindDnD();
 
   const ICON_PDF = '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="12" y1="18" x2="12" y2="12"/><polyline points="9 15 12 18 15 15"/></svg>';
