@@ -1,4 +1,17 @@
 // ============================================================================
+//  v30 (16/11/2026) : retours de Julien Faugeras.
+//    - RETOUR ARRIÈRE : depuis la fiche de réalisation, ouvrir la fiche d'un
+//      client puis faire « Précédent » dans le navigateur rouvre la même
+//      bilatérale, sur le même indicateur, le même filtre et la même position
+//      de défilement (sessionStorage od_bil_retour, posé au départ, utilisé
+//      seulement si le retour vient du bouton Précédent).
+//    - ORDRE DU JOUR : pastilles de points récurrents (les plus utilisés par
+//      le chef d'abord — bilat_odj_suggestions — puis une liste type) et
+//      texte libre, à la planification (fenêtre « Planifier », « Mener
+//      maintenant ») ; section « Ordre du jour » modifiable en tête de la
+//      fiche de réalisation (enregistrement automatique) ; affiché au vendeur
+//      sous « Ma prochaine bilatérale », mis à jour en direct (Realtime sur
+//      bilaterale_odj, relecture toutes les 45 s en secours).
 //  v29 (16/11/2026) : « Affaires en cours » de la fiche bilatérale refaite.
 //    La liste montre enfin les MÊMES affaires que la tuile (affaires BACS
 //    ouvertes depuis 90 j au plus, sans commande — bilat_synthese_part
@@ -94,6 +107,12 @@ __anchor.id = 'bil-root';
 // Variable WeWeb remplie par le bouton "Réaliser la Bilatérale" de l'agenda :
 // si elle contient un id au chargement, on ouvre directement le popup de réalisation.
 const VAR_ID_BILATE_REAL = '851fed59-9397-41ae-b91d-26daa2ff960a';
+// v30 : ordre du jour des bilatérales (déclaré tôt : la vue vendeur s'en sert).
+const ODJ_TYPE = ['Engagements de la dernière fois', 'Commandes du mois', 'Affaires à relancer', 'Leads non contactés',
+  'RDV sans compte rendu', 'Livraisons en retard', 'Financements', 'Objectifs du mois', 'Accompagnement / formation', 'Organisation et planning'];
+let ODJ_SUGG = null, ODJ_SUGG_VOL = false;
+const VS_ODJ = { id: null, data: null, canal: null, iv: null };
+
 
 // --- Règles d'animation (réglables par tenant) -------------------------------
 // cadenceJ : fréquence exigée par la direction entre deux bilatérales d'un même
@@ -771,6 +790,45 @@ function scopeLabel() {
 
 // Sélecteur de périmètre : l'arbre est toujours visible, tout s'adapte au clic.
 
+  // ===== v30 : ordre du jour de la prochaine bilatérale, en direct =========
+  function vsOdjAfficher(flash) {
+    const el = doc.getElementById('vs-odj'); if (!el) return false;
+    el.innerHTML = odjLecture(VS_ODJ.data || odjVide());
+    const m = doc.getElementById('vs-odj-maj');
+    if (m) m.textContent = flash ? '· mis à jour à l’instant' : '';
+    if (flash) { el.classList.remove('flash'); void el.offsetWidth; el.classList.add('flash'); }
+    return true;
+  }
+  async function vsOdjLire(flash) {
+    const id = VS_ODJ.id; if (id == null) return;
+    try {
+      const r = await ctx.supabase.from('bilaterale_odj').select('points,texte,maj').eq('id_bilaterales', id).maybeSingle();
+      if (r.error || VS_ODJ.id !== id) return;
+      const avant = JSON.stringify(VS_ODJ.data || null), d = r.data ? odjNorm(r.data) : odjVide();
+      VS_ODJ.data = d;
+      vsOdjAfficher(!!flash || (avant !== 'null' && avant !== JSON.stringify(d)));
+    } catch (e) {}
+  }
+  function vsOdjSuivre(id) {
+    if (!doc.getElementById('vs-odj')) return;
+    if (VS_ODJ.id === id && VS_ODJ.canal) { vsOdjAfficher(false); return; }
+    vsOdjStop();
+    VS_ODJ.id = id; VS_ODJ.data = null;
+    vsOdjLire(false);
+    try {
+      VS_ODJ.canal = ctx.supabase.channel('bil-odj-' + id)
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'bilaterale_odj', filter: 'id_bilaterales=eq.' + id }, () => vsOdjLire(true))
+        .subscribe();
+    } catch (e) { VS_ODJ.canal = null; }
+    // Secours : relecture toutes les 45 s tant que l'encart est affiché.
+    VS_ODJ.iv = setInterval(() => { if (!doc.getElementById('vs-odj')) { vsOdjStop(); return; } vsOdjLire(false); }, 45000);
+  }
+  function vsOdjStop() {
+    try { if (VS_ODJ.canal) ctx.supabase.removeChannel(VS_ODJ.canal); } catch (e) {}
+    if (VS_ODJ.iv) clearInterval(VS_ODJ.iv);
+    VS_ODJ.canal = null; VS_ODJ.iv = null;
+  }
+
   // ===== INTERFACE VENDEUR (rôle 4) : "Mes bilatérales", lecture seule =====
   // v23 : vue vendeur refaite. Avant : quatre tuiles dont « à planifier » en
   // gros caractères et « 0 sur la période » (la semaine en cours), puis
@@ -802,7 +860,9 @@ function scopeLabel() {
       const quand = d.toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long' });
       h += '<div class="next-box vs-next"><div class="nb-l">Ma prochaine bilatérale</div><div class="nb-main"><div>' +
         '<div class="nb-nom">' + esc(quand) + ' à ' + esc(fmtHeure(next.start_date)) + '</div>' +
-        '<div class="nb-why">avec ' + esc(next.nom_chef || 'votre chef des ventes') + ' · préparez-la avec les chiffres ci-dessous et vos engagements en cours</div></div></div></div>';
+        '<div class="nb-why">avec ' + esc(next.nom_chef || 'votre chef des ventes') + ' · préparez-la avec les chiffres ci-dessous et vos engagements en cours</div></div></div>' +
+        '<div class="vs-odj"><div class="vs-odj-t">Ordre du jour <span id="vs-odj-maj"></span></div><div id="vs-odj">' + (VS_ODJ.id === Number(next.id_bilaterales) && VS_ODJ.data ? odjLecture(VS_ODJ.data) : '<div class="odj-vide">Chargement…</div>') + '</div></div></div>';
+      setTimeout(() => vsOdjSuivre(Number(next.id_bilaterales)), 0);
     } else {
       h += '<div class="next-box vs-next vide"><div class="nb-l">Ma prochaine bilatérale</div><div class="nb-main"><div>' +
         '<div class="nb-nom">Pas encore programmée</div>' +
@@ -1775,6 +1835,42 @@ function messageErreur(e) {
 }
 
 // ============================================================================
+//  ORDRE DU JOUR (v30) — pastilles + texte libre, table bilaterale_odj
+// ============================================================================
+// (constantes de l'ordre du jour : déclarées en tête du module, v30)
+function odjVide(){ return { points: [], texte: '' }; }
+function odjNorm(o){ return { points: (o && Array.isArray(o.points)) ? o.points.slice() : [], texte: (o && o.texte) || '' }; }
+function odjEstVide(o){ return !o || (!(o.points || []).length && !String(o.texte || '').trim()); }
+function odjChargerSugg(apres){
+  if (ODJ_SUGG || ODJ_SUGG_VOL) return; ODJ_SUGG_VOL = true;
+  Promise.resolve(ctx.supabase.rpc('bilat_odj_suggestions')).then(r => { ODJ_SUGG = (!r.error && Array.isArray(r.data)) ? r.data : []; if (apres) apres(); })
+    .catch(() => { ODJ_SUGG = []; }).finally(() => { ODJ_SUGG_VOL = false; });
+}
+function odjPastilles(o){
+  const vus = {}, out = [];
+  (ODJ_SUGG || []).concat(ODJ_TYPE).concat((o && o.points) || []).forEach(p => { const k = String(p || '').trim(); if (k && !vus[k.toLowerCase()]) { vus[k.toLowerCase()] = 1; out.push(k); } });
+  return out;
+}
+function odjBascule(o, p){ const i = o.points.findIndex(x => String(x).toLowerCase() === String(p).toLowerCase()); if (i >= 0) o.points.splice(i, 1); else o.points.push(p); }
+// Éditeur : attr = attribut de clic des pastilles (data-pact « odj: » pour la
+// fenêtre de planification, data-ract « odj: » pour la fiche de réalisation).
+function odjEditeur(o, attr, idTxt, onInput){
+  const on = p => (o.points || []).some(x => String(x).toLowerCase() === String(p).toLowerCase());
+  return '<div class="odj-chips">' + odjPastilles(o).map(p => '<button type="button" class="odj-chip' + (on(p) ? ' on' : '') + '" ' + attr + '="odj:' + esc(p) + '">' + (on(p) ? '✓ ' : '+ ') + esc(p) + '</button>').join('') + '</div>' +
+    '<textarea id="' + idTxt + '" class="odj-txt" rows="2"' + (onInput ? ' oninput="' + onInput + '"' : '') + ' placeholder="Autres points, précisions pour le vendeur…">' + esc(o.texte || '') + '</textarea>';
+}
+function odjLecture(o){
+  if (odjEstVide(o)) return '<div class="odj-vide">Pas encore d’ordre du jour.</div>';
+  return ((o.points || []).length ? '<ul class="odj-ul">' + o.points.map(p => '<li>' + esc(p) + '</li>').join('') + '</ul>' : '') +
+    (String(o.texte || '').trim() ? '<div class="odj-libre">' + esc(o.texte).replace(/\n/g, '<br>') + '</div>' : '');
+}
+async function odjPoser(idBilat, o){
+  const r = await ctx.supabase.rpc('bilat_odj_poser', { p_id: Number(idBilat), p_points: (o && o.points) || [], p_texte: (o && o.texte) || null });
+  if (r.error) throw r.error;
+  return r.data;
+}
+
+// ============================================================================
 //  PLANIFIER UNE BILATÉRALE (depuis la file de priorité ou la timeline)
 //  Deux clics : la date proposée est le prochain jour ouvré, 9 h, 30 min.
 //  « Mener maintenant » crée la bilatérale à l'instant présent et ouvre la
@@ -1784,7 +1880,8 @@ const P = { idUser: null, idSite: null, nom: '', date: '', heure: '09:00', dur: 
 function P_open(idUser, idSite) {
   const c = (state.cadence || []).find(x => x.id_user === idUser);
   P.idUser = idUser; P.idSite = idSite; P.nom = c ? c.nom_vendeur : ('Vendeur ' + idUser);
-  P.date = ymd(jourOuvre(new Date(), 1)); P.heure = '09:00'; P.dur = 30; P.saving = false; P.err = '';
+  P.date = ymd(jourOuvre(new Date(), 1)); P.heure = '09:00'; P.dur = 30; P.saving = false; P.err = ''; P.odj = odjVide();
+  odjChargerSugg(() => { if (doc.querySelector('#bil-ov .pl-modal:not(.pb-modal)')) { P_sync(); P_render(); } });
   P.contexte = c ? prioDetail(c) : null;
   P_render();
 }
@@ -1800,6 +1897,8 @@ function P_render() {
       '<label>Heure<input type="time" id="pl-heure" step="900" value="' + esc(P.heure) + '"></label>' +
       '<label>Durée<select id="pl-dur">' + [15, 30, 45, 60, 90].map(m => '<option value="' + m + '"' + (m === P.dur ? ' selected' : '') + '>' + m + ' min</option>').join('') + '</select></label></div>' +
       '<div class="pl-quick">' + [1, 2, 3, 7].map(n => { const dd = jourOuvre(new Date(), n); return '<button data-pact="jour:' + ymd(dd) + '">' + esc(dd.toLocaleDateString('fr-FR', { weekday: 'short', day: '2-digit', month: '2-digit' })) + '</button>'; }).join('') + '</div>' +
+      '<div class="pl-odj"><div class="pl-odj-t">Ordre du jour <span>' + ((P.odj.points || []).length ? P.odj.points.length + ' point' + (P.odj.points.length > 1 ? 's' : '') : 'facultatif') + '</span></div>' +
+        odjEditeur(P.odj, 'data-pact', 'pl-odj-txt') + '<div class="pl-odj-h">Le vendeur le verra dans son module Bilatérales, mis à jour en direct.</div></div>' +
       (P.err ? '<div class="pl-err">' + esc(P.err) + '</div>' : '') +
       '<div class="pl-acts"><button class="pl-go" data-pact="planifier"' + (P.saving ? ' disabled' : '') + '>' + (P.saving ? 'Enregistrement…' : '📅 Planifier') + '</button>' +
       '<button class="pl-now" data-pact="maintenant"' + (P.saving ? ' disabled' : '') + '>▶ Mener l’entretien maintenant</button></div>' +
@@ -1811,6 +1910,7 @@ function P_sync() {
   if (g('pl-date')) P.date = g('pl-date').value;
   if (g('pl-heure')) P.heure = g('pl-heure').value;
   if (g('pl-dur')) P.dur = Number(g('pl-dur').value) || 30;
+  if (g('pl-odj-txt')) { P.odj = P.odj || odjVide(); P.odj.texte = g('pl-odj-txt').value; }
 }
 async function P_planifier() {
   P_sync(); P.err = '';
@@ -1820,6 +1920,7 @@ async function P_planifier() {
     const start = P.date + ' ' + P.heure + ':00', end = P.date + ' ' + plus(P.dur, P.heure) + ':00';
     const r = await ctx.supabase.rpc('create_bilaterale', { p_id_user: P.idUser, p_id_manager: getViewerId(), p_id_site: P.idSite, p_start: start, p_end: end, p_duree: P.dur + ' min' });
     if (r.error) throw r.error;
+    if (!odjEstVide(P.odj) && r.data != null) { try { await odjPoser(r.data, P.odj); } catch (eo) { bilToast('Bilatérale planifiée, mais l’ordre du jour n’a pas été posé : ' + messageErreur(eo)); } }
     closeModal();
     bilToast('Bilatérale planifiée avec ' + P.nom + ' · ' + libQuand(P.date, P.heure));
     rechargerBil();
@@ -1830,6 +1931,7 @@ async function P_maintenant() {
   try {
     const r = await ctx.supabase.rpc('bilat_creer_maintenant', { p_id_user: P.idUser, p_id_site: P.idSite, p_duree_min: P.dur });
     if (r.error) throw r.error;
+    if (!odjEstVide(P.odj) && r.data != null) { try { await odjPoser(r.data, P.odj); } catch (eo) {} }
     closeModal();
     rechargerBil();
     R_open(Number(r.data));
@@ -1893,6 +1995,7 @@ function P_route(e) {
   if (v === 'planifier') { P_planifier(); return true; }
   if (v === 'maintenant') { P_maintenant(); return true; }
   if (v.indexOf('jour:') === 0) { P_sync(); P.date = v.slice(5); P_render(); return true; }
+  if (v.indexOf('odj:') === 0) { P_sync(); odjBascule(P.odj, v.slice(4)); P_render(); return true; }
   return true;
 }
 function rechargerBil() {
@@ -2318,6 +2421,23 @@ const STYLE = '<style>' +
 '#bil-root .pk.clik{cursor:pointer;transition:border-color .12s}' +
 '#bil-root .pk.clik:hover{border-color:#acc5e4}' +
 '#bil-root .pk.on{border-color:#2a5ea9;box-shadow:inset 0 0 0 1px #2a5ea9}' +
+'#bil-root .odj-chips{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:8px}' +
+'#bil-root .odj-chip{border:1.5px solid #e2eaf5;background:#fff;color:#1F4A85;font:700 12px "Nunito Sans",system-ui,sans-serif;padding:5px 10px;border-radius:999px;cursor:pointer}' +
+'#bil-root .odj-chip:hover{border-color:#2a5ea9}' +
+'#bil-root .odj-chip.on{background:#2a5ea9;border-color:#2a5ea9;color:#fff}' +
+'#bil-root .odj-txt{width:100%;box-sizing:border-box;border:1px solid #d6e2f2;border-radius:10px;padding:8px 10px;font:600 13px "Nunito Sans",system-ui,sans-serif;color:#1F4A85;resize:vertical;min-height:52px}' +
+'#bil-root .pl-odj{margin-top:14px}' +
+'#bil-root .pl-odj-t{font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:.05em;color:#7a98c5;margin-bottom:6px}' +
+'#bil-root .pl-odj-t span{text-transform:none;letter-spacing:0;font-weight:600;margin-left:4px}' +
+'#bil-root .pl-odj-h{font-size:11px;color:#7a98c5;font-weight:600;margin-top:5px}' +
+'#bil-root .vs-odj{margin-top:12px;padding-top:10px;border-top:1px solid rgba(42,94,169,.18)}' +
+'#bil-root .vs-odj-t{font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:.05em;color:#2a5ea9;margin-bottom:6px}' +
+'#bil-root .vs-odj-t span{text-transform:none;letter-spacing:0;font-weight:600;color:#00997f;margin-left:4px}' +
+'#bil-root .odj-ul{margin:0 0 6px;padding-left:18px;color:#1F4A85;font-size:13.5px;font-weight:700;line-height:1.6}' +
+'#bil-root .odj-libre{font-size:13px;color:#2a5ea9;line-height:1.5}' +
+'#bil-root .odj-vide{font-size:12.5px;color:#7a98c5;font-style:italic}' +
+'#bil-root #vs-odj.flash{animation:odjFlash 1.6s ease}' +
+'@keyframes odjFlash{0%{background:rgba(83,189,167,.28)}100%{background:transparent}}' +
 '#bil-root .next-box{background:linear-gradient(135deg,rgba(42,94,169,.08),rgba(83,189,167,.10));border:1px solid rgba(42,94,169,.25);border-radius:14px;padding:14px 18px;margin-bottom:14px}' +
 '#bil-root .nb-l{font-size:11px;font-weight:800;color:#2a5ea9;text-transform:uppercase;letter-spacing:.05em;margin-bottom:6px}' +
 '#bil-root .nb-main{display:flex;align-items:center;gap:14px;flex-wrap:wrap;justify-content:space-between}' +
@@ -2611,9 +2731,48 @@ function R_setClientAndTab(idClient, tab){
   try { wwLib.wwVariable.updateValue(R_SELECTED_CLIENT_VAR, { IDVu: Number(idClient) }); } catch(e){}
   try { const w = (wwLib.getFrontWindow && wwLib.getFrontWindow()) || window; w.__odFicheTab = (tab != null ? tab : 0); } catch(e){}
 }
+// v30 : mémoire de la fiche de réalisation pour le bouton « Précédent ».
+// Posée au départ vers la fiche client ; utilisée au retour seulement si le
+// navigateur est revenu ici par l'historique (popstate), pas par le menu.
+function R_memoRetour(){
+  try {
+    if(R.bilId==null) return;
+    try { R_lireSaisie(); R_saveDraft(); } catch(e){}
+    const W=(wwLib.getFrontWindow && wwLib.getFrontWindow()) || window;
+    const ov=doc.getElementById('real-ov');
+    const o={ id:R.bilId, kpi:R.kpi, f:R.b2filter, all:!!R.affTout, reunion:!!R.reunion, sc: ov?ov.scrollTop:0, t:Date.now(), path:W.location.pathname, pop:false };
+    W.sessionStorage.setItem('od_bil_retour', JSON.stringify(o));
+    if(W.__bilPopH){ try { W.removeEventListener('popstate', W.__bilPopH); } catch(e){} }
+    W.__bilPopH=function(){
+      try {
+        const raw=W.sessionStorage.getItem('od_bil_retour'); if(!raw){ W.removeEventListener('popstate', W.__bilPopH); W.__bilPopH=null; return; }
+        const x=JSON.parse(raw);
+        if(W.location.pathname===x.path){ x.pop=true; W.sessionStorage.setItem('od_bil_retour', JSON.stringify(x)); W.removeEventListener('popstate', W.__bilPopH); W.__bilPopH=null; }
+      } catch(e){}
+    };
+    W.addEventListener('popstate', W.__bilPopH);
+  } catch(e){}
+}
+function R_restaurerRetour(){
+  try {
+    const W=(wwLib.getFrontWindow && wwLib.getFrontWindow()) || window;
+    const raw=W.sessionStorage.getItem('od_bil_retour'); if(!raw) return false;
+    const x=JSON.parse(raw);
+    if(Date.now()-(x.t||0) > 4*3600*1000){ W.sessionStorage.removeItem('od_bil_retour'); return false; }
+    if(!x.pop || x.id==null) return false;
+    W.sessionStorage.removeItem('od_bil_retour');
+    R_open(Number(x.id));
+    R.kpi=x.kpi||'cmd'; R.b2filter=x.f||'tous'; R.affTout=!!x.all; R.reunion=!!x.reunion;
+    R_render();
+    const sc=Number(x.sc)||0;
+    if(sc>0) [300,900,1800,3000].forEach(ms=>setTimeout(()=>{ const ov=doc.getElementById('real-ov'); if(ov && R.bilId===Number(x.id) && ov.scrollTop < sc-5) ov.scrollTop=sc; }, ms));
+    return true;
+  } catch(e){ return false; }
+}
 async function R_openClientFiche(idClient){
   if(!idClient){ console.warn('[real] openClientFiche: id_client manquant'); return; }
   try {
+    R_memoRetour();
     R_setClientAndTab(idClient, R_TAB_CONTACTS);
     R_close();
     R_goPage(R_PAGE_FICHE_ID, R_PATH_FICHE_CLIENT);
@@ -2622,6 +2781,7 @@ async function R_openClientFiche(idClient){
 async function R_openClientFicheTab(idClient, tab){
   if(!idClient){ return; }
   try {
+    R_memoRetour();
     R_setClientAndTab(idClient, tab);
     R_close();
     R_goPage(R_PAGE_FICHE_ID, R_PATH_FICHE_CLIENT);
@@ -2721,7 +2881,31 @@ window.__bilEngInput=function(i,field,val){
   else R.engagements[i].libelle=val;
   R_saveDraft();
 };
+// Ordre du jour dans la fiche de réalisation : enregistré tout seul, 0,8 s
+// après la dernière modification (le vendeur le voit changer en direct).
+let R_odjMinuteur=null;
+function R_odjPlanifierEnreg(){
+  if(R_odjMinuteur) clearTimeout(R_odjMinuteur);
+  R.odjEtat='attente'; R_odjIndic();
+  R_odjMinuteur=setTimeout(async ()=>{
+    R_odjMinuteur=null; const id=R.bilId; if(id==null) return;
+    try { await odjPoser(id, R.odj); if(R.bilId===id){ R.odjEtat='ok'; R_odjIndic(); } }
+    catch(e){ console.error('[real] ordre du jour', e); if(R.bilId===id){ R.odjEtat='err'; R.odjErr=messageErreur(e); R_odjIndic(); } }
+  }, 800);
+}
+function R_odjIndic(){
+  const el=doc.getElementById('r-odj-ind'); if(!el) return;
+  el.className='odj-ind '+(R.odjEtat||'');
+  el.textContent = R.odjEtat==='attente' ? 'enregistrement…' : R.odjEtat==='ok' ? 'enregistré · visible par le vendeur' : R.odjEtat==='err' ? ('non enregistré : '+(R.odjErr||'erreur')) : 'visible par le vendeur';
+}
+window.__bilOdjTxt=function(val){ if(!R.odj) R.odj=odjVide(); R.odj.texte=val; R_odjPlanifierEnreg(); };
+function R_odjSec(){
+  const n=(R.odj.points||[]).length;
+  return '<div class="sec sec-odj"><div class="sec-t">Ordre du jour <span class="pill">'+(n?n+' point'+(n>1?'s':''):'à compléter')+'</span><span id="r-odj-ind" class="odj-ind '+(R.odjEtat||'')+'"></span></div>'+
+    odjEditeur(R.odj, 'data-ract', 'r-odj-txt', 'window.__bilOdjTxt(this.value)')+'</div>';
+}
 function R_lireSaisie(){
+  const ot=doc.getElementById('r-odj-txt'); if(ot && R.odj) R.odj.texte=ot.value;
   const res=doc.getElementById('rf-res'), act=doc.getElementById('rf-act');
   if(R.detail){ if(res) R.detail.resultat=res.value; if(act) R.detail.actions=act.value; }
   const rows=doc.querySelectorAll('#real-ov .eng-item');
@@ -2771,6 +2955,8 @@ function R_open(bilId){
   R.engagements=[]; R.ouverts=[]; R.revues={}; R.engLoaded=false; R.reunion=false; R._draftApplied=false;
   R.K=null; R.Kp=null; R.kLoaded=false; R.dashErr=null; R.cad=null; R.parts={}; R.legacy=false;
   R.future=false; R.done=null; R.prefilled=false; R.fromDraft=false; R.saveErr=''; R.nextDate=''; R.nextHeure=''; R.nextMsg='';
+  R.odj=odjVide(); R.odjEtat='';
+  odjChargerSugg(()=>{ if(doc.getElementById('real-ov') && R.detail && !R.done){ R_lireSaisie(); R_render(); } });
   R_ensureOverlay();
   R_render();
   R_load();
@@ -2791,6 +2977,7 @@ async function R_load(){
     const rDet = await supabase.rpc('get_bilaterale_detail', { p_id: id });
     if(rDet.error) throw rDet.error;
     R.detail = rDet.data || null;
+    R.odj = odjNorm(R.detail && R.detail.odj);
     if(!R.detail || R.detail.id_user==null){ R.error='Bilatérale introuvable.'; R.loading=false; R_render(); return; }
     R.loading=false;
     const sd = R.detail.start_date ? new Date(String(R.detail.start_date).replace(' ','T')) : null;
@@ -3288,18 +3475,24 @@ function R_render(){
     if(R.reunion){
       // Mode réunion : les chiffres en grand à gauche (c'est l'écran qu'on
       // tourne vers le vendeur), le compte rendu en panneau latéral.
-      body+='<div class="r-cols"><div class="r-left">'+perf+histo+'</div><div class="r-right">'+R_revue()+R_saisie()+'</div></div>';
+      body+='<div class="r-cols"><div class="r-left">'+perf+histo+'</div><div class="r-right">'+R_odjSec()+R_revue()+R_saisie()+'</div></div>';
     } else {
-      body+=R_revue()+perf+R_saisie()+histo;
+      body+=R_odjSec()+R_revue()+perf+R_saisie()+histo;
     }
   }
+  setTimeout(R_odjIndic, 0);
   const scrollPrec = ov.scrollTop;
+  // v30 : un rendu asynchrone (chiffres, historique) ne fait plus perdre la
+  // saisie en cours : le champ actif retrouve le focus et le curseur.
+  let focusPrec=null;
+  try { const ae=doc.activeElement; if(ae && ae.id && ov.contains(ae) && ('selectionStart' in ae)) focusPrec={ id:ae.id, a:ae.selectionStart, b:ae.selectionEnd }; } catch(e){}
   try { const t=doc.getElementById('agenda-tip'); if(t) t.style.display='none'; } catch(e){}
   ov.innerHTML = R_STYLE + '<div class="real-modal'+(R.reunion?' reunion':'')+'">'+
     '<div class="real-toolbar">'+(R.done?'':'<button class="real-mode" data-ract="reunion">'+(R.reunion?'↙ Quitter le mode réunion':'⤢ Mode réunion')+'</button>')+'</div>'+
     '<button class="real-close" data-ract="annuler" title="Fermer">×</button>'+body+'</div>';
   R_autoHauteur();
   ov.scrollTop = scrollPrec;
+  if(focusPrec){ try { const el=doc.getElementById(focusPrec.id); if(el){ el.focus({preventScroll:true}); el.setSelectionRange(focusPrec.a, focusPrec.b); } } catch(e){} }
 }
 // Le bilan et les actions grandissent avec leur contenu : le bilan pré-rempli
 // (constats chiffrés) se lit en entier sans ascenseur interne.
@@ -3425,6 +3618,7 @@ window.__realRoute2 = function(e){
   if(hd){ R_lireSaisie(); R.histIdx=Number(hd.getAttribute('data-rhistdot')); R_render(); return; }
   const act=e.target.closest('[data-ract]');
   if(act){ const a=act.getAttribute('data-ract');
+    if(a.indexOf('odj:')===0){ R_lireSaisie(); odjBascule(R.odj, a.slice(4)); R_render(); R_odjPlanifierEnreg(); return; }
     if(a==='save'){ R_save(); return; }
     if(a==='annuler'){ if(!R.done) R_lireSaisie(); R_close(); return; }
     if(a==='reunion'){ R_lireSaisie(); R.reunion=!R.reunion; R_render(); return; }
@@ -3633,6 +3827,15 @@ const R_STYLE = '<style>'+
 '#real-ov .perf-prev{font-size:11px;color:#8b99b0;margin-top:3px}'+
 '#real-ov .b2-note{font-size:11px;color:#8b99b0;margin-top:10px}'+
 '#real-ov .sec-rev{border-color:rgba(250,192,85,.55);background:#fdf3de}'+
+'#real-ov .sec-odj{border-color:rgba(42,94,169,.30);background:rgba(42,94,169,.05)}'+
+'#real-ov .sec-odj .sec-t{color:#1F4A85}'+
+'#real-ov .odj-chips{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:8px}'+
+'#real-ov .odj-chip{border:1.5px solid #e2eaf5;background:#fff;color:#1F4A85;font:700 12px "Nunito Sans",system-ui,sans-serif;padding:5px 10px;border-radius:999px;cursor:pointer}'+
+'#real-ov .odj-chip:hover{border-color:#2a5ea9}'+
+'#real-ov .odj-chip.on{background:#2a5ea9;border-color:#2a5ea9;color:#fff}'+
+'#real-ov .odj-txt{width:100%;box-sizing:border-box;border:1px solid #d6e2f2;border-radius:10px;padding:8px 10px;font:600 13px "Nunito Sans",system-ui,sans-serif;color:#1F4A85;resize:vertical;min-height:52px;background:#fff}'+
+'#real-ov .odj-ind{margin-left:auto;font-size:11px;font-weight:600;text-transform:none;letter-spacing:0;color:#7a98c5}'+
+'#real-ov .odj-ind.ok{color:#00997f}#real-ov .odj-ind.err{color:#c0524f}'+
 '#real-ov .sec-rev .sec-t{color:#8a6d1f}'+
 '#real-ov .sec-rev .sec-t .pill{background:rgba(250,192,85,.30);color:#8a6d1f}'+
 '#real-ov .rev-date.echu{color:#c0524f;font-weight:700}'+
@@ -4016,6 +4219,8 @@ const RC_STYLE = '<style>'+
 // ============================================================================
 (function bilAutoOpenFromAgenda(){
   function tryOpen(){
+    // v30 : retour par « Précédent » depuis une fiche client ouverte ici.
+    if (R_restaurerRetour()) return true;
     // v6 : l'agenda dépose l'id dans sessionStorage (fiable en navigation SPA).
     try {
       const W = (wwLib.getFrontWindow && wwLib.getFrontWindow()) || window;
