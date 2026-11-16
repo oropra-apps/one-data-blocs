@@ -1,5 +1,15 @@
 // ============================================================================
-//  NOTIFICATIONS — module One Data (OD.define)   v12 — PROFIL TEAM COLIN
+//  NOTIFICATIONS — module One Data (OD.define)   v13 — PROFIL TEAM COLIN
+//
+//  v13 (16/11/2026) : L'ÉQUIPE, retours chef des ventes.
+//   * La pastille « L'équipe » et le bandeau comptent EXACTEMENT les lignes du
+//     tableau (48 annoncés pour 42 affichés : 6 dettes portées par un compte
+//     désactivé, que personne ne voyait). Un compte désactivé ou hors équipe
+//     qui porte des clients en attente apparaît désormais, étiqueté.
+//   * Clic sur un vendeur : la liste de SES clients qui attendent (depuis
+//     quand, par quel canal, enjeu) — sans le contenu des messages, que la
+//     fiche donne. Par client : Fiche, Alerter (nommé), Reprendre (confirmé).
+//   Prérequis SQL : notif_lire renvoie equipe[].clients / inactif / hors_equipe.
 //
 //  v12 (13/11/2026) : « Commande signée » parmi les motifs de classement, sur
 //   « On m'attend » et sur les relances promises (bon de commande signé, pas
@@ -498,6 +508,20 @@ OD.define('notifications', {
 #notif-root .tab td.f{font-family:var(--mono);font-weight:600}
 #notif-root .tab td .mauvais{color:var(--m-rouge);font-weight:700}
 #notif-root .tab td .bon{color:var(--m-vert)}
+#notif-root .tab tr.dpl{cursor:pointer}#notif-root .tab tr.dpl:hover td,#notif-root .tab tr.dpl.on td{background:#f6f9fd}
+#notif-root .tab .chev{display:inline-block;width:14px;color:var(--ink-3);font-size:11px}
+#notif-root .tg{display:inline-block;font-size:10.5px;font-weight:700;padding:2px 8px;border-radius:999px;background:var(--calme-bg);color:var(--ink-2);vertical-align:middle;margin-left:4px;white-space:nowrap}
+#notif-root .tg.r{background:var(--chaud-bg);color:var(--m-rouge)}
+#notif-root .tab tr.det td{padding:0 12px 12px;background:#f6f9fd;text-align:left;font-weight:400}
+#notif-root .dcl{display:flex;flex-direction:column;gap:6px;padding-top:4px}
+#notif-root .dcl-n{margin:4px 0;font-size:12px;color:var(--m-rouge);font-weight:700}
+#notif-root .dc{display:grid;grid-template-columns:64px minmax(0,1fr) auto auto;gap:12px;align-items:center;background:var(--card);border:1px solid var(--line);border-radius:10px;padding:8px 12px}
+#notif-root .dc-t{font-family:var(--mono);font-weight:700;font-size:12.5px;text-align:center;border-radius:8px;padding:4px 0;background:var(--calme-bg);color:var(--ink-2)}
+#notif-root .dc-t.chaud{background:var(--chaud-bg);color:var(--m-rouge)}#notif-root .dc-t.tiede{background:var(--alerte-bg);color:var(--m-orange)}
+#notif-root .dc-q{min-width:0}#notif-root .dc-q b{display:block;font-size:13px;color:var(--ink);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+#notif-root .dc-q small{display:block;font-size:11.5px;color:var(--ink-3);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+#notif-root .dc-a{display:flex;gap:6px}#notif-root .dc-a .conf{border-color:var(--m-rouge);color:var(--m-rouge)}
+@media (max-width:700px){#notif-root .dc{grid-template-columns:56px minmax(0,1fr)}#notif-root .dc-a{grid-column:1/-1}}
 #notif-root .tab tr:hover td{background:#fafcff}
 #notif-root .tab .mini{font-size:11.5px;font-weight:600;color:var(--ink-3);padding:5px 10px;
   border-radius:7px;border:1px solid var(--line-2);background:var(--card);cursor:pointer}
@@ -643,7 +667,7 @@ OD.define('notifications', {
     const state = { j: null, section: null, canal: 'TOUS', erreur: null,
                     chargement: true, reportOuvert: null, busBound: false,
                     classOuvert: null, classNonClient: false, exclusions: [],
-                    sig: null };
+                    sig: null, deplie: {} };
 
     // Le périmètre choisi dans la barre du haut. « Tout mon périmètre » ne
     // filtre rien : on envoie null plutôt que la liste complète, pour que la
@@ -1182,8 +1206,10 @@ OD.define('notifications', {
         + '<th>Charge</th><th></th></tr></thead><tbody>';
       lignes.forEach(x => {
         const r = num(x.en_retard);
-        h += '<tr data-cle="' + esc(x.cle) + '">'
-          + '<td>' + esc(x.nom) + '</td>'
+        const nCl = estVendeur ? (x.clients || []).length : 0, ouvert = !!(state.deplie && state.deplie[x.cle]);
+        h += '<tr data-cle="' + esc(x.cle) + '"' + (nCl ? ' class="dpl' + (ouvert ? ' on' : '') + '" data-role="deplier" title="Voir les clients qui attendent"' : '') + '>'
+          + '<td>' + (nCl ? '<span class="chev" aria-hidden="true">' + (ouvert ? '▾' : '▸') + '</span>' : '') + esc(x.nom)
+          + (x.inactif ? ' <span class="tg r">compte désactivé</span>' : x.hors_equipe ? ' <span class="tg">autre équipe</span>' : '') + '</td>'
           + '<td class="f">' + fmt(x.dette) + '</td>'
           + '<td class="f">' + (r > 0 ? '<span class="mauvais">' + fmt(r) + '</span>' : '—') + '</td>'
           + '<td class="f">' + (num(x.plus_ancienne_min) > 0
@@ -1199,15 +1225,36 @@ OD.define('notifications', {
           + '<td><span class="barre"><i style="width:'
               + Math.round(num(x.dette) / max * 100) + '%;background:'
               + (r > 0 ? 'var(--m-rouge)' : 'var(--m-bleu)') + '"></i></span></td>'
-          + '<td>' + (estVendeur && num(x.dette) > 0
+          + '<td>' + (estVendeur && num(x.dette) > 0 && !x.inactif
               ? '<button type="button" class="mini" data-role="alerter">Alerter</button>' : '')
           + '</td></tr>';
+        if (nCl && ouvert) h += '<tr class="det"><td colspan="8">' + detailClients(x) + '</td></tr>';
       });
       h += '</tbody></table></div>';
       if (estVendeur) h += '<p class="dnote" style="font-size:11.5px;color:var(--ink-3);margin-top:8px">'
-        + '« Alerter » envoie au vendeur une notification nommée dans sa propre file. '
-        + 'Vous ne voyez pas ses messages : le détail reste chez celui qui doit agir.</p>';
+        + 'Cliquez sur un vendeur pour voir les clients qui attendent. « Alerter » envoie au vendeur une notification nommée dans sa propre file ; '
+        + '« Reprendre » vous attribue le client. Le contenu des messages reste dans la fiche du client.</p>';
       return h + blocTraces();
+    }
+    // v13 : le détail d'une dette — qui attend, depuis quand, par quel canal.
+    const CANAL_LIB = { VOIP: 'Appel', SMS: 'SMS', WHATSAPP: 'WhatsApp', EMAIL: 'E-mail' };
+    function detailClients(x) {
+      const ls = x.clients || [];
+      let h = '<div class="dcl">';
+      if (x.inactif) h += '<p class="dcl-n">Compte désactivé : ces clients n’ont plus personne. Reprenez-les ou confiez-les depuis leur fiche.</p>';
+      ls.forEach(c => {
+        const can = (c.medias || []).map(m => CANAL_LIB[m] || m).join(' · ');
+        h += '<div class="dc" data-client="' + esc(c.id_client) + '" data-user="' + esc(x.cle) + '">'
+          + '<span class="dc-t ' + esc(c.feu || '') + '">' + duree(c.attend_min) + '</span>'
+          + '<span class="dc-q"><b>' + esc(c.client_nom || c.tel || 'Client') + '</b>'
+          + '<small>' + esc([can, c.a_un_manque ? 'appel manqué' : '', num(c.nb_ev) > 1 ? fmt(c.nb_ev) + ' messages sans réponse' : '', c.tel && c.client_nom ? c.tel : ''].filter(Boolean).join(' · ')) + '</small></span>'
+          + (c.enjeu === 'cde' ? '<span class="tg r">commande en cours</span>' : c.enjeu === 'devis' ? '<span class="tg">devis en cours</span>' : '<span></span>')
+          + '<span class="dc-a"><button type="button" class="mini" data-role="det-fiche">Fiche</button>'
+          + (x.inactif ? '' : '<button type="button" class="mini" data-role="det-alerter">Alerter</button>')
+          + '<button type="button" class="mini" data-role="det-reprendre">Reprendre</button></span></div>';
+      });
+      if (ls.length >= 100) h += '<p class="dcl-n">Les 100 plus anciens sont affichés.</p>';
+      return h + '</div>';
     }
 
     // v9 : ce qui a été classé sans suite, et les expéditeurs exclus. Compté à
@@ -2228,6 +2275,40 @@ OD.define('notifications', {
           await recharger();
         } catch (e) { ec.textContent = 'échec'; }
         return;
+      }
+
+      // --- v13 : détail d'une dette
+      const dl = ev.target.closest('[data-role^="det-"]');
+      if (dl && r.contains(dl)) {
+        const row = dl.closest('[data-client]'), idc = Number(row.getAttribute('data-client')), idu = Number(row.getAttribute('data-user'));
+        const role = dl.getAttribute('data-role');
+        if (role === 'det-fiche') { ouvrirFiche(idc); return; }
+        if (role === 'det-alerter') {
+          dl.textContent = '…';
+          try {
+            const res = await rpc('notif_alerter', { p_id_user_cible: idu, p_id_client: idc,
+              p_message: 'Ce client attend une réponse de votre part.' });
+            dl.textContent = (res && res.ok) ? 'alerté' : 'échec';
+          } catch (e) { dl.textContent = 'échec'; }
+          return;
+        }
+        if (role === 'det-reprendre') {
+          // Reprendre change le dossier de main : un second clic confirme.
+          if (dl.getAttribute('data-ok') !== '1') { dl.setAttribute('data-ok', '1'); dl.textContent = 'Confirmer ?'; dl.classList.add('conf'); return; }
+          dl.textContent = '…';
+          try {
+            const res = await rpc('notif_reprendre', { p_id_client: idc });
+            if (res && res.ok) await recharger(); else dl.textContent = 'échec';
+          } catch (e) { dl.textContent = 'échec'; }
+          return;
+        }
+      }
+      const dp = ev.target.closest('tr[data-role="deplier"]');
+      if (dp && r.contains(dp) && !ev.target.closest('button')) {
+        const k = dp.getAttribute('data-cle');
+        state.deplie = state.deplie || {};
+        state.deplie[k] = !state.deplie[k];
+        rendre(); return;
       }
 
       // --- alerter un vendeur
