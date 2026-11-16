@@ -1,6 +1,26 @@
 // ============================================================================
 //  LEAD MANAGEMENT — module One Data (OD.define 'lead-mgmt')
-//  VERSION TEAM COLIN (v123) — déploiement CIBLÉ (publish-targets :
+//  VERSION TEAM COLIN (v124) — déploiement CIBLÉ (publish-targets :
+//  v124 (16/11/2026) : Pool lisible (retours d'Arnaud Lefebvre, L'Haÿ) :
+//    - Accueil chef : les boutons passent SOUS le lead quand la colonne du
+//      Pool est étroite (portable ~1280 px) — plus de noms réduits à une
+//      lettre ni d'étiquette « Vroom Team » posée sur « suggéré : … » ;
+//    - une seule mesure du temps partout : le gros chiffre = attente depuis
+//      l'arrivée sur le site ; dessous, « hors délai » ou « reste 2 h » ;
+//    - demande lisible : quand le véhicule se réduit à la marque (« Toyota »),
+//      on affiche la qualification (Achat VN · Yaris · échéance…) ; le
+//      détail complet sous chaque carte du Pool ;
+//    - « Sans nom » remplacé par l'e-mail ou le téléphone ; même contact
+//      (e-mail / mobile) sur le site = « + 1 autre demande » ;
+//    - site en LIBRE-SERVICE : plus de « Tout attribuer » ni de bouton
+//      d'attribution en vedette ; « Je le prends » / « Pour moi » d'abord,
+//      « Attribuer… » en second ;
+//    - Mon équipe / L'équipe : colonne « en souffrance » calculée comme
+//      l'onglet « En souffrance », et tous ceux qui ont des leads du site
+//      (vous, vendeurs d'une autre équipe) y figurent : les totaux concordent ;
+//    - suggestion : charge affichée = celle de l'équipe (même calcul que les
+//      listes) ; côté base, poste_suggestions ne propose plus que des
+//      vendeurs de l'équipe visible du chef.
 //  v123 (16/11/2026) : retours de Julien Faugeras, trois correctifs réunis :
 //    - onglet HISTORIQUE : le sélecteur VN / VO du haut de page filtre enfin
 //      la liste (colonne univers ajoutée à poste_historique) ;
@@ -3015,7 +3035,26 @@
     var MOI = null;
 
     // ── Lecture de la donnée ──────────────────────────────────────────────
-    function nomLead(l) { return propre(l.nom) || 'Sans nom'; }
+    // v124 : sans nom, on montre l'e-mail ou le téléphone plutôt que « Sans nom ».
+    function nomLead(l) {
+      var n = propre(l.nom); if (n) return n;
+      var e = String(l.email || '').trim(); if (e) return e;
+      var t = String(l.telephone || '').trim(); return t || 'Client sans coordonnées';
+    }
+    // v124 : clés de contact normalisées (e-mail, 9 derniers chiffres du téléphone).
+    function clesContact(l) {
+      var k = [], e = String(l.email || '').trim().toLowerCase(), t = String(l.telephone || '').replace(/\D/g, '');
+      if (e) k.push('e:' + e);
+      if (t.length >= 9) k.push('t:' + t.slice(-9));
+      return k;
+    }
+    function memeContact(l) {
+      var k = clesContact(l); if (!k.length) return 0;
+      return S.leads.filter(function (x) {
+        return x !== l && x.zone !== 'plateau' && Number(x.id_site) === Number(l.id_site) && Number(x.id_lead) !== Number(l.id_lead)
+          && clesContact(x).some(function (c) { return k.indexOf(c) !== -1; });
+      }).length;
+    }
     // Une mesure (médiane, moyenne) : « moins d'une minute » plutôt que « à l'instant ».
     function dureeMes(m) { return m == null ? '—' : Number(m) < 1 ? '< 1 min' : duree(Number(m)); }
     function prenom(n) { return String(propre(n) || '').split(' ')[0]; }
@@ -3180,11 +3219,20 @@
     function sitePoste() { return POSTE === 'direction' ? S.vueSite : S.site; }
     function monStat() { return ((S.stats && S.stats.vendeurs) || []).filter(function (v) { return Number(v.id_user) === Number(MOI); }); }
     function stockDu(id) { return S.leads.filter(function (l) { return l.zone !== 'plateau' && Number(l.id_site) === Number(id) && mins(l.arrive_le) >= 1440; }).length; }
-    function demandeDe(l) { return l.vehicule || (l.message ? String(l.message).replace(/^\[[^\]]*\]\s*/, '').slice(0, 90) : '') || l.source_libelle || 'Demande'; }
+    // v124 : « Toyota » seul ne dit rien. Quand le véhicule se réduit à la
+    // marque, la demande lisible est la qualification (projet · modèle · échéance).
+    function vehiculeVague(l) { var v = String(l.vehicule || '').trim().toLowerCase(); return !v || /^(toyota|lexus)$/.test(v) || v === String(l.marque_lead || '').trim().toLowerCase(); }
+    function qualifCourte(l) { return l.qualification ? String(l.qualification).replace(/[\s·]+$/, '').trim() : ''; }
+    function demandeDe(l) {
+      var q = qualifCourte(l);
+      if (q && vehiculeVague(l)) return q.length > 90 ? q.slice(0, 89) + '…' : q;
+      return l.vehicule || (l.message ? String(l.message).replace(/^\[[^\]]*\]\s*/, '').slice(0, 90) : '') || l.source_libelle || 'Demande';
+    }
     // v122 : détail de la demande affiché dans les listes (qualification de la
     // Vroom Team, sinon message du client s'il n'est pas déjà la ligne demande).
     function detailDe(l) {
       var q = l.qualification ? String(l.qualification).trim() : '';
+      if (q && vehiculeVague(l)) return '';   // v124 : la qualification EST la demande (affichée en entier sur la carte, au survol ailleurs)
       var m = l.message && l.vehicule ? String(l.message).replace(/^\[[^\]]*\]\s*/, '').trim() : '';
       var t = q || m;
       if (!t) return '';
@@ -3193,7 +3241,7 @@
       return '<p class="lr-dt" title="' + esc(t) + '">' + esc(court) + '</p>';
     }
     var BACS_LIB = { Abandonned: 'Abandonné', Interesse: 'Intéressé', 'A affecter': 'À affecter' };   // v110
-    function autresDemandes(l) { return Number((S.autres || {})[String(l.id_lead)] || 0); }
+    function autresDemandes(l) { return Math.max(Number((S.autres || {})[String(l.id_lead)] || 0), memeContact(l)); }
     function tagsLead(l) {
       var h = univTag(l) + '<span class="tag">' + esc(l.source_libelle || l.source || 'Lead') + '</span>';
       if (l.statut_bacs && l.statut_bacs !== 'Abandonned') h += '<span class="tag" title="Statut du lead dans BACS">BACS : ' + esc(BACS_LIB[l.statut_bacs] || l.statut_bacs) + '</span>';
@@ -3493,6 +3541,15 @@
       if (fait) render();
     }
     function suggestion(l) { return S.sugg[l.id_lead] || null; }
+    // v124 : site en libre-service (règle du site, sinon mode des stats).
+    function libreService(sid) { var r = S.regle[sid]; var m = (r && !r.vide && r.mode) || (siteInfo(sid) || {}).mode; return m === 'libre'; }
+    // v124 : la charge affichée est celle des listes (leads ouverts du vendeur sur le site).
+    function raisonSugg(g, l) {
+      var r = String((g && g.raison) || ''), n = charge(g.id_user, l.id_site);
+      if (/^(le moins chargé|aucun lead en cours)/.test(r)) return 'le moins chargé · ' + n + ' en cours';
+      if (/^répartition du Pool/.test(r)) return 'répartition du Pool · ' + n + ' en cours';
+      return r;
+    }
 
     // ── v64 : le site de la barre du haut EST le périmètre de la page ─────
     function busApi() { try { return FW.oropraSite || window.oropraSite || null; } catch (e) { return window.oropraSite || null; } }
@@ -3644,6 +3701,21 @@
     // v97 : avec un créneau choisi par le client, le temps qui reste est celui
     // qui sépare de la fin du créneau.
     function reste(l) { var cr = creneauAcc(l); if (cr) return (cr.fin - Date.now()) / 60000; return slaDe(l) - minsO(arrive(l)); }
+    // v124 : tous ceux qui ont des leads ouverts sur le site — l'équipe du chef,
+    // le chef lui-même, un vendeur d'une autre équipe — pour que les totaux
+    // de « Mon équipe » rejoignent l'en-tête et l'onglet « En souffrance ».
+    function porteursDu(sid) {
+      var vs = vendeursDu(sid).map(function (v) { return Object.assign({ equipe: true }, v); }), vus = {};
+      vs.forEach(function (v) { vus[v.id_user] = 1; });
+      S.leads.forEach(function (l) {
+        var u = l.id_user_attribue;
+        if (l.zone !== 'vendeur' || u == null || Number(l.id_site) !== Number(sid) || vus[u]) return;
+        vus[u] = 1;
+        vs.push({ id_user: u, id_site: sid, nom: l.vendeur_nom || 'Vendeur', equipe: false, moi: Number(u) === Number(MOI) });
+      });
+      return vs;
+    }
+    function souffranceDe(uid, sid) { return bloques(sid).filter(function (l) { return Number(l.id_user_attribue) === Number(uid); }).length; }
     function retardsEquipe(sid) { return S.leads.filter(function (l) { return l.zone === 'vendeur' && (sid == null || Number(l.id_site) === Number(sid)) && niveau(l) === 'crit'; }).length; }
     function libPerim() {
       var sid = sitePoste();
@@ -3708,7 +3780,7 @@
           + (bl ? ' · <b class="t-crit">' + bl + ' en souffrance</b> chez ' + plural(Object.keys(nbV).length, 'vendeur') : ' · aucun lead en souffrance') + '.';
         if (sid != null && !manager(sid)) p += ' <span class="t-mut">Vue de pilotage : le chef des ventes du site agit sur ses leads.</span>';
         var aAttr = pool.filter(function (l) { var g = suggestion(l); return manager(l.id_site) && g && g.id_user; });
-        if (aAttr.length) cta = '<button type="button" class="cta" data-a="tout-attribuer">Attribuer ' + (aAttr.length > 1 ? 'les ' + aAttr.length + ' leads du Pool' : 'le lead du Pool') + '<small>' + (aAttr.length > 1 ? 'chacun au vendeur suggéré' : 'au vendeur suggéré') + '</small></button>';
+        if (aAttr.length && !libreService(sid)) cta = '<button type="button" class="cta" data-a="tout-attribuer">Attribuer ' + (aAttr.length > 1 ? 'les ' + aAttr.length + ' leads du Pool' : 'le lead du Pool') + '<small>' + (aAttr.length > 1 ? 'chacun au vendeur suggéré' : 'au vendeur suggéré') + '</small></button>';
       }
       var analyses = '';
       return '<section class="hello"><div class="hello-t">' + (POSTE !== 'vendeur' ? perimetreHtml() : '')
@@ -3884,31 +3956,53 @@
       return '<div class="regle"><span class="i" aria-hidden="true">i</span><div><b>Règle d\'attribution de ' + esc(siteNom((siteInfo(sid) || {}).site)) + '.</b> ' + texteRegle(r)
         + (r.peut_modifier ? ' <button type="button" class="lien" data-a="regle-modifier" data-id="' + sid + '">Modifier la règle</button>' : '') + '</div></div>';
     }
+    // v124 : UNE mesure du temps. Gros chiffre = attente depuis l'arrivée sur
+    // le site ; dessous, la situation face au délai de rappel. Rouge : hors
+    // délai ; orange : moins de 40 % du délai restant ; vert : dans les temps.
+    function attente(l) {
+      var m = mins(arrive(l)), sla = slaDe(l), r = sla - minsO(arrive(l));
+      var cl = (m >= 1440 || r <= 0) ? 'crit' : r <= sla * 0.4 ? 'warn' : 'ok';
+      return { m: m, cl: cl, sous: (m >= 1440 || r <= 0) ? 'hors délai' : 'reste ' + duree(r),
+               titre: 'Attend depuis ' + duree(m) + ' (arrivé sur le site ' + quand(arrive(l)) + ') · délai de rappel ' + slaTxt(sla) };
+    }
+    var LEGENDE_TEMPS = '<p class="lg-t">Temps : attente depuis l\'arrivée sur le site · dessous, la situation face au délai de rappel.</p>';
     function ageLead(l) {
       var cr = creneauAcc(l);   // v97 : créneau choisi par le client
       if (cr) { var tn = tonCreneau(cr); return '<div class="age acr-' + tn + '" title="Rappel choisi par le client : ' + esc(plageCreneau(cr)) + '"><b>' + esc(hhMs(cr.deb)) + '</b><small>' + esc(tn === 'rouge' ? 'créneau manqué' : 'rappel ' + hhMs(cr.fin)) + '</small></div>'; }
-      var m = mins(arrive(l)), r = slaDe(l) - minsO(arrive(l));
-      if (m >= 1440) return '<div class="age r"><b>' + duree(m) + '</b><small>en attente</small></div>';
-      if (r <= 0) return '<div class="age o"><b>' + duree(minsO(arrive(l))) + '</b><small>hors délai</small></div>';
-      return '<div class="age v"><b>' + duree(r) + '</b><small>avant le délai</small></div>';
+      var a = attente(l);
+      return '<div class="age ' + (a.cl === 'crit' ? 'r' : a.cl === 'warn' ? 'o' : 'v') + '" title="' + esc(a.titre) + '"><b>' + duree(a.m) + '</b><small>' + esc(a.sous) + '</small></div>';
     }
     function carteLead(l) {
       var g = suggestion(l), gere = manager(l.id_site), ch = S.choix && S.choix[l.id_lead];
       var act;
       if (!gere) act = '<button type="button" class="btn" data-a="open" data-id="' + l.id_lead + '">Ouvrir</button>';
+      else if (libreService(l.id_site) && !ch) {   // v124 : libre-service, l'attribution passe au second plan
+        act = '<div class="act-c">' + (chefVend(l.id_site) && !verrouAutre(l) ? '<button type="button" class="btn vr sm moi" data-a="prendre" data-id="' + l.id_lead + '" title="Le lead passe à votre nom, dans « Mes leads »">Je le prends</button>' : '')
+          + '<button type="button" class="btn ghost sm moi" data-a="choix" data-id="' + l.id_lead + '" title="' + esc(g && g.id_user ? 'Suggestion : ' + propre(g.nom) + ', ' + raisonSugg(g, l) : 'Choisir le vendeur') + '">Attribuer…</button></div>';
+        return carteHtml(l, act);
+      }
       else if (ch || !(g && g.id_user)) act = '<div class="choix"><select id="sel-' + l.id_lead + '" aria-label="Vendeur">' + optionsVendeurs(l.id_site, null, g && g.id_user) + '</select><button type="button" class="btn pri" data-a="attribuer" data-id="' + l.id_lead + '">Attribuer</button>'
         + (g && g.id_user ? '<button type="button" class="btn ghost sm" data-a="choix" data-id="' + l.id_lead + '">Annuler</button>' : '') + '</div>';
-      else act = '<div class="go"><button type="button" class="main" data-a="attribuer-sugg" data-id="' + l.id_lead + '">Attribuer à ' + esc(prenom(g.nom)) + '<small>' + esc(g.raison) + '</small></button>'
+      else act = '<div class="go"><button type="button" class="main" data-a="attribuer-sugg" data-id="' + l.id_lead + '">Attribuer à ' + esc(prenom(g.nom)) + '<small>' + esc(raisonSugg(g, l)) + '</small></button>'
         + '<button type="button" class="alt" data-a="choix" data-id="' + l.id_lead + '" title="Choisir un autre vendeur" aria-label="Choisir un autre vendeur">▾</button></div>';
       if (gere && chefVend(l.id_site) && !verrouAutre(l)) act = '<div class="act-c">' + act + '<button type="button" class="btn vr sm moi" data-a="prendre" data-id="' + l.id_lead + '" title="Le lead passe à votre nom, dans « Mes leads »">Je le prends</button></div>';
+      return carteHtml(l, act);
+    }
+    function carteHtml(l, act) {
+      var nA = autresDemandes(l);
       return '<div class="carte-l' + univCls(l) + '" data-a="open" data-id="' + l.id_lead + '" tabindex="0">' + ageLead(l)
-        + '<div class="qui"><b>' + esc(nomLead(l)) + (sitePoste() == null ? ' <span class="lr-v">' + esc(siteNom(l.site)) + '</span>' : '') + pastilleAcc(l) + '</b><p>' + esc(demandeDe(l)) + '</p>' + univTag(l) + '<span class="src">' + esc(l.source_libelle || l.source || 'Lead') + '</span></div>'
+        + '<div class="qui"><b>' + esc(nomLead(l)) + (sitePoste() == null ? ' <span class="lr-v">' + esc(siteNom(l.site)) + '</span>' : '') + pastilleAcc(l) + '</b>' + (qualifCourte(l) && vehiculeVague(l)
+          ? '<p class="dq" title="' + esc(qualifCourte(l)) + '">' + esc(qualifCourte(l).length > 280 ? qualifCourte(l).slice(0, 279) + '…' : qualifCourte(l)) + '</p>'
+          : '<p>' + esc(demandeDe(l)) + '</p>' + detailDe(l))
+        + univTag(l) + '<span class="src">' + esc(l.source_libelle || l.source || 'Lead') + '</span>'
+        + (l.par_plateau ? '<span class="src vr">Qualifié par la Vroom Team</span>' : '')
+        + (nA ? '<span class="src warn" title="Même client (e-mail ou téléphone) sur ce site">+ ' + plural(nA, 'autre demande', 'autres demandes') + '</span>' : '') + '</div>'
         + act + '</div>';
     }
     function vuePool() {
       var sid = sitePoste();
       var ls = trierPool(libres(sid));
-      var h = regleHtml(sid) + '<div class="cartes">';
+      var h = regleHtml(sid) + LEGENDE_TEMPS + '<div class="cartes">';
       if (!ls.length) h += '<div class="vide">Le Pool est vide : chaque lead a son vendeur.</div>';
       ls.slice(0, 150).forEach(function (l) { h += carteLead(l); });
       if (ls.length > 150) h += '<div class="vide">… et ' + (ls.length - 150) + ' autres.</div>';
@@ -4011,16 +4105,16 @@
             + '<span class="mate-lg">1er contact médian, 30 j : ' + (c.s.d30_min != null ? dureeMes(c.s.d30_min) : '—') + '</span></button>';
         }).join('') + '</div>';
       }
-      var vs = vendeursDu(sid).map(function (v) {
+      var vs = porteursDu(sid).map(function (v) {   // v124 : mêmes porteurs et même « en souffrance » que l'onglet
         var ls = S.leads.filter(function (l) { return l.zone === 'vendeur' && Number(l.id_site) === Number(sid) && Number(l.id_user_attribue) === Number(v.id_user); });
-        var vieux = ls.reduce(function (a, l) { return Math.max(a, mins(arrive(l))); }, 0);
-        return { v: v, n: ls.length, ret: ls.filter(function (l) { return niveau(l) === 'crit' || niveau(l) === 'stock'; }).length, vieux: vieux, critV: ls.some(function (l) { return niveau(l) === 'crit' || niveau(l) === 'stock'; }) };
+        var vieux = ls.reduce(function (a, l) { return Math.max(a, mins(arrive(l))); }, 0), ret = souffranceDe(v.id_user, sid);
+        return { v: v, n: ls.length, ret: ret, vieux: vieux, critV: ls.some(function (l) { return niveau(l) === 'crit' || niveau(l) === 'stock'; }) };
       });
       var actifs = vs.filter(function (x) { return x.n || x.v.contacts_jour || x.v.pris_jour; })
         .sort(function (a, b) { return (b.ret - a.ret) || (b.n - a.n); });
       var autres = vs.filter(function (x) { return actifs.indexOf(x) === -1; });
       var carte = function (x) {
-        return '<button type="button" class="mate" data-a="cell" data-id="' + x.v.id_user + '|tous"><span class="nm">' + esc(propre(x.v.nom))
+        return '<button type="button" class="mate" data-a="cell" data-id="' + x.v.id_user + '|tous"><span class="nm">' + esc(x.v.moi ? 'Vous' : propre(x.v.nom)) + (x.v.equipe || x.v.moi ? '' : ' <small class="mate-ae">autre équipe</small>')
           + (x.ret ? '<span class="pill crit">' + x.ret + ' en souffrance</span>' : '<span class="pill ok">à jour</span>') + '</span>'
           + '<span class="st"><span><b>' + x.n + '</b>en cours</span><span><b class="' + (x.critV ? 't-crit' : '') + '">' + (x.n ? duree(x.vieux) : '—') + '</b>plus ancien</span></span>'
           + '<span class="mate-lg">' + plural(x.v.contacts_jour || 0, 'premier contact', 'premiers contacts') + ' · ' + (x.v.pris_jour || 0) + ' pris aujourd\'hui' + (x.v.exclu ? ' · écarté du tour de rôle' : '') + '</span></button>';
@@ -4763,16 +4857,14 @@
         var auj = new Date(l.rappel_le).toDateString() === new Date().toDateString();
         return '<span class="ac-p ' + (rappelDu(l) ? 'crit' : 'rap') + '" title="' + esc(texteRappel(l)) + '">' + esc(auj ? hh(l.rappel_le) : jour(l.rappel_le)) + '</span>';
       }
-      var m = mins(arrive(l)), r = slaDe(l) - minsO(arrive(l)), cl, t;
-      if (m >= 1440) { cl = 'crit'; t = dureeC(m); }
-      else if (r <= 0) { cl = 'crit'; t = '+' + dureeC(-r); }
-      else { cl = r <= slaDe(l) * 0.4 ? 'warn' : 'ok'; t = dureeC(r); }
-      return '<span class="ac-p ' + cl + '">' + esc(t) + '</span>';
+      var a = attente(l);   // v124 : même mesure que l'onglet Pool
+      return '<span class="ac-p ' + a.cl + '" title="' + esc(a.titre) + '"><b>' + esc(dureeC(a.m)) + '</b><small>' + esc(a.sous) + '</small></span>';
     }
     function acLigne(l, bouton, avant) {
       return '<div class="ac-l" data-a="open" data-id="' + l.id_lead + '" tabindex="0">' + pastille(l)
         + '<div class="ac-x"><b>' + esc(nomLead(l)) + '</b><span>' + esc([avant, demandeDe(l), l.source_libelle].filter(Boolean).join(' · ')) + '</span>'
         + (l.par_plateau ? '<em class="vr">Qualifié par la Vroom Team</em>' : l.tentatives ? '<em>' + esc(etatCourt(l)) + '</em>' : '')
+        + (autresDemandes(l) ? '<em class="wn" title="Même client (e-mail ou téléphone) sur ce site">+ ' + plural(autresDemandes(l), 'autre demande', 'autres demandes') + '</em>' : '')
         + (accDe(l) && accDe(l).pastille_libelle ? '<div class="acc-w">' + pastilleAcc(l) + '</div>' : '') + '</div>'
         + (bouton || '') + '</div>';
     }
@@ -4842,28 +4934,32 @@
             + (urg.length > 8 ? '<button type="button" class="ac-plus" data-a="tab" data-id="bloques">Voir les ' + urg.length + ' leads</button>' : '')
           : '<p class="ac-vide">Aucun lead en souffrance chez vos vendeurs.</p>') + '</section>';
       var aAttr = pool.filter(function (l) { var g = suggestion(l); return gere && g && g.id_user; }).length;
+      var libre = libreService(sid);
       h += '<section class="ac-c pool"><div class="ac-ch wrap"><div><b>' + esc(poolNom(sid)) + ' · ' + pool.length + '</b><span>' + (sansPlateauSite(sid) ? 'site sans Vroom Team : toutes les demandes BACS arrivent ici' : 'site web, Leboncoin, La Centrale, e-mails · les demandes BACS passent par la Vroom Team') + '</span></div>'
         + '<div class="ac-f">' + [['tous', 'Tous', pool.length], ['hd', 'Hors délai', n(function (l) { return niveau(l) === 'crit'; })], ['vn', 'VN', n(function (l) { return estU(l, 'VN'); })], ['vo', 'VO', n(function (l) { return estU(l, 'VO'); })]]
             .map(function (x) { return '<button type="button" class="' + (filtre === x[0] ? 'on' : '') + (x[0] === 'hd' && x[2] ? ' r' : '') + '" data-a="ac-filtre" data-id="' + x[0] + '">' + x[1] + ' · ' + x[2] + '</button>'; }).join('') + '</div>'
-        + (aAttr > 1 ? '<button type="button" class="ac-go" data-a="tout-attribuer">Tout attribuer au vendeur suggéré</button>' : '') + '</div>'
+        + (aAttr > 1 && !libre ? '<button type="button" class="ac-go" data-a="tout-attribuer">Tout attribuer au vendeur suggéré</button>' : '') + '</div>'
+        + LEGENDE_TEMPS
         + (vis.length ? vis.slice(0, 15).map(function (l) {
             var g = suggestion(l), act;
             if (!gere) act = '';
             else if (verrouAutre(l)) act = '<span class="resa-l">Réservé par ' + esc(propre(l.verrou_nom || 'un collègue')) + '</span>';
-            else if (g && g.id_user) act = '<span class="ac-sg">suggéré : <b>' + esc(prenom(g.nom)) + '</b></span><button type="button" class="btn sm pri" data-a="attribuer-sugg" data-id="' + l.id_lead + '">Attribuer</button><button type="button" class="btn sm" data-a="open" data-id="' + l.id_lead + '">Autre…</button>';
+            else if (libre) act = (!S.comme ? '<button type="button" class="btn sm vr" data-a="pour-moi" data-id="' + l.id_lead + '">Pour moi</button>' : '')
+              + '<button type="button" class="btn sm" data-a="open" data-id="' + l.id_lead + '" title="' + esc(g && g.id_user ? 'Suggestion : ' + propre(g.nom) + ', ' + raisonSugg(g, l) : 'Choisir le vendeur') + '">Attribuer…</button>';
+            else if (g && g.id_user) act = '<span class="ac-sg" title="' + esc(raisonSugg(g, l)) + '">suggéré : <b>' + esc(prenom(g.nom)) + '</b></span><button type="button" class="btn sm pri" data-a="attribuer-sugg" data-id="' + l.id_lead + '">Attribuer</button><button type="button" class="btn sm" data-a="open" data-id="' + l.id_lead + '">Autre…</button>';
             else act = '<button type="button" class="btn sm pri" data-a="open" data-id="' + l.id_lead + '">Attribuer</button>';
-            if (gere && !verrouAutre(l) && !S.comme) act += '<button type="button" class="btn sm" data-a="pour-moi" data-id="' + l.id_lead + '">Pour moi</button>';
+            if (gere && !libre && !verrouAutre(l) && !S.comme) act += '<button type="button" class="btn sm" data-a="pour-moi" data-id="' + l.id_lead + '">Pour moi</button>';
             return acLigne(l, '<div class="ac-act">' + act + '</div>'); }).join('')
           + (vis.length > 15 ? '<button type="button" class="ac-plus" data-a="tab" data-id="pool">Voir les ' + vis.length + ' leads</button>' : '')
           : '<p class="ac-vide">' + (pool.length ? 'Aucun lead pour ce filtre.' : 'Le Pool est vide : chaque lead a son vendeur.') + '</p>') + '</section>';
-      var vs = vendeursDu(sid).filter(function (v) { return !v.exclu; }).map(function (v) {
+      var vs = porteursDu(sid).map(function (v) {
         var mesL = S.leads.filter(function (l) { return l.zone === 'vendeur' && Number(l.id_user_attribue) === Number(v.id_user) && Number(l.id_site) === Number(sid); });
-        return { v: v, o: mesL.length, r: mesL.filter(function (l) { return niveau(l) === 'crit'; }).length };
-      }).sort(function (a, b) { return b.r - a.r || b.o - a.o; });
+        return { v: v, o: mesL.length, r: souffranceDe(v.id_user, sid) };
+      }).filter(function (x) { return !x.v.exclu || x.o; }).sort(function (a, b) { return b.r - a.r || b.o - a.o; });
       var vrs = S.leads.filter(function (l) { return l.par_plateau && Number(l.id_site) === Number(sid); });
       var st = stockDu(sid), r = S.regle[sid] || {}, MODES = { libre: 'libre-service', manuel: 'par le chef', auto: 'automatique' };
-      h += '<aside class="ac-side"><section class="ac-c"><div class="ac-ch"><b>Mon équipe</b><span>ouverts · en retard</span></div>'
-        + (vs.length ? vs.map(function (x) { return '<div class="ac-v"><i>' + esc(String(propre(x.v.nom) || '?').split(' ').map(function (w) { return w.charAt(0); }).slice(0, 2).join('')) + '</i><span>' + esc(propre(x.v.nom)) + '</span><b>' + x.o + '</b><b class="' + (x.r ? 'r' : 'z') + '">' + x.r + '</b></div>'; }).join('')
+      h += '<aside class="ac-side"><section class="ac-c"><div class="ac-ch"><b>Mon équipe</b><span>ouverts · en souffrance</span></div>'
+        + (vs.length ? vs.map(function (x) { return '<div class="ac-v"><i>' + esc(String(propre(x.v.nom) || '?').split(' ').map(function (w) { return w.charAt(0); }).slice(0, 2).join('')) + '</i><span>' + esc(x.v.moi ? 'Vous' : propre(x.v.nom)) + (x.v.equipe || x.v.moi ? '' : '<small>autre équipe</small>') + '</span><b>' + x.o + '</b><b class="' + (x.r ? 'r' : 'z') + '">' + x.r + '</b></div>'; }).join('')
           : '<p class="ac-vide">Aucun vendeur rattaché à ce site.</p>') + '</section>'
         + (!sansPlateauSite(sid) && vrs.length > 10 ? '<section class="ac-c"><div class="ac-ch"><b>La Vroom Team et vous</b></div>'
             + '<div class="ac-r"><span>Transmis par la Vroom Team</span><b>' + vrs.length + '</b></div>'
@@ -6870,7 +6966,19 @@
 .lmtc .ac-p.ok{background:#eaf7f4;color:#2c7a68}.lmtc .ac-p.warn{background:#fff6e0;color:#8a5a00}.lmtc .ac-p.crit{background:#fdeeee;color:#b23433}
 .lmtc .ac-x{flex:1;min-width:0}.lmtc .ac-x b{display:block;font-size:14.5px;font-weight:900;color:#1c2b45;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .lmtc .ac-x span{display:block;font-size:12.5px;color:#4b5563;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.lmtc .ac-x em{display:inline-block;margin-top:4px;font-style:normal;font-size:11.5px;font-weight:800;padding:2px 8px;border-radius:999px;background:#f2f6fc;color:#4b5563}.lmtc .ac-x em.vr{background:var(--sel);color:var(--bleu)}
+.lmtc .ac-x em{display:inline-block;margin-top:4px;font-style:normal;font-size:11.5px;font-weight:800;padding:2px 8px;border-radius:999px;background:#f2f6fc;color:#4b5563;max-width:100%;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;vertical-align:top;box-sizing:border-box}.lmtc .ac-x em.vr{background:var(--sel);color:var(--bleu)}
+.lmtc .ac-x em+em{margin-left:6px}.lmtc .ac-x em.wn{background:#fff6e0;color:#8a5a00}
+/* v124 : la colonne du Pool s'adapte à SA largeur, pas à celle de l'écran */
+.lmtc .ac-c{container-type:inline-size}
+@container (max-width:640px){.lmtc .ac-l{flex-wrap:wrap;row-gap:8px}.lmtc .ac-l .ac-act{flex:1 1 100%;justify-content:flex-start;padding-left:86px}}
+@container (max-width:360px){.lmtc .ac-l .ac-act{padding-left:0}}
+.lmtc .ac-p b{display:block;font-weight:900}.lmtc .ac-p small{display:block;font-size:10px;font-weight:700;opacity:.85;white-space:nowrap}
+.lmtc .lg-t{margin:-4px 0 10px;font-size:12px;color:var(--ink-3)}.lmtc .ac-c .lg-t{margin:0;padding:8px 20px;border-bottom:1px solid #f0f4fa;background:#fbfcfe}
+.lmtc .ac-v span small{display:block;font-size:11px;color:#6b7280}
+.lmtc .mate-ae{font-size:11px;font-weight:700;color:var(--ink-3)}
+.lmtc .carte-l .src.vr{background:var(--sel);color:var(--bleu);margin-left:6px}.lmtc .carte-l .src.warn{background:#fff6e0;color:#8a5a00;margin-left:6px}
+.lmtc .carte-l .lr-dt{margin:2px 0 0}
+.lmtc .carte-l .qui p.dq{white-space:normal;line-height:1.4;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
 .lmtc .ac-act{display:flex;gap:6px;align-items:center;flex-wrap:wrap;justify-content:flex-end}.lmtc .ac-sg{font-size:12px;color:#4b5563}.lmtc .ac-sg b{color:var(--bleu-dk)}
 .lmtc .ac-plus{display:block;width:100%;font:inherit;font-size:13px;font-weight:800;padding:12px;border:0;background:#f6f9fd;color:var(--bleu);cursor:pointer}
 .lmtc .ac-vide{padding:18px 20px;margin:0;font-size:13px;color:#4b5563;font-style:italic}
