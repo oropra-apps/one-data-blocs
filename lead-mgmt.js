@@ -1,6 +1,12 @@
 // ============================================================================
 //  LEAD MANAGEMENT — module One Data (OD.define 'lead-mgmt')
-//  VERSION TEAM COLIN (v125) — déploiement CIBLÉ (publish-targets :
+//  VERSION TEAM COLIN (v126) — déploiement CIBLÉ (publish-targets :
+//  v126 (16/11/2026) : vendeur multisite, cohérence Historique / Suivis.
+//    - Historique suit le site choisi en haut à droite (comme le Pool, les
+//      campagnes et les Suivis), et signale les gestes faits sur ses autres sites ;
+//    - Suivis : une recherche sans résultat sur le site choisi est relancée sur
+//      tout le périmètre, et les demandes trouvées ailleurs sont affichées avec
+//      leur site (« Aucune demande à L'Haÿ · trouvée à Arcueil »).
 //  v125 (16/11/2026) : vendeur multisite — l'onglet Campagnes (et sa pastille)
 //    suit le site choisi en haut à droite, comme le Pool : une campagne de
 //    Lexus Sceaux n'apparaît plus quand on est sur L'Haÿ-les-Roses.
@@ -3589,7 +3595,7 @@
     function surBus() {
       if (__busEcrit || !S.charge) return;
       if (S.dr && S.dr.id) rechargerFil();
-      if (adopterSite(siteDuBus())) { render(); chargerAide(); if (S.tab === 'campagnes') chargerCampagnes().then(render); }
+      if (adopterSite(siteDuBus())) { render(); chargerAide(); if (S.tab === 'campagnes') chargerCampagnes().then(render); if (S.tab === 'suivis') chargerSuivis(); }
     }
 
     // ── Signaux ───────────────────────────────────────────────────────────
@@ -4697,8 +4703,10 @@
       var H = histEtat(), tous = H.rows || [];
       var hier = POSTE !== 'vendeur' || tous.some(function (x) { return x.hierarchie; });
       // La hiérarchie lit le site de la barre du haut ; sans site : tout son périmètre.
-      var sidH = hier ? sitePoste() : null;
+      // v126 : le vendeur multisite suit aussi le site choisi (comme le Pool, les campagnes, les Suivis).
+      var sidH = hier ? sitePoste() : poolVendeurSite();
       var rows = sidH == null ? tous : tous.filter(function (x) { return Number(x.id_site) === Number(sidH); });
+      var nAilleurs = sidH == null ? 0 : tous.length - rows.length;
       var vends = [];
       if (hier) rows.forEach(function (x) {
         if (x.par_id_user == null) return;
@@ -4725,7 +4733,8 @@
       var opt = function (v, lib, cur) { return '<option value="' + esc(v) + '"' + (v === cur ? ' selected' : '') + '>' + esc(lib) + '</option>'; };
       var h = '<div class="ph"><div><h2>Historique</h2><p>' + (hier
           ? 'Les leads traités par votre équipe pendant la période' + (sidH != null ? ' sur ' + esc(siteNom((siteInfo(sidH) || {}).site)) : '') + ', avec le dernier geste et qui l\'a fait.'
-          : 'Les leads sur lesquels vous avez agi pendant la période, avec votre dernier geste.') + ' Un lead encore ouvert s\'ouvre ici ; un lead clos ouvre la fiche du client.</p></div></div>'
+          : 'Les leads sur lesquels vous avez agi pendant la période' + (sidH != null ? ' à ' + esc(siteNom((siteInfo(sidH) || {}).site)) : '') + ', avec votre dernier geste.'
+            + (nAilleurs && !hier ? ' <b>' + plural(nAilleurs, 'autre lead', 'autres leads') + ' sur vos autres sites</b> : changez de site en haut à droite pour les voir.' : '')) + ' Un lead encore ouvert s\'ouvre ici ; un lead clos ouvre la fiche du client.</p></div></div>'
         + '<div class="hist-f">'
         + (hier ? '<label>Vendeur<select data-x="hist-vend">' + opt('', 'Toute l\'équipe', H.vend) + vends.map(function (v) { return opt(String(v.id), (Number(v.id) === Number(MOI) ? 'Moi' : v.nom) + ' · ' + v.n, H.vend); }).join('') + '</select></label>' : '')
         + '<label>Du<input type="date" data-x="hist-du" value="' + esc(H.du || '') + '"></label>'
@@ -4772,7 +4781,14 @@
       try {
         var r = await rpc('poste_site_suivis', { p_sites: sid != null ? [Number(sid)] : null, p_q: X.q ? X.q : null }) || [];
         if (seq !== X.seq) return;
-        X.rows = r;
+        // v126 : rien sur ce site ? on cherche sur tout le périmètre (le client a pu appeler un autre site).
+        var ail = [];
+        if (!r.length && X.q && sid != null && sitesStats().length > 1) {
+          ail = (await rpc('poste_site_suivis', { p_sites: null, p_q: X.q }) || []).filter(function (x) { return Number(x.id_site) !== Number(sid); });
+          if (seq !== X.seq) return;
+        }
+        X.ailleurs = ail.length ? ail : null;
+        X.rows = ail.length ? ail : r;
       } catch (e) { if (seq !== X.seq) return; X.rows = []; X.err = messageErreur(e); }
       if (S.tab === 'suivis') { render(); suiviFocus(); }
     }
@@ -4806,7 +4822,9 @@
         + '<div class="hist-f"><label class="q">Rechercher un client<input type="search" data-x="suivi-q" placeholder="Nom, téléphone, e-mail, véhicule…" value="' + esc(X.q || '') + '"></label></div>';
       if (X.err) return h + '<p class="alerte">' + esc(X.err) + '</p>';
       if (X.rows == null) return h + '<div class="empty">Recherche des demandes…</div>';
-      if (!rows.length) return h + '<div class="empty">' + (X.q ? 'Aucune demande ne correspond à « ' + esc(X.q) + ' ».' : 'Aucune demande prise en charge sur cette période.') + '</div>';
+      if (!rows.length) return h + '<div class="empty">' + (X.q ? 'Aucune demande ne correspond à « ' + esc(X.q) + ' »' + (sid != null && sitesStats().length > 1 ? ', ni ici ni sur vos autres sites' : '') + '.' : 'Aucune demande prise en charge sur cette période.') + '</div>';
+      var ailleurs = !!X.ailleurs;   // v126 : résultats trouvés sur un autre site
+      if (ailleurs) h += '<p class="alerte-i">Aucune demande à ' + esc(siteNom((siteInfo(sid) || {}).site)) + ' pour « ' + esc(X.q) + ' ». Trouvée sur un autre de vos sites :</p>';
       h += '<p class="hist-n">' + plural(rows.length, 'demande') + (rows.length >= 300 ? ' (les 300 plus récentes : précisez la recherche)' : '') + '</p>'
         + '<div class="hist-w"><table class="hist"><thead><tr><th>Client</th><th>Demande</th><th>Suivi par</th><th>Dernier geste</th><th>Statut</th><th>Suite</th></tr></thead><tbody>';
       rows.forEach(function (x) {
@@ -4816,7 +4834,7 @@
           : (x.clos_le && ['perdu', 'rejete', 'converti'].indexOf(x.statut) !== -1 ? '<small>clos le ' + esc(jour(x.clos_le)) + '</small>' : '');
         h += '<tr class="clic" data-a="suivi-open" data-id="' + x.id_lead + '" tabindex="0">'
           + '<td class="l"><b>' + esc(propre(x.nom) || 'Sans nom') + '</b>' + (x.telephone ? '<small>' + esc(x.telephone) + '</small>' : '') + '</td>'
-          + '<td class="l">' + esc(x.vehicule || x.source_libelle || '—') + '<small>' + esc([x.vehicule ? x.source_libelle : null, 'reçu le ' + jour(x.recu_le), sid == null ? siteNom(x.site) : null].filter(Boolean).join(' · ')) + '</small></td>'
+          + '<td class="l">' + esc(x.vehicule || x.source_libelle || '—') + '<small>' + esc([x.vehicule ? x.source_libelle : null, 'reçu le ' + jour(x.recu_le), (sid == null || ailleurs) ? siteNom(x.site) : null].filter(Boolean).join(' · ')) + '</small></td>'
           + '<td class="l">' + (x.vendeur_nom ? '<b>' + esc(moi ? 'Moi' : propre(x.vendeur_nom)) + '</b>' : '<span>Pool</span>') + '</td>'
           + '<td class="l">' + esc(suiviGeste(x)) + '<small>' + esc([x.dernier_geste_le ? quand(x.dernier_geste_le) : (x.premier_contact_le ? quand(x.premier_contact_le) : ''), x.dernier_geste_par ? propre(x.dernier_geste_par) : ''].filter(Boolean).join(' · ')) + '</small></td>'
           + '<td><span class="h-st ' + suiviStCls(x) + '">' + esc(ST_LIB[x.statut] || x.statut || '—') + '</span>' + (x.statut_bacs ? '<small>BACS : ' + esc(x.statut_bacs) + '</small>' : '') + '</td>'
@@ -5998,7 +6016,7 @@
           if (id !== '') ecrireBus(Number(id));
           if (['mur', 'mursites'].indexOf(S.tab) !== -1) S.tab = sitePoste() == null ? 'mursites' : 'mur';
           render(); chargerAide(); if (S.tab === 'campagnes') { await chargerCampagnes(); render(); } return;
-        case 'site': S.site = Number(id); S.cell = null; S.campagnes = null; render(); if (S.tab === 'campagnes') { await chargerCampagnes(); render(); } return;
+        case 'site': S.site = Number(id); S.cell = null; S.campagnes = null; render(); if (S.tab === 'suivis') chargerSuivis(); if (S.tab === 'campagnes') { await chargerCampagnes(); render(); } return;
         case 'voir-site': S.vueSite = Number(id); S.tab = 'pool'; S.cell = null; S.campagnes = null; S.suggKey = null; render(); chargerAide(); try { FW.scrollTo(0, 0); } catch (e) {} return;
         case 'retour-sites': S.vueSite = null; S.tab = 'pool'; S.cell = null; S.campagnes = null; S.suggKey = null; render(); chargerAide(); return;
         case 'depuis': S.depuis = id; S.cell = null; render(); return;
@@ -6983,6 +7001,7 @@
 .lmtc .mate-ae{font-size:11px;font-weight:700;color:var(--ink-3)}
 .lmtc .carte-l .src.vr{background:var(--sel);color:var(--bleu);margin-left:6px}.lmtc .carte-l .src.warn{background:#fff6e0;color:#8a5a00;margin-left:6px}
 .lmtc .carte-l .lr-dt{margin:2px 0 0}
+.lmtc .alerte-i{margin:0 0 10px;padding:9px 12px;border-radius:10px;background:#eef4fc;color:#1F4A85;font-size:13px;font-weight:700}
 .lmtc .carte-l .qui p.dq{white-space:normal;line-height:1.4;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
 .lmtc .ac-act{display:flex;gap:6px;align-items:center;flex-wrap:wrap;justify-content:flex-end}.lmtc .ac-sg{font-size:12px;color:#4b5563}.lmtc .ac-sg b{color:var(--bleu-dk)}
 .lmtc .ac-plus{display:block;width:100%;font:inherit;font-size:13px;font-weight:800;padding:12px;border:0;background:#f6f9fd;color:var(--bleu);cursor:pointer}
