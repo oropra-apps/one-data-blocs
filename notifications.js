@@ -1,5 +1,11 @@
 // ============================================================================
-//  NOTIFICATIONS — module One Data (OD.define)   v13 — PROFIL TEAM COLIN
+//  NOTIFICATIONS — module One Data (OD.define)   v14 — PROFIL TEAM COLIN
+//
+//  v14 (16/11/2026) : INCONNUS — la conversation à DEUX VOIX. Le dernier appel
+//   s'affiche en dialogue Client / concession (summary.dialogue de l'appel,
+//   renvoyé par notif_lire), et non plus en transcription brute d'un seul bloc.
+//   L'équipe : les secrétaires de livraison et comptes hors équipe ne sont plus
+//   comptés (notif_lire) : la pastille égale toujours la somme du tableau.
 //
 //  v13 (16/11/2026) : L'ÉQUIPE, retours chef des ventes.
 //   * La pastille « L'équipe » et le bandeau comptent EXACTEMENT les lignes du
@@ -508,6 +514,11 @@ OD.define('notifications', {
 #notif-root .tab td.f{font-family:var(--mono);font-weight:600}
 #notif-root .tab td .mauvais{color:var(--m-rouge);font-weight:700}
 #notif-root .tab td .bon{color:var(--m-vert)}
+#notif-root .dlg{margin:10px 0 0;display:flex;flex-direction:column;gap:5px;max-height:320px;overflow:auto;padding-right:4px}
+#notif-root .dlg p{margin:0;font-size:12.5px;line-height:1.45;padding:6px 10px;border-radius:10px;max-width:88%}
+#notif-root .dlg p b{display:block;font-size:10px;letter-spacing:.05em;text-transform:uppercase;margin-bottom:1px}
+#notif-root .dlg-c{background:var(--calme-bg);color:var(--ink);align-self:flex-start}#notif-root .dlg-c b{color:var(--ink-3)}
+#notif-root .dlg-v{background:#e6f4f1;color:var(--ink);align-self:flex-end}#notif-root .dlg-v b{color:var(--m-vert)}
 #notif-root .tab tr.dpl{cursor:pointer}#notif-root .tab tr.dpl:hover td,#notif-root .tab tr.dpl.on td{background:#f6f9fd}
 #notif-root .tab .chev{display:inline-block;width:14px;color:var(--ink-3);font-size:11px}
 #notif-root .tg{display:inline-block;font-size:10.5px;font-weight:700;padding:2px 8px;border-radius:999px;background:var(--calme-bg);color:var(--ink-2);vertical-align:middle;margin-left:4px;white-space:nowrap}
@@ -1049,6 +1060,22 @@ OD.define('notifications', {
       VOIP: ['A appelé', 'appels'], SMS: ['A écrit un SMS', 'SMS'], WHATSAPP: ['A écrit sur WhatsApp', 'messages'],
       EMAIL: ['A envoyé un mail', 'mails'], RCS: ['A écrit un message', 'messages']
     };
+    // v14 : le dialogue à deux voix d'un appel (« Client: … » / « Vendeur: … »).
+    // Les répliques consécutives d'une même voix sont regroupées.
+    function dialogueHtml(txt, qui) {
+      const tours = [];
+      String(txt || '').split(/\n+/).forEach(l => {
+        const m = /^\s*(client|vendeur|conseiller|agent)\s*:\s*(.*)$/i.exec(l);
+        const voix = m ? (/^client$/i.test(m[1]) ? 'c' : 'v') : (tours.length ? tours[tours.length - 1].v : 'c');
+        const dit = (m ? m[2] : l).trim();
+        if (!dit) return;
+        if (tours.length && tours[tours.length - 1].v === voix) tours[tours.length - 1].t += ' ' + dit;
+        else tours.push({ v: voix, t: dit });
+      });
+      if (!tours.length) return '';
+      const nomV = qui ? String(qui).split(' ')[0] : 'Concession';
+      return '<div class="dlg">' + tours.map(x => '<p class="dlg-' + x.v + '"><b>' + (x.v === 'c' ? 'Client' : esc(nomV)) + '</b>' + esc(x.t) + '</p>').join('') + '</div>';
+    }
     function carteInconnu(i) {
       const n = num(i.nb_messages);
       const ton = n > 1 ? 'tiede' : 'froid';
@@ -1075,7 +1102,8 @@ OD.define('notifications', {
               : (media === 'VOIP' && i.decroche_par
                   ? '<span class="ev">Décroché par <b>' + esc(i.decroche_par) + '</b></span>' : ''))
         + '</div>'
-        + (i.apercu ? '<p class="extrait' + (estMedia(i.apercu) ? ' media' : '') + '">'
+        + (media === 'VOIP' && i.dialogue ? dialogueHtml(i.dialogue, i.decroche_par)
+          : i.apercu ? '<p class="extrait' + (estMedia(i.apercu) ? ' media' : '') + '">'
             + esc(libelleApercu(i.apercu)) + '</p>' : '')
         + (state.classOuvert === 'orphan:' + i.interlocuteur
             ? blocClasser('orphan', i.interlocuteur, i.interlocuteur) : '')
