@@ -1,6 +1,9 @@
 // ============================================================================
 //  LEAD MANAGEMENT — module One Data (OD.define 'lead-mgmt')
-//  VERSION TEAM COLIN (v126) — déploiement CIBLÉ (publish-targets :
+//  VERSION TEAM COLIN (v127) — déploiement CIBLÉ (publish-targets :
+//  v127 (16/11/2026) : vendeur restreint à une clientèle sur un site
+//    (lead_vendeur_clientele, ex. Adrien = pros seulement à L'Haÿ) : le Pool
+//    est filtré en base ; « Prendre » refusé avec un message clair.
 //  v126 (16/11/2026) : vendeur multisite, cohérence Historique / Suivis.
 //    - Historique suit le site choisi en haut à droite (comme le Pool, les
 //      campagnes et les Suivis), et signale les gestes faits sur ses autres sites ;
@@ -5753,6 +5756,7 @@
         if (r && r.action === 'occupe') toast('Déjà pris par ' + propre(r.par_nom || 'un collègue') + '.', true);
         else if (r && r.action === 'clos') toast('Ce lead est déjà traité.', true);
         else if (r && r.action === 'univers') toast('Ce lead ' + r.univers + ' est réservé aux vendeurs ' + r.univers + '.', true);
+        else if (r && r.action === 'clientele') toast(r.clientele === 'pro' ? 'Ce lead professionnel n\'est pas dans votre périmètre sur ce site.' : 'Sur ce site, vous ne traitez que les leads professionnels.', true);   // v127
         rafraichir(true);
       });
     }
