@@ -1,6 +1,9 @@
 // ============================================================================
 //  LEAD MANAGEMENT — module One Data (OD.define 'lead-mgmt')
-//  VERSION TEAM COLIN (v121) — déploiement CIBLÉ (publish-targets :
+//  VERSION TEAM COLIN (v122) — déploiement CIBLÉ (publish-targets :
+//  v122 (13/11/2026) : listes de leads — DÉTAIL DE LA DEMANDE sous la ligne
+//    (qualification de la Vroom Team, ex. date du RDV atelier, sinon message du
+//    client), sans ouvrir la fiche. Texte complet au survol (detailDe).
 //  v121 (13/11/2026) : le filtre Particuliers / Pros et l'étiquette « Pro »
 //    s'appliquent aussi au CONGÉLATEUR (RPC lead_clienteles_sf).
 //  v120 (13/11/2026) : PARTICULIER / PRO — étiquette « Pro » sur les leads
@@ -3162,6 +3165,17 @@
     function monStat() { return ((S.stats && S.stats.vendeurs) || []).filter(function (v) { return Number(v.id_user) === Number(MOI); }); }
     function stockDu(id) { return S.leads.filter(function (l) { return l.zone !== 'plateau' && Number(l.id_site) === Number(id) && mins(l.arrive_le) >= 1440; }).length; }
     function demandeDe(l) { return l.vehicule || (l.message ? String(l.message).replace(/^\[[^\]]*\]\s*/, '').slice(0, 90) : '') || l.source_libelle || 'Demande'; }
+    // v122 : détail de la demande affiché dans les listes (qualification de la
+    // Vroom Team, sinon message du client s'il n'est pas déjà la ligne demande).
+    function detailDe(l) {
+      var q = l.qualification ? String(l.qualification).trim() : '';
+      var m = l.message && l.vehicule ? String(l.message).replace(/^\[[^\]]*\]\s*/, '').trim() : '';
+      var t = q || m;
+      if (!t) return '';
+      var max = q ? 280 : 200;
+      var court = t.length > max ? t.slice(0, max - 1) + '…' : t;
+      return '<p class="lr-dt" title="' + esc(t) + '">' + esc(court) + '</p>';
+    }
     var BACS_LIB = { Abandonned: 'Abandonné', Interesse: 'Intéressé', 'A affecter': 'À affecter' };   // v110
     function autresDemandes(l) { return Number((S.autres || {})[String(l.id_lead)] || 0); }
     function tagsLead(l) {
@@ -3731,7 +3745,7 @@
       if (act === 'prendre') a = verrouAutre(l) ? '<span class="resa-l">Réservé par ' + esc(propre(l.verrou_nom || 'un collègue')) + '</span>' : '<button type="button" class="btn vr" data-a="prendre" data-id="' + l.id_lead + '">Prendre</button>';
       else a = '<button type="button" class="btn pri" data-a="appeler" data-id="' + l.id_lead + '">' + (__lmPeutAppeler() ? (l.tentatives ? 'Rappeler' : 'Appeler') : 'Traiter') + '</button>';
       return '<div class="lr v2' + univCls(l) + (rappelDu(l) ? ' rap-du' : '') + '" data-a="open" data-id="' + l.id_lead + '" tabindex="0"><div>' + ((l.rappel_le || creneauAcc(l)) && act !== 'prendre' ? tmRappel(l) : rebours(l)) + '</div>'
-        + '<div class="who"><span class="lr-n">' + esc(nomLead(l)) + '</span>' + pastilleAcc(l) + '<p class="lr-d">' + esc(demandeDe(l)) + ' · ' + esc(etatCourt(l)) + '</p></div>'
+        + '<div class="who"><span class="lr-n">' + esc(nomLead(l)) + '</span>' + pastilleAcc(l) + '<p class="lr-d">' + esc(demandeDe(l)) + ' · ' + esc(etatCourt(l)) + '</p>' + detailDe(l) + '</div>'
         + '<div class="src">' + univTag(l) + '<span class="tag">' + esc(l.source_libelle || l.source || 'Lead') + '</span></div>'
         + '<div class="lr-a">' + a + '</div></div>';
     }
@@ -3995,7 +4009,7 @@
         : tmO(arrive(l), slaDe(l), (S.depuis === 'bacs' ? 'depuis la réception' : 'sur le site') + ' · SLA ' + slaTxt(slaDe(l)));
       return '<div class="lr' + (verrouAutre(l) ? ' resa' : '') + univCls(l) + '" data-a="open" data-id="' + l.id_lead + '" tabindex="0">'
         + '<div>' + gauche + '</div>'
-        + '<div><span class="lr-n">' + esc(nomLead(l)) + '</span>' + pastilleAcc(l) + ' <span class="lr-v">' + esc(siteNom(l.site) + qui) + '</span><p class="lr-d">' + esc(demandeDe(l)) + '</p><div class="tags">' + tagsLead(l) + '</div></div>'
+        + '<div><span class="lr-n">' + esc(nomLead(l)) + '</span>' + pastilleAcc(l) + ' <span class="lr-v">' + esc(siteNom(l.site) + qui) + '</span><p class="lr-d">' + esc(demandeDe(l)) + '</p>' + detailDe(l) + '<div class="tags">' + tagsLead(l) + '</div></div>'
         + '<div class="lr-a">' + a + '</div></div>';
     }
 
@@ -6181,6 +6195,7 @@
 .lmtc .lr-n{font-weight:800;color:var(--ink)}
 .lmtc .lr-v{color:var(--mut);font-size:12.5px;font-weight:600}
 .lmtc .lr-d{font-size:13px;margin-top:1px;color:var(--ink-2)}
+.lmtc .lr-dt{font-size:12px;margin-top:2px;color:var(--ink-3);line-height:1.35;white-space:normal}
 .lmtc .lr-a{display:flex;flex-wrap:wrap;gap:6px;justify-content:flex-end;align-items:center}
 .lmtc .resa-l{font-size:12px;color:var(--mut);font-weight:600;text-align:right}
 @media (max-width:600px){.lmtc .lr{grid-template-columns:minmax(0,1fr)}.lmtc .lr-a{justify-content:flex-start}.lmtc .resa-l{text-align:left}}
