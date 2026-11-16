@@ -1,4 +1,15 @@
 // ============================================================================
+//  v29 (16/11/2026) : « Affaires en cours » de la fiche bilatérale refaite.
+//    La liste montre enfin les MÊMES affaires que la tuile (affaires BACS
+//    ouvertes depuis 90 j au plus, sans commande — bilat_synthese_part
+//    'affaires'), classées par action : bons de commande à finaliser,
+//    à relancer (ouvertes depuis 8 à 30 j), fraîches (7 j au plus),
+//    froides (plus de 30 j). Ouvre sur « À relancer » ; 15 lignes puis
+//    « Afficher tout ». Chaque ligne : client, VN/VO, devis, montant, âge
+//    de l'affaire et jours sans activité. Les ventes gagnées ne sont plus
+//    mélangées aux affaires en cours. Libellé corrigé partout : « à relancer »
+//    = ouvertes depuis 8 à 30 j (et non « plus de 30 j »). Repli sur
+//    l'ancienne liste si la section 'affaires' n'existe pas sur le tenant.
 //  v26 (02/11/2026) : tuiles au design One Data (fond bleu très pâle, sans
 //    bordure ni ombre, coins 8 px, chiffres en bleu, aucun rouge ni beige).
 //    Liseré bleu à gauche au survol, seulement sur une tuile cliquable ;
@@ -816,7 +827,7 @@ function scopeLabel() {
       lignes.push(['Commandes du mois', o ? fmtNb(K.cdes, 0) + ' / ' + fmtNb(o.obj, 0) : fmtNb(K.cdes, 0),
         o ? (o.ecart < -0.5 ? 'retard de ' + fmtNb(-o.ecart) + ' sur l’attendu à date (' + fmtNb(o.att) + ')' : 'dans l’objectif à date (' + fmtNb(o.att) + ' attendues)') : 'pas d’objectif saisi',
         o && o.ecart < -0.5 ? 'ko' : 'ok']);
-      if (K.pipe_affaires) lignes.push(['Affaires à relancer', fmtNb(K.pipe_a_relancer, 0), 'sans contact depuis plus de 30 jours, sur ' + fmtNb(K.pipe_affaires, 0) + ' en cours', K.pipe_a_relancer > 0 ? 'warn' : 'ok']);
+      if (K.pipe_affaires) lignes.push(['Affaires à relancer', fmtNb(K.pipe_a_relancer, 0), 'ouvertes depuis 8 à 30 jours sans commande, sur ' + fmtNb(K.pipe_affaires, 0) + ' en cours', K.pipe_a_relancer > 0 ? 'warn' : 'ok']);
       lignes.push(['Leads non contactés', fmtNb(K.leads_jamais, 0), K.leads_jamais_48h ? 'dont ' + fmtNb(K.leads_jamais_48h, 0) + ' depuis plus de 48 h' : 'aucun en souffrance', K.leads_jamais_48h > 0 ? 'ko' : (K.leads_jamais > 0 ? 'warn' : 'ok')]);
       if (K.livr_retard || K.livr_attente) lignes.push(['Livraisons en retard', fmtNb(K.livr_retard, 0), fmtNb(K.livr_attente, 0) + ' en attente', K.livr_retard > 0 ? 'ko' : 'ok']);
       if (K.rdv_a_venir || K.rdv_tenus) lignes.push(['RDV à venir', fmtNb(K.rdv_a_venir, 0), fmtNb(K.rdv_tenus, 0) + ' tenus ce mois', 'ok']);
@@ -983,7 +994,7 @@ function prioDetail(c) {
   if (state.txMesurable === false) {
     const aff = K ? (K.pipe_affaires || 0) : 0, rel = K ? (K.pipe_a_relancer || 0) : 0;
     r.comps.transfo = aff > 0 ? clamp01(rel / aff) * Math.min(1, aff / 10) : 0;
-    r.txt.transfo = aff > 0 && rel > 0 ? rel + ' affaire' + (rel > 1 ? 's' : '') + ' sur ' + aff + ' à relancer (> 30 j)' : '';
+    r.txt.transfo = aff > 0 && rel > 0 ? rel + ' affaire' + (rel > 1 ? 's' : '') + ' sur ' + aff + ' à relancer (ouvertes depuis 8 à 30 j)' : '';
   } else if (c.transfo_baisse && c.transfo_precedent > 0) {
     const poidsVol = Math.min(1, (c.tx_tot_actuel != null ? c.tx_tot_actuel : BIL_CFG.minVolumeTransfo) / 20);
     r.comps.transfo = clamp01((c.transfo_precedent - c.transfo_actuel) / c.transfo_precedent) * poidsVol;
@@ -1192,7 +1203,7 @@ function renderPrioVendeurs() {
       (aFaire.length > 1 && !isDirection() ? '<button class="nb-batch" data-batch="1">📅 Planifier les ' + Math.min(5, aFaire.length) + ' premiers</button>' : '') + '</div></div></div>';
   }
   h += '<details class="hint-det"><summary>Comment est calculé le classement ?</summary><div>Score sur 100 : <b>40</b> retard de commandes rapporté à l’attendu à date (0 commande sur 8 attendues = 40 points) · <b>25</b> ' +
-    (state.txMesurable === false ? 'part du portefeuille à relancer (> 30 j) — la transformation n’est pas mesurable tant que les affaires perdues ne sont pas enregistrées' : 'baisse de la transformation sur ' + BIL_CFG.transfoJours + ' jours') +
+    (state.txMesurable === false ? 'part du portefeuille à relancer (ouvertes depuis 8 à 30 j) — la transformation n’est pas mesurable tant que les affaires perdues ne sont pas enregistrées' : 'baisse de la transformation sur ' + BIL_CFG.transfoJours + ' jours') +
     ' · <b>20</b> ancienneté de la dernière bilatérale (plafond ' + BIL_CFG.retardJ + ' j) · <b>15</b> discipline : engagements non tenus, relances en retard, leads non contactés depuis 48 h. Les vendeurs dont la bilatérale est déjà programmée passent en bas de liste. La raison qui pèse le plus est affichée en bleu.</div></details>';
 
   // v14 : liste en tableau sobre. Une ligne = rang, vendeur, POURQUOI (la
@@ -2752,11 +2763,11 @@ function R_print(){
   w.document.open(); w.document.write(html); w.document.close();
 }
 
-const R_PARTS = ['pipeline','rdv','cycles','clos'];
+const R_PARTS = ['pipeline','affaires','rdv','cycles','clos'];
 function R_open(bilId){
   R.bilId = Number(bilId); R.detail=null; R.hist=null;
   R.error=null; R.kpi='cmd'; R.histIdx=0; R.saving=false;
-  R.histLoading=false; R.b2filter='tous';
+  R.histLoading=false; R.b2filter='tous'; R.affTout=false;
   R.engagements=[]; R.ouverts=[]; R.revues={}; R.engLoaded=false; R.reunion=false; R._draftApplied=false;
   R.K=null; R.Kp=null; R.kLoaded=false; R.dashErr=null; R.cad=null; R.parts={}; R.legacy=false;
   R.future=false; R.done=null; R.prefilled=false; R.fromDraft=false; R.saveErr=''; R.nextDate=''; R.nextHeure=''; R.nextMsg='';
@@ -2855,7 +2866,7 @@ function R_loadLegacy(){
   const idUser = Number(R.detail.id_user);
   const a = new Date(); const from = ymd(new Date(a.getFullYear(), a.getMonth(), 1));
   Promise.resolve(ctx.supabase.rpc('get_vendeur_synthese', { p_id_user: idUser, p_date_from: from, p_date_to: ymd(a) }))
-    .then(r=>{ if(r.error) throw r.error; const s=r.data||{}; R_PARTS.forEach(p=>{ R.parts[p]={ st:'ok', data: s[p]||[] }; }); })
+    .then(r=>{ if(r.error) throw r.error; const s=r.data||{}; R_PARTS.forEach(p=>{ R.parts[p]= (p==='affaires'&&!s[p]) ? { st:'err', err:'section absente' } : { st:'ok', data: s[p]||[] }; }); })
     .catch(e=>{ const m=messageErreur(e); R_PARTS.forEach(p=>{ R.parts[p]={ st:'err', err:m }; }); })
     .finally(()=>{ R_legacyEnVol=false; R_render(); });
 }
@@ -2913,7 +2924,7 @@ function R_kpis(){
   h+='<div class="kpi clik big'+on('cmd')+'" data-rkpi="cmd"><div class="k-l">Commandes du mois</div><div class="k-v" style="color:'+colObj(cmd)+'">'+v(K.cdes)+(cmd.obj?'<span class="k-of"> / '+fmtNb(cmd.obj,0)+'</span>':'')+'</div><div class="k-s">'+(dashOk?subObj(cmd,'cmd'):'')+'</div>'+(Kp?'<div class="k-p">mois dernier : '+fmtNb(Kp.cdes,0)+(Kp.obj_cdes?' / '+fmtNb(Kp.obj_cdes,0):'')+'</div>':'')+'</div>';
   h+='<div class="kpi clik'+on('fi')+'" data-rkpi="fi"><div class="k-l">Financements</div><div class="k-v" style="color:'+colObj(fi)+'">'+v(K.fi)+(fi.obj?'<span class="k-of"> / '+fmtNb(fi.obj,0)+'</span>':'')+'</div><div class="k-s">'+(dashOk?(fi.att==null?'pas d’objectif saisi':'attendu à date '+fmtNb(fi.att)):'')+'</div></div>';
   h+=R_txTile();
-  h+='<div class="kpi clik'+on('pipeline')+'" data-rkpi="pipeline"><div class="k-l">Affaires en cours</div><div class="k-v" style="color:#2a5ea9">'+v(K.pipe_affaires)+'</div><div class="k-s">'+(dashOk?fmtNb(K.pipe_a_relancer,0)+' à relancer (> 30 j)':'')+'</div></div>';
+  h+='<div class="kpi clik'+on('pipeline')+'" data-rkpi="pipeline"><div class="k-l">Affaires en cours</div><div class="k-v" style="color:#2a5ea9">'+v(K.pipe_affaires)+'</div><div class="k-s">'+(dashOk?fmtNb(K.pipe_a_relancer,0)+' à relancer (8 à 30 j)':'')+'</div></div>';
   h+='<div class="kpi clik'+on('leads')+'" data-rkpi="leads"><div class="k-l">Leads jamais contactés</div><div class="k-v" style="color:'+((K.leads_jamais||0)>0?'#c0524f':'#00997f')+'">'+v(K.leads_jamais)+'</div><div class="k-s">'+(dashOk?'dont '+fmtNb(K.leads_jamais_48h,0)+' depuis plus de 48 h':'')+'</div></div>';
   h+='<div class="kpi clik'+on('rdv')+'" data-rkpi="rdv"><div class="k-l">RDV à venir</div><div class="k-v" style="color:#2a5ea9">'+v(K.rdv_a_venir)+(D.nbRetardRdv>0?' <span class="k-alert">⚠ '+D.nbRetardRdv+'</span>':'')+'</div><div class="k-s">'+(dashOk?fmtNb(K.rdv_tenus,0)+' tenus ce mois':'')+(D.nbRetardRdv>0?' · '+D.nbRetardRdv+' sans compte rendu':'')+'</div></div>';
   h+='<div class="kpi mute"><div class="k-l">Livraisons en retard</div><div class="k-v" style="color:'+((K.livr_retard||0)>0?'#c0524f':'#00997f')+'">'+v(K.livr_retard)+'</div><div class="k-s">'+(dashOk?fmtNb(K.livr_attente,0)+' en attente':'')+'</div></div>';
@@ -2947,6 +2958,59 @@ function R_propaleRow(p){
 }
 const R_PDF_SVG='<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="12" y1="18" x2="12" y2="12"/><polyline points="9 15 12 18 15 15"/></svg>';
 const R_EDIT_SVG='<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>';
+// --- Affaires en cours (v29) -------------------------------------------------
+// Une ligne par affaire BACS ouverte (même définition que la tuile) + les bons
+// de commande à finaliser. Classement par action, pas par type de document.
+const R_AFF_CATS = [
+  ['bdc','Bons de commande à finaliser','urgent','signés ou imprimés, pas encore validés'],
+  ['relancer','À relancer','retard','ouvertes depuis 8 à 30 j, sans commande'],
+  ['fraiche','Fraîches','cours','ouvertes depuis 7 j au plus'],
+  ['froide','Froides','aband','ouvertes depuis plus de 30 j — à requalifier ou abandonner']
+];
+const R_AFF_MAX = 15;
+const R_STATUT_BACS = { 'Printed':'imprimé', 'Awaiting Approval':'en attente d’approbation' };
+function R_jours(n){ n=Number(n); if(isNaN(n)) return ''; return n<=0?'aujourd’hui':(n===1?'hier':'il y a '+n+' j'); }
+function R_affRow(a){
+  const cli = a.client || 'Client sans nom';
+  const bits = [];
+  if(a.vn_vo) bits.push(String(a.vn_vo).toUpperCase());
+  if(a.type==='bdc') bits.push('BDC '+(R_STATUT_BACS[a.statut_bacs]||a.statut_bacs||''));
+  else bits.push(a.nb_devis>0 ? a.nb_devis+' devis' : 'aucun devis');
+  if(a.montant!=null) bits.push(R_eur(a.montant));
+  const sa = Number(a.sans_activite_j);
+  const calme = !isNaN(sa) && sa>=14;
+  const age = '<div class="aff-age"><span>'+(a.type==='bdc'?'créé ':'ouverte ')+esc(R_jours(a.age_j))+'</span>'+
+    (!isNaN(sa)?'<span class="'+(calme?'aff-calme':'')+'">'+(sa<=0?'activité aujourd’hui':'sans activité depuis '+sa+' j')+'</span>':'')+'</div>';
+  const pdf = (a.type==='bdc' && a.id_propale_bdc)
+    ? '<button class="pp-icon pp-pdf" data-rpdf="'+a.id_propale_bdc+':bdc" data-rmaj="'+esc(a.maj||'')+'" title="PDF du bon de commande">'+R_PDF_SVG+'</button>' : '';
+  return '<div class="cyc pp-row aff-row">'+
+    '<div class="pp-main" data-rgo="client:'+(a.id_client||'')+'"><div class="c-cli">'+esc(cli)+'</div><div class="c-info">'+esc(bits.join(' · '))+'</div></div>'+
+    '<div class="c-right">'+age+pdf+'<span class="c-arrow">›</span></div></div>';
+}
+function R_affaires(list){
+  list = Array.isArray(list) ? list : [];
+  const par = {}; R_AFF_CATS.forEach(([c])=>par[c]=list.filter(a=>a.categorie===c));
+  const nbAff = list.filter(a=>a.type==='affaire').length;
+  if(!list.length) return '<div class="b2-title">Affaires en cours</div><div class="b2-empty">Aucune affaire ouverte ni bon de commande en cours.</div>';
+  if(R.b2filter==='auto' || (R.b2filter!=='tous' && !par[R.b2filter])){
+    R.b2filter = ['relancer','bdc','fraiche','froide'].find(c=>par[c].length) || 'tous';
+  }
+  const cats = R_AFF_CATS.map(([c,l])=>[c,l,par[c].length]).concat([['tous','Tout',list.length]]);
+  let h = '<div class="b2-title">'+nbAff+' affaire'+(nbAff>1?'s':'')+' ouverte'+(nbAff>1?'s':'')+
+          ' · '+par.relancer.length+' à relancer'+(par.bdc.length?' · '+par.bdc.length+' bon'+(par.bdc.length>1?'s':'')+' de commande à finaliser':'')+'</div>'+R_chips(cats);
+  const groupes = R.b2filter==='tous' ? R_AFF_CATS : R_AFF_CATS.filter(([c])=>c===R.b2filter);
+  let restant = R.affTout ? Infinity : R_AFF_MAX, cache = 0, body = '';
+  groupes.forEach(([c,label,cls,note])=>{
+    const l = par[c]; if(!l.length) return;
+    const vis = l.slice(0, Math.max(0, restant)); cache += l.length - vis.length; restant -= vis.length;
+    if(!vis.length) return;
+    body += '<div class="pipe-group"><div class="pipe-gt '+cls+'">'+label+' <span class="gn">'+l.length+'</span><span class="aff-note">'+esc(note)+'</span></div>';
+    vis.forEach(a=> body += R_affRow(a));
+    body += '</div>';
+  });
+  if(cache>0) body += '<button class="aff-all" data-raffall="1">Afficher les '+cache+' autres</button>';
+  return h + (body || '<div class="b2-empty">Aucune affaire pour ce filtre.</div>');
+}
 function R_chips(cats){
   let h='<div class="b2-chips">';
   cats.forEach(([key,label,count])=>{
@@ -2997,7 +3061,12 @@ function R_bloc2(){
       if(list.length>12) s+='<div class="b2-empty">+ '+(list.length-12)+' autres</div>'; return s+'</div>'; };
     return h+grp('En retard','retard','retard')+grp('À traiter','urgent','urgent')+grp('En cours','cours','cours');
   }
+  if(k==='pipeline' && R.parts.affaires && R.parts.affaires.st!=='err'){
+    const m=R_partMsg('affaires'); if(m) return '<div class="b2-title">Affaires en cours</div>'+m;
+    return R_affaires(R.parts.affaires.data);
+  }
   if(k==='pipeline'){
+    if(R.b2filter==='auto') R.b2filter='tous';
     const m=R_partMsg('pipeline'); if(m) return '<div class="b2-title">Affaires en cours</div>'+m;
     if(!D.pipeline.length) return '<div class="b2-empty">Aucune proposition ni bon de commande en cours.</div>';
     const cats=[['tous','Tous',D.pipeline.length],['propale','Propositions',D.pipeline.filter(p=>p.status==='propale').length],['bdc','Bons de commande',D.pipeline.filter(p=>p.status==='bdc').length],['win','Gagnées',D.pipeline.filter(p=>p.status==='win').length],['lose','Perdues',D.pipeline.filter(p=>p.status==='lose').length]];
@@ -3054,7 +3123,7 @@ function R_constats(){
   if(c && c.tx_signif && c.transfo_actuel!=null) out.push('Transformation'+(state.transfoStable?' sur '+BIL_CFG.transfoJours+' jours':'')+' : '+fmtNb(c.transfo_actuel)+' %'+(c.tx_signif_prec&&c.transfo_precedent!=null?' contre '+fmtNb(c.transfo_precedent)+' % '+(state.transfoStable?'les '+BIL_CFG.transfoJours+' jours d’avant':'la période précédente'):'')+(c.tx_tot_actuel!=null?', sur '+c.tx_tot_actuel+' '+(state.transfoStable?'affaires tranchées':'propositions'):'')+'.');
   if(K){
     const bits=[];
-    bits.push(fmtNb(K.pipe_affaires,0)+' affaires en cours dont '+fmtNb(K.pipe_a_relancer,0)+' à relancer (plus de 30 j)');
+    bits.push(fmtNb(K.pipe_affaires,0)+' affaires en cours dont '+fmtNb(K.pipe_a_relancer,0)+' à relancer (ouvertes depuis 8 à 30 j)');
     if(K.leads_jamais) bits.push(fmtNb(K.leads_jamais,0)+' lead'+(K.leads_jamais>1?'s':'')+' jamais contacté'+(K.leads_jamais>1?'s':'')+(K.leads_jamais_48h?' dont '+fmtNb(K.leads_jamais_48h,0)+' depuis plus de 48 h':''));
     if(K.livr_retard) bits.push(fmtNb(K.livr_retard,0)+' livraison'+(K.livr_retard>1?'s':'')+' en retard');
     out.push('Activité : '+bits.join(' · ')+'.');
@@ -3086,7 +3155,7 @@ function R_suggestions(){
   const K=R.K; if(!K) return [];
   const s=[];
   if(K.leads_jamais>0) s.push({ libelle:'Contacter tous les leads jamais contactés', cible:K.leads_jamais, echeance:R_addJours(2) });
-  if(K.pipe_a_relancer>0) s.push({ libelle:'Relancer les affaires sans contact depuis plus de 30 jours', cible:K.pipe_a_relancer, echeance:R_addJours(7) });
+  if(K.pipe_a_relancer>0) s.push({ libelle:'Relancer les affaires ouvertes depuis plus d’une semaine', cible:K.pipe_a_relancer, echeance:R_addJours(7) });
   const o=R_objectif(K.cdes,K.obj_cdes);
   if(o.obj && o.rea<o.obj) s.push({ libelle:'Signer des commandes d’ici la fin du mois', cible:Math.ceil(o.obj-o.rea), echeance:R_finMois() });
   const fi=R_objectif(K.fi,K.obj_fi);
@@ -3334,10 +3403,11 @@ window.__realRoute2 = function(e){
   e.__realDone = true;
   if(e.target.id==='real-ov'){ if(!R.done) R_lireSaisie(); R_close(); return; }
   const kpi=e.target.closest('[data-rkpi]');
-  if(kpi){ const k=kpi.getAttribute('data-rkpi'); if(k==='transfo') return; R_lireSaisie(); R.kpi=k; R.b2filter='tous'; R_render(); return; }
+  if(kpi){ const k=kpi.getAttribute('data-rkpi'); if(k==='transfo') return; R_lireSaisie(); R.kpi=k; R.b2filter=(k==='pipeline'?'auto':'tous'); R.affTout=false; R_render(); return; }
   const chip=e.target.closest('[data-rchip]');
-  if(chip){ R.b2filter=chip.getAttribute('data-rchip');
+  if(chip){ R.b2filter=chip.getAttribute('data-rchip'); R.affTout=false;
     const b2=ov.querySelector('.bloc2'); if(b2){ b2.innerHTML=R_bloc2(); } return; }
+  if(e.target.closest('[data-raffall]')){ R.affTout=true; const b2=ov.querySelector('.bloc2'); if(b2){ b2.innerHTML=R_bloc2(); } return; }
   const mod=e.target.closest('[data-rmodif]');
   if(mod){ R_modifPropale(Number(mod.getAttribute('data-rmodif'))); return; }
   const pdf=e.target.closest('[data-rpdf]');
@@ -3434,6 +3504,11 @@ const R_STYLE = '<style>'+
 '#real-ov .perf-bar i{display:block;height:7px;border-radius:4px}'+
 '#real-ov .perf-pct{font-size:11px;color:#8b99b0;font-weight:600;margin-top:5px}'+
 '#real-ov .pipe-group{margin-bottom:14px}'+
+'#real-ov .aff-note{font-size:11px;font-weight:600;text-transform:none;letter-spacing:0;color:#8b99b0;margin-left:4px}'+
+'#real-ov .aff-age{display:flex;flex-direction:column;align-items:flex-end;font-size:11px;color:#8b99b0;font-weight:600;line-height:1.35;white-space:nowrap}'+
+'#real-ov .aff-age .aff-calme{color:#c0524f}'+
+'#real-ov .aff-all{display:block;width:100%;margin-top:4px;padding:9px;border:1px dashed #acc5e4;border-radius:10px;background:transparent;color:#2a5ea9;font-weight:700;font-size:13px;cursor:pointer;font-family:inherit}'+
+'#real-ov .aff-all:hover{background:rgba(172,197,228,.14)}'+
 '#real-ov .pipe-gt{font-size:12px;font-weight:800;text-transform:uppercase;letter-spacing:.04em;margin-bottom:8px;display:flex;align-items:center;gap:6px}'+
 '#real-ov .pipe-gt.retard{color:#c0524f}#real-ov .pipe-gt.urgent{color:#8a6d1f}#real-ov .pipe-gt.cours{color:#00997f}'+
 '#real-ov .pipe-gt.win{color:#00997f}#real-ov .pipe-gt.aband{color:#c0524f}'+
@@ -3814,7 +3889,7 @@ function RC_card(item){
     const chipColors={ 'Abandon':{bg:'#fee2e2',color:'#9B1C1C',border:'#fca5a5'},'Marketing':{bg:'#ede9fe',color:'#5b21b6',border:'#c4b5fd'},'Choc':{bg:'#fef3c7',color:'#92400e',border:'#fcd34d'},'Commande':{bg:'#d1fae5',color:'#065f46',border:'#6ee7b7'},'Relance':{bg:'#dbeafe',color:'#1e40af',border:'#93c5fd'} };
     const chip=chipColors[resultat]||{bg:'#f3f4f6',color:'#374151',border:'#d1d5db'};
     headerMiddle='<div style="display:flex;flex-wrap:wrap;gap:5px;align-items:center;flex:1;min-width:0;">'+
-      (resultat?'<span style="background:'+chip.bg+';color:'+chip.color+';border:1px solid '+chip.border+';border-radius:999px;padding:2px 10px;font-size:12px;font-weight:500;white-space:nowrap;">'+esc(resultat)+'</span>':'')+
+      (resultat?'<span style="background:'+chip.bg+';color:'+chip.color+';border:1px solid '+chip.border+';border-radius:999px;padding:2px 10px;font-size:12px;font-weight:500;white-space:nowrap;">'+esc((resultat==='Choc'?'RDV':resultat))+'</span>':'')+
       (canalContact?'<span style="background:#f3f4f6;color:#6b7280;border:1px solid #e5e7eb;border-radius:999px;padding:2px 10px;font-size:12px;white-space:nowrap;">'+esc(canalContact)+'</span>':'')+
       (dtActivation?'<span style="background:#eff6ff;color:#2a5ea9;border:1px solid #bfdbfe;border-radius:999px;padding:2px 10px;font-size:12px;white-space:nowrap;">'+formatRdv(dtActivation)+'</span>':'')+'</div>';
     const sid='rv_'+uid; const showToggle=commentaire.length>80; const resume=truncate(commentaire,80);
