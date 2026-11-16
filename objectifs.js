@@ -32,6 +32,15 @@
 //  dans objectif_kpi) et ne sont jamais répartis sur elle. Quand tout le
 //  périmètre affiché est Lexus, les colonnes VU et Arval disparaissent du
 //  tableau, des fiches, de l'atelier et de la vue vendeur.
+//  v11 (16/11/2026, Team Colin) :
+//   - OBJECTIF DE COMMANDES TOTAL en tête : l'atelier affiche « Commandes
+//     particuliers » + « Commandes pro » = « Objectif commandes total » (saisie
+//     directe des deux, plus de taux pour le pro). Les taux PHEV / VU / Kinto /
+//     Arval se calculent sur ce total, M-1 compris. Le tableau gagne une
+//     première colonne « Cde total » (lecture seule, particuliers + pro) à
+//     chaque niveau : réseau, affaire, site, VN / VO, vendeur.
+//   - TABULATION dans le tableau : Tab passe à la cellule suivante,
+//     Maj+Tab à la précédente (Entrée valide, Échap annule, comme avant).
 //  Rendu dans __anchor ; SUPABASE_URL/KEY -> ctx.tenant ; getUserJwt() ->
 //  session du client runtime ; doc -> __anchor.ownerDocument. User = oropraUser.
 //  Périmètre 100% v_mon_perimetre (VAR_SITES retirée). 0 vestige.
@@ -116,7 +125,7 @@ const REAL_FIELDS = IS_TC
   : { commandes: 'commandes_realisees', financements: 'financements_realises', contrat_service: 'contrats_service_realises', waxoyl: 'waxoyls_realises', gravage: 'gravages_realises' }
 const FIELDS = OBJ_TABLE_FIELDS.concat(KPI_TABLE_FIELDS)
 const SECONDARY = IS_TC
-  ? [{ k: 'pro', label: 'Pro' }, { k: 'phev_ev', label: 'PHEV / EV' }, { k: 'vu', label: 'VU' }, { k: 'kinto', label: 'Kinto' }, { k: 'arval', label: 'Arval' }]
+  ? [{ k: 'phev_ev', label: 'PHEV / EV' }, { k: 'vu', label: 'VU' }, { k: 'kinto', label: 'Kinto' }, { k: 'arval', label: 'Arval' }]
   : [{ k: 'financements', label: 'Financement' }, { k: 'contrat_service', label: 'CS' }, { k: 'waxoyl', label: 'Waxoyl' }, { k: 'gravage', label: 'Gravage' }]
 
 // --- Lexus : ni VU ni Arval (29/10/2026) ---
@@ -157,13 +166,15 @@ window.__objState = state
 let data = [], realCur = {}, realM1 = {}, realOk = true, siteMeta = {}, userMeta = {}, originalSnap = {}, loading = false
 const MOIS_NOMS = ['Janvier', 'Février', 'Mars', 'Avril', 'Mai', 'Juin', 'Juillet', 'Août', 'Septembre', 'Octobre', 'Novembre', 'Décembre']
 const GKEYS = IS_TC
-  ? [{ k: 'commandes', label: 'Cde part.' }, { k: 'pro', label: 'Cde pro' }, { k: 'phev_ev', label: 'PHEV / EV' }, { k: 'vu', label: 'VU' }, { k: 'kinto', label: 'Kinto' }, { k: 'arval', label: 'Arval' }]
+  ? [{ k: 'cde_total', label: 'Cde total', calc: true }, { k: 'commandes', label: 'Cde part.' }, { k: 'pro', label: 'Cde pro' }, { k: 'phev_ev', label: 'PHEV / EV' }, { k: 'vu', label: 'VU' }, { k: 'kinto', label: 'Kinto' }, { k: 'arval', label: 'Arval' }]
   : [{ k: 'commandes', label: 'Commandes' }, { k: 'gravage', label: 'Gravages' }, { k: 'financements', label: 'Financements' }, { k: 'contrat_service', label: 'CS' }, { k: 'waxoyl', label: 'Waxoyl' }, { k: 'contacts_jour', label: 'Contacts/j' }]
 const KPIS_SUIVI = IS_TC
-  ? [{ k: 'commandes', label: 'Commandes particuliers' }, { k: 'pro', label: 'Commandes pro' }, { k: 'phev_ev', label: 'PHEV / EV' }, { k: 'vu', label: 'VU' }, { k: 'kinto', label: 'Kinto' }, { k: 'arval', label: 'Arval' }]
+  ? [{ k: 'cde_total', label: 'Commandes total', calc: true }, { k: 'commandes', label: 'Commandes particuliers' }, { k: 'pro', label: 'Commandes pro' }, { k: 'phev_ev', label: 'PHEV / EV' }, { k: 'vu', label: 'VU' }, { k: 'kinto', label: 'Kinto' }, { k: 'arval', label: 'Arval' }]
   : [{ k: 'commandes', label: 'Commandes' }, { k: 'financements', label: 'Financements' }, { k: 'contrat_service', label: 'Contrat de service' }, { k: 'waxoyl', label: 'Waxoyl' }, { k: 'gravage', label: 'Gravage' }]
 
 // --- nombres / dates ---
+// Valeur d'un indicateur sur une ligne : « cde_total » = particuliers + pro.
+function valK(r, k) { return k === 'cde_total' ? num(r.commandes) + num(r.pro) : num(r[k]) }
 function num(v) { if (v == null) return 0; if (typeof v === 'number') return isNaN(v) ? 0 : v; const n = parseFloat(String(v).replace(',', '.').trim()); return isNaN(n) ? 0 : n }
 function ymOf(a, m) { return a + '-' + String(m).padStart(2, '0') }
 function prevYM(a, m) { let y = a, mo = m - 1; if (mo === 0) { mo = 12; y-- } return { annee: y, mois: mo, ym: ymOf(y, mo) } }
@@ -318,14 +329,17 @@ async function saveKpiRow(r, jwt) {
 function scopeM1(col) { const users = [...new Set(scopeRows().map(function (r) { return r.id_user }))]; return users.reduce(function (a, u) { return a + realiseFor(realM1, u, col) }, 0) }
 function ensureCapDefaults() {
   const rows = scopeRows()
-  if (state.cap == null) state.cap = { commandes: null, taux: {}, contacts: null }
+  if (state.cap == null) state.cap = { commandes: null, pro: null, taux: {}, contacts: null }
   if (state.cap.taux == null) state.cap.taux = {}
   if (state.cap.commandes == null) state.cap.commandes = rows.reduce(function (a, r) { return a + num(r.commandes) }, 0)
-  const m1c = scopeM1(REAL_FIELDS.commandes)
-  SECONDARY.forEach(function (s) { if (state.cap.taux[s.k] == null) { let t = 0; if (realOk && m1c > 0) t = Math.round(scopeM1(REAL_FIELDS[s.k]) / m1c * 100); else { const oc = rows.reduce(function (a, r) { return a + num(r.commandes) }, 0), os = rows.reduce(function (a, r) { return a + num(r[s.k]) }, 0); t = oc > 0 ? Math.round(os / oc * 100) : 0 } state.cap.taux[s.k] = Math.max(0, Math.min(200, t)) } })
+  if (IS_TC && state.cap.pro == null) state.cap.pro = rows.reduce(function (a, r) { return a + (kpiApplicable(r, 'pro') ? num(r.pro) : 0) }, 0)
+  // Base des taux : commandes totales (particuliers + pro chez Team Colin).
+  const m1c = scopeM1(REAL_FIELDS.commandes) + (IS_TC ? scopeM1(REAL_FIELDS.pro) : 0)
+  SECONDARY.forEach(function (s) { if (state.cap.taux[s.k] == null) { let t = 0; if (realOk && m1c > 0) t = Math.round(scopeM1(REAL_FIELDS[s.k]) / m1c * 100); else { const oc = rows.reduce(function (a, r) { return a + num(r.commandes) + (IS_TC ? num(r.pro) : 0) }, 0), os = rows.reduce(function (a, r) { return a + num(r[s.k]) }, 0); t = oc > 0 ? Math.round(os / oc * 100) : 0 } state.cap.taux[s.k] = Math.max(0, Math.min(200, t)) } })
   if (state.cap.contacts == null) { const f = {}; rows.forEach(function (r) { const v = num(r.contacts_jour); f[v] = (f[v] || 0) + 1 }); let best = 0, bc = -1; Object.keys(f).forEach(function (k) { if (f[k] > bc) { bc = f[k]; best = Number(k) } }); state.cap.contacts = best }
 }
-function cibleOf(k) { return Math.round(Math.max(0, parseInt(state.cap.commandes) || 0) * (num(state.cap.taux[k]) / 100)) }
+function capTotal() { return Math.max(0, parseInt(state.cap.commandes) || 0) + (IS_TC ? Math.max(0, parseInt(state.cap.pro) || 0) : 0) }
+function cibleOf(k) { return Math.round(capTotal() * (num(state.cap.taux[k]) / 100)) }
 function allocate(target, weights) { const n = weights.length; if (target <= 0 || n === 0) return new Array(n).fill(0); const sw = weights.reduce(function (a, b) { return a + b }, 0); if (sw <= 0) { const base = Math.floor(target / n), rem = target - base * n; const r = []; for (let i = 0; i < n; i++)r.push(base + (i < rem ? 1 : 0)); return r } const raw = weights.map(function (w) { return target * w / sw }); const res = raw.map(function (x) { return Math.floor(x) }); let rem = target - res.reduce(function (a, b) { return a + b }, 0); const ord = raw.map(function (x, i) { return { i: i, f: x - Math.floor(x) } }).sort(function (a, b) { return b.f - a.f }); for (let k = 0; k < rem; k++)res[ord[k % n].i]++; return res }
 function rowWeights(rows, mode) {
   if (mode === 'equitable') return rows.map(function () { return 1 })
@@ -339,6 +353,11 @@ function repartir() {
   ensureCapDefaults()
   const w = rowWeights(rows, state.methode)
   const cmd = allocate(Math.max(0, parseInt(state.cap.commandes) || 0), w); rows.forEach(function (r, i) { r.commandes = cmd[i] })
+  if (IS_TC) {
+    const ip = []; rows.forEach(function (r, i) { if (kpiApplicable(r, 'pro')) ip.push(i); else r.pro = 0 })
+    const ap = allocate(Math.max(0, parseInt(state.cap.pro) || 0), ip.map(function (i) { return w[i] }))
+    ip.forEach(function (i, j) { rows[i].pro = ap[j] })
+  }
   SECONDARY.forEach(function (s) {
     const idx = []; rows.forEach(function (r, i) { if (kpiApplicable(r, s.k)) idx.push(i); else r[s.k] = 0 })
     const arr = allocate(cibleOf(s.k), idx.map(function (i) { return w[i] }))
@@ -423,16 +442,27 @@ function makeAtelier(doc) {
   // Cap : commandes + contacts (haut) ; taux -> cibles (bas)
   const cap = doc.createElement('div'); cap.className = 'obj-cap'; cap.style.cssText = 'margin-bottom:14px'
   const top = doc.createElement('div'); top.style.cssText = 'display:flex;gap:28px;flex-wrap:wrap;margin-bottom:14px'
+  const capLbl = function (t) { return '<div style="font-size:11px;color:#acc5e4;text-transform:uppercase;letter-spacing:.4px;margin-bottom:5px">' + t + '</div>' }
   const cCmd = doc.createElement('div')
-  cCmd.innerHTML = '<div style="font-size:11px;color:#acc5e4;text-transform:uppercase;letter-spacing:.4px;margin-bottom:5px">Cible commandes</div>'
+  cCmd.innerHTML = capLbl(IS_TC ? 'Commandes particuliers' : 'Cible commandes')
   const inCmd = numInput(state.cap.commandes, 92); inCmd.className = 'obj-cap'; inCmd.style.fontSize = '17px'; inCmd.style.fontWeight = '500'; cCmd.appendChild(inCmd); top.appendChild(cCmd)
+  let inPro = null, totVal = null
+  if (IS_TC) {
+    const plus = doc.createElement('div'); plus.style.cssText = 'align-self:flex-end;padding-bottom:6px;font-size:18px;color:#acc5e4'; plus.textContent = '+'; top.appendChild(plus)
+    const cPro = doc.createElement('div'); cPro.innerHTML = capLbl('Commandes pro')
+    inPro = numInput(state.cap.pro, 92); inPro.style.fontSize = '17px'; inPro.style.fontWeight = '500'; cPro.appendChild(inPro); top.appendChild(cPro)
+    const eqT = doc.createElement('div'); eqT.style.cssText = 'align-self:flex-end;padding-bottom:6px;font-size:18px;color:#acc5e4'; eqT.textContent = '='; top.appendChild(eqT)
+    const cTot = doc.createElement('div'); cTot.style.cssText = 'background:#eef3fb;border-radius:10px;padding:6px 14px'
+    cTot.innerHTML = capLbl('Objectif commandes total')
+    totVal = doc.createElement('div'); totVal.className = 'obj-cap-total'; totVal.style.cssText = 'font-size:22px;font-weight:700;color:#2a5ea9;line-height:1.2'; totVal.textContent = capTotal(); cTot.appendChild(totVal); top.appendChild(cTot)
+  }
   const cCon = doc.createElement('div')
   cCon.innerHTML = '<div style="font-size:11px;color:#acc5e4;text-transform:uppercase;letter-spacing:.4px;margin-bottom:5px">Contacts / jour</div>'
   const inCon = numInput(state.cap.contacts, 76); inCon.style.fontSize = '17px'; inCon.style.fontWeight = '500'; cCon.appendChild(inCon); top.appendChild(cCon)
   cap.appendChild(top)
 
   const secWrap = doc.createElement('div')
-  secWrap.innerHTML = '<div style="font-size:11px;color:#acc5e4;text-transform:uppercase;letter-spacing:.4px;margin-bottom:6px">Taux (pré-rempli M-1) → cible d\u2019équipe</div>'
+  secWrap.innerHTML = '<div style="font-size:11px;color:#acc5e4;text-transform:uppercase;letter-spacing:.4px;margin-bottom:6px">Taux (pré-rempli M-1, sur les commandes totales) → cible d\u2019équipe</div>'
   const grid = doc.createElement('div'); grid.style.cssText = 'display:grid;grid-template-columns:repeat(auto-fit,minmax(215px,1fr));gap:8px'
   const refs = {}
   const secAff = colonnesPour(SECONDARY, scopeRows())
@@ -445,12 +475,14 @@ function makeAtelier(doc) {
     const cible = numInput(cibleOf(s.k), 66); cible.style.color = '#2a5ea9'; cible.style.fontWeight = '500'
     refs[s.k] = { taux: taux, cible: cible }
     taux.addEventListener('input', function () { state.cap.taux[s.k] = Math.max(0, parseInt(taux.value) || 0); cible.value = cibleOf(s.k) })
-    cible.addEventListener('input', function () { const cmd = Math.max(0, parseInt(state.cap.commandes) || 0); const val = Math.max(0, parseInt(cible.value) || 0); state.cap.taux[s.k] = cmd > 0 ? Math.round(val / cmd * 100) : 0; taux.value = state.cap.taux[s.k] })
+    cible.addEventListener('input', function () { const cmd = capTotal(); const val = Math.max(0, parseInt(cible.value) || 0); state.cap.taux[s.k] = cmd > 0 ? Math.round(val / cmd * 100) : 0; taux.value = state.cap.taux[s.k] })
     cell.appendChild(lab); cell.appendChild(taux); cell.appendChild(pc); cell.appendChild(eq); cell.appendChild(cible); grid.appendChild(cell)
   })
   secWrap.appendChild(grid); cap.appendChild(secWrap)
 
-  inCmd.addEventListener('input', function () { state.cap.commandes = Math.max(0, parseInt(inCmd.value) || 0); secAff.forEach(function (s) { refs[s.k].cible.value = cibleOf(s.k) }); updateBalanceBar() })
+  const majCap = function () { if (totVal) totVal.textContent = capTotal(); secAff.forEach(function (s) { refs[s.k].cible.value = cibleOf(s.k) }); updateBalanceBar() }
+  inCmd.addEventListener('input', function () { state.cap.commandes = Math.max(0, parseInt(inCmd.value) || 0); majCap() })
+  if (inPro) inPro.addEventListener('input', function () { state.cap.pro = Math.max(0, parseInt(inPro.value) || 0); majCap() })
   inCon.addEventListener('input', function () { state.cap.contacts = Math.max(0, parseInt(inCon.value) || 0) })
   card.appendChild(cap)
 
@@ -490,7 +522,7 @@ function makeAtelier(doc) {
 }
 function updateBalanceBar() {
   const rd = doc, fill = rd.querySelector('#obj-balfill'), pill = rd.querySelector('#obj-balpill'); if (!fill || !pill) return
-  const rows = scopeRows(), sum = rows.reduce(function (a, r) { return a + num(r.commandes) }, 0), target = Math.max(0, parseInt(state.cap && state.cap.commandes) || 0)
+  const rows = scopeRows(), sum = rows.reduce(function (a, r) { return a + num(r.commandes) + (IS_TC ? num(r.pro) : 0) }, 0), target = state.cap ? capTotal() : 0
   fill.style.width = (target > 0 ? Math.min(100, Math.round(sum / target * 100)) : 0) + '%'
   let bg, col, fc, txt
   if (target === 0) { bg = '#f0f2f5'; col = '#8a96a8'; fc = '#dde2ea'; txt = 'fixez une cible' }
@@ -503,16 +535,30 @@ function updateBalanceBar() {
 // --- édition cellule (brouillon, pas de PATCH) ---
 function makeEditableCell(r, field, doc) {
   const td = doc.createElement('td')
+  if (field === 'cde_total') { td.style.cssText = 'padding:' + CELL_PAD + ';text-align:center;font-size:12px;font-weight:700;color:#2a5ea9;background:#f5f8fc;font-variant-numeric:tabular-nums'; td.title = 'Particuliers + pro'; td.textContent = Math.round(valK(r, field)); return td }
   if (!kpiApplicable(r, field)) { td.style.cssText = 'padding:' + CELL_PAD + ';text-align:center;color:#acc5e4;font-size:12px'; td.title = 'Sans objet chez Lexus'; td.textContent = '—'; return td }
   if (!canEdit) { td.style.cssText = 'padding:' + CELL_PAD + ';text-align:center'; const s = doc.createElement('span'); s.style.cssText = 'color:#4a6a8a;font-size:12px'; s.textContent = r[field] || 0; td.appendChild(s); return td }
-  td.style.cssText = 'padding:' + CELL_PAD + ';text-align:center;cursor:pointer'; let editing = false
+  td.style.cssText = 'padding:' + CELL_PAD + ';text-align:center;cursor:pointer'; td.className = 'obj-ed'; let editing = false, saut = false
   const dirty = function () { const o = originalSnap[rowKey(r)]; return o && num(o[field]) !== num(r[field]) }
   function span() { editing = false; td.innerHTML = ''; const s = doc.createElement('span'); s.style.cssText = 'font-size:12px;color:' + (dirty() ? '#2a5ea9' : '#4a6a8a') + ';font-weight:' + (dirty() ? '500' : '400'); s.textContent = r[field] || 0; td.appendChild(s); td.onmouseenter = function () { td.style.background = '#f5f8fc' }; td.onmouseleave = function () { td.style.background = '' } }
   function editor() {
     editing = true; td.onmouseenter = null; td.onmouseleave = null; td.innerHTML = ''; td.style.background = '#f0f6ff'; const i = doc.createElement('input'); i.type = 'text'; i.value = r[field] || 0; i.style.cssText = 'width:48px;text-align:center;border:none;border-bottom:1.5px solid #2a5ea9;background:transparent;font-size:12px;color:#2a5ea9;outline:none;padding:0'; td.appendChild(i); i.focus(); i.select()
     function val() { r[field] = parseInt(i.value) || 0; state._saveMsg = null; renderObj() }
-    i.addEventListener('keydown', function (e) { if (e.key === 'Enter') val(); if (e.key === 'Escape') { td.style.background = ''; span() } })
-    i.addEventListener('blur', function () { td.style.background = ''; if (String(parseInt(i.value) || 0) !== String(r[field] || 0)) val(); else span() })
+    i.addEventListener('keydown', function (e) {
+      if (e.key === 'Tab') {
+        // Tabulation : la valeur est gardée, la cellule voisine s'ouvre ; le
+        // tableau n'est recalculé (totaux) qu'à la sortie de la saisie.
+        e.preventDefault(); saut = true
+        r[field] = parseInt(i.value) || 0; state._saveMsg = null
+        const tbl = td.closest('table'); const cells = tbl ? Array.prototype.slice.call(tbl.querySelectorAll('td.obj-ed')) : []
+        const idx = cells.indexOf(td); const next = cells[idx + (e.shiftKey ? -1 : 1)]
+        td.style.background = ''; span(); saut = false
+        try { updateBalanceBar() } catch (er) { }
+        if (next) next.click(); else renderObj()
+        return
+      }
+      if (e.key === 'Enter') val(); if (e.key === 'Escape') { td.style.background = ''; span() } })
+    i.addEventListener('blur', function () { if (saut || !editing) return; td.style.background = ''; if (String(parseInt(i.value) || 0) !== String(r[field] || 0)) val(); else span() })
   }
   span(); td.addEventListener('click', function () { if (!editing) editor() }); return td
 }
@@ -522,7 +568,7 @@ function makeEditableCell(r, field, doc) {
 const CELL_PAD = IS_TC ? '3px 6px' : '6px 8px'
 const COL_W = IS_TC ? '74px' : '90px'
 function aggNew() { const a = { _n: 0, _lexN: 0 }; GKEYS.forEach(function (k) { a[k.k] = 0 }); return a }
-function aggAdd(a, r) { a._n++; if (estLexus(r)) a._lexN++; GKEYS.forEach(function (k) { a[k.k] += num(r[k.k]) }) }
+function aggAdd(a, r) { a._n++; if (estLexus(r)) a._lexN++; GKEYS.forEach(function (k) { a[k.k] += valK(r, k.k) }) }
 function aggLexus(a) { return KPI_TOYOTA_SEUL.length > 0 && a && a._n > 0 && a._lexN === a._n }
 function buildTree(rows) {
   const R = {}
@@ -604,14 +650,16 @@ function renderCards(rootEl, doc) {
       GKEYS.filter(function (k) { return kpiApplicable(r, k.k) }).forEach(function (k, gi) {
         const line = doc.createElement('div'); line.style.cssText = 'display:flex;align-items:center;justify-content:space-between;gap:10px;padding:5px 0' + (gi ? ';border-top:0.5px solid #f1f5fb' : '')
         const lab = doc.createElement('span'); lab.style.cssText = 'font-size:13px;color:#4a6a8a'; lab.textContent = k.label; line.appendChild(lab)
-        if (canEdit) {
+        if (k.calc) {
+          const val = doc.createElement('span'); val.className = 'obj-card-total'; val.style.cssText = 'font-size:16px;font-weight:700;color:#2a5ea9'; val.textContent = Math.round(valK(r, k.k)); line.appendChild(val)
+        } else if (canEdit) {
           const inp = doc.createElement('input'); inp.type = 'number'; inp.inputMode = 'numeric'; inp.min = '0'; inp.step = '1'; inp.value = (r[k.k] == null ? 0 : r[k.k])
           inp.style.cssText = 'width:74px;text-align:right;padding:6px 9px;border:0.5px solid #cfe0f2;border-radius:8px;font-size:15px;color:#2a5ea9;font-weight:600;outline:none;font-family:inherit'
           inp.addEventListener('focus', function () { inp.select() })
-          inp.addEventListener('input', function () { r[k.k] = parseInt(inp.value) || 0; state._saveMsg = null; try { updateBalanceBar() } catch (e) { } })
+          inp.addEventListener('input', function () { r[k.k] = parseInt(inp.value) || 0; state._saveMsg = null; try { const t = card.querySelector('.obj-card-total'); if (t) t.textContent = Math.round(valK(r, 'cde_total')); updateBalanceBar() } catch (e) { } })
           line.appendChild(inp)
         } else {
-          const val = doc.createElement('span'); val.style.cssText = 'font-size:16px;font-weight:600;color:#2a5ea9'; val.textContent = Math.round(num(r[k.k])); line.appendChild(val)
+          const val = doc.createElement('span'); val.style.cssText = 'font-size:16px;font-weight:600;color:#2a5ea9'; val.textContent = Math.round(valK(r, k.k)); line.appendChild(val)
         }
         body.appendChild(line)
       })
@@ -717,7 +765,7 @@ function renderTree(rootEl, doc) {
 }
 
 // --- vue vendeur ---
-function aggObjectif(f) { return visibleRows().reduce(function (a, r) { return a + num(r[f]) }, 0) }
+function aggObjectif(f) { return visibleRows().reduce(function (a, r) { return a + valK(r, f) }, 0) }
 function renderVendeur(rootEl, doc) {
   const rows = visibleRows()
   if (!rows.length) { const m = doc.createElement('div'); m.style.cssText = 'text-align:center;padding:30px;color:#7a9cc4;font-size:12px;font-style:italic'; m.textContent = 'Aucun objectif pour cette période.'; rootEl.appendChild(m); return }
@@ -730,7 +778,7 @@ function renderVendeur(rootEl, doc) {
   rootEl.appendChild(hero)
   const grid = doc.createElement('div'); grid.className = 'obj-cards'; grid.style.cssText = 'display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:12px'
   for (const kp of colonnesPour(KPIS_SUIVI, rows)) {
-    const obj = aggObjectif(kp.k), real = realOk ? realiseFor(realCur, myId, REAL_FIELDS[kp.k]) : 0, pct = obj > 0 ? Math.round(real / obj * 100) : 0, ps = paceStyle(real, obj, prorata), reste = Math.max(0, obj - real)
+    const obj = aggObjectif(kp.k), real = realOk ? (kp.k === 'cde_total' ? realiseFor(realCur, myId, REAL_FIELDS.commandes) + realiseFor(realCur, myId, REAL_FIELDS.pro) : realiseFor(realCur, myId, REAL_FIELDS[kp.k])) : 0, pct = obj > 0 ? Math.round(real / obj * 100) : 0, ps = paceStyle(real, obj, prorata), reste = Math.max(0, obj - real)
     let cad
     if (obj <= 0) cad = 'pas d\u2019objectif fixé'
     else if (reste <= 0) cad = 'objectif atteint'
