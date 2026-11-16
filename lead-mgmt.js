@@ -2038,8 +2038,16 @@
       }
       if (v.site) D.site = Number(v.site);
       var vend = v.vendeur;
+      // v123 : le re-rendu périodique (état BACS, verrou) ne fait plus sortir
+      // le curseur du champ en cours de saisie (note pour le vendeur…).
+      var act = doc.activeElement, fid = act && $drawer.contains(act) && act.id ? act.id : null, s0 = null, s1 = null;
+      if (fid) { try { s0 = act.selectionStart; s1 = act.selectionEnd; } catch (e) {} }
       renderDrawer();
       var sel = $drawer.querySelector('#q-vendeur'); if (sel && vend) sel.value = vend;
+      if (fid) {
+        var nf = $drawer.querySelector('#' + fid);
+        if (nf) { try { nf.focus({ preventScroll: true }); if (s0 != null) nf.setSelectionRange(s0, s1); } catch (e) {} }
+      }
     }
     async function fermerDrawer(silencieux) {
       clearInterval(renouvellement); clearInterval(suiviCreation);
