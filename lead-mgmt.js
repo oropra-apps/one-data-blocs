@@ -1,9 +1,14 @@
 // ============================================================================
 //  LEAD MANAGEMENT — module One Data (OD.define 'lead-mgmt')
-//  VERSION TEAM COLIN (v122) — déploiement CIBLÉ (publish-targets :
-//  v123 (16/11/2026) : fiche du lead, carte « Message automatique » sous le
-//    bandeau Appeler / SMS / WhatsApp : canal, état, envoyé / remis / lu /
-//    lien ouvert / réponse en clair (auparavant seulement dans l'infobulle).
+//  VERSION TEAM COLIN (v123) — déploiement CIBLÉ (publish-targets :
+//  v123 (16/11/2026) : retours de Julien Faugeras, trois correctifs réunis :
+//    - onglet HISTORIQUE : le sélecteur VN / VO du haut de page filtre enfin
+//      la liste (colonne univers ajoutée à poste_historique) ;
+//    - fiche du lead, carte « Message automatique » sous le bandeau Appeler /
+//      SMS / WhatsApp : canal, état, envoyé / remis / lu / lien ouvert /
+//      réponse en clair (auparavant seulement dans l'infobulle) — agent, ticket 14 ;
+//    - plateau Vroom : le curseur ne sort plus de la note vendeur au re-rendu
+//      périodique — agent, ticket 13.
 //  v122 (13/11/2026) : listes de leads — DÉTAIL DE LA DEMANDE sous la ligne
 //    (qualification de la Vroom Team, ex. date du RDV atelier, sinon message du
 //    client), sans ouvrir la fiche. Texte complet au survol (detailDe).
@@ -4604,6 +4609,10 @@
       vends.sort(function (a, b) { return Number(b.id) === Number(MOI) ? 1 : Number(a.id) === Number(MOI) ? -1 : a.nom.localeCompare(b.nom, 'fr'); });
       if (H.vend && !vends.some(function (v) { return String(v.id) === String(H.vend); })) H.vend = '';
       if (H.vend) rows = rows.filter(function (x) { return String(x.par_id_user) === String(H.vend); });
+      // v123 (16/11/2026) : le sélecteur VN / VO du haut de page s'applique aussi
+      // à l'historique (poste_historique renvoie désormais l'univers du lead).
+      var uH = univActif();
+      if (uH !== 'tous') rows = rows.filter(function (x) { return !x.univers || x.univers === uH; });
       var q = String(H.q || '').trim().toLowerCase();
       var vis = rows.filter(function (h) {
         if (H.statut && famSt(h) !== H.statut) return false;
