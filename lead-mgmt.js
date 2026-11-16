@@ -1,6 +1,9 @@
 // ============================================================================
 //  LEAD MANAGEMENT — module One Data (OD.define 'lead-mgmt')
 //  VERSION TEAM COLIN (v122) — déploiement CIBLÉ (publish-targets :
+//  v123 (16/11/2026) : fiche du lead, carte « Message automatique » sous le
+//    bandeau Appeler / SMS / WhatsApp : canal, état, envoyé / remis / lu /
+//    lien ouvert / réponse en clair (auparavant seulement dans l'infobulle).
 //  v122 (13/11/2026) : listes de leads — DÉTAIL DE LA DEMANDE sous la ligne
 //    (qualification de la Vroom Team, ex. date du RDV atelier, sinon message du
 //    client), sans ouvrir la fiche. Texte complet au survol (detailDe).
@@ -3290,6 +3293,30 @@
       var ton = ACC_TONS[a.pastille_ton] ? a.pastille_ton : 'gris', tip = infobulleAcc(a);
       return ' <span class="acc-p acc-' + ton + '" title="' + esc(tip) + '" aria-label="' + esc(a.pastille_libelle + '. ' + tip.replace(/\n/g, '. ')) + '">' + esc(a.pastille_libelle) + '</span>';
     }
+    // v123 (demande de Julien Faugeras) : sur la fiche du lead, le suivi du
+    // message automatique en clair, sous le bandeau Appeler / SMS / WhatsApp
+    // (même contenu que l'infobulle de la pastille, une étape par ligne).
+    function carteAcc(l) {
+      var a = accDe(l);
+      if (!a || !a.pastille_libelle) return '';
+      var c = ACC_CANAL[a.canal] || null, rows = [];
+      if (a.envoye_le) rows.push(['Envoyé', quandAcc(a.envoye_le)]);
+      if (a.remis_le) rows.push(['Remis', quandAcc(a.remis_le)]);
+      if (a.lu_le) rows.push(['Lu', quandAcc(a.lu_le)]);
+      if (a.lien_ouvert_le) rows.push(['Lien ouvert', quandAcc(a.lien_ouvert_le)]);
+      var rep = '';
+      if (a.repondu_le) {
+        rep = 'Le client ' + (ACC_CHOIX[a.choix_type] || 'a répondu');
+        if (a.choix_type === 'creneau') { var cr = creneauAcc(l); if (cr) rep += ' : ' + plageCreneau(cr); }
+        rows.push(['Réponse', quandAcc(a.repondu_le)]);
+      }
+      if (!rows.length) rows.push(['Envoi', 'pas encore envoyé']);
+      return '<div class="fx-card"><div class="fx-lab">Message automatique' + (c ? ' (' + esc(c) + ')' : '') + ' · ' + esc(a.pastille_libelle) + '</div>'
+        + rows.map(function (r) { return '<div class="fx-row"><span>' + esc(r[0]) + '</span><b>' + esc(r[1]) + '</b></div>'; }).join('')
+        + (rep ? '<p class="fx-note"><b>' + esc(rep) + '</b></p>' : '')
+        + (a.texte_reponse ? '<p class="fx-note">« ' + esc(String(a.texte_reponse).replace(/\s+/g, ' ').trim().slice(0, 240)) + ' »</p>' : '')
+        + '</div>';
+    }
     // Tri du Pool (v97) : 0 « attend un appel maintenant », 1 créneau à moins
     // de 30 min (ou en cours, ou manqué), 2 sans créneau, 3 créneau plus loin.
     function rangPool(l) {
@@ -4964,6 +4991,7 @@
       var v = cx.vroom, sous = v && v.rdv_debut && v.rdv_ok !== false ? 'RDV déjà posé par la Vroom Team : ' + quand(v.rdv_debut) + (v.rdv_vendeur ? ' avec ' + propre(v.rdv_vendeur) : '') + ' · à confirmer'
         : (l.telephone ? telAff(l.telephone) : 'Aucun numéro dans la demande');
       var c2 = '<div class="fx-call"><div class="t"><b>' + esc(prochain) + '</b><small>' + esc(sous) + '</small></div><div class="canaux">' + canaux + '</div></div>'
+        + carteAcc(l)
         + composeHtml(l)
         + '<div class="fx-card"><div class="fx-th"><h3 class="fx-t"><span class="fx-d">D</span>Delco · ce qu\'il faut savoir avant d\'appeler</h3></div>'
         + (D.cx ? '<div class="fx-delco">' + pointsDelco(l, cx).map(function (p) { return '<div><b class="' + p[1] + '">' + esc(p[0]) + '</b><p>' + esc(p[2]) + '</p></div>'; }).join('') + '</div>' : '<p class="hint">Delco lit le dossier du client…</p>') + '</div>'
