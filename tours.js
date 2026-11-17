@@ -1,5 +1,8 @@
 // ============================================================================
-//  VISITES GUIDÉES (« Montre-moi en vrai ») — module One Data (OD.define) v7
+//  VISITES GUIDÉES (« Montre-moi en vrai ») — module One Data (OD.define) v8
+//  v8 (17/11/2026) : Propositions commerciales — les filtres (.flt) et la
+//    synthèse étaient sautés (mauvais repère) ; la visite déplie la
+//    première affaire pour montrer ses versions, puis la referme.
 //  v7 (17/11/2026) : passage d'une étape à l'autre accéléré — une étape
 //    facultative absente est passée aussitôt (150 ms, 1,2 s après une
 //    action) au lieu de 2,5 s ; Propositions commerciales : étape « Pas
@@ -433,14 +436,19 @@ OD.define('tours', {
 
     'pcom': {
       path: '/fiche-client', pageId: '259f1951-a2d4-4b90-ac83-0b3febe1d4ec', rootCheck: '#oropra-fiche-shell .fs-tabs',
+      // Referme l'affaire dépliée par la visite.
+      fin: () => { if (win.__odtPcomOuvert) { win.__odtPcomOuvert = false; const b = doc.querySelector('#pcom-root .ln'); if (b) b.click(); } },
       steps: [
-        { action: ficheOnglet('pcom'), target: { css: '#oropra-fiche-shell .fs-tab[data-tab="pcom"]' }, title: 'P. Commerciales', body: 'Le suivi commercial du client, affaire par affaire.' },
+        { action: async () => { await ficheOnglet('pcom')(); for (let k = 0; k < 15 && !doc.querySelector('#pcom-root .ln, #pcom-root .vide'); k++) await sleep(200); },
+          target: { css: '#oropra-fiche-shell .fs-tab[data-tab="pcom"]' }, title: 'P. Commerciales', body: 'Le suivi commercial du client, affaire par affaire.' },
         { optional: true, target: { css: '#pcom-root > .vide' }, title: 'Pas encore d’affaire', body: 'Ce client n’a aucune affaire : dès qu’une simulation ou une commande est faite dans BACS, elle apparaît ici. Ouvre un client qui a des affaires pour voir la suite de la visite.' },
-        { optional: true, target: { css: '#pcom-root .outils' }, title: 'Les filtres', body: 'VN ou VO, et le statut des affaires.' },
-        { optional: true, target: { css: '#pcom-root .ln' }, title: 'Une affaire', body: 'Une intention d’achat : l’opportunité BACS avec ses simulations et ses commandes. Où on en est, depuis quand rien ne bouge, le montant de la commande.' },
-        { optional: true, target: { css: '#pcom-root .plier, #pcom-root .vers' }, title: 'Les versions', body: 'Déplie une affaire : chaque version avec son écart de prix, celle qui est retenue, celles qui ont été refusées.' },
+        { optional: true, target: { css: '#pcom-root .flt' }, title: 'Les filtres', body: 'Tous, VN ou VO ; et l’état : en cours, commandées, vendues, abandonnées, avec leur nombre.' },
+        { optional: true, target: { css: '#pcom-root .res' }, title: 'La synthèse', body: 'Combien d’affaires, combien en cours, ce qu’elles engagent, et la plus ancienne sans mouvement.' },
+        { optional: true, target: { css: '#pcom-root .ln' }, title: 'Une affaire', body: 'Une intention d’achat : l’opportunité BACS avec ses simulations et ses commandes. Le véhicule, le vendeur et le site, le nombre de documents et de versions, la fourchette de prix, les jours sans mouvement et l’état.' },
+        { optional: true, action: async () => { if (!doc.querySelector('#pcom-root .det')) { const b = doc.querySelector('#pcom-root .ln'); if (b) { b.click(); win.__odtPcomOuvert = true; await sleep(400); } } },
+          target: { css: '#pcom-root .det' }, title: 'Les versions', body: 'Je déplie l’affaire : chaque version avec son écart de prix, celle qui est retenue, et les abandonnées (à afficher ou masquer). La loupe consulte un document, « B » l’ouvre dans BACS.' },
         { optional: true, target: { css: '#pcom-root .frise' }, title: 'Plus ancien', body: 'Au-delà de 12 mois, les affaires passent sur une frise.' },
-        FIN('Créer ou modifier', 'Chez Team Colin, simulations et commandes se font dans BACS : elles remontent ici toutes seules. La loupe consulte un document, « B » l’ouvre dans BACS.'),
+        FIN('Créer ou modifier', 'Chez Team Colin, simulations et commandes se font dans BACS : elles remontent ici et dans la gestion des ventes toutes seules.'),
       ],
     },
 
