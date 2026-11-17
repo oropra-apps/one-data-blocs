@@ -1,5 +1,9 @@
 // ============================================================================
-//  NOTIFICATIONS — module One Data (OD.define)   v14 — PROFIL TEAM COLIN
+//  NOTIFICATIONS — module One Data (OD.define)   v15 — PROFIL TEAM COLIN
+//
+//  v15 (17/11/2026) : les alertes de la concession virtuelle (Pavillon) ont un
+//   bouton « Rejoindre au Pavillon » (lien de la salle du client) ; « On m'attend »
+//   compte les alertes non lues (notif_lire), la page s'ouvre donc dessus.
 //
 //  v14 (16/11/2026) : INCONNUS — la conversation à DEUX VOIX. Le dernier appel
 //   s'affiche en dialogue Client / concession (summary.dialogue de l'appel,
@@ -476,6 +480,7 @@ OD.define('notifications', {
   cursor:pointer;border:1px solid transparent;text-align:center;white-space:nowrap}
 #notif-root .btn.p{background:var(--bleu);color:#fff}
 #notif-root .btn.p:hover{background:#24528f}
+#notif-root a.btn{text-decoration:none;display:inline-block}
 #notif-root .btn.s{background:var(--card);border-color:var(--line-2);color:var(--ink-2)}
 #notif-root .btn.s:hover{border-color:var(--bleu-clair);color:var(--bleu)}
 #notif-root .btn.t{background:none;color:var(--ink-3);font-weight:600;font-size:12px;padding:4px}
@@ -1038,16 +1043,27 @@ OD.define('notifications', {
         + '<button type="button" class="q ann" data-role="classer-fermer">annuler</button></div>';
     }
 
+    // v15 : une alerte de la concession virtuelle (Pavillon) porte le lien de la
+    // salle du client : il devient un bouton « Rejoindre au Pavillon », le texte
+    // reste lisible sans l'adresse brute. Seuls les domaines du Pavillon sont repris.
+    const LIEN_PAVILLON = /(?:Rejoindre(?: la salle)?\s*:\s*)?(https:\/\/(?:manouvelleconcession\.one-data\.fr|oropra-concession\.oropra-gen\.workers\.dev)\/[^\s<>"']+)/;
+    function lienAlerte(m) {
+      const x = String(m || '').match(LIEN_PAVILLON);
+      return x ? { texte: String(m).replace(x[0], '').replace(/\s+$/, ''), lien: x[1].replace(/[.,;]+$/, '') } : { texte: m, lien: null };
+    }
     function carteAlerte(a) {
+      const L = lienAlerte(a.message);
+      const pav = !!L.lien;
       return '<article class="cli chaud" data-alerte="' + esc(a.id) + '">'
         + '<div class="av">!</div>'
-        + '<div><h3>' + esc(a.client_nom || 'Dossier à traiter')
-        + ' <span class="enjeu livr">Signalé par ' + esc(a.de) + '</span></h3>'
+        + '<div><h3>' + esc(a.client_nom || (pav ? 'Client au Pavillon' : 'Dossier à traiter'))
+        + ' <span class="enjeu livr">' + (pav ? 'Concession virtuelle' : 'Signalé par ' + esc(a.de)) + '</span></h3>'
         + '<p class="attend">' + esc(quandLisible(a.cree_le)) + '</p>'
-        + (a.message ? '<p class="extrait">' + esc(a.message) + '</p>' : '')
+        + (L.texte ? '<p class="extrait">' + esc(L.texte) + '</p>' : '')
         + '</div>'
         + '<div class="actes">'
-        + (a.id_client ? '<button type="button" class="btn p" data-role="repondre">Ouvrir la fiche</button>' : '')
+        + (pav ? '<a class="btn p" href="' + esc(L.lien) + '" target="_blank" rel="noopener">Rejoindre au Pavillon</a>' : '')
+        + (a.id_client ? '<button type="button" class="btn ' + (pav ? 't' : 'p') + '" data-role="repondre">Ouvrir la fiche</button>' : '')
         + '<button type="button" class="btn t" data-role="alerte-lue">J’ai vu</button>'
         + '</div></article>';
     }
