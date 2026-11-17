@@ -1,5 +1,8 @@
 // ============================================================================
-//  TOP NAV — module One Data (OD.define)  v46 — COCKPIT MARKETING
+//  TOP NAV — module One Data (OD.define)  v47 — ACCÈS AU COCKPIT PAR LA BASE
+//  v47 (17/11/2026) : « Cockpit marketing » s'affiche si la base répond oui
+//    (RPC mkt_acces, champ acces des items). Pilote : seuls les utilisateurs
+//    de od_predict.mkt_acces ; table vide = rôles 1, 2, 5, 6, 7, 8.
 //  v46 (17/11/2026) : menu Leads, entrée « Cockpit marketing » (page
 //    /cockpit-marketing, module cockpit-mkt) visible des seuls rôles 1, 2, 5,
 //    6, 7 et 8 (nouveau champ roles des items de menu).
@@ -434,7 +437,7 @@ OD.define('topnav', {
     { label: 'Leads', leads: true, items: [
       { t: 'Leads management', p: P.marketing, leads: true },
       { t: 'Leads performances', p: P.perf, vue: 'leads' },
-      { t: 'Cockpit marketing', p: P.cockpitMkt, roles: [1, 2, 5, 6, 7, 8] }
+      { t: 'Cockpit marketing', p: P.cockpitMkt, acces: 'mkt_acces' }
     ] },
     { label: 'Véhicules', items: [
       { t: 'Stock VN', p: P.vnListe },
@@ -632,7 +635,8 @@ OD.define('topnav', {
       m.items.forEach(function (it) {
         if (__masque.indexOf(it.p) !== -1) return;
         if (it.roles && it.roles.indexOf(__roleMenu) === -1) return;
-        items += '<a data-page="' + it.p + '"' + (it.vue ? ' data-vue="' + it.vue + '"' : '') + '>' + esc(it.t) +
+        items += '<a data-page="' + it.p + '"' + (it.vue ? ' data-vue="' + it.vue + '"' : '') +
+          (it.acces ? ' data-acces="' + it.acces + '" style="display:none"' : '') + '>' + esc(it.t) +
           (it.badge ? '<span class="od-pill od-notifs-pill" style="display:none"></span>' : '') +
           (it.leads && __leadsBadge ? '<span class="od-pill od-leads-pill" style="display:none"></span><span class="od-pill od-camp-pill" style="display:none"></span>' : '') + '</a>';
       });
@@ -750,6 +754,8 @@ OD.define('topnav', {
         if (!wasOpen && parent.classList.contains('od-user')) rafraichirBadgeArbitrage();
       });
     });
+    // v47 : entrées dont l'accès est tranché par la base (masquées jusqu'au oui)
+    r.querySelectorAll('[data-acces]').forEach(function (el) { verifierAcces(el, 0); });
     // navigation par data-page
     r.querySelectorAll('[data-page]').forEach(function (el) {
       el.addEventListener('click', function (e) {
@@ -1442,6 +1448,19 @@ OD.define('topnav', {
     nature_differente:'société vs particulier', vin_commun:'même véhicule'
   };
 
+  // v47 : accès à une entrée de menu demandé à la base, une fois par utilisateur.
+  const ACCES_CACHE = {};
+  function verifierAcces(el, essai) {
+    const fn = el.getAttribute('data-acces'); const uid = arbUserId(); const sb = arbSb();
+    if (!fn) return;
+    if (!sb || uid == null) { if (essai < 40) setTimeout(function () { verifierAcces(el, essai + 1); }, 500); return; }
+    const cle = fn + '|' + uid;
+    if (!ACCES_CACHE[cle]) {
+      ACCES_CACHE[cle] = Promise.resolve(sb.rpc(fn)).then(function (r) { return !!(r && !r.error && r.data === true); }, function () { return false; });
+      ACCES_CACHE[cle].then(function (ok) { if (!ok) setTimeout(function () { delete ACCES_CACHE[cle]; }, 60000); });
+    }
+    ACCES_CACHE[cle].then(function (ok) { if (ok) el.style.display = ''; });
+  }
   function arbSb() {
     try { return wwLib.wwPlugins && wwLib.wwPlugins.supabase && wwLib.wwPlugins.supabase.instance; }
     catch (e) { return null; }
