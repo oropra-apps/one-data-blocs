@@ -1,5 +1,8 @@
 // ============================================================================
-//  COCKPIT MARKETING — module One Data (OD.define)   v2 — PROFIL TEAM COLIN
+//  COCKPIT MARKETING — module One Data (OD.define)   v3 — PROFIL TEAM COLIN
+//  v3 (17/11/2026) : périmètre choisi dans la page (groupe / marque / affaire /
+//    site, RPC mkt_perimetre), comparatif au niveau inférieur, suivi des
+//    campagnes limité et ventilé selon le même périmètre.
 //  v2 (17/11/2026) : accès tranché par la base (RPC mkt_acces), pilote limité.
 //
 //  Page du directeur digital et marketing. Quatre onglets :
@@ -14,7 +17,7 @@
 //  Prérequis SQL (tenant Team Colin, sql/04_cockpit_marketing.sql) :
 //    mkt_synthese, mkt_audience, mkt_export, mkt_campagne_creer, mkt_campagnes
 //  Accès : rôles 1, 2, 5, 6, 7, 8 (contrôlé aussi côté base par mkt_viewer).
-//  Périmètre : suit le bus de site (window.oropraSite).
+//  Périmètre : sélecteur propre à la page (le site de la barre du haut n'est pas suivi).
 // ============================================================================
 
 OD.define('cockpit-mkt', {
@@ -59,7 +62,8 @@ OD.define('cockpit-mkt', {
     const S = {
       onglet: 'moments', synth: null, err: null, chargement: true,
       crit: critDefaut(), nom: '', motif: '', audience: null, audErr: null, audCharge: false, audSeq: 0,
-      confirm: null, envoi: false, message: null, campagnes: null, campErr: null, ouvertCoh: null
+      confirm: null, envoi: false, message: null, campagnes: null, campErr: null, ouvertCoh: null,
+      per: { niveau: 'groupe', valeur: null }, perim: null, ouvertCamp: {}
     };
     function critDefaut() {
       return { segments: [], etats: [], archetypes: [], etapes: [], marques: [], financements: [],
@@ -86,20 +90,56 @@ OD.define('cockpit-mkt', {
       try { const w = wwLib.getFrontWindow(); if (w && w.oropraSite) return w.oropraSite; } catch (e) { }
       return window.oropraSite || null;
     }
+    // v3 : le périmètre se choisit DANS la page (groupe / marque / affaire / site),
+    // indépendamment du site de la barre du haut. Mémorisé par utilisateur.
+    const NIVEAUX = [['groupe', 'Groupe'], ['marque', 'Marque'], ['affaire', 'Affaire'], ['site', 'Site']];
+    const SOUS_NIVEAU = { groupe: 'marque', marque: 'affaire', affaire: 'site', site: null };
+    const CLE_PER = () => 'od-mkt-perimetre-' + (viewer() || 0);
+    function lirePer() {
+      try { const p = JSON.parse(localStorage.getItem(CLE_PER()) || 'null'); if (p && p.niveau) return p; } catch (e) { }
+      return { niveau: 'groupe', valeur: null };
+    }
+    function ecrirePer() { try { localStorage.setItem(CLE_PER(), JSON.stringify(S.per)); } catch (e) { } }
+    const cleNiveau = (s, niv) => niv === 'marque' ? s.marque : niv === 'affaire' ? String(s.id_affaire) : niv === 'site' ? String(s.id_site) : 'groupe';
+    const libNiveau = (s, niv) => niv === 'marque' ? (s.marque.charAt(0) + s.marque.slice(1).toLowerCase()) : niv === 'affaire' ? s.affaire : niv === 'site' ? s.site : 'Groupe';
+    function sitesDe(niv, val) {
+      const l = S.perim || [];
+      if (niv === 'groupe' || val == null) return l;
+      return l.filter(s => cleNiveau(s, niv) === String(val));
+    }
     function sites() {
-      try {
-        const b = bus();
-        if (b && typeof b.getSitesDuPerimetre === 'function') {
-          const l = (b.getSitesDuPerimetre() || []).map(Number).filter(x => x > 0);
-          if (l.length) return l;
-        }
-        if (b && typeof b.getSiteId === 'function') { const id = Number(b.getSiteId()); if (id > 0) return [id]; }
-      } catch (e) { }
-      return null;
+      if (!S.perim || S.per.niveau === 'groupe' || S.per.valeur == null) return null;
+      const ids = sitesDe(S.per.niveau, S.per.valeur).map(s => Number(s.id_site));
+      return ids.length ? ids : null;
     }
     function libPerimetre() {
-      try { const p = bus() && bus().getPerimetre && bus().getPerimetre(); if (p && p.label) return p.label; } catch (e) { }
-      return 'Tout mon périmètre';
+      const p = S.per;
+      if (p.niveau === 'groupe' || p.valeur == null) return 'Tout le groupe · ' + n0((S.perim || []).length) + ' concessions';
+      const l = sitesDe(p.niveau, p.valeur);
+      if (!l.length) return 'Tout le groupe';
+      const nom = libNiveau(l[0], p.niveau);
+      return (p.niveau === 'site' ? 'Site ' : p.niveau === 'affaire' ? 'Affaire ' : 'Marque ') + nom + (p.niveau !== 'site' ? ' · ' + l.length + ' concession' + (l.length > 1 ? 's' : '') : '');
+    }
+    // Regroupe une liste {id_site, ...valeurs} au niveau voulu
+    function regrouper(lignes, niv, champs) {
+      const parSite = {}; (S.perim || []).forEach(s => { parSite[s.id_site] = s; });
+      const g = {};
+      lignes.forEach(x => {
+        const s = parSite[x.id_site]; if (!s) return;
+        const k = cleNiveau(s, niv);
+        if (!g[k]) { g[k] = { cle: k, lib: libNiveau(s, niv) }; champs.forEach(c => { g[k][c] = 0; }); }
+        champs.forEach(c => { g[k][c] += Number(x[c]) || 0; });
+      });
+      return Object.values(g);
+    }
+    function choisirPer(niveau, valeur) {
+      if (niveau !== 'groupe' && valeur == null) {
+        const premier = (S.perim || [])[0]; valeur = premier ? cleNiveau(premier, niveau) : null;
+      }
+      S.per = { niveau: niveau, valeur: niveau === 'groupe' ? null : valeur };
+      ecrirePer();
+      S.audience = null; S.confirm = null; S.message = null; S.campagnes = null;
+      chargerSynthese().then(() => { if (S.onglet === 'composer') chargerAudience(); });
     }
     function ouvrirFicheClient(id) {
       const n = Number(id); if (!(n > 0)) return;
@@ -134,6 +174,14 @@ OD.define('cockpit-mkt', {
 #mkt-root h2{font-size:15px;font-weight:800;color:var(--bleu-f);margin:0 0 10px;display:flex;align-items:center;gap:8px}
 #mkt-root h2:before{content:'';width:4px;height:16px;border-radius:2px;background:var(--bleu);flex:none}
 #mkt-root .sous{color:var(--ink-3);font-size:12.5px}
+#mkt-root .perim{display:flex;flex-wrap:wrap;align-items:center;gap:8px 10px;margin:-4px 0 14px}
+#mkt-root .perl{font-size:10.5px;font-weight:800;letter-spacing:.07em;text-transform:uppercase;color:var(--ink-3)}
+#mkt-root .seg{display:inline-flex;border:1px solid #d6e2f2;border-radius:10px;overflow:hidden;background:#fff}
+#mkt-root .seg button{border:0;background:none;padding:7px 14px;font:inherit;font-size:13px;font-weight:700;color:var(--ink-2);cursor:pointer;border-right:1px solid #e3ebf6}
+#mkt-root .seg button:last-child{border-right:0}
+#mkt-root .seg button.on{background:var(--bleu);color:#fff}
+#mkt-root .perim select{min-width:220px}
+#mkt-root tr.sousl td{background:var(--tuile);font-size:12.5px}
 #mkt-root .tete{display:flex;flex-wrap:wrap;align-items:flex-end;justify-content:space-between;gap:10px;margin-bottom:14px}
 #mkt-root .onglets{display:flex;gap:4px;background:var(--tuile);border:1px solid var(--line);border-radius:12px;padding:4px;overflow-x:auto;margin-bottom:16px}
 #mkt-root .onglets button{border:0;background:none;padding:8px 16px;border-radius:9px;font:inherit;font-weight:700;color:var(--ink-2);cursor:pointer;white-space:nowrap}
@@ -227,11 +275,21 @@ OD.define('cockpit-mkt', {
     }
 
     // ------------------------------------------------------------- chargements
+    let synthSeq = 0;
     async function chargerSynthese() {
-      S.chargement = true; S.err = null; rendre();
-      try { S.synth = await rpc('mkt_synthese', { p_site_ids: sites(), p_viewer_id_user: viewer() }); }
-      catch (e) { S.err = e.message || String(e); console.error('[cockpit-mkt]', e); }
+      const seq = ++synthSeq; S.chargement = true; S.err = null; rendre();
+      let d = null, err = null;
+      try { d = await rpc('mkt_synthese', { p_site_ids: sites(), p_viewer_id_user: viewer() }); }
+      catch (e) { err = e.message || String(e); console.error('[cockpit-mkt]', e); }
+      if (seq !== synthSeq) return;
+      if (d) S.synth = d; S.err = err;
       S.chargement = false; rendre();
+    }
+    async function chargerPerimetre() {
+      try { S.perim = await rpc('mkt_perimetre', { p_viewer_id_user: viewer() }) || []; }
+      catch (e) { S.perim = []; console.error('[cockpit-mkt] périmètre', e); }
+      // un choix mémorisé qui ne correspond plus à rien repasse au groupe
+      if (S.per.niveau !== 'groupe' && !sitesDe(S.per.niveau, S.per.valeur).length) S.per = { niveau: 'groupe', valeur: null };
     }
     let minuteur = null;
     function planifierAudience() {
@@ -257,10 +315,14 @@ OD.define('cockpit-mkt', {
       } catch (e) { if (seq !== S.audSeq) return; S.audErr = e.message || String(e); }
       S.audCharge = false; rendreAudience();
     }
+    let campSeq = 0;
     async function chargerCampagnes() {
-      S.campErr = null;
-      try { S.campagnes = await rpc('mkt_campagnes', { p_viewer_id_user: viewer() }) || []; }
-      catch (e) { S.campErr = e.message || String(e); S.campagnes = []; }
+      const seq = ++campSeq; S.campCharge = true; S.campErr = null;
+      let res = [], err = null;
+      try { res = await rpc('mkt_campagnes', { p_site_ids: sites(), p_viewer_id_user: viewer() }) || []; }
+      catch (e) { err = e.message || String(e); }
+      if (seq !== campSeq) return;
+      S.campagnes = res; S.campErr = err; S.campCharge = false;
       rendre();
     }
 
@@ -295,6 +357,7 @@ OD.define('cockpit-mkt', {
       let h = '<div class="tete"><div><h1>Cockpit marketing</h1><div class="sous">' + esc(libPerimetre()) +
         (s && s.date_ref ? ' · scores du ' + esc(dfr(s.date_ref)) : '') + '</div></div>' +
         '<button class="btn sec" data-act="recharger">Actualiser</button></div>';
+      h += selecteurPerimetre();
       h += '<div class="onglets">' + [['moments', 'Moments'], ['composer', 'Composer une campagne'], ['campagnes', 'Campagnes'], ['moteur', 'Moteur']]
         .map(o => '<button data-onglet="' + o[0] + '" class="' + (S.onglet === o[0] ? 'on' : '') + '">' + o[1] + '</button>').join('') + '</div>';
       if (S.err) h += '<div class="alerte">Le cockpit n\'a pas pu charger les scores : ' + esc(S.err) + '</div>';
@@ -309,6 +372,30 @@ OD.define('cockpit-mkt', {
       if (S.onglet === 'composer') rendreAudience();
     }
 
+    const TITRE_NIV = { marque: 'Par marque', affaire: 'Par affaire', site: 'Par concession' };
+    function selecteurPerimetre() {
+      const p = S.per;
+      let h = '<div class="perim"><span class="perl">Périmètre</span><div class="seg">' + NIVEAUX.map(n => '<button data-niveau="' + n[0] + '" class="' + (p.niveau === n[0] ? 'on' : '') + '">' + n[1] + '</button>').join('') + '</div>';
+      if (p.niveau !== 'groupe') {
+        const opts = {};
+        (S.perim || []).forEach(s => { const k = cleNiveau(s, p.niveau); if (!opts[k]) opts[k] = { k: k, l: libNiveau(s, p.niveau), n: 0 }; opts[k].n += Number(s.n) || 0; });
+        h += '<select data-champ="perval">' + Object.values(opts).sort((a, b) => a.l.localeCompare(b.l, 'fr')).map(o => '<option value="' + esc(o.k) + '"' + (String(p.valeur) === o.k ? ' selected' : '') + '>' + esc(o.l) + ' · ' + n0(o.n) + ' clients</option>').join('') + '</select>';
+      }
+      if (S.chargement) h += '<span class="charge">mise à jour…</span>';
+      return h + '</div>';
+    }
+    function vueComparatif() {
+      const sous = SOUS_NIVEAU[S.per.niveau]; if (!sous || !S.perim) return '';
+      const l = regrouper(sitesDe(S.per.niveau, S.per.valeur).map(s => ({ id_site: s.id_site, n: s.n, attendus: s.attendus })), sous, ['n', 'attendus'])
+        .sort((a, b) => b.attendus - a.attendus);
+      if (l.length < 2) return '';
+      const tot = l.reduce((a, x) => a + x.attendus, 0) || 1;
+      return '<div class="card"><h2>' + TITRE_NIV[sous] + '</h2><div class="sous" style="margin:-4px 0 10px">Cliquez une ligne pour y restreindre le cockpit.</div><div class="defil"><table class="tbl"><thead><tr><th></th><th class="n">Clients</th><th class="n">Achats attendus</th><th class="n">Taux</th><th>Part des achats attendus</th></tr></thead><tbody>' +
+        l.map(x => '<tr><td><button class="lien" data-act="drill" data-niv="' + sous + '" data-k="' + esc(x.cle) + '">' + esc(x.lib) + '</button></td><td class="n">' + n0(x.n) + '</td><td class="n">' + n0(x.attendus) + '</td><td class="n">' + pct(x.n ? x.attendus / x.n : 0) +
+          '</td><td><div class="barre"><i style="width:' + (x.attendus / tot * 100) + '%"></i></div><div class="fact">' + pct(x.attendus / tot, 0) + '</div></td></tr>').join('') +
+        '</tbody></table></div></div>';
+    }
+
     function vueMoments() {
       const s = S.synth, etats = s.etats || [];
       const tot = Number(s.achats_attendus) || 0;
@@ -319,7 +406,8 @@ OD.define('cockpit-mkt', {
         kpi('Clients suivis', n0(s.clients), 'avec un score à jour') +
         kpi('Achats attendus', n0(tot), 'dans les 6 prochains mois') +
         kpi('Retours atelier attendus', n0(s.retours_atelier_attendus), 'dans les 6 prochains mois') +
-        kpi('Concessions', n0((s.sites || []).length), 'dans le périmètre') + '</div>';
+        kpi('Concessions', n0((sites() || (S.perim || [])).length), 'dans le périmètre') + '</div>';
+      h += vueComparatif();
       h += '<div class="card"><h2>Le brief du jour</h2><div class="brief">' +
         'Le moteur attend <b>' + n0(tot) + ' achats</b> sur ' + n0(s.clients) + ' clients. ' +
         (tot ? '<b>' + pct(chauds / tot, 0) + '</b> viennent des projets en cours et des prospects chauds : c\'est le travail des vendeurs, à protéger d\'une sollicitation de trop. ' : '') +
@@ -422,7 +510,7 @@ OD.define('cockpit-mkt', {
       const okNom = S.nom.trim().length > 0, okNb = finale > 0 && !S.envoi;
       if (S.message) h += '<div class="' + (S.message.ok ? 'resume' : 'alerte') + '">' + S.message.t + '</div>';
       if (S.confirm) {
-        h += '<div class="info">' + n0(finale) + ' sollicitations « Marketing Affaire » vont être créées ' +
+        h += '<div class="info">' + n0(finale) + ' sollicitations « Marketing Affaire » vont être créées sur le périmètre <b>' + esc(libPerimetre()) + '</b>, ' +
           (S.confirm === 'libre' ? 'en <b>libre-service</b> : le premier vendeur qui les prend en devient responsable.' : 'au nom du <b>vendeur habituel</b> de chaque client (libre-service s\'il n\'en a pas).') +
           (temoins > 0 ? ' ' + n0(temoins) + ' clients restent en témoin.' : '') + '<div class="ligne" style="margin-top:8px"><button class="btn vert" data-act="confirmer"' + (S.envoi ? ' disabled' : '') + '>' + (S.envoi ? 'Création…' : 'Confirmer') + '</button><button class="btn sec" data-act="annuler">Annuler</button></div></div>';
       } else {
@@ -444,26 +532,46 @@ OD.define('cockpit-mkt', {
       box.innerHTML = h;
     }
 
+    function ligneResultat(lib, x, extra) {
+      const cib = Number(x.cibles) || 0, pris = cib ? (Number(x.pris) || 0) / cib : 0, tr = cib ? (Number(x.traites) || 0) / cib : 0;
+      const tem = Number(x.temoins) || 0, tc = cib ? (Number(x.commandes) || 0) / cib : null, tt = tem ? (Number(x.commandes_temoin) || 0) / tem : null;
+      const dd = (tc != null && tt != null) ? Math.round((tc - tt) * cib) : null;
+      return '<tr' + (extra ? ' class="sousl"' : '') + '><td>' + lib + '</td><td class="n">' + n0(cib) + '</td>' +
+        '<td><div class="barre"><i style="width:' + (pris * 100) + '%"></i></div><div class="fact">' + pct(pris, 0) + '</div></td>' +
+        '<td><div class="barre"><i style="width:' + (tr * 100) + '%;background:var(--vert)"></i></div><div class="fact">' + pct(tr, 0) + '</div></td>' +
+        '<td class="n">' + n0(x.commandes) + '</td><td class="n">' + pct(tc) + '</td><td class="n">' + pct(tt) + '<div class="fact">' + n0(tem) + ' clients</div></td>' +
+        '<td class="n">' + (dd == null ? '–' : (dd > 0 ? '<span class="tag vert">+' + n0(dd) + '</span>' : '<span class="tag or">' + n0(dd) + '</span>')) + '</td></tr>';
+    }
+    const CHAMPS_RES = ['cibles', 'temoins', 'pris', 'traites', 'commandes', 'commandes_temoin'];
+    const TETE_RES = '<th class="n">Sollicités</th><th>Prises en main</th><th>Traitées</th><th class="n">Commandes</th><th class="n">Taux</th><th class="n">Témoin</th><th class="n">Dues</th>';
     function vueCampagnes() {
-      if (S.campagnes == null) { chargerCampagnes(); return '<div class="card vide">Chargement des campagnes…</div>'; }
+      if (S.campagnes == null) { if (!S.campCharge) chargerCampagnes(); return '<div class="card vide">Chargement des campagnes…</div>'; }
       let h = '';
       if (S.campErr) h += '<div class="alerte">' + esc(S.campErr) + '</div>';
-      const l = S.campagnes || [];
-      if (!l.length) return h + '<div class="card vide">Aucune campagne lancée depuis le cockpit pour l\'instant.<div style="margin-top:10px"><button class="btn" data-onglet="composer">Composer une campagne</button></div></div>';
-      const tc = l.reduce((a, c) => a + (Number(c.cibles) || 0), 0), dues = l.reduce((a, c) => a + Math.max(0, Number(c.commandes_dues) || 0), 0);
-      h += '<div class="bande">' + kpi('Campagnes', n0(l.length), 'lancées depuis le cockpit') + kpi('Clients sollicités', n0(tc), 'hors groupes témoins') +
-        kpi('Commandes', n0(l.reduce((a, c) => a + (Number(c.commandes) || 0), 0)), 'dans les 90 jours') + kpi('Commandes dues aux campagnes', n0(dues), 'au-delà du groupe témoin') + '</div>';
-      h += '<div class="card"><h2>Résultats</h2><div class="sous" style="margin:-4px 0 10px">Une commande compte si elle arrive dans les 90 jours après le lancement. Les commandes dues à la campagne sont l\'écart avec le groupe témoin, ramené au nombre de clients sollicités.</div><div class="defil"><table class="tbl"><thead><tr>' +
-        '<th>Campagne</th><th class="n">Sollicités</th><th>Prises en main</th><th>Traitées</th><th class="n">Commandes</th><th class="n">Taux</th><th class="n">Témoin</th><th class="n">Dues</th></tr></thead><tbody>' +
+      const l = S.campagnes || [], sous = SOUS_NIVEAU[S.per.niveau];
+      if (!l.length) return h + '<div class="card vide">Aucune campagne lancée depuis le cockpit sur ce périmètre.<div style="margin-top:10px"><button class="btn" data-onglet="composer">Composer une campagne</button></div></div>';
+      const somme = c => l.reduce((a, x) => a + (Number(x[c]) || 0), 0);
+      const dues = l.reduce((a, c) => a + Math.max(0, Number(c.commandes_dues) || 0), 0);
+      h += '<div class="bande">' + kpi('Campagnes', n0(l.length), 'touchant ce périmètre') + kpi('Clients sollicités', n0(somme('cibles')), 'hors groupes témoins') +
+        kpi('Commandes', n0(somme('commandes')), 'dans les 90 jours') + kpi('Commandes dues aux campagnes', n0(dues), 'au-delà du groupe témoin') + '</div>';
+      // toutes campagnes confondues, au niveau inférieur du périmètre
+      if (sous) {
+        const tout = []; l.forEach(c => (c.par_site || []).forEach(x => tout.push(x)));
+        const g = regrouper(tout, sous, CHAMPS_RES).sort((a, b) => b.cibles - a.cibles);
+        if (g.length > 1) {
+          h += '<div class="card"><h2>' + TITRE_NIV[sous] + ', toutes campagnes</h2><div class="defil"><table class="tbl"><thead><tr><th></th>' + TETE_RES + '</tr></thead><tbody>' +
+            g.map(x => ligneResultat('<button class="lien" data-act="drill" data-niv="' + sous + '" data-k="' + esc(x.cle) + '">' + esc(x.lib) + '</button>', x)).join('') + '</tbody></table></div></div>';
+        }
+      }
+      h += '<div class="card"><h2>Résultats par campagne</h2><div class="sous" style="margin:-4px 0 10px">Une commande compte si elle arrive dans les 90 jours après le lancement. Les commandes dues à la campagne sont l\'écart avec le groupe témoin, ramené au nombre de clients sollicités. Chiffres limités au périmètre choisi.</div><div class="defil"><table class="tbl"><thead><tr>' +
+        '<th>Campagne</th>' + TETE_RES + '</tr></thead><tbody>' +
         l.map(c => {
-          const cib = Number(c.cibles) || 0, pris = cib ? (Number(c.pris) || 0) / cib : 0, tr = cib ? (Number(c.traites) || 0) / cib : 0;
-          const dd = Number(c.commandes_dues);
-          return '<tr><td><b style="color:var(--bleu-f)">' + esc(c.nom) + '</b><div class="fact">' + esc(dfr(c.cree_le)) + ' · ' + (c.mode === 'habituel' ? 'vendeur habituel' : 'libre-service') +
-            ' · ' + esc(CANAUX[(c.criteres || {}).canal] || '') + '</div></td><td class="n">' + n0(cib) + '</td>' +
-            '<td><div class="barre"><i style="width:' + (pris * 100) + '%"></i></div><div class="fact">' + pct(pris, 0) + '</div></td>' +
-            '<td><div class="barre"><i style="width:' + (tr * 100) + '%;background:var(--vert)"></i></div><div class="fact">' + pct(tr, 0) + '</div></td>' +
-            '<td class="n">' + n0(c.commandes) + '</td><td class="n">' + pct(c.taux_cible) + '</td><td class="n">' + pct(c.taux_temoin) + '<div class="fact">' + n0(c.temoins) + ' clients</div></td>' +
-            '<td class="n">' + (isNaN(dd) || c.commandes_dues == null ? '–' : (dd > 0 ? '<span class="tag vert">+' + n0(dd) + '</span>' : '<span class="tag or">' + n0(dd) + '</span>')) + '</td></tr>';
+          const ouvert = !!S.ouvertCamp[c.id];
+          let r = ligneResultat('<b style="color:var(--bleu-f)">' + esc(c.nom) + '</b><div class="fact">' + esc(dfr(c.cree_le)) + ' · ' + (c.mode === 'habituel' ? 'vendeur habituel' : 'libre-service') +
+            ' · ' + esc(CANAUX[(c.criteres || {}).canal] || '') + '</div>' +
+            (sous ? '<button class="lien" data-act="campdet" data-id="' + c.id + '">' + (ouvert ? 'Masquer le détail' : TITRE_NIV[sous].replace('Par', 'Détail par')) + '</button>' : ''), c);
+          if (ouvert && sous) r += regrouper(c.par_site || [], sous, CHAMPS_RES).sort((a, b) => b.cibles - a.cibles).map(x => ligneResultat('<span style="padding-left:14px">' + esc(x.lib) + '</span>', x, true)).join('');
+          return r;
         }).join('') + '</tbody></table></div></div>';
       return h;
     }
@@ -538,6 +646,7 @@ OD.define('cockpit-mkt', {
       const t = ev.target.closest('button'); if (!t || !corps.contains(t)) return;
       if (t.dataset.onglet) { S.onglet = t.dataset.onglet; rendre(); if (S.onglet === 'composer' && !S.audience) chargerAudience(); return; }
       if (t.dataset.fiche) { ouvrirFicheClient(t.dataset.fiche); return; }
+      if (t.dataset.niveau) { if (t.dataset.niveau !== S.per.niveau) choisirPer(t.dataset.niveau, null); return; }
       if (t.dataset.puce) {
         const l = S.crit[t.dataset.puce], v = t.dataset.v, i = l.indexOf(v);
         if (i === -1) l.push(v); else l.splice(i, 1);
@@ -546,10 +655,12 @@ OD.define('cockpit-mkt', {
       }
       if (t.dataset.canal) { S.crit.canal = t.dataset.canal; S.confirm = null; S.message = null; rendre(); planifierAudience(); return; }
       const act = t.dataset.act;
-      if (act === 'recharger') { S.campagnes = null; chargerSynthese().then(() => { if (S.onglet === 'composer') chargerAudience(); }); }
+      if (act === 'recharger') { S.campagnes = null; chargerPerimetre().then(chargerSynthese).then(() => { if (S.onglet === 'composer') chargerAudience(); }); }
       else if (act === 'prop') { const p = propositions()[Number(t.dataset.i)]; if (p) versComposer(Object.assign({ canal: p.canal }, p.crit), p.t); }
       else if (act === 'etat') versComposer({ etats: [t.dataset.k] }, ETATS[t.dataset.k].t);
       else if (act === 'coh') { const k = t.dataset.k; versComposer({ segments: [k.split('-')[0]], archetypes: [k] }, 'Cohorte ' + nomCohorte(k)); }
+      else if (act === 'drill') choisirPer(t.dataset.niv, t.dataset.k);
+      else if (act === 'campdet') { const id = t.dataset.id; S.ouvertCamp[id] = !S.ouvertCamp[id]; rendre(); }
       else if (act === 'cycle') { S.crit.exclure_cycle_ouvert = !S.crit.exclure_cycle_ouvert; S.confirm = null; rendre(); planifierAudience(); }
       else if (act === 'raz') { S.crit = critDefaut(); S.nom = ''; S.confirm = null; S.message = null; rendre(); planifierAudience(); }
       else if (act === 'lancer') { S.confirm = t.dataset.mode; S.message = null; rendreAudience(); }
@@ -565,6 +676,7 @@ OD.define('cockpit-mkt', {
     });
     corps.addEventListener('change', ev => {
       const f = ev.target.dataset && ev.target.dataset.champ; if (!f) return;
+      if (f === 'perval') { choisirPer(S.per.niveau, ev.target.value); return; }
       if (f === 'decile_max') S.crit.decile_max = ev.target.value ? Number(ev.target.value) : null;
       else if (f === 'pression_jours' || f === 'temoin_pct') S.crit[f] = Number(ev.target.value);
       else return;
@@ -577,21 +689,11 @@ OD.define('cockpit-mkt', {
       corps.querySelectorAll('[data-act="export"]').forEach(b => { b.disabled = !(S.motif.trim() && fin > 0 && !S.envoi); });
     }
 
-    // ------------------------------------------------------------- bus de site
-    (function lier(n) {
-      const b = bus();
-      if (!b || typeof b.onChange !== 'function') { if ((n || 0) < 120) setTimeout(() => lier((n || 0) + 1), 250); return; }
-      if (R.__mktLie) return; R.__mktLie = true;
-      let dernier = JSON.stringify(sites());
-      b.onChange(() => {
-        if (!R.isConnected) return;
-        const k = JSON.stringify(sites()); if (k === dernier) return; dernier = k;
-        S.audience = null; S.confirm = null; S.message = null;
-        chargerSynthese().then(() => { if (S.onglet === 'composer') chargerAudience(); });
-      });
-    })(0);
-
+    // ------------------------------------------------------------- démarrage
+    // v3 : le site de la barre du haut n'est plus suivi ; le périmètre se choisit dans la page.
+    S.per = lirePer();
     rendre();
+    await chargerPerimetre();
     await chargerSynthese();
   }
 });
