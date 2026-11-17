@@ -1,5 +1,7 @@
 // ============================================================================
-//  COCKPIT MARKETING — module One Data (OD.define)   v4 — PROFIL TEAM COLIN
+//  COCKPIT MARKETING — module One Data (OD.define)   v5 — PROFIL TEAM COLIN
+//  v5 (17/11/2026) : logo = « O » One Data qui décompose la lumière ; PRISME
+//    signe chaque onglet (ligne d'en-tête) et chaque bloc qu'il produit.
 //  v4 (17/11/2026) : marque « PRISME by One Data » (bandeau, onglet PRISME,
 //    propositions signées). Données du client, intelligence One Data.
 //  v3 (17/11/2026) : périmètre choisi dans la page (groupe / marque / affaire /
@@ -178,6 +180,10 @@ OD.define('cockpit-mkt', {
 #mkt-root .sous{color:var(--ink-3);font-size:12.5px}
 #mkt-root .prisme-bandeau{display:inline-flex;align-items:center;gap:7px;font-size:12px;color:var(--ink-2);background:var(--tuile);border:1px solid var(--line);border-radius:20px;padding:4px 12px 4px 8px;margin:-6px 0 12px}
 #mkt-root .prisme-bandeau b{color:var(--bleu-f)} #mkt-root .prisme-bandeau .sep{color:var(--ink-3)}
+#mkt-root h2.p:before{display:none}
+#mkt-root h2.p{gap:7px}
+#mkt-root .prisme-onglet{display:flex;flex-wrap:wrap;align-items:center;gap:6px 8px;font-size:12.5px;color:var(--ink-2);margin:-6px 0 14px;padding:0 2px}
+#mkt-root .prisme-onglet b{color:var(--bleu-f)}
 #mkt-root .signe{display:inline-flex;align-items:center;gap:5px;font-size:11px;font-weight:700;color:var(--ink-3)}
 #mkt-root .prisme-carte{background:linear-gradient(135deg,#fff 0%,var(--tuile) 100%)}
 #mkt-root .prisme-titre{display:flex;align-items:center;gap:12px;margin-bottom:12px}
@@ -373,7 +379,8 @@ OD.define('cockpit-mkt', {
       h += bandeauPrisme();
       h += selecteurPerimetre();
       h += '<div class="onglets">' + [['moments', 'Moments'], ['composer', 'Composer une campagne'], ['campagnes', 'Campagnes'], ['moteur', 'PRISME']]
-        .map(o => '<button data-onglet="' + o[0] + '" class="' + (S.onglet === o[0] ? 'on' : '') + '">' + o[1] + '</button>').join('') + '</div>';
+        .map(o => '<button data-onglet="' + o[0] + '" class="' + (S.onglet === o[0] ? 'on' : '') + '">' + (o[0] === 'moteur' ? LOGO + ' ' : '') + o[1] + '</button>').join('') + '</div>';
+      if (s) h += '<div class="prisme-onglet">' + LOGO + '<span><b>PRISME</b> ' + esc(SOUS_ONGLET[S.onglet] || '') + '</span><span class="fact">· lecture du ' + esc(dfr(s.date_ref)) + '</span></div>';
       if (S.err) h += '<div class="alerte">Le cockpit n\'a pas pu charger les scores : ' + esc(S.err) + '</div>';
       if (S.chargement && !s) h += '<div class="card vide">Chargement des parcours clients…</div>';
       else if (s) {
@@ -392,16 +399,27 @@ OD.define('cockpit-mkt', {
       const t = ctx.tenant; const k = String((t && (t.slug || t.code || t.tenant || t.id)) || t || '').toLowerCase();
       return (t && (t.nom || t.label || t.name)) || NOMS_CLIENTS[k] || 'votre groupe';
     })();
-    // prisme : lumière blanche entrante, trois faisceaux aux couleurs de la charte (pas de rouge)
+    // Logo PRISME : le « O » de One Data (anneau sarcelle, quart orange, comme le favicon)
+    // reçoit un rayon de lumière et le décompose en trois faisceaux aux couleurs de la charte.
     function prismeSvg(t) {
-      return '<svg width="' + t + '" height="' + t + '" viewBox="0 0 32 32" aria-hidden="true" style="flex:none;vertical-align:middle">' +
-        '<path d="M1 17 L11 15" stroke="#7a9cc4" stroke-width="1.6" stroke-linecap="round"/>' +
-        '<path d="M14 4 L24 26 L4 26 Z" fill="#e8f0fb" stroke="#2a5ea9" stroke-width="1.8" stroke-linejoin="round"/>' +
-        '<path d="M17 16 L31 11" stroke="#2a5ea9" stroke-width="1.8" stroke-linecap="round"/>' +
-        '<path d="M17.5 17.5 L31 17" stroke="#53bda7" stroke-width="1.8" stroke-linecap="round"/>' +
-        '<path d="M18 19 L31 23" stroke="#fac055" stroke-width="1.8" stroke-linecap="round"/></svg>';
+      const l = Math.round(t * 1.3);
+      return '<svg width="' + l + '" height="' + t + '" viewBox="0 0 42 32" aria-hidden="true" style="flex:none;vertical-align:middle">' +
+        '<path d="M1 16 L7.5 16" stroke="#7a9cc4" stroke-width="2" stroke-linecap="round"/>' +
+        '<circle cx="16" cy="16" r="7.5" fill="none" stroke="#32AFA4" stroke-width="4.4"/>' +
+        '<circle cx="16" cy="16" r="7.5" fill="none" stroke="#F8BA36" stroke-width="4.4" stroke-dasharray="11.78 35.34"/>' +
+        '<path d="M25.5 13.2 L41 7" stroke="#2a5ea9" stroke-width="2" stroke-linecap="round"/>' +
+        '<path d="M26 16 L41 16" stroke="#53bda7" stroke-width="2" stroke-linecap="round"/>' +
+        '<path d="M25.5 18.8 L41 25" stroke="#fac055" stroke-width="2" stroke-linecap="round"/></svg>';
     }
-    const LOGO = prismeSvg(16), LOGO_GRAND = prismeSvg(40);
+    // Titre d'un bloc produit par PRISME : le logo remplace la barre bleue
+    const h2p = (t, style) => '<h2 class="p"' + (style ? ' style="' + style + '"' : '') + '>' + LOGO + '<span>' + t + '</span></h2>';
+    const LOGO = prismeSvg(20), LOGO_GRAND = prismeSvg(44);
+    const SOUS_ONGLET = {
+      moments: 'lit le parcours de chaque client et ce qu\'il va probablement faire',
+      composer: 'calcule l\'audience et classe chaque client par probabilité d\'achat',
+      campagnes: 'mesure ce que chaque campagne a vraiment rapporté, contre son groupe témoin',
+      moteur: 'montre sa fiabilité, testée sur des clients qu\'il n\'avait jamais vus'
+    };
     function bandeauPrisme() {
       return '<div class="prisme-bandeau">' + LOGO + '<span>Données <b>' + esc(NOM_CLIENT) + '</b></span><span class="sep">·</span><span>Intelligence <b>PRISME</b> by One Data</span></div>';
     }
@@ -424,7 +442,7 @@ OD.define('cockpit-mkt', {
         .sort((a, b) => b.attendus - a.attendus);
       if (l.length < 2) return '';
       const tot = l.reduce((a, x) => a + x.attendus, 0) || 1;
-      return '<div class="card"><h2>' + TITRE_NIV[sous] + '</h2><div class="sous" style="margin:-4px 0 10px">Cliquez une ligne pour y restreindre le cockpit.</div><div class="defil"><table class="tbl"><thead><tr><th></th><th class="n">Clients</th><th class="n">Achats attendus</th><th class="n">Taux</th><th>Part des achats attendus</th></tr></thead><tbody>' +
+      return '<div class="card">' + h2p(TITRE_NIV[sous]) + '<div class="sous" style="margin:-4px 0 10px">Cliquez une ligne pour y restreindre le cockpit.</div><div class="defil"><table class="tbl"><thead><tr><th></th><th class="n">Clients</th><th class="n">Achats attendus</th><th class="n">Taux</th><th>Part des achats attendus</th></tr></thead><tbody>' +
         l.map(x => '<tr><td><button class="lien" data-act="drill" data-niv="' + sous + '" data-k="' + esc(x.cle) + '">' + esc(x.lib) + '</button></td><td class="n">' + n0(x.n) + '</td><td class="n">' + n0(x.attendus) + '</td><td class="n">' + pct(x.n ? x.attendus / x.n : 0) +
           '</td><td><div class="barre"><i style="width:' + (x.attendus / tot * 100) + '%"></i></div><div class="fact">' + pct(x.attendus / tot, 0) + '</div></td></tr>').join('') +
         '</tbody></table></div></div>';
@@ -442,7 +460,7 @@ OD.define('cockpit-mkt', {
         kpi('Retours atelier attendus', n0(s.retours_atelier_attendus), 'dans les 6 prochains mois') +
         kpi('Concessions', n0((sites() || (S.perim || [])).length), 'dans le périmètre') + '</div>';
       h += vueComparatif();
-      h += '<div class="card"><h2>Le brief du jour</h2><div class="brief">' +
+      h += '<div class="card">' + h2p('Le brief du jour') + '<div class="brief">' +
         'PRISME attend <b>' + n0(tot) + ' achats</b> sur ' + n0(s.clients) + ' clients. ' +
         (tot ? '<b>' + pct(chauds / tot, 0) + '</b> viennent des projets en cours et des prospects chauds : c\'est le travail des vendeurs, à protéger d\'une sollicitation de trop. ' : '') +
         (fen.n ? '<b>' + n0(fen.n) + '</b> clients sont dans leur fenêtre de renouvellement (' + n0(fen.attendus) + ' achats attendus) : un gisement que le marketing peut travailler sans gêner les vendeurs. ' : '') +
@@ -452,13 +470,13 @@ OD.define('cockpit-mkt', {
 
       const props = propositions();
       if (props.length) {
-        h += '<div class="card"><h2>Campagnes proposées par PRISME</h2><div class="sous" style="margin:-4px 0 10px">Classées par achats attendus. Ouvrez-en une pour l\'ajuster avant de la lancer.</div><div class="props">' +
+        h += '<div class="card">' + h2p('Campagnes proposées par PRISME') + '<div class="sous" style="margin:-4px 0 10px">Classées par achats attendus. Ouvrez-en une pour l\'ajuster avant de la lancer.</div><div class="props">' +
           props.slice(0, 6).map((p, i) => '<div class="prop"><div class="ligne" style="justify-content:space-between"><span class="t">' + esc(p.t) + '</span><span class="tag">' + esc(CANAUX[p.canal]) + '</span></div>' +
             '<div class="pq">' + esc(p.pq) + '</div><div class="m"><span><b>' + n0(p.n) + '</b> clients</span><span><b>' + n0(p.attendus) + '</b> achats attendus</span><span><b>' + pct(p.p) + '</b></span></div>' +
             '<div class="ligne" style="justify-content:space-between"><button class="btn" data-act="prop" data-i="' + i + '">Préparer la campagne</button><span class="signe">' + LOGO + ' Proposé par PRISME</span></div></div>').join('') + '</div></div>';
       }
 
-      h += '<div class="card"><h2>Où en sont les clients</h2><div class="sous" style="margin:-4px 0 12px">Chaque client est placé à un moment de son parcours. Probabilité d\'achat à 6 mois, achats attendus et prochaine étape la plus probable.</div><div class="voies">';
+      h += '<div class="card">' + h2p('Où en sont les clients') + '<div class="sous" style="margin:-4px 0 12px">Chaque client est placé à un moment de son parcours. Probabilité d\'achat à 6 mois, achats attendus et prochaine étape la plus probable.</div><div class="voies">';
       ['acq', 'pos', 'ren'].forEach(g => {
         h += '<div class="voie ' + g + '"><div class="titre">' + GROUPES[g] + '</div>';
         ORDRE_ETATS.filter(k => ETATS[k].g === g).forEach(k => {
@@ -473,11 +491,11 @@ OD.define('cockpit-mkt', {
       h += '</div></div>';
 
       const dec = s.deciles || [], maxD = Math.max.apply(null, dec.map(d => Number(d.attendus) || 0).concat([1]));
-      h += '<div class="card"><h2>Où se trouvent les achats</h2><div class="sous" style="margin:-4px 0 6px">Achats attendus par décile de score (1 = les 10 % les plus chauds).</div><div class="deciles">' +
+      h += '<div class="card">' + h2p('Où se trouvent les achats') + '<div class="sous" style="margin:-4px 0 6px">Achats attendus par décile de score (1 = les 10 % les plus chauds).</div><div class="deciles">' +
         dec.map(d => '<div class="c"><b>' + n0(d.attendus) + '</b><i style="height:' + Math.max(2, Math.round((Number(d.attendus) || 0) / maxD * 100)) + '%"></i><span>' + d.decile + '</span></div>').join('') + '</div>' +
         (dec.length && tot ? '<div class="sous" style="margin-top:8px">Les 3 premiers déciles portent <b>' + pct(dec.filter(d => d.decile <= 3).reduce((a, d) => a + (Number(d.attendus) || 0), 0) / tot, 0) + '</b> des achats attendus.</div>' : '') + '</div>';
 
-      h += '<div class="card"><h2>Cohortes de parcours</h2><div class="sous" style="margin:-4px 0 10px">Familles de clients au comportement proche, trouvées par PRISME. Les flèches indiquent ce qui les distingue de la moyenne.</div>';
+      h += '<div class="card">' + h2p('Cohortes de parcours') + '<div class="sous" style="margin:-4px 0 10px">Familles de clients au comportement proche, trouvées par PRISME. Les flèches indiquent ce qui les distingue de la moyenne.</div>';
       ['B2C', 'B2B'].forEach(seg => {
         const l = (s.cohortes || []).filter(c => c.segment === seg).sort((a, b) => (Number(b.attendus) || 0) - (Number(a.attendus) || 0));
         if (!l.length) return;
@@ -528,7 +546,7 @@ OD.define('cockpit-mkt', {
     function rendreAudience() {
       const box = corps.querySelector('#mkt-aud'); if (!box) return;
       const a = S.audience, c = S.crit;
-      let h = '<h2>Audience en direct</h2>';
+      let h = '' + h2p('Audience en direct') + '';
       if (S.audErr) h += '<div class="alerte">' + esc(S.audErr) + '</div>';
       if (!a) { box.innerHTML = h + '<div class="charge">Calcul de l\'audience…</div>'; return; }
       const cas = a.cascade || [], max = Math.max(1, Number((cas[0] || {}).n) || 1);
@@ -557,7 +575,7 @@ OD.define('cockpit-mkt', {
       // aperçu
       const ap = a.apercu || [];
       if (ap.length) {
-        h += '<h2 style="margin-top:14px">Les plus chauds de l\'audience</h2><div class="defil"><table class="tbl"><thead><tr><th>Client</th><th>Moment</th><th>Prochaine étape</th><th class="n">Achat</th></tr></thead><tbody>' +
+        h += '' + h2p('Les plus chauds selon PRISME', 'margin-top:14px') + '<div class="defil"><table class="tbl"><thead><tr><th>Client</th><th>Moment</th><th>Prochaine étape</th><th class="n">Score PRISME</th></tr></thead><tbody>' +
           ap.slice(0, 25).map(x => '<tr><td><button class="lien" data-fiche="' + esc(x.id_client) + '">' + esc(x.nom) + '</button><div class="fact">' + esc([x.ville, x.nom_site].filter(Boolean).join(' · ')) + '</div>' +
             (Array.isArray(x.facteurs) && x.facteurs.length ? '<div class="fact">' + esc(x.facteurs.slice(0, 2).map(f => f.facteur).join(' · ')) + '</div>' : '') + '</td>' +
             '<td>' + esc((ETATS[x.etat] || {}).t || x.etat) + '<div class="fact">' + esc(x.archetype_libelle || '') + '</div></td><td>' + esc(ETAPES[x.etape] || x.etape || '–') + '</td><td class="n">' + pct(x.p_achat) + '</td></tr>').join('') +
@@ -593,11 +611,11 @@ OD.define('cockpit-mkt', {
         const tout = []; l.forEach(c => (c.par_site || []).forEach(x => tout.push(x)));
         const g = regrouper(tout, sous, CHAMPS_RES).sort((a, b) => b.cibles - a.cibles);
         if (g.length > 1) {
-          h += '<div class="card"><h2>' + TITRE_NIV[sous] + ', toutes campagnes</h2><div class="defil"><table class="tbl"><thead><tr><th></th>' + TETE_RES + '</tr></thead><tbody>' +
+          h += '<div class="card">' + h2p(TITRE_NIV[sous] + ', toutes campagnes') + '<div class="defil"><table class="tbl"><thead><tr><th></th>' + TETE_RES + '</tr></thead><tbody>' +
             g.map(x => ligneResultat('<button class="lien" data-act="drill" data-niv="' + sous + '" data-k="' + esc(x.cle) + '">' + esc(x.lib) + '</button>', x)).join('') + '</tbody></table></div></div>';
         }
       }
-      h += '<div class="card"><h2>Résultats par campagne</h2><div class="sous" style="margin:-4px 0 10px">Une commande compte si elle arrive dans les 90 jours après le lancement. Les commandes dues à la campagne sont l\'écart avec le groupe témoin, ramené au nombre de clients sollicités. Chiffres limités au périmètre choisi.</div><div class="defil"><table class="tbl"><thead><tr>' +
+      h += '<div class="card">' + h2p('Résultats mesurés par PRISME') + '<div class="sous" style="margin:-4px 0 10px">Une commande compte si elle arrive dans les 90 jours après le lancement. Les commandes dues à la campagne sont l\'écart avec le groupe témoin, ramené au nombre de clients sollicités. Chiffres limités au périmètre choisi.</div><div class="defil"><table class="tbl"><thead><tr>' +
         '<th>Campagne</th>' + TETE_RES + '</tr></thead><tbody>' +
         l.map(c => {
           const ouvert = !!S.ouvertCamp[c.id];
@@ -620,7 +638,7 @@ OD.define('cockpit-mkt', {
           ['S', 'Silences', 'retards sur le rythme propre à chaque client'], ['M', 'Moments', 'onze moments de vie, de prospect à silence profond'], ['É', 'Étapes', 'prochaine étape la plus probable et son délai']]
           .map(l => '<div><b>' + l[0] + '</b><span>' + l[1] + '</span><em>' + l[2] + '</em></div>').join('') + '</div>' +
         '<div class="sous" style="margin-top:10px">Les données restent celles de ' + esc(NOM_CLIENT) + '. Les modèles, les cohortes, les règles de lecture et leur entraînement sont la propriété de One Data.</div></div>';
-      h += '<div class="card"><h2>Ce que vaut PRISME</h2><div class="sous" style="margin:-4px 0 12px">Testé honnêtement : entraîné sur le passé, puis confronté à ce que les clients ont réellement fait dans les 6 mois suivant le ' + esc(dfr(m.date_test)) + ', sur ' + n0(me.clients_test) + ' clients. Version ' + esc(m.version) + '.</div><div class="tuiles">' +
+      h += '<div class="card">' + h2p('Ce que vaut PRISME') + '<div class="sous" style="margin:-4px 0 12px">Testé honnêtement : entraîné sur le passé, puis confronté à ce que les clients ont réellement fait dans les 6 mois suivant le ' + esc(dfr(m.date_test)) + ', sur ' + n0(me.clients_test) + ' clients. Version ' + esc(m.version) + '.</div><div class="tuiles">' +
         '<div class="tuile"><div class="v">' + pct(a.capture_top10pct, 0) + '</div><p>des achats viennent des <b>10 % de clients</b> que PRISME juge les plus chauds.</p></div>' +
         '<div class="tuile"><div class="v">× ' + (a.lift_top10pct != null ? Number(a.lift_top10pct).toLocaleString('fr-FR') : '–') + '</div><p>Dans ces 10 %, on trouve ' + (a.lift_top10pct != null ? Number(a.lift_top10pct).toLocaleString('fr-FR') : '–') + ' fois plus d\'acheteurs que dans la base (' + pct(a.taux_top10pct) + ' contre ' + pct(a.taux_observe) + ').</p></div>' +
         '<div class="tuile"><div class="v">' + pct(r.taux_top10pct, 0) + '</div><p>des 10 % les plus probables reviennent bien à l\'atelier dans les 6 mois (moyenne ' + pct(r.taux_observe, 0) + ').</p></div>' +
@@ -630,7 +648,7 @@ OD.define('cockpit-mkt', {
       const pe = (me.par_etat || []).slice().sort((x, y) => ORDRE_ETATS.indexOf(x.etat) - ORDRE_ETATS.indexOf(y.etat));
       if (pe.length) {
         const mx = Math.max.apply(null, pe.map(x => Math.max(Number(x.achat_predit) || 0, Number(x.achat_observe) || 0)).concat([0.01]));
-        h += '<div class="card"><h2>Promesse tenue, moment par moment</h2><div class="sous" style="margin:-4px 0 10px">Taux d\'achat annoncé par PRISME et taux réellement observé. Un écart signalé veut dire que PRISME est prudent : il y a plus d\'acheteurs que prévu.</div><div class="defil"><table class="tbl"><thead><tr><th>Moment</th><th class="n">Clients</th><th>Annoncé</th><th>Observé</th><th></th></tr></thead><tbody>' +
+        h += '<div class="card">' + h2p('Promesse tenue, moment par moment') + '<div class="sous" style="margin:-4px 0 10px">Taux d\'achat annoncé par PRISME et taux réellement observé. Un écart signalé veut dire que PRISME est prudent : il y a plus d\'acheteurs que prévu.</div><div class="defil"><table class="tbl"><thead><tr><th>Moment</th><th class="n">Clients</th><th>Annoncé</th><th>Observé</th><th></th></tr></thead><tbody>' +
           pe.map(x => {
             const p = Number(x.achat_predit) || 0, o = Number(x.achat_observe) || 0;
             const ecart = o > p * 1.3 && o - p > 0.005 ? '<span class="tag or">sous-estimé</span>' : (p > o * 1.3 && p - o > 0.005 ? '<span class="tag">surestimé</span>' : '<span class="tag vert">juste</span>');
@@ -641,7 +659,7 @@ OD.define('cockpit-mkt', {
       }
       const ap = e.auc_par_etape || {};
       if (Object.keys(ap).length) {
-        h += '<div class="card"><h2>Fiabilité par prochaine étape</h2><div class="defil"><table class="tbl"><thead><tr><th>Étape</th><th class="n">Part observée</th><th>Qualité de tri</th></tr></thead><tbody>' +
+        h += '<div class="card">' + h2p('Fiabilité par prochaine étape') + '<div class="defil"><table class="tbl"><thead><tr><th>Étape</th><th class="n">Part observée</th><th>Qualité de tri</th></tr></thead><tbody>' +
           Object.keys(ap).sort((x, y) => ap[y] - ap[x]).map(k => '<tr><td>' + esc(ETAPES[k] || k) + '</td><td class="n">' + pct((e.repartition_observee || {})[k]) + '</td><td><div class="barre"><i style="width:' + Math.max(0, (Number(ap[k]) - 0.5) * 200) + '%"></i></div><div class="fact">' + Number(ap[k]).toLocaleString('fr-FR', { maximumFractionDigits: 2 }) + '</div></td></tr>').join('') +
           '</tbody></table></div><div class="sous" style="margin-top:8px">PRISME se réentraîne seul tous les 30 jours ; les scores sont recalculés chaque jour.</div></div>';
       }
