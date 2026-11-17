@@ -1,5 +1,7 @@
 // ============================================================================
-//  NOTIFICATIONS — module One Data (OD.define)   v15 — PROFIL TEAM COLIN
+//  NOTIFICATIONS — module One Data (OD.define)   v16 — PROFIL TEAM COLIN
+//
+//  v16 (17/11/2026) : libellé « Rejoindre le Pavillon ».
 //
 //  v15 (17/11/2026) : les alertes de la concession virtuelle (Pavillon) ont un
 //   bouton « Rejoindre au Pavillon » (lien de la salle du client) ; « On m'attend »
@@ -1062,7 +1064,7 @@ OD.define('notifications', {
         + (L.texte ? '<p class="extrait">' + esc(L.texte) + '</p>' : '')
         + '</div>'
         + '<div class="actes">'
-        + (pav ? '<a class="btn p" href="' + esc(L.lien) + '" target="_blank" rel="noopener">Rejoindre au Pavillon</a>' : '')
+        + (pav ? '<a class="btn p" href="' + esc(L.lien) + '" target="_blank" rel="noopener">Rejoindre le Pavillon</a>' : '')
         + (a.id_client ? '<button type="button" class="btn ' + (pav ? 't' : 'p') + '" data-role="repondre">Ouvrir la fiche</button>' : '')
         + '<button type="button" class="btn t" data-role="alerte-lue">J’ai vu</button>'
         + '</div></article>';
