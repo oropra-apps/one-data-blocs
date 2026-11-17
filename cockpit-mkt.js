@@ -1,5 +1,6 @@
 // ============================================================================
-//  COCKPIT MARKETING — module One Data (OD.define)   v1 — PROFIL TEAM COLIN
+//  COCKPIT MARKETING — module One Data (OD.define)   v2 — PROFIL TEAM COLIN
+//  v2 (17/11/2026) : accès tranché par la base (RPC mkt_acces), pilote limité.
 //
 //  Page du directeur digital et marketing. Quatre onglets :
 //    Moments    : où en sont les clients du périmètre dans leur parcours, ce que
@@ -215,7 +216,12 @@ OD.define('cockpit-mkt', {
     const corps = document.createElement('div'); R.appendChild(corps);
 
     // ------------------------------------------------------------- garde d'accès
-    if (ROLES_OK.indexOf(role()) === -1) {
+    // v2 : la base tranche (RPC mkt_acces). Pilote : utilisateurs listés dans
+    // od_predict.mkt_acces ; table vide = rôles 1, 2, 5, 6, 7, 8. Repli sur le
+    // rôle si la fonction n'existe pas encore.
+    let acces = null;
+    try { acces = (await rpc('mkt_acces')) === true; } catch (e) { acces = ROLES_OK.indexOf(role()) !== -1; }
+    if (!acces) {
       corps.innerHTML = '<div class="card vide">Cette page est réservée à la direction marketing et à la direction.</div>';
       return;
     }
