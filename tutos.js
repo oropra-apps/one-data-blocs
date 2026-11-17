@@ -1,5 +1,5 @@
 // ============================================================================
-//  TUTOS / Centre d'aide Delco coach — module One Data (OD.define)  v4
+//  TUTOS / Centre d'aide Delco coach — module One Data (OD.define)  v6
 //  Migré : rend DANS l'ancre `el` (aucun getElementById -> pas de collision
 //  d'ID) ; edge via ctx.fn('tutos-coach') ; rôle via socle oropraUser.
 //  v3 : section « Lead management » (un tuto par geste, par poste : vendeur,
@@ -12,6 +12,20 @@
 //  tours v4) ; tuto « Tableau de bord » par rôle ; tutos Gestion des ventes,
 //  Suivi d'activité, Performances et Objectifs réécrits sur les écrans
 //  actuels ; l'opérateur VROOM voit aussi son tableau de bord.
+//  v6 (17/11/2026, Team Colin) : contrôle de chaque tuto et de sa visite.
+//  - Lead management réécrit sur le poste actuel (lead-mgmt v127 : Accueil,
+//    Pool, Congélateur, À rappeler, Relances, Campagnes, Suivis, Historique,
+//    En souffrance ; Vroom Team : Pool BACS, Rappels dus, Transferts,
+//    Campagnes, Mes actions). Les tutos v3-v5 décrivaient l'ancien poste.
+//  - Retirés : l'application téléphone Android (One-Data Phone), remplacée
+//    chez Team Colin par la téléphonie 3CX (section « Téléphone 3CX ») ;
+//    l'ancien tuto « Lead Management » (v48) ; « Adoption & déploiement ».
+//  - Écrits (ils étaient « Bientôt disponible ») : Démarrer, Fiche client,
+//    Propositions commerciales, Bilatérales, WhatsApp, E-mails et SMS,
+//    Delco, Piloter son équipe ; nouveau : Performances leads.
+//  - Le marketing (5) a le poste de direction ; le secrétariat (9) n'a pas
+//    de lead management. Sous-sections par catégorie dans chaque section ;
+//    « Dans la même section » sur tous les tutos.
 // ============================================================================
 OD.define('tutos', {
   mount(__anchor, ctx) {
@@ -37,13 +51,13 @@ OD.define('tutos', {
     // Opérateur plateau VROOM (10) : son propre groupe, s'il a le poste plateau.
     if (role === 10 && posteLeads()) return 'vroom';
     // Vendeur et tout rôle connu hors des rôles manager.
-    if (role === 4 || (role > 0 && ![1, 2, 3, 5, 6, 7, 8, 9].includes(role))) return 'vendeur';
+    if (role === 4 || role === 9 || (role > 0 && ![1, 2, 3, 5, 6, 7, 8].includes(role))) return 'vendeur';
     if (role === 3) return 'chef';
     return 'manager'; // 1,2,5,6,7,8
   }
   // Lead management par poste : version du module lead-mgmt servie au tenant
-  // (manifeste du socle). Le marketing (5) et le secrétariat (9) gardent
-  // l'écran précédent.
+  // (manifeste du socle). Le secrétariat (9) n'a pas de lead management ; le
+  // marketing (5) a le poste de direction.
   function versionLeads() {
     try {
       const fw = (window.wwLib && wwLib.getFrontWindow && wwLib.getFrontWindow()) || win;
@@ -53,57 +67,22 @@ OD.define('tutos', {
       return n ? Number(n[1]) : 0;
     } catch (e) { return 0; }
   }
-  function posteLeads() { return versionLeads() >= 52 && ![5, 9].includes(roleNum); }
+  function posteLeads() { return versionLeads() >= 52 && roleNum !== 9; }
   let roleNum = getRole();
   let group = groupOf(roleNum);
 
   /* =======================  DONNÉES  ======================= */
-  const BRANDS = {
-    samsung:  { label: 'Samsung (One UI)', match: /samsung|\bSM-[A-Z0-9]/i, steps: [
-      'Réglages > Applications > One-Data Phone > Batterie : « Sans restriction ».',
-      'Réglages > Batterie > Limites d\u2019usage en arrière-plan : retire l\u2019app des « applis en veille » et ne l\u2019ajoute pas à « veille profonde ».',
-      'Désactive « Mettre en veille les applis inutilisées » pour cette application.' ] },
-    xiaomi:   { label: 'Xiaomi / Redmi / POCO (MIUI/HyperOS)', match: /xiaomi|redmi|poco|\bMI\b|miui/i, steps: [
-      'Gérer les applications > One-Data Phone : active « Démarrage automatique ».',
-      '« Économiseur de batterie » : « Pas de restrictions ».',
-      'Récents (multitâche) : verrouille l\u2019app (cadenas).',
-      'Autres autorisations : active « Afficher les fenêtres popup en arrière-plan ».' ] },
-    huawei:   { label: 'Huawei / Honor (EMUI)', match: /huawei|honor|-L29|\bCLT-|\bANE-|\bELE-/i, steps: [
-      'Réglages > Batterie > Lancement des applications > One-Data Phone : désactive « Gérer automatiquement ».',
-      'Active « Lancement auto », « Lancement secondaire », « Exécution en arrière-plan ».',
-      'Sors l\u2019app de l\u2019optimisation de la batterie.' ] },
-    pixel:    { label: 'Google Pixel (Android standard)', match: /pixel/i, steps: [
-      'Réglages > Applications > One-Data Phone > Batterie : « Sans restriction ».',
-      'Vérifie que les notifications sont activées.' ] },
-    oppo:     { label: 'Oppo (ColorOS)', match: /\boppo\b|\bCPH[0-9]/i, steps: [
-      'Réglages > Batterie > One-Data Phone : autorise arrière-plan + démarrage auto.',
-      'Gestionnaire de démarrage : autorise One-Data Phone.',
-      'Verrouille l\u2019app dans les Récents.' ] },
-    oneplus:  { label: 'OnePlus (OxygenOS)', match: /oneplus/i, steps: [
-      'Optimisation de la batterie > One-Data Phone : « Ne pas optimiser ».',
-      'Autorise l\u2019arrière-plan ; désactive « Optimisation poussée ».',
-      'Verrouille l\u2019app dans les Récents.' ] },
-    autre:    { label: 'Autre / Android standard', match: null, steps: [
-      'Réglages > Applications > One-Data Phone > Batterie : « Sans restriction ».',
-      'Autorise notifications + affichage par-dessus les autres applications.',
-      'Active un éventuel « démarrage auto » propre à ta surcouche.' ] },
-  };
-
-  const PERMS = [
-    { id: 'perm:micro',   label: 'Microphone autorisé', help: 'Demandé au 1er appel — touche « Autoriser ».' },
-    { id: 'perm:notif',   label: 'Notifications autorisées', help: 'Pour être prévenu des appels entrants.' },
-    { id: 'perm:overlay', label: '« Afficher par-dessus les autres applications » activé', help: 'Pour voir l\u2019écran d\u2019appel même verrouillé.' },
-  ];
-
+  // v6 : plus d'application téléphone Android (One-Data Phone) chez Team
+  // Colin : la téléphonie passe par 3CX. Section « Téléphone » réécrite.
   const ALL = ['vendeur', 'chef', 'manager'];
-  function crm(id, title, sub, aud) { return { id, product: 'crm', category: title, title, subtitle: sub, available: false, aud: aud || ALL }; }
+  const ALL4 = ['vendeur', 'chef', 'manager', 'vroom'];
+  const ENC = ['chef', 'manager'];
 
   /* =======================  LEAD MANAGEMENT (postes)  =======================
-     Section affichée seulement quand le tenant sert le lead management par
-     poste (lead-mgmt v52 et plus) et que le rôle y a un poste : vendeur (4),
-     chef des ventes (3), direction (1, 2, 6, 7, 8), opérateur VROOM (10).
-     Le marketing (5) et le secrétariat commercial (9) gardent l'écran
-     précédent : ils voient l'ancien tuto « Lead Management ».            */
+     Section affichée quand le tenant sert le lead management par poste
+     (lead-mgmt v52 et plus) : vendeur (4), chef des ventes (3), direction et
+     marketing (1, 2, 5, 6, 7, 8), Vroom Team (10). Le secrétariat commercial
+     (9) n'a pas de lead management.                                       */
   const SITES = ['vendeur', 'chef', 'manager'];
   const POSTES = ['vendeur', 'chef', 'manager', 'vroom'];
   const TOUR_POSTE = { vendeur: 'lm-vendeur', chef: 'lm-chef', manager: 'lm-direction', vroom: 'lm-plateau' };
@@ -112,343 +91,301 @@ OD.define('tutos', {
   }
   const TUTOS_LEADS = [
     /* ---------- Premiers pas, pour tous les postes ---------- */
-    lm('lm-poste', 'Premiers pas', '2 min', POSTES, 'Ton poste Lead management', 'Situation, signaux, onglets',
-      'La page Lead management ouvre un poste de travail selon ton rôle. Il n’y a rien à paramétrer. Lance la visite guidée pour le parcourir sur ton écran.',
+    lm('lm-poste', 'Premiers pas', '2 min', POSTES, 'Ton poste Lead management', 'Accueil, onglets, filtres',
+      'La page Leads › Leads management ouvre un poste de travail selon ton rôle. Rien à paramétrer. Lance la visite guidée pour le parcourir sur ton écran.',
       [
-        { title: 'La phrase de situation', body: 'En haut, une phrase dit l’essentiel du moment, suivie des chiffres du jour.',
+        { title: 'L’Accueil', body: 'La page d’arrivée résume la situation.',
           bodyBy: {
-            vendeur: 'En haut, une phrase dit combien de personnes tu as à appeler et combien de leads sont libres dans la piscine du site. Dessous : premiers contacts et leads pris aujourd’hui, à faire, en piscine, relances de campagne.',
-            chef: 'En haut, une phrase dit combien de leads sont hors délai dans la piscine, combien sont pris sans appel, et où en est l’équipe dans ses premiers contacts du jour.',
-            manager: 'En haut, une phrase donne les trois délais de premier contact les plus longs sur 30 jours, et le nombre de leads ouverts depuis plus de 24 h.',
-            vroom: 'En haut, une phrase dit combien de leads sont libres et hors délai dans la piscine BACS, depuis quand attend le plus ancien, et combien de rappels sont dus. Dessous : pris, qualifiés, rappels, abandonnés aujourd’hui, et l’état de la copie BACS.' } },
-        { title: 'À gauche, les signaux', body: 'Ce qui vient d’arriver ou qui demande une action. Chaque signal porte le bouton qui le traite ; « Vu » le retire de la liste. Un signal nouveau clignote quelques secondes.' },
-        { title: 'À droite, les onglets', body: 'Tes files de travail. Le chiffre d’un onglet passe en rouge dès qu’un lead y est hors délai.',
+            vendeur: '« Bonjour » : combien de clients tu as à rappeler (et combien sont en retard), combien de leads sont libres dans le Pool, puis « À faire maintenant » : le lead le plus urgent, prêt à appeler.',
+            chef: 'Ton site aujourd’hui : leads dans le Pool (dont hors délai), chez les vendeurs, en souffrance, venus de la Vroom Team, part rappelée dans le délai sur 30 jours. Dessous : « À traiter maintenant », le Pool, ton équipe et le pilotage.',
+            manager: 'Pas d’Accueil pour la direction : la phrase du haut résume ton périmètre (leads dans le Pool, hors délai, en souffrance). Choisis un site dans le périmètre pour le voir comme son chef des ventes.',
+            vroom: 'La phrase du haut : leads à traiter, rappels dus, ce que tu as pris, transféré et abandonné aujourd’hui. « Prendre le suivant » à droite.' } },
+        { title: 'Les onglets', body: 'Une liste par onglet ; le chiffre passe en rouge quand un lead est en retard.',
           bodyBy: {
-            vendeur: 'Tes files de travail : « À faire », « Piscine du site » et « Mes campagnes ». Le chiffre d’un onglet passe en rouge dès qu’un lead y est hors délai.',
-            chef: 'Tes files de travail : « Le mur », « À relayer » et « Campagnes ». Le chiffre d’« À relayer » passe en rouge dès qu’un lead libre est hors délai.',
-            manager: 'Tes vues : « Le mur des sites », « Le relais » et « Campagnes ». Depuis le mur des sites, « Ouvrir » montre le mur du chef des ventes d’un site.',
-            vroom: 'Tes files de travail : « La piscine BACS », « Rappels », « Transferts » et « Campagnes ». Le chiffre d’un onglet passe en rouge dès qu’il y a un retard.' } },
-        { title: 'La fiche du lead', body: 'Un clic sur une ligne ouvre la fiche à droite : délais, téléphone avec Appeler, WhatsApp, Email et SMS, la demande, puis ce qui est parti dans BACS. La croix, la touche Échap ou un clic à côté la ferment.' },
-        { title: 'L’écran se tient à jour', body: 'Il se recharge tout seul chaque minute. Le lien « Tableaux détaillés », en haut, ramène à l’écran précédent : cycles, kanban, synthèse et règles d’attribution.' },
-      ], { tourBy: TOUR_POSTE, tour: null }),
-
+            vendeur: 'Accueil, Pool, Congélateur, À rappeler (tes leads pas encore contactés), Relances (les clients déjà essayés), Campagnes, Suivis, Historique.',
+            chef: 'Accueil, Pool, Congélateur, Mes leads (si tu vends aussi), En souffrance, Campagnes, Suivis, Historique.',
+            manager: 'Pool, Congélateur, En souffrance, Campagnes, Suivis, Historique.',
+            vroom: 'Pool BACS, Rappels dus, Transferts, Campagnes, Mes actions.' } },
+        { title: 'Les filtres', body: 'VN / VO, Particuliers / Pros, « Rappels programmés » (aujourd’hui et demain) et la période de réception, en haut à droite des onglets.',
+          bodyBy: { vroom: 'La recherche (nom, téléphone, e-mail), « + Nouveau lead », VN / VO et la période.' } },
+        { title: 'La fiche du lead', body: 'Un clic sur un lead l’ouvre en plein écran : la demande, les coordonnées, Delco, le fil du client, et à droite ce que tu en fais.',
+          bodyBy: { vroom: 'Un clic sur un lead ouvre sa fiche : client, délai, contact, demande, qualification, site, attribution, puis l’issue.' } },
+      ], { tourBy: TOUR_POSTE }),
     lm('lm-delais', 'Premiers pas', '2 min', POSTES, 'Délais et couleurs', 'Vert, orange, rouge',
-      'Chaque lead a un délai de premier contact. Le minuteur à gauche de chaque ligne dit où il en est.',
+      'Chaque lead a un délai de premier contact. Les couleurs disent où tu en es.',
       [
-        { title: 'Trois couleurs', body: 'Vert tant que moins de 60 % du délai est consommé. Orange au-delà : le lead est « à risque ». Rouge une fois le délai dépassé : il est « hors délai ».' },
-        { title: 'Le délai dépend de la source', body: 'Site constructeur (Toyota.fr, Lexus.fr) : 30 min. Campagne marketing BACS : 1 h. Autre demande BACS : 2 h. Showroom et trafic atelier : 4 h.' },
-        { title: 'Lead transmis par le plateau VROOM', body: 'Le site a 2 h pour contacter un lead qualifié par le plateau, à compter du transfert. Au-delà, le plateau relance le chef des ventes.' },
-        { title: 'Ouverts + 24 h, puis archives', body: 'Un lead sans contact depuis plus de 24 h passe en « Ouverts + 24 h ». Après 30 jours, il sort des files et n’est plus compté qu’à part, en archives : le chef des ventes le solde.' },
+        { title: 'Le compte à rebours', body: 'Vert : le temps qu’il reste avant le délai. Orange : moins de 40 % du délai restant. Rouge « +12 min » : délai dépassé. Au-delà de 24 h : la date d’arrivée.',
+          bodyBy: { vroom: 'Depuis la réception dans BACS, coloré selon le délai de la source.' } },
+        { title: 'Le délai du site', body: 'Il se compte en heures ouvrées depuis l’arrivée du lead sur le site ; la fiche l’affiche (« délai de rappel du site : 15 min ouvrées »). Au-delà, le chef des ventes est prévenu.',
+          bodyBy: { vroom: '« Demande client (1h) » : pénalité constructeur au-delà d’une heure. Ces leads restent en bandeau sur tous les onglets tant qu’ils attendent. Le site a ensuite 2 h pour prendre un transfert.' } },
+        { title: 'Le créneau choisi par le client', body: 'Quand le client a choisi l’heure de son rappel (message automatique), l’heure remplace le compte à rebours. « Créneau manqué » en rouge si l’heure est passée ; « Le client attend un appel maintenant » s’il a répondu « dès que possible ».',
+          bodyBy: { vroom: 'Les rappels programmés (injoignable, projet long terme) affichent « maintenant », « retard 2 h 10 » ou « dans 1 h 30 ».' } },
       ]),
-
     lm('lm-bacs-sites', 'Premiers pas', '2 min', SITES, 'Ce qui part dans BACS', 'Plus besoin d’aller dans BACS',
-      'Pour un lead BACS, tes gestes sont reportés automatiquement dans BACS. La fiche du lead montre chaque envoi et son résultat, dans sa section « Dans BACS ».',
+      'Pour un lead venu de BACS, tes gestes dans One Data sont reportés automatiquement dans BACS.',
       [
-        { title: 'Joint · RDV', body: 'Le rendez-vous part dans BACS, avec le vendeur comme propriétaire du lead.' },
-        { title: 'Attribuer, autre site', body: 'Une attribution pose le vendeur comme propriétaire (s’il a un identifiant BACS). Un renvoi vers un autre site met à jour le site et le propriétaire.' },
-        { title: 'Clore, confier au plateau', body: 'Clore abandonne le lead dans BACS avec le motif équivalent. Confier au plateau VROOM le passe en « Injoignable temporairement », au compte VROOM, avec un rappel dans 30 min.' },
-        { title: 'Ce qui reste dans One Data', body: 'Joint sans RDV, Pas joint et Rendre à la piscine ne modifient pas BACS.' },
-        { title: 'Un envoi en échec', body: 'La raison donnée par BACS s’affiche sous le geste. « Relancer l’envoi » le remet en route pour cinq essais.' },
+        { title: 'Ce qui part dans BACS', body: 'Le RDV, l’attribution à un vendeur, le renvoi vers un autre site, la clôture avec son motif, le retour à la Vroom Team.' },
+        { title: 'Ce qui reste dans One Data', body: 'Joint sans RDV, Pas joint et Rendre au Pool ne modifient pas BACS.' },
+        { title: 'Où le voir', body: 'Dans la fiche du lead : le statut BACS, puis « Dans BACS » avec chaque envoi (fait, en attente, échec avec sa raison). Un échec se relance.' },
+        { title: 'BACS fermé', body: 'Un bandeau rouge « BACS fermé sur ce poste » apparaît quand aucun onglet BACS n’est ouvert dans ton navigateur : les gestes sur les leads BACS sont alors refusés. Ouvre BACS et connecte-toi.' },
       ]),
+    lm('lm-p-bacs', 'Premiers pas', '2 min', ['vroom'], 'BACS : un onglet ouvert, rien d’autre', 'One Data écrit dans BACS pour toi',
+      'Tu ne travailles plus dans BACS : One Data y reporte chacun de tes gestes, par ta session BACS ouverte dans ce navigateur avec l’extension.',
+      [
+        { title: 'Le voyant', body: 'À côté de « Vroom Team » : BACS connecté (vert), en attente (orange), BACS fermé ou échecs (rouge).' },
+        { title: 'Ce qui part', body: 'Prendre (Accepté), Qualifié (site et propriétaire), Injoignable (date de rappel, e-mail et SMS au client si tu les coches), Projet long terme, Abandon avec son motif et ton commentaire.' },
+        { title: 'Un refus de BACS', body: 'Un bandeau rouge liste les gestes refusés : ces leads ne sont PAS à jour dans BACS. Ne les retraite pas : « Signaler au support ».' },
+        { title: 'Vérifier', body: 'L’onglet « Mes actions » dit, geste par geste : reporté, en route, refusé, non reporté. « Corriger » reporte une correction dans BACS.' },
+      ], { tour: 'lm-p-actions' }),
 
     /* ---------- Vendeur ---------- */
-    lm('lm-v-afaire', 'Vendeur', '2 min', ['vendeur'], 'À faire : qui appeler maintenant', 'Le plus pressé en tête',
-      'L’onglet « À faire » range tes leads pas encore contactés, le plus pressé en tête, puis tes relances de campagne.',
+    lm('lm-v-pool', 'Vendeur', '1 min', ['vendeur'], 'Prendre un lead dans le Pool', 'Libre-service, premier arrivé',
+      'Le Pool du site : les leads que personne n’a pris. Premier arrivé, premier servi.',
       [
-        { title: 'Chaque ligne dit quoi faire', body: '« Appeler » pour un premier contact, « Rappeler » avec le numéro de la tentative, « Relancer » pour une campagne.' },
-        { title: 'Et pourquoi', body: 'Qualifié par le plateau VROOM (avec sa qualification), attribué par ton chef, ou pas joint au dernier essai : la raison est écrite sous le nom.' },
-        { title: 'Ouvre et appelle', body: 'Clique la ligne : la fiche s’ouvre à droite avec le téléphone et les boutons Appeler, WhatsApp, Email et SMS. Lis la qualification du plateau avant d’appeler.' },
-        { title: 'Les leads plus anciens', body: 'En bas de la liste, une ligne compte tes leads de plus de 30 jours encore à ton nom. Ils ne sont plus à appeler en priorité : ton chef des ventes les solde.' },
+        { title: 'Ce qui arrive dans le Pool', body: 'Le site web, Leboncoin, La Centrale, les e-mails, et les leads BACS qualifiés par la Vroom Team. À Lexus Sceaux, les demandes BACS arrivent directement.' },
+        { title: 'Prendre', body: 'Le lead passe à ton nom, dans « À rappeler », et sa fiche s’ouvre. « Réservé par … » : un collègue le regarde en ce moment.' },
+        { title: 'Le quart d’heure', body: 'Un lead pris et non traité (ni appel, ni geste) dans le quart d’heure revient tout seul dans le Pool.' },
+        { title: 'Pas pour toi ?', body: 'Dans sa fiche, « Rendre au Pool » le remet à disposition de tes collègues.' },
       ]),
-
-    lm('lm-v-piscine', 'Vendeur', '1 min', ['vendeur'], 'Prendre un lead dans la piscine', 'Libre-service, premier arrivé',
-      'La piscine contient les leads du site que personne n’a pris.',
+    lm('lm-v-fiche', 'Vendeur', '2 min', ['vendeur', 'chef'], 'La fiche du lead', 'Tout savoir avant d’appeler',
+      'La fiche s’ouvre en plein écran, en trois colonnes. Lance la visite : elle ouvre une fiche d’exemple où rien n’est enregistré.',
       [
-        { title: 'Prendre', body: '« Prendre » met le lead à ton nom : il passe dans « À faire » et sa fiche s’ouvre.' },
-        { title: 'Déjà pris ?', body: '« Réservé par … jusqu’à 10:42 » : un collègue regarde ce lead. Si quelqu’un l’a pris juste avant toi, un message te le dit et rien ne change.' },
-        { title: 'Un lead BACS manque ?', body: 'Il est encore au plateau VROOM : il arrivera sur le site une fois qualifié.' },
-        { title: '« Aussi en piscine BACS »', body: 'One Data te l’a attribué alors que BACS le présente encore au plateau. Appelle-le normalement : une fois contacté, il sort de la piscine du plateau.' },
+        { title: 'La demande', body: 'À gauche : ce que le client a demandé (VN ou VO, véhicule, message complet), la source, le statut BACS, ce que la Vroom Team a appris, ses coordonnées et « Ouvrir la fiche client ».' },
+        { title: 'L’appel', body: 'Au centre : Appeler (par ton poste 3CX), SMS, WhatsApp, E-mail avec des modèles adaptés ; le message automatique reçu par le client et sa réponse ; Delco (stock, reprise, affaire en cours, atelier) ; le fil du client.' },
+        { title: 'Le résultat', body: 'À droite : le résultat de l’appel et les délais. « Lead suivant » en haut enchaîne sans revenir à la liste.' },
+        { title: 'L’avis sur la Vroom Team', body: 'Sur un lead qualifié par la Vroom Team, dis en un clic si la qualification était bonne : le plateau s’améliore avec tes retours.' },
       ]),
-
     lm('lm-v-apres', 'Vendeur', '2 min', ['vendeur', 'chef'], 'Après l’appel : dire ce qui s’est passé', 'RDV, joint, pas joint, clore',
-      'En bas de la fiche du lead, choisis ce qui s’est passé. Un chef des ventes qui a appelé lui-même trouve la même chose sous « Résultat d’appel ».',
+      'En bas à droite de la fiche, quatre issues. Rien n’est enregistré tant que tu ne cliques pas le bouton de l’issue.',
       [
-        { title: 'Joint · RDV', body: 'Choisis la date, la durée et l’objet, puis « Enregistrer le RDV ». Le rendez-vous s’inscrit dans ton agenda One Data et le lead est marqué contacté. Il faut une fiche client rattachée au lead.' },
-        { title: 'Joint · sans RDV', body: 'Le lead est marqué contacté, avec une note si tu veux. Il sort de « À faire » ; la suite se joue dans le cycle du client.' },
-        { title: 'Pas joint', body: 'La tentative est notée (1, 2, 3 sur 3). Le lead reste dans « À faire » et revient en signal « Rappel » deux heures plus tard. Après trois essais, ton chef le voit dans « À relayer ».' },
-        { title: 'Clore', body: 'Avec un motif : pas intéressé, injoignable, parti à la concurrence, doublon, fausse demande, autre.' },
-        { title: 'Ce lead n’est pas pour toi ?', body: '« Rendre à la piscine », en bas de la fiche, le remet en libre-service.' },
+        { title: 'Joint · RDV', body: 'L’objet (RDV vente, essai, estimation de reprise, livraison VN ou VO), la date, les invités, puis enregistrer : le RDV s’inscrit dans ton agenda et, pour un lead BACS, dans BACS.' },
+        { title: 'Joint · sans RDV', body: 'Une note si tu veux, puis « Enregistrer le contact ».' },
+        { title: 'Pas joint', body: 'Choisis la prochaine tentative (dans 1 h, 2 h, ce soir 18:00, demain 9:00 ou 14:00, ou une date), puis « Noter la tentative 1 sur 3 ». Le lead passe dans Relances, rangé à cette heure.' },
+        { title: 'Clore', body: 'Avec un motif : pas intéressé, injoignable, parti à la concurrence, doublon, fausse demande, autre. Un lead BACS est aussi clos dans BACS.' },
+        { title: 'Sans fiche client', body: 'Si le lead n’a pas de fiche client, « Joint » te demande de choisir la bonne parmi celles proposées, ou d’en créer une : tu as le client au téléphone, c’est toi qui tranches.' },
+      ]),
+    lm('lm-v-rappeler', 'Vendeur', '1 min', ['vendeur'], 'À rappeler et Relances', 'Tes leads, dans l’ordre',
+      'Deux listes pour tes leads : ceux pas encore contactés, et ceux déjà essayés.',
+      [
+        { title: 'À rappeler', body: 'Tes leads pas encore contactés, le plus urgent en haut. Chaque ligne : le délai, le client, sa demande et son état (nouveau, qualifié par la Vroom Team, repris du congélateur…), puis « Appeler ».' },
+        { title: 'Relances', body: 'Les clients essayés sans les joindre (« pas joint ×2 »), à l’heure du rappel que tu as choisie. En rouge quand le rappel est dû.' },
+        { title: 'Rappels programmés', body: 'Le bouton en haut ne garde que les leads à rappeler aujourd’hui ou demain, créneaux choisis par les clients compris.' },
+        { title: 'Les anciens', body: 'Tes leads reçus il y a plus de 30 jours ne sont plus à appeler en priorité : ton chef des ventes les solde.' },
+      ]),
+    lm('lm-v-campagnes', 'Vendeur', '2 min', ['vendeur'], 'Campagnes : prendre et relancer', 'Libre-service, comme le Pool',
+      'Une campagne (ex. « Lexus Black Friday ») propose des clients à relancer. Tu les prends toi-même, comme un lead.',
+      [
+        { title: 'L’avancement', body: 'En tête de chaque campagne : à prendre, pris par l’équipe, traités, propositions, commandes, tes clients, et la barre d’avancement.' },
+        { title: 'Choisir', body: 'Les clients « À prendre » sont triés par priorité (sur 100) : véhicule, kilométrage, passages atelier, simulation BACS, renouvellement. Filtre par nom, ville, immatriculation, modèle ou critère.' },
+        { title: 'Je prends, puis Traiter', body: '« Je prends » met le client à ton nom (« À relancer par vous »). « Traiter » ouvre le panneau : numéros, e-mail, véhicule, raisons, puis le résultat.' },
+        { title: 'Le résultat', body: 'RDV pris (posé dans l’agenda), à rappeler (relance datée), messagerie (relance le lendemain 10 h), pas intéressé, déjà équipé, ne plus appeler. Ou « Rendre ».' },
       ]),
 
-    lm('lm-v-campagnes', 'Vendeur', '1 min', ['vendeur'], 'Mes campagnes : relancer mes clients', 'Les clients confiés par ton chef',
-      'Ton chef des ventes te confie des clients dans une campagne. Ils sont dans « Mes campagnes », et à la fin de « À faire ».',
+    /* ---------- Au quotidien, sur les sites ---------- */
+    lm('lm-congelateur', 'Au quotidien', '1 min', SITES, 'Le Congélateur', 'Une deuxième chance',
+      'Les leads que la Vroom Team a abandonnés dans BACS, avec leur motif.',
       [
-        { title: 'Relancer', body: 'Un clic ouvre la fiche du client : appelle-le, puis fais ton compte rendu. La relance est alors comptée comme traitée.' },
-        { title: 'Depuis quand', body: 'Chaque ligne dit depuis combien de jours la campagne est lancée ; elle passe en orange au-delà de trois jours.' },
+        { title: 'Ce qu’on y trouve', body: 'Reçu le…, la demande, abandonné le…, et le motif de la Vroom Team avec son commentaire.' },
+        { title: 'Prendre', body: 'Le lead passe à ton nom (À rappeler ; Mes leads pour un chef des ventes) et repasse « Accepté » dans BACS.' },
+        { title: 'Sans délai', body: 'Ici, ni délai ni alerte : un lead repris du congélateur ne revient pas au Pool tout seul.' },
+        { title: 'S’il n’aboutit pas', body: 'Dans sa fiche, « Remettre au congélateur » le rend à tes collègues, avec ton commentaire.' },
+      ]),
+    lm('lm-suivis', 'Au quotidien', '1 min', SITES, 'Suivis : un client rappelle', 'Retrouver sa demande',
+      'Un client rappelle ? Retrouve sa demande et vois où elle en est, même si un collègue la suit.',
+      [
+        { title: 'Rechercher', body: 'Nom, téléphone, e-mail ou véhicule. Sans recherche : les demandes prises en charge ces 60 derniers jours, ou encore ouvertes.' },
+        { title: 'Lire', body: 'Client, demande, suivi par (ou Pool), dernier geste, statut (et statut BACS), rappel prévu. Un clic ouvre la fiche du client.' },
+        { title: 'Plusieurs sites', body: 'La recherche porte d’abord sur le site choisi en haut ; sans résultat, elle cherche sur tes autres sites et le signale.' },
+      ]),
+    lm('lm-historique', 'Au quotidien', '1 min', SITES, 'Historique', 'Ce qui a été fait',
+      'Les leads traités et chaque geste : pris, attribué, joint, RDV posé, pas joint, clos.',
+      [
+        { title: 'Les filtres', body: 'Période, recherche, statut, résultat, source ; pour un chef des ventes, le vendeur.' },
+        { title: 'Le statut actuel', body: 'Chaque ligne dit ce que le lead est devenu : vendu, en cours chez un collègue, perdu…' },
+        { title: 'Le site', body: 'L’Historique suit le site choisi en haut à droite, comme le Pool et les campagnes.' },
       ]),
 
-    lm('lm-dashboard', 'Vendeur', '1 min', ['vendeur', 'chef'], 'Ouvrir un lead depuis le tableau de bord', 'Jamais contactés',
-      'Le tableau de bord et le poste comptent les mêmes leads.',
+    /* ---------- Encadrement : chef des ventes, direction ---------- */
+    lm('lm-c-pool', 'Encadrement', '2 min', ENC, 'Le Pool : laisser faire ou attribuer', 'Libre-service, suggestion',
+      'Le Pool du site, avec la règle d’attribution et l’équipe.',
       [
-        { title: 'Jamais contactés', body: 'La tuile « Jamais contactés » du tableau de bord compte les leads ouverts sans premier contact, comme ton poste.' },
-        { title: 'La liste', body: 'Un clic sur la tuile ouvre la liste : client, véhicule, ancienneté, téléphone.',
-          bodyBy: { chef: 'Un clic sur la tuile donne, vendeur par vendeur, les leads jamais appelés, ceux à plus de 48 h et le plus ancien.' } },
-        { title: 'Ouvrir', body: 'Le bouton « Ouvrir » d’un lead t’emmène sur Lead management, sa fiche déjà ouverte.',
-          bodyBy: { chef: 'Pour agir, ouvre ton mur dans Lead management : la même case y donne la liste des leads.' } },
+        { title: 'La règle du site', body: 'Libre-service (les vendeurs se servent), par le chef, ou automatique. Chez Team Colin, les sites pilotes sont en libre-service.' },
+        { title: 'Attribuer', body: '« Attribuer… » propose le vendeur suggéré (le moins chargé de l’équipe) ou un autre. En libre-service, l’attribution reste possible, en second.' },
+        { title: 'Pour moi', body: 'Si tu vends aussi : « Pour moi » ou « Je le prends » met le lead dans « Mes leads ».' },
+        { title: 'L’équipe', body: 'Sous le Pool (et sur l’Accueil, « Mon équipe ») : chaque vendeur, ses leads ouverts et en souffrance.' },
       ]),
-
-    /* ---------- Chef des ventes ---------- */
-    lm('lm-c-mur', 'Chef des ventes', '2 min', ['chef', 'manager'], 'Le mur : qui a la main', 'Une ligne par personne',
-      'Qui a la main sur quoi, et depuis combien de temps. Lance la visite guidée pour le parcourir.',
+    lm('lm-c-souffrance', 'Encadrement', '2 min', ENC, 'En souffrance : prévenir, réattribuer', 'Ce qui n’avance pas',
+      'Les leads qui n’avancent pas chez un vendeur, regroupés par vendeur.',
       [
-        { title: 'Chaque lead compté une fois', body: 'Chez la personne qui l’a en main. La piscine (personne) en tête, puis les vendeurs, puis « Au plateau VROOM » : les leads BACS pas encore transmis au site.' },
-        { title: 'Les colonnes', body: 'Dans les temps, À risque, Hors délai, Ouverts + 24 h, et les premiers contacts de chacun aujourd’hui.' },
-        { title: 'Clique un chiffre', body: 'La liste de ces leads s’ouvre dans le volet de droite. Ouvre un lead pour l’attribuer, puis « Retour à la liste » ramène à la liste.' },
-        { title: 'Compter depuis', body: 'L’arrivée sur le site (le transfert du plateau, sinon la réception) ou la réception dans BACS.' },
-        { title: 'Plusieurs sites', body: 'Si tu encadres plusieurs sites, des pastilles en haut changent de site. Les vendeurs sans lead en cours sont repliés sous « Afficher les autres vendeurs ».' },
+        { title: 'La définition', body: 'Pris sans appel depuis plus de 20 min, délai dépassé, gardé plus de 24 h, ou trois essais sans joindre le client.' },
+        { title: 'Prévenir', body: 'Le vendeur reçoit une alerte avec la liste de ses leads en souffrance.' },
+        { title: 'Réattribuer', body: '« Tout réattribuer… » les passe à un autre vendeur ou au Pool ; « Réattribuer › » lead par lead ouvre la fiche.' },
       ]),
-
-    lm('lm-c-relayer', 'Chef des ventes', '2 min', ['chef', 'manager'], 'À relayer : remettre les leads en route', 'Un geste par groupe',
-      'L’onglet « À relayer » regroupe ce qui reste en plan, avec le geste proposé pour chaque groupe.',
+    lm('lm-c-fiche', 'Encadrement', '2 min', ENC, 'Agir sur un lead', 'Quatre gestes',
+      'Dans la fiche d’un lead de ton site, à droite : « Que faire de ce lead ? ».',
       [
-        { title: 'Hors délai dans la piscine', body: 'Choisis un vendeur (le moins chargé est conseillé) et attribue. « Tout attribuer selon la règle » répartit tout le groupe d’un coup, avec la règle du site.' },
-        { title: 'Pris sans appel depuis plus de 20 min', body: 'Rends le lead à la piscine, ou attribue-le à un autre vendeur.' },
-        { title: 'Autre marque demandée', body: 'Renvoie-le vers un site de la bonne marque : il y arrive avec son délai remis à zéro.' },
-        { title: 'Injoignables après 3 tentatives', body: 'Confie-les au plateau VROOM (leads BACS) : ils repartent en rappel au plateau dans 30 minutes. Ou clos-les.' },
-        { title: 'Stock de plus de 24 h', body: 'Solde-le en une fois : voir le tuto « Solder le stock ».' },
+        { title: 'Attribuer', body: 'Le vendeur, puis « Attribuer ». Dessous : « Confier à la Vroom Team » (lead BACS d’un site Toyota : rappel au plateau), « Rendre au Pool », « Je le prends ».' },
+        { title: 'Résultat d’appel', body: 'Si tu as appelé toi-même : RDV, joint, pas joint ou clore.' },
+        { title: 'Autre site', body: 'Le lead part dans le Pool du site choisi, délai remis à zéro. BACS reçoit le nouveau site.' },
+        { title: 'Clore', body: 'Avec un motif. Un lead BACS est aussi abandonné dans BACS. Sur un site que tu n’encadres pas : vue de pilotage, tu lis sans agir.' },
       ]),
-
-    lm('lm-c-fiche', 'Chef des ventes', '2 min', ['chef', 'manager'], 'Agir sur un lead', 'Attribuer, résultat, autre site, clore',
-      'Le pied de la fiche d’un lead propose quatre gestes.',
+    lm('lm-c-comme', 'Encadrement', '1 min', ['chef'], 'Voir l’écran d’un vendeur', 'En lecture seule',
+      'Le sélecteur « Vendeur » en haut des onglets montre l’écran d’un vendeur, exactement comme il le voit.',
       [
-        { title: 'Attribuer ou réattribuer', body: 'Choisis le vendeur : sa charge en cours est affichée. Au même endroit : « Confier au plateau VROOM » et « Rendre à la piscine ».' },
-        { title: 'Résultat d’appel', body: 'Comme un vendeur, si tu as appelé toi-même : RDV, joint, pas joint ou clore.' },
-        { title: 'Autre site', body: 'Le lead part dans la piscine du site choisi (ou chez le vendeur du tour de rôle), délai remis à zéro.' },
-        { title: 'Clore', body: 'Avec un motif. Un lead BACS est aussi abandonné dans BACS.' },
-      ], { tip: '<b>Direction.</b> Sur un site que tu n’encadres pas directement, tu lis tout mais n’agis pas : les gestes restent au chef des ventes du site.' }),
-
-    lm('lm-c-solder', 'Chef des ventes', '2 min', ['chef', 'manager'], 'Solder le stock', 'Les leads ouverts depuis plus de 24 h',
-      'Les leads sans premier contact depuis plus de 24 h, archives de plus de 30 jours comprises, se traitent en une fois.',
-      [
-        { title: 'Où le trouver', body: 'Dans « À relayer », sur la ligne « à solder en une fois ». Ou sur le mur : clique la case « Ouverts + 24 h » de la piscine, le bouton est au pied du volet.' },
-        { title: 'Confier au plateau VROOM', body: 'Les leads BACS repartent au plateau, qui rappelle et requalifie ; ceux qui ont encore un projet reviennent sur le site. Les autres leads restent ouverts.' },
-        { title: 'Répartir sur l’équipe', body: 'Selon la règle du site, le moins chargé d’abord.' },
-        { title: 'Clore « sans suite, stock avant déploiement »', body: 'Ils sortent des délais. Rien n’est effacé, le motif est conservé. BACS n’est pas modifié.' },
-        { title: 'Compté avant d’appliquer', body: 'La fenêtre donne le nombre exact de leads, dont ceux venant de BACS, avant que tu cliques « Appliquer ». Les leads encore au plateau ne sont pas soldés.' },
+        { title: 'Choisir', body: 'Recherche, puis un clic sur le vendeur : son Pool, ses leads à rappeler, ses relances.' },
+        { title: 'Lecture seule', body: 'Un bandeau le rappelle ; « Revenir à ma vue » le referme. Pour agir sur un lead, ouvre-le depuis ta vue.' },
       ]),
-
-    lm('lm-campagnes', 'Chef des ventes', '2 min', ['chef', 'manager'], 'Campagnes : suivre et créer', 'Relancer une cible de clients',
-      'L’onglet « Campagnes » suit les campagnes internes et en crée de nouvelles.',
+    lm('lm-c-solder', 'Encadrement', '1 min', ENC, 'Solder le stock', 'Les leads de plus de 24 h',
+      'Les leads ouverts depuis plus de 24 h faussent les délais du site. Ils se traitent en une fois.',
       [
-        { title: 'Suivre', body: 'Pour chaque campagne : cibles, traitées, à relancer, propositions, commandes. Un clic sur une ligne montre qui avance, vendeur par vendeur.' },
-        { title: 'Créer', body: '« Créer une campagne » choisit les clients par critères : site, particuliers ou sociétés, marque, modèle, âge et kilométrage du véhicule, départements.' },
-        { title: 'Estimer, puis lancer', body: 'La cible et sa répartition entre vendeurs sont estimées avant tout envoi. Rien n’est créé sans une seconde confirmation.' },
+        { title: 'Où', body: 'Sur l’Accueil (Pilotage › « Ouverts depuis plus de 24 h · solder ») ou au pied du Pool (« Solder le stock »).' },
+        { title: 'Trois choix', body: 'Confier les leads BACS à la Vroom Team (qui rappelle et requalifie), répartir sur l’équipe selon la règle du site, ou clore sans suite (« stock avant déploiement » : rien n’est effacé, BACS n’est pas modifié).' },
+        { title: 'Appliquer', body: 'La fenêtre compte les leads avant tout geste ; rien ne part sans ton clic.' },
       ]),
-
-    /* ---------- Direction ---------- */
-    lm('lm-d-sites', 'Direction', '2 min', ['manager'], 'Le mur des sites', 'Une ligne par site',
-      'Tous les sites de ton périmètre, d’un coup d’œil. Lance la visite guidée pour le parcourir.',
+    lm('lm-campagnes', 'Encadrement', '2 min', ENC, 'Créer et suivre une campagne', 'Relancer une cible',
+      'Une campagne choisit des clients par critères et suit leurs relances.',
       [
-        { title: 'Maintenant', body: 'Les quatre premières colonnes : leads dans les temps, à risque, hors délai, ouverts depuis plus de 24 h (et les archives), puis ceux encore au plateau.' },
-        { title: 'Sur la durée', body: 'Le délai moyen de premier contact et la part des contacts faits dans le délai, sur 30 jours ; les leads reçus sur 7 jours.' },
-        { title: 'Ouvrir un site', body: '« Ouvrir » montre le mur du chef des ventes de ce site. « ← Tous les sites », en haut, ramène au mur des sites.' },
+        { title: 'Créer', body: '« Créer une campagne » : site, particuliers ou sociétés, marque, modèle, âge et kilométrage du véhicule, départements. La cible est estimée avant tout lancement.' },
+        { title: 'Avec ou sans répartition', body: 'Répartie : chaque vendeur reçoit ses clients. Sans répartition : les vendeurs prennent eux-mêmes les clients dans leur onglet Campagnes, comme dans le Pool.' },
+        { title: 'Suivre', body: 'Cibles, traitées (avec la barre d’avancement), à relancer, propositions, commandes. Un clic sur une campagne : vendeur par vendeur. L’avancement se lit avant le résultat.' },
       ]),
-
-    lm('lm-d-relais', 'Direction', '1 min', ['manager'], 'Le relais : où le temps se perd', 'De BACS au premier appel',
-      'Le chemin d’un lead, de BACS au premier appel, en temps médian par site.',
+    lm('lm-d-perimetre', 'Encadrement', '1 min', ['manager'], 'Ton périmètre', 'Tous les sites ou un seul',
+      'La direction voit tous ses sites ; le bouton « Périmètre » choisit une marque, une affaire ou un site.',
       [
-        { title: 'Quatre segments', body: 'Attente en piscine BACS, traitement par le plateau VROOM, attente sur le site, vendeur avant l’appel.' },
-        { title: 'Les segments hachurés', body: 'Ils n’appartiennent à personne : c’est là que le temps se perd.' },
+        { title: 'Tous mes sites', body: 'Le Pool, les leads en souffrance et les campagnes de tout ton périmètre, chacun avec son site.' },
+        { title: 'Un site', body: 'Tu le vois comme son chef des ventes. Sur un site que tu n’encadres pas : vue de pilotage, c’est le chef des ventes du site qui agit.' },
+      ], { tour: 'lm-direction' }),
+
+    /* ---------- Vroom Team ---------- */
+    lm('lm-p-pool', 'Vroom Team', '2 min', ['vroom'], 'Le Pool BACS', 'Prendre le bon lead',
+      'Les leads « À affecter » ou « Nouveau » de BACS, prêts à être pris.',
+      [
+        { title: 'Prendre le suivant', body: 'Le bouton en haut à droite prend le prochain lead à traiter, « Demande client (1h) » d’abord.' },
+        { title: 'Les groupes', body: 'Demande client (1h) à prendre maintenant, Relance concession (48h), autres leads, trafic atelier par date de RDV atelier.' },
+        { title: 'Moins de 24 h, plus de 24 h, stock', body: 'Les leads frais d’abord ; les plus anciens à part ; « Stock accepté » : acceptés il y a plus de 14 jours, sans suite. Les pastilles de sources ajoutent ou retirent une source (le trafic atelier est masqué par défaut).' },
+        { title: 'Prendre', body: 'Réserve le lead à ton nom quelques minutes, le passe en Accepté dans BACS et ouvre sa fiche.' },
       ]),
-
-    /* ---------- Plateau VROOM ---------- */
-    lm('lm-p-bacs', 'Plateau VROOM', '2 min', ['vroom'], 'BACS : un onglet ouvert, rien d’autre', 'Le report automatique dans BACS',
-      'Tu ne travailles plus dans BACS. One Data y écrit pour toi, par ta session BACS.',
+    lm('lm-p-traiter', 'Vroom Team', '2 min', ['vroom'], 'Traiter un lead', 'Qualifier, orienter',
+      'La fiche du lead, de haut en bas. Lance la visite : elle ouvre une fiche d’exemple où rien n’est réservé ni envoyé dans BACS.',
       [
-        { title: 'Garde un onglet BACS ouvert', body: 'Dans le même navigateur que One Data, connecté, avec l’extension One Data installée. Inutile de le regarder ; une session ouverte depuis la veille a souvent expiré : reconnecte-toi.' },
-        { title: 'Bandeau rouge', body: 'Aucune session BACS ne répond : Prendre, Transférer, Programmer et Abandonner sont bloqués. Ouvre BACS et connecte-toi ; le bandeau disparaît tout seul dans les 15 secondes.' },
-        { title: 'Bandeau bleu', body: 'Tes gestes passent par la session d’un collègue : l’historique BACS portera son nom. Ouvre BACS sur ton poste.' },
-        { title: 'Bandeau orange', body: 'Des gestes attendent depuis plus de 2 minutes. Patiente, puis recharge l’onglet BACS si cela dure.' },
-        { title: 'La section « Dans BACS »', body: 'Chaque fiche montre ce qui est parti : « Fait à 10:42 », « En attente » ou « Échec » avec la raison. Un envoi est retenté cinq fois ; ensuite, « Relancer l’envoi ».' },
+        { title: 'Le client', body: 'Retrouvé dans One Data par son numéro, sinon cherché dans BACS, ou nouveau client.' },
+        { title: 'Qualifier', body: 'Projet, modèle, échéance, reprise, financement, note pour le vendeur : c’est ce qu’il lira avant d’appeler.' },
+        { title: 'Orienter', body: 'Le site BACS, puis ceux où le client a un dossier, puis les autres sites de la marque, chacun avec ses leads en attente. L’attribution : le Pool de la concession (règle du site) ou un vendeur précis.' },
+        { title: 'Libérer', body: '« Libérer » rend le lead sans rien faire ; fermer la fiche fait de même.' },
       ]),
-
-    lm('lm-p-signaux', 'Plateau VROOM', '2 min', ['vroom'], 'Les signaux du plateau', 'Ce qui demande une action',
-      'Les signaux et la phrase de situation portent toujours sur tout le plateau, même avec un filtre de campagne.',
+    lm('lm-p-issues', 'Vroom Team', '2 min', ['vroom'], 'Les quatre issues', 'Qualifié, injoignable, long terme, abandon',
+      'En bas de la fiche, l’issue de ton appel. Chacune part dans BACS.',
       [
-        { title: 'Nouveau lead, hors délai', body: '« Nouveau lead » : un lead libre arrivé il y a moins de 15 min, bouton Prendre. « Hors délai » : un seul signal pour tous, bouton Prendre le plus ancien.' },
-        { title: 'Rappels', body: '« Rappel » : un rappel tombe dans les 30 min ; « Appeler » prend le lead et ouvre sa fiche. « Rappels en retard » : dépassés de plus de 30 min.' },
-        { title: 'Relais bloqué', body: 'Un site n’a pas contacté un lead transféré depuis plus de 2 h. « Relancer le chef » alerte les chefs des ventes du site.' },
-        { title: 'BACS', body: '« Report BACS » : un geste n’a pas pu être écrit après cinq essais. « Copie BACS » : la dernière lecture de BACS a plus de 2 h ; recharge l’onglet BACS.' },
-        { title: 'Information', body: '« Plateau » : un collègue a pris un lead. « Stock » : des leads acceptés il y a plus de 14 jours sans suite. « Trafic atelier » : des leads atelier attendent alors que la piscine les masque.' },
+        { title: 'Qualifié', body: '« Transférer à … » : le lead part au site choisi avec ta qualification. BACS : Qualifié, site et propriétaire.' },
+        { title: 'Injoignable', body: 'Un rappel dans 2 h, demain 9 h, après-demain 9 h ou à une date ; e-mail et SMS au client si tu les coches.' },
+        { title: 'Projet long terme', body: 'Un rappel à la date choisie ; le lead revient dans Rappels dus.' },
+        { title: 'Abandonner', body: 'Un commentaire pour BACS et le motif. Le lead part au Congélateur, où un vendeur peut le reprendre. Si le client a d’autres demandes ouvertes sur le site, une case propose de les clore aussi.' },
       ]),
-
-    lm('lm-p-piscine', 'Plateau VROOM', '2 min', ['vroom'], 'La piscine BACS', 'Qu’est-ce que je prends maintenant ?',
-      'La piscine range les leads à prendre, du plus ancien au plus récent. Lance la visite guidée pour la parcourir.',
+    lm('lm-p-rappels', 'Vroom Team', '1 min', ['vroom'], 'Rappels dus', 'Injoignables et long terme',
+      'Les leads à rappeler, du plus en retard au plus lointain.',
       [
-        { title: 'Ce qu’elle contient', body: 'Les leads « À affecter » ou « Nouveau » reçus depuis moins de 60 jours, et ceux acceptés par le plateau ces 14 derniers jours, restés sans suite.' },
-        { title: 'Les sources', body: 'Une pastille par source, avec son nombre de leads. Le trafic atelier est masqué par défaut ; clique une pastille pour ajouter ou retirer une source.' },
-        { title: 'Le stock accepté', body: 'Le bouton « Stock accepté » affiche les leads acceptés il y a plus de 14 jours, jamais qualifiés ni abandonnés. Le bouton de ligne devient « Rappeler ».' },
-        { title: 'La copie BACS', body: 'One Data lit une copie de BACS. Un lead arrivé après la dernière lecture n’est pas encore visible : l’indicateur « Copie BACS » donne son âge. Tes gestes, eux, comptent tout de suite.' },
+        { title: 'Le minuteur', body: '« Maintenant », « retard 2 h 10 » ou « dans 1 h 30 », avec l’heure prévue, le statut BACS et le nombre de tentatives.' },
+        { title: 'Les miens', body: 'Ne garde que les leads dont tu as fait le dernier geste.' },
+        { title: 'L’arriéré BACS', body: 'Les rappels promis dans BACS avant One Data sont regroupés à part.' },
       ]),
-
-    lm('lm-p-traiter', 'Plateau VROOM', '3 min', ['vroom'], 'Traiter un lead, pas à pas', 'Prendre, qualifier, orienter',
-      'De la prise à la validation, sans ouvrir BACS.',
+    lm('lm-p-transferts', 'Vroom Team', '1 min', ['vroom'], 'Transferts', 'Ce que deviennent tes leads',
+      'Les leads qualifiés ces 30 derniers jours. Le site a 2 h pour prendre un transfert.',
       [
-        { title: 'Prendre', body: '« Prendre » (ou « Appeler », « Rappeler ») réserve le lead à ton nom 5 minutes, le passe en « Accepté » dans BACS et ouvre sa fiche. La réservation se prolonge tant que la fiche reste ouverte.' },
-        { title: 'Lire la fiche', body: 'Les délais, le contact et ses boutons, la demande telle que BACS l’a reçue, ce qui est déjà parti dans BACS, puis le parcours du lead.' },
-        { title: 'Qualifier', body: 'Projet, modèle visé, échéance, reprise, financement, et une note pour le vendeur. Tout est facultatif, mais c’est ce que le vendeur lira avant d’appeler.' },
-        { title: 'Orienter', body: 'Le site affecté par BACS, puis ceux où le client a un dossier, puis les autres sites de la marque, chacun avec ses leads en attente. Vendeur : « Tour de rôle du site » par défaut, ou un vendeur précis.' },
-        { title: 'Choisir l’issue et valider', body: 'En bas de la fiche, l’une des quatre issues, puis le bouton qui apparaît. La fiche se ferme et le geste part dans BACS.' },
-        { title: 'Rendre sans rien faire', body: '« Libérer », ou ferme simplement la fiche : le lead redevient libre tout de suite pour tes collègues.' },
+        { title: 'L’état', body: 'Contacté par … en …, En attente chez …, Chef relancé, Converti, Clos par le site, Suivi dans BACS.' },
+        { title: 'Relancer le chef', body: 'Après 2 h sans contact, le bouton envoie une alerte aux chefs des ventes du site.' },
       ]),
-
-    lm('lm-p-issues', 'Plateau VROOM', '2 min', ['vroom'], 'Les quatre issues', 'Ce que devient le lead',
-      'Chaque issue est reportée dans BACS.',
+    lm('lm-p-campagnes', 'Vroom Team', '1 min', ['vroom'], 'Campagnes BACS', 'Filtrer une campagne',
+      'Les campagnes BACS : reçus, à prendre, acceptés, en rappel, qualifiés, abandonnés, taux de qualification.',
       [
-        { title: 'Qualifié', body: 'Le lead part au site choisi avec ta qualification. Même site que dans BACS : il est attribué au vendeur choisi ou par tour de rôle. Autre site : il y est transféré. BACS : statut Qualifié, site et propriétaire.' },
-        { title: 'Injoignable', body: 'Une tentative de plus et un rappel : dans 2 h, demain 9 h, après-demain 9 h ou à une date choisie. BACS : Injoignable temporairement et date de rappel.' },
-        { title: 'Projet long terme', body: 'Un rappel à la date choisie, dans 30 jours par défaut ; le lead revient dans Rappels 7 jours avant. BACS : Projet Long Terme et date de rappel.' },
-        { title: 'Abandonner', body: 'Avec un motif BACS (non intéressé, injoignable permanent, doublon, erreur du client, conserve son véhicule…). BACS : Abandonné et motif.' },
+        { title: 'Filtrer', body: '« Filtrer » restreint le Pool, les rappels et les transferts à la campagne ; un bandeau le rappelle sous les onglets.' },
+        { title: 'Ce qui ne change pas', body: 'La phrase du haut et le bandeau « Demande client (1h) » comptent toujours tout le plateau.' },
       ]),
-
-    lm('lm-p-rappels', 'Plateau VROOM', '1 min', ['vroom'], 'Rappels', 'Injoignables et projets long terme',
-      'Les leads en rappel tenus par le plateau, du plus en retard au plus lointain.',
+    lm('lm-p-nouveau', 'Vroom Team', '1 min', ['vroom'], 'Nouveau lead et recherche', 'Un client appelle',
+      'Un client appelle sans demande dans BACS, ou rappelle pour une demande en cours.',
       [
-        { title: 'Ce qu’il contient', body: 'Injoignable temporairement, Projet Long Terme et Intéressé, dont le rappel tombe entre 30 jours en arrière et 7 jours en avant.' },
-        { title: 'Le minuteur', body: '« Maintenant », « retard 2 h 10 » ou « dans 1 h 30 », avec la date prévue ; une étiquette donne le statut et le nombre de tentatives.' },
-        { title: 'Les miens', body: '« Les miens » ne garde que les leads dont tu as fait le dernier geste.' },
+        { title: 'Rechercher', body: 'Nom, téléphone ou e-mail : la recherche porte sur tout le plateau.' },
+        { title: '+ Nouveau lead', body: 'Le client (retrouvé par son numéro ou nouveau), la demande, la concession. S’il a déjà une demande ouverte, la fiche le signale.' },
       ]),
-
-    lm('lm-p-transferts', 'Plateau VROOM', '1 min', ['vroom'], 'Transferts : suivre et relancer', 'Ce que deviennent tes leads qualifiés',
-      'Les leads qualifiés par le plateau ces 30 derniers jours. Le site a 2 h pour les contacter.',
-      [
-        { title: 'Contacté, en attente', body: '« Contacté par … en … » : le vendeur a appelé, avec le délai depuis le transfert. « En attente chez … » : attribué, pas encore contacté, dans le délai.' },
-        { title: 'Relancer le chef', body: 'Après 2 h sans contact, le bouton alerte les chefs des ventes du site dans leur page Notifications ; la ligne passe en « Chef relancé ».' },
-        { title: 'Terminés', body: '« Converti · Clos par le site » : vente, ou lead perdu ou rejeté. « Suivi dans BACS » : qualifié directement dans BACS, son suivi n’est que dans BACS.' },
-      ]),
-
-    lm('lm-p-campagnes', 'Plateau VROOM', '1 min', ['vroom'], 'Campagnes BACS', 'Filtrer le travail par campagne',
-      'Les campagnes BACS des 90 derniers jours, hors trafic atelier.',
-      [
-        { title: 'Le tableau', body: 'Pour chaque campagne : reçus, à prendre, acceptés, en rappel, qualifiés, abandonnés, et le taux de qualification.' },
-        { title: 'Filtrer', body: '« Filtrer » restreint la piscine, les rappels et les transferts à cette campagne. Un bandeau bleu reste sous les onglets, avec « Retirer le filtre ».' },
-      ]),
-
-    lm('lm-p-dashboard', 'Plateau VROOM', '2 min', ['vroom'], 'Ton tableau de bord du plateau', 'Piscine, journée, transferts',
-      'Ta page Tableau de bord est celle du plateau, pas celle d’un vendeur.',
-      [
-        { title: 'Ta journée', body: 'Une phrase : leads à traiter, rappels dus, ce que tu as pris et transmis, transferts qui attendent un vendeur.' },
-        { title: 'La piscine, maintenant', body: 'Leads à traiter, rappels dus et en retard, transferts non pris au-delà de 2 h, stock accepté, trafic atelier, âge de la copie BACS.' },
-        { title: 'Aujourd’hui et sur 30 jours', body: 'Tes leads pris, transmis, mis en rappel, abandonnés, face au total du plateau ; ton délai de prise médian ; le taux de qualification.' },
-        { title: 'Les transferts et les opérateurs', body: 'Ce que deviennent les leads qualifiés, site par site. Puis les gestes par personne ; les comptes VROOM partagés de BACS sont sur une ligne à part.' },
-      ], { tour: 'tdb-plateau' }),
 
     /* ---------- Questions fréquentes ---------- */
     lm('lm-faq-sites', 'Questions fréquentes', '2 min', SITES, 'Questions fréquentes', 'Vendeurs, chefs, direction',
-      'Les questions qui reviennent le plus sur les postes des sites.',
+      'Les questions qui reviennent le plus sur les sites.',
       [
-        { title: 'Un lead BACS de mon site n’est pas dans la piscine.', body: 'Il est encore au plateau VROOM : il arrivera une fois qualifié. Le chef des ventes le voit sur la ligne « Au plateau VROOM » de son mur.' },
-        { title: 'Le stock compte plus de leads que le mur.', body: 'Le mur ne montre que les leads de moins de 30 jours ; les plus anciens sont comptés à part, en archives, et soldés avec le reste.' },
-        { title: 'Le bouton Appeler ne fait rien.', body: 'Sans téléphonie 3CX active sur le poste, le navigateur ouvre le numéro avec l’application de téléphone. Le numéro reste affiché et copiable.' },
-        { title: 'Un envoi est en échec dans « Dans BACS ».', body: 'La raison est affichée sous le geste. Corrige si besoin, puis « Relancer l’envoi ».' },
-        { title: 'Je veux retrouver l’ancien écran.', body: 'Lien « Tableaux détaillés », en haut du poste : cycles, kanban, synthèse et règles d’attribution y sont toujours.' },
-      ]),
-
-    lm('lm-faq-plateau', 'Questions fréquentes', '2 min', ['vroom'], 'Questions fréquentes du plateau', 'Boutons grisés, piscine vide…',
-      'Les questions qui reviennent le plus au plateau VROOM.',
+        { title: 'Un lead BACS manque dans le Pool.', body: 'Sur un site Toyota, il est encore à la Vroom Team : il arrivera une fois qualifié. Sinon, regarde le Congélateur.' },
+        { title: 'Mon lead est revenu dans le Pool.', body: 'Pris mais ni appelé ni traité dans le quart d’heure : il revient au Pool. Reprends-le et appelle.' },
+        { title: '« Appeler » ne fait rien.', body: 'L’appel passe par ton poste 3CX : vérifie qu’il est connecté. Sinon, copie le numéro.' },
+        { title: 'Un geste BACS est refusé.', body: 'BACS doit être ouvert et connecté dans un onglet de ton navigateur ; un échec se relance depuis la fiche (« Dans BACS »).' },
+        { title: 'Le même client a deux demandes.', body: '« + 1 autre demande » sur le lead : traite-les ensemble, et clos l’autre comme doublon.' },
+      ], { tour: null }),
+    lm('lm-faq-plateau', 'Questions fréquentes', '2 min', ['vroom'], 'Questions fréquentes', 'Vroom Team',
+      'Les questions qui reviennent le plus au plateau.',
       [
-        { title: 'Les boutons Prendre et Transférer sont grisés.', body: 'Le bandeau rouge est affiché : aucune session BACS ne répond. Ouvre BACS dans un onglet de ce navigateur et connecte-toi ; les boutons se réactivent dans les 15 secondes.' },
-        { title: 'La piscine est vide, mais des leads attendent dans BACS.', body: 'Regarde « Copie BACS » : si elle est ancienne, recharge l’onglet BACS. Vérifie ensuite les pastilles de sources (trafic atelier masqué) et l’absence de filtre de campagne.' },
-        { title: 'Le chiffre d’un onglet ne correspond pas à la phrase.', body: 'Un filtre de campagne est actif (bandeau bleu) : la phrase et les signaux comptent tout le plateau, les onglets seulement la campagne.' },
-        { title: '« Réservé par … jusqu’à 10:42 ».', body: 'Un collègue traite ce lead ; il redevient libre à l’heure indiquée s’il n’a rien fait. Tu peux ouvrir sa fiche en lecture.' },
-        { title: 'J’ai fermé la fiche par erreur.', body: 'Le lead est libéré. Reprends-le avec « Prendre » : la qualification saisie est perdue, mais rien n’a été enregistré à moitié.' },
-      ]),
+        { title: 'Les boutons sont grisés.', body: 'BACS n’est pas ouvert ou a expiré : ouvre BACS dans un onglet et connecte-toi. Tout se réactive dans les 15 secondes.' },
+        { title: 'Pool vide mais des leads dans BACS.', body: 'Regarde quand BACS a été relu (phrase du haut) ; si c’est ancien, recharge l’onglet BACS. Vérifie aussi les pastilles de sources.' },
+        { title: 'Un onglet ne colle pas à la phrase.', body: 'Un filtre de campagne est actif : les onglets ne comptent que cette campagne.' },
+        { title: '« Réservé par … ».', body: 'Un collègue traite ce lead ; il redevient libre à l’heure indiquée s’il n’a rien fait.' },
+        { title: 'J’ai fermé la fiche par erreur.', body: 'Le lead est libéré : reprends-le avec « Prendre ». Rien n’a été enregistré à moitié.' },
+      ], { tour: null }),
   ];
 
+  /* =======================  CRM, TÉLÉPHONE  ======================= */
   const TUTOS = [
-    { id: 'phone-install', product: 'phone', category: 'Premiers pas', duration: '2 min', available: true, aud: ALL,
-      title: 'Installer l\u2019application', steps: [
-        { title: 'Récupère ton lien d\u2019accès', body: 'Tu reçois (ou demandes à ton administrateur) un lien d\u2019accès.', action: { label: 'Copier le lien', copy: INSTALL_LINK } },
-        { title: 'Ouvre le lien sur ton téléphone', body: 'Connecte-toi avec ton compte Google et accepte de rejoindre le test.' },
-        { title: 'Installe depuis le Play Store', body: 'Suis « Télécharger sur Google Play » puis installe One-Data Phone.' },
-        { title: 'Lance l\u2019application', body: 'Ouvre One-Data Phone : tu arrives sur l\u2019écran de connexion.' } ] },
-    { id: 'phone-login', product: 'phone', category: 'Premiers pas', duration: '1 min', available: true, aud: ALL,
-      title: 'Se connecter', steps: [
-        { title: 'Saisis tes identifiants', body: 'Email + mot de passe One Data, les mêmes que sur le CRM web.' },
-        { title: 'Connecte-toi', body: 'Touche « Se connecter ». Tu dois voir « Prêt à appeler ».' },
-        { title: 'En cas d\u2019erreur', body: 'Si « identifiants incorrects », revérifie ; en cas de doute, contacte ton administrateur.' } ] },
-    { id: 'phone-setup', product: 'phone', category: 'Paramétrage', duration: '3 min', available: true, aud: ALL,
-      title: 'Paramétrer son téléphone (appels entrants)', type: 'phoneSetup',
-      intro: 'Pour recevoir les appels même app fermée ou téléphone verrouillé. Les chemins exacts varient selon la version.' },
-    { id: 'phone-call', product: 'phone', category: 'Utiliser', duration: '2 min', available: true, aud: ALL,
-      title: 'Passer un appel', steps: [
-        { title: 'Rechercher un client', body: 'Onglet « Rechercher » : filtre Tous/Particuliers/Sociétés, tape le nom, touche le client.' },
-        { title: 'Composer un numéro', body: 'Onglet « Clavier » : 06\u2026 ou +33\u2026 (appui long sur 0 = « + »). « Appeler » quand valide.' },
-        { title: 'Pendant l\u2019appel', body: 'Muet, clavier, haut-parleur, bouton rouge pour raccrocher.' } ] },
-    { id: 'phone-incoming', product: 'phone', category: 'Utiliser', duration: '2 min', available: true, aud: ALL,
-      title: 'Recevoir un appel', steps: [
-        { title: 'L\u2019écran d\u2019appel s\u2019affiche', body: 'Même verrouillé : nom + numéro de l\u2019appelant.' },
-        { title: 'Le briefing client', body: 'Contexte : véhicule, dernier devis, dernier échange, suggestion d\u2019accroche.' },
-        { title: 'Accepte ou refuse', body: 'Vert pour répondre, rouge pour refuser.' } ] },
-    { id: 'phone-recents', product: 'phone', category: 'Utiliser', duration: '1 min', available: true, aud: ALL,
-      title: 'Consulter ses appels récents', steps: [
-        { title: 'Onglet « Récents »', body: 'Entrants, sortants, manqués (rouge), avec le nom du client si connu.' },
-        { title: 'Rappeler en un tap', body: 'Touche une ligne pour rappeler.' } ] },
-    { id: 'phone-trouble-incoming', product: 'phone', category: 'Dépannage', duration: '2 min', available: true, aud: ALL,
-      title: 'Je ne reçois pas les appels', steps: [
-        { title: 'Vérifie ton paramétrage', body: 'Cause n°1 : ouvre « Paramétrer son téléphone » et déroule la checklist de ta marque.' },
-        { title: 'Affichage + notifications', body: '« Afficher par-dessus » et notifications doivent être autorisés.' },
-        { title: 'Batterie & arrière-plan', body: 'Optimisation batterie désactivée, arrière-plan autorisé.' },
-        { title: 'Toujours rien ?', body: 'Ferme/rouvre l\u2019app (réenregistre l\u2019appareil) et vérifie ta connexion.' } ] },
-    { id: 'phone-trouble-audio', product: 'phone', category: 'Dépannage', duration: '1 min', available: true, aud: ALL,
-      title: 'Pas de son / micro', steps: [
-        { title: 'Autorisation micro', body: 'Réglages > Applications > One-Data Phone > Autorisations > Micro.' },
-        { title: 'Volume d\u2019appel', body: 'Monte le volume pendant l\u2019appel.' },
-        { title: 'Haut-parleur', body: 'Teste le haut-parleur pour isoler le souci.' } ] },
-
-    /* CRM — phase 2 */
-    crm('crm-start', 'Démarrer', 'Connexion, navigation, périmètre'),
-    { id: 'crm-tdb', product: 'crm', category: 'Piloter son activité', duration: '2 min', available: true, aud: ['vendeur', 'chef', 'manager', 'vroom'],
+    { id: 'crm-start', product: 'crm', category: 'Démarrer', duration: '2 min', available: true, aud: ALL4,
+      title: 'Démarrer', subtitle: 'Menus, recherche, site', tour: 'demarrer',
+      intro: 'La barre du haut est la même partout. Lance la visite guidée pour la parcourir.',
+      steps: [
+        { title: 'Se connecter', body: 'Ton e-mail et ton mot de passe. À la première connexion, tu choisis ton mot de passe. « Mot de passe oublié ? » sous le formulaire t’envoie un lien par e-mail.' },
+        { title: 'Les menus', body: 'Clients (Base client, Notifications), Ventes (Gestion des ventes, Performances, Objectifs), Management (Bilatérales, Suivi activité), Leads (Leads management, Leads performances), Véhicules (Stock VN, Stock VO). Ce que tu vois dépend de ton rôle.' },
+        { title: 'La recherche', body: 'Un client, une immatriculation, un VIN, un téléphone, une affaire : quelques lettres suffisent, les résultats arrivent rangés par catégorie. Raccourci : Ctrl K.' },
+        { title: 'Le site et le dernier client', body: 'Le site sur lequel tu travailles (à changer si tu es sur plusieurs sites) ; le dernier client ouvert, à rouvrir d’un clic.' },
+        { title: 'Ton compte et le O', body: 'Les initiales en haut à droite : Mon compte, Annuaire, Tutos, Email Support, Se déconnecter. Le O en bas à droite : ton avis ou un problème, à l’écrit ou à la voix ; la réponse arrive dans le même fil.' },
+      ] },
+    { id: 'crm-tdb', product: 'crm', category: 'Piloter son activité', duration: '2 min', available: true, aud: ALL4,
       title: 'Tableau de bord', subtitle: 'Ta page d’accueil', tourBy: { vendeur: 'tdb', chef: 'tdb', manager: 'tdb', vroom: 'tdb-plateau' },
       intro: 'La page d’accueil répond à la question de ton rôle. Lance la visite guidée pour la parcourir.',
       steps: [
-        { title: 'Le constat', body: 'Une question selon ton rôle (« Qui appeler aujourd’hui », « Qui décroche, et sur quoi », « Quelle entité décroche »…), une phrase qui y répond et quatre chiffres.',
-          bodyBy: { vroom: 'Ta journée : leads à traiter dans la piscine, rappels dus, ce que tu as pris et transmis, transferts qui attendent un vendeur.' } },
-        { title: 'Les tuiles', body: 'Rangées par famille. Un clic ouvre le détail juste dessous, avec « Ce qu’il faut en faire ».',
-          bodyBy: { vroom: 'La piscine maintenant, ta journée, le plateau sur 14 et 30 jours, ce que deviennent les transferts, et les opérateurs.' } },
+        { title: 'Le constat', body: 'Une question selon ton rôle (« Qui appeler aujourd’hui », « Qui décroche, et sur quoi »…), une phrase qui y répond et quatre chiffres.',
+          bodyBy: { vroom: 'Ta journée : leads à traiter dans le Pool BACS, rappels dus, ce que tu as pris et transmis, transferts qui attendent un vendeur.' } },
+        { title: 'Les tuiles', body: 'Rangées par famille. Un clic ouvre le détail juste dessous, avec « Ce qu’il faut en faire ». « Jamais contactés » ouvre le lead dans Lead management.',
+          bodyBy: { vroom: 'Le Pool maintenant, ta journée, le plateau sur 14 et 30 jours, ce que deviennent les transferts, et les opérateurs.' } },
         { title: 'Le mois et le périmètre', body: 'Le mois en cours ou les deux précédents ; à droite, tout ton périmètre ou un site. Les chiffres se rafraîchissent toutes les 2 minutes.',
-          bodyBy: { vroom: 'Les chiffres portent sur le plateau ; l’activité additionne l’historique BACS des comptes VROOM et tes gestes dans One Data.' } },
+          bodyBy: { vroom: 'Les chiffres portent sur le plateau ; l’activité additionne l’historique BACS des comptes Vroom Team et tes gestes dans One Data.' } },
+        { title: 'L’agenda', body: 'Sous le tableau de bord : ton agenda, tes RDV clients et tes bilatérales. Un RDV posé ici part aussi dans BACS.' },
       ] },
-    { id: 'crm-dashboard', product: 'crm', category: 'Piloter son activité', duration: '3 min', available: true, aud: ALL,
-      title: 'Suivi d’activité', subtitle: 'Contacts, RDV, pipeline, cadence', tour: 'suivi-activite',
-      intro: 'L’activité de l’équipe : contacts, RDV, propositions et transformation. Lance la visite guidée pour parcourir la page.',
+    { id: 'crm-activite', product: 'crm', category: 'Piloter son activité', duration: '3 min', available: true, aud: ALL,
+      title: 'Suivi d’activité', subtitle: 'Un écran par rôle', tourBy: { vendeur: 'act-vendeur', chef: 'act-chef', manager: 'act-direction' },
+      intro: 'Management › Suivi activité : un écran par question, selon ton rôle. Lance la visite guidée pour parcourir les tiens.',
       steps: [
-        { title: 'Période, type et export', body: 'Du 1er du mois à aujourd’hui à chaque arrivée ; Tous, VN, VO ou VN/VO ; le logo Excel exporte la page.' },
-        { title: 'Le résumé et les graphes', body: 'Contacts, RDV, propositions, BDC, wins, abandons ; les contacts par jour (avec la moyenne mobile sur 7 jours) et le pipeline dans le temps.' },
-        { title: 'Le périmètre', body: 'Un clic sur une ligne de l’arbre filtre la page ; un site devient le site global. Sur un site : la cadence jour par jour et le détail par vendeur.' },
-        { title: 'Comparer', body: '« ⇄ Comparer », puis deux lignes de l’arbre : la meilleure valeur ressort sur chaque mesure.' } ] },
-    { id: 'crm-leads', product: 'crm', category: 'Piloter son activité', duration: '2 min', available: true, aud: ALL, poste: false,
-      title: 'Lead Management', subtitle: 'À traiter, pipeline, suivi', tour: 'lead-management',
-      intro: 'Le poste de pilotage des leads et des cycles commerciaux. Lance la visite guidée pour le parcourir sur ton écran.',
-      steps: [
-        { title: 'Choisis ta vue', body: 'Vendeur : « À traiter » et « Pipeline ». Manager : « Synthèse », « Suivi leads » et « Campagnes ».' },
-        { title: 'Traite les urgences', body: 'Dans « À traiter », les cycles sont triés par urgence (SLA). Clique une carte pour ouvrir la fiche client.' },
-        { title: 'Analyse et pilote', body: 'Manager : la Synthèse donne KPI, classement et graphes ; l’équipe se déplie par réseau, affaire et site.' } ] },
+        { title: 'Vendeur : Ma journée', body: '« Que dois-je faire aujourd’hui ? » Tes commandes du mois, tes relances en retard, la carte de tes opportunités (dans la zone rouge : délai de relance dépassé) et tes actions du jour.',
+          bodyBy: { chef: 'Ton écran : Point du matin. Avec qui, sur quoi, avec quel levier : un vendeur par onglet, ses opportunités qui bloquent (avec « Ouvrir la fiche » ou « Note pour … »), et l’équipe en un regard.',
+            manager: 'Tes écrans : Site et Groupe. Quel site, quel écart : commandes face à l’objectif, transformation et financement par site, ce qui mérite une question, parcours et motifs de perte.' } },
+        { title: 'En direct', body: 'Pour l’encadrement : la journée d’une concession, pensée pour le téléphone, comparée à la même heure il y a 7 jours et mise à jour chaque minute. Un clic sur une tuile filtre le fil de la journée.' },
+        { title: 'Les filtres', body: 'Tous, VN, VO ou Pro ; la période (aujourd’hui, hier, 7 jours, ce mois, ou le calendrier « 📅 du → au »).' },
+        { title: 'Les définitions', body: 'Opportunités → simulations (devis BACS) → commandes. Commandes : VN à la transmission au constructeur, VO validées ou en attente d’approbation, hors grands comptes. Délai de relance : 3 jours (simulation, commande), 7 jours (opportunité sans simulation).' },
+      ] },
     { id: 'crm-kanban', product: 'crm', category: 'Piloter son activité', duration: '2 min', available: true, aud: ALL,
       title: 'Gestion des ventes', subtitle: 'De la simulation à la commande', tour: 'gestion-ventes',
       intro: 'Ton pipe commercial, de la simulation à la commande validée. Lance la visite guidée pour le découvrir sur ton écran.',
       steps: [
         { title: 'Qui et quand', body: 'Vendeur : tes affaires. Chef des ventes : un vendeur de ton site. Direction : réseau, affaire, site, vendeur. La période revient au mois en cours à chaque visite.' },
         { title: 'Cinq colonnes', body: 'Simulations, Commandes, Demande d’approbation, Transmis TFR / Validée, Abandonné ; en tête, le nombre, le montant et le taux de passage.' },
-        { title: 'Une affaire', body: 'Le statut BACS en haut, le client (vers sa fiche), le véhicule, le montant et l’âge. Loupe pour consulter, crayon pour modifier, « B » pour ouvrir dans BACS.' },
+        { title: 'Une affaire', body: 'Le statut BACS en haut, le client (vers sa fiche), le véhicule, le montant et l’âge. Loupe pour consulter, « B » pour ouvrir dans BACS.' },
         { title: 'Faire avancer', body: 'Glisse-dépose ou « Déplacer ». Une affaire BACS ne passe ici que de Simulations à Commandes : la suite se fait dans BACS. Transmis et Abandonné sont réservés aux managers.' } ] },
     { id: 'crm-performances', product: 'crm', category: 'Piloter son activité', duration: '3 min', available: true, aud: ALL,
-      title: 'Performances', subtitle: 'Réalisé vs objectifs', tour: 'performances',
-      intro: 'Ton réalisé face aux objectifs du reporting commandes : Cde, Cde part., Cde pro, FI, PHEV / EV, VU, Kinto, Arval. Lance la visite guidée pour parcourir la page.',
+      title: 'Performances : les ventes', subtitle: 'Réalisé vs objectifs', tour: 'performances',
+      intro: 'Ventes › Performances, vue Ventes : ton réalisé face aux objectifs du reporting commandes (Cde, Cde part., Cde pro, FI, PHEV / EV, VU, Kinto, Arval). Lance la visite guidée pour parcourir la page.',
       steps: [
         { title: 'Choisis ce que tu regardes', body: 'Période, type (VN/VO), activité (réseau, grands comptes ou tous) et vue (pilotage ou mix produit).' },
-        { title: 'Lis au prorata du mois', body: 'Chaque tuile : réalisé sur objectif. Vert si l’atteinte suit le mois écoulé, orange un peu en dessous, rouge loin derrière, gris sans objectif.' },
+        { title: 'Lis au prorata du mois', body: 'Chaque tuile : réalisé sur objectif. Vert si l’atteinte suit le mois écoulé, orange un peu en dessous, gris sans objectif.' },
         { title: 'Le périmètre et le reste à faire', body: 'L’arbre donne chaque site et chaque vendeur (toi : « vous »), avec ce qui reste à faire. Un chiffre ouvre les commandes qui le composent.' } ] },
+    { id: 'crm-perf-leads', product: 'crm', category: 'Piloter son activité', duration: '2 min', available: true, aud: ALL,
+      title: 'Performances : les leads', subtitle: 'Délai, contact, RDV, commande', tour: 'perf-leads',
+      intro: 'Leads › Leads performances : les indicateurs du lead management sur la période et le site choisis. Lance la visite guidée pour parcourir la page.',
+      steps: [
+        { title: 'Six chiffres clés', body: 'Leads reçus, contactés, délai du premier contact (médian), part dans le délai, rendez-vous, commandes, avec leur tendance.' },
+        { title: 'Le parcours', body: 'Du lead à la commande : chaque étape et ce qu’elle garde de la précédente ; les leads jour après jour, contactés à temps, en retard ou pas encore.' },
+        { title: 'La rapidité paie', body: 'Ce que deviennent les leads selon le temps mis à les contacter ; quand arrivent les leads, par jour et par heure.' },
+        { title: 'Les tableaux', body: 'Par source, par vendeur (pastille « dans le délai » : vert au-delà de 80 %), par site et pour la Vroom Team.' } ] },
     { id: 'crm-objectifs', product: 'crm', category: 'Piloter son activité', duration: '3 min', available: true, aud: ALL,
       title: 'Objectifs', subtitle: 'Définir et suivre', tour: 'objectifs',
       intro: 'Les objectifs du mois et ton rythme. La page s’adapte : tableau de marche pour le vendeur, saisie pour le chef des ventes. Lance la visite guidée pour la parcourir.',
@@ -456,14 +393,91 @@ OD.define('tutos', {
         { title: 'Vendeur : ton rythme', body: 'Commandes particuliers, commandes pro, PHEV / EV, VU, Kinto, Arval : ton réalisé sur l’objectif, le trait bleu du mois écoulé, et la cadence pour finir dans les temps.' },
         { title: 'Chef : l’atelier', body: 'Pose la cible de commandes, laisse les taux du mois précédent déduire les autres cibles, puis répartis (équitable, prorata M-1, jours de présence) ou reconduis le mois précédent.' },
         { title: 'Brouillon puis enregistrement', body: 'Tout reste en brouillon, corrigeable case par case dans l’arbre, jusqu’à « Enregistrer les objectifs ».' } ] },
-    crm('crm-client', 'Fiche client (CRM 360)', 'Historique multicanal'),
-    crm('crm-propales', 'Propositions & bons de commande', 'Propale, BDC, PDF, VN/VO'),
-    crm('crm-bilaterales', 'Bilatérales', 'Suivi propales & BDC'),
-    crm('crm-whatsapp', 'Messagerie WhatsApp', 'Échanger avec ses clients'),
-    crm('crm-emails', 'Emails', 'Rédiger et suivre'),
-    crm('crm-delco', 'Delco (assistant IA)', 'Signaux & recommandations'),
-    crm('crm-team', 'Piloter son équipe', 'Suivi et coaching', ['chef', 'manager']),
-    crm('crm-rollout', 'Adoption & déploiement', 'Suivi par site', ['manager']),
+    { id: 'crm-client', product: 'crm', category: 'Le client', duration: '3 min', available: true, aud: ALL4,
+      title: 'Fiche client (CRM 360)', subtitle: 'Tout le client sur une page', tour: 'fiche-client',
+      intro: 'La fiche client réunit tout ce que le groupe sait d’un client, et tous les échanges avec lui. On l’ouvre par la recherche, depuis un lead, une affaire ou un RDV. Lance la visite guidée pour la parcourir.',
+      steps: [
+        { title: 'L’en-tête', body: 'Nom, téléphone, e-mail, type et ville. Appeler (3CX), WhatsApp, Email, SMS, RPV : chaque échange se range dans l’historique. « B » ouvre le compte du client dans BACS.' },
+        { title: 'Fiche client', body: 'Identité, contact (un picto copie l’e-mail ou le portable), adresse, profil, véhicule déclaré, commentaires ; « Modifier la fiche » pour corriger. En bas, les consentements reflétés de BACS, par marque.' },
+        { title: 'Contacts et RDV', body: 'Contacts : tous les échanges du cycle (appels avec résumé, SMS, WhatsApp, e-mails, RPV, leads). RDV : à venir, en retard, passés ; « Ajouter un RDV » ouvre l’agenda sur ce client.' },
+        { title: 'Véhicules, Likes, P. Commerciales', body: 'Son parc (VIN, mise en circulation, factures atelier de tous les sites), les véhicules qui l’intéressent, ses affaires BACS version par version.' },
+        { title: 'Entreprise, Entourage, Historique', body: 'Les sociétés dont il est l’interlocuteur (ou, pour une société, ses interlocuteurs), son entourage (conjoint, enfants, parrain…), ses cycles commerciaux du premier contact au résultat.' },
+      ] },
+    { id: 'crm-propales', product: 'crm', category: 'Le client', duration: '2 min', available: true, aud: ALL,
+      title: 'Propositions commerciales', subtitle: 'Les affaires du client', tour: 'pcom',
+      intro: 'L’onglet P. Commerciales de la fiche client montre des affaires, pas des papiers : une affaire, c’est une intention d’achat, avec ses simulations et ses commandes.',
+      steps: [
+        { title: 'Une affaire', body: 'Où on en est, depuis combien de temps rien ne bouge, et le montant qui engage : celui de la commande. Sans commande, une fourchette.' },
+        { title: 'Les versions', body: 'Déplie l’affaire : chaque version avec son écart de prix, celle qui a été retenue, celles que le client a refusées. La mémoire de la négociation.' },
+        { title: 'Chez tes collègues', body: 'Les affaires du client chez un collègue apparaissent sans détail (date, modèle, auteur) : tu sais qu’il est suivi.' },
+        { title: 'Créer, modifier', body: 'Chez Team Colin, simulations et bons de commande se font dans BACS : ils remontent ici et dans la gestion des ventes. La loupe consulte, « B » ouvre dans BACS.' },
+      ] },
+    { id: 'crm-whatsapp', product: 'crm', category: 'Le client', duration: '2 min', available: true, aud: ALL4,
+      title: 'Messagerie WhatsApp', subtitle: 'Échanger avec ses clients',
+      intro: 'Le bouton WhatsApp de la fiche client (ou de la fiche d’un lead) ouvre la conversation avec le client, depuis le numéro de la concession ou le tien s’il est raccordé.',
+      steps: [
+        { title: 'Ouvrir la conversation', body: 'Tout l’échange avec le client s’affiche, y compris celui d’un collègue sur le même site.' },
+        { title: 'Le premier message', body: 'WhatsApp n’autorise un message libre que dans les 24 h qui suivent la dernière réponse du client. Au-delà, choisis un motif (ou un modèle) : un message validé par Meta part, et la conversation s’ouvre quand le client répond.' },
+        { title: 'Écrire', body: 'Texte, photos (remises à l’endroit automatiquement), pièces jointes, modèles de messages.' },
+        { title: 'Ton numéro', body: 'Si ton propre numéro WhatsApp Business est raccordé, tes clients reçoivent le message du numéro qu’ils connaissent, et la conversation est la même que sur ton téléphone.' },
+      ] },
+    { id: 'crm-emails', product: 'crm', category: 'Le client', duration: '2 min', available: true, aud: ALL4,
+      title: 'E-mails et SMS', subtitle: 'Rédiger, modèles, dictée',
+      intro: 'Les boutons Email et SMS de la fiche client (ou de la fiche d’un lead) ouvrent une fenêtre d’écriture. Les envois se rangent dans les contacts du client.',
+      steps: [
+        { title: 'Les modèles', body: '« Modèles » remplit le message (objet et texte pour un e-mail) avec les données du client ou du lead. Les [données manquantes] restées dans le texte bloquent l’envoi tant qu’elles y sont.' },
+        { title: 'Le SMS', body: 'Entrée passe à la ligne, Ctrl + Entrée envoie. Le fil des SMS du client s’affiche au-dessus.' },
+        { title: 'Mes modèles', body: 'Un message que tu réutilises ? « Enregistrer mon message comme modèle » le garde pour la prochaine fois.' },
+        { title: 'La dictée', body: 'Le micro dicte le texte. Dis « virgule », « point final », « à la ligne », « nouveau paragraphe »… La dictée s’arrête à l’envoi ou dès que tu tapes au clavier.' },
+        { title: 'L’e-mail', body: 'Il part de ta boîte reliée à One Data, avec ta signature. Sans boîte reliée, le panneau Signature l’explique.' },
+      ] },
+    { id: 'crm-bilaterales', product: 'crm', category: 'Management', duration: '3 min', available: true, aud: ALL,
+      title: 'Bilatérales', subtitle: 'Planifier, mener, suivre', tour: 'bilaterales',
+      intro: 'Management › Bilatérales : l’entretien régulier entre un vendeur et son chef des ventes. Chez Team Colin, au moins une par semaine et par vendeur. Lance la visite guidée pour parcourir la page.',
+      steps: [
+        { title: 'Vendeur : ma prochaine bilatérale', body: 'Planifiée par ton chef des ventes, avec son ordre du jour ; tes engagements en cours et tenus ; les chiffres qui seront regardés, les mêmes que ceux de ton chef.',
+          bodyBy: { chef: '« À recevoir en priorité » classe tes vendeurs par un score expliqué (écart à l’objectif, baisse de transformation, ancienneté de la dernière bilatérale, engagements non tenus). « Suivi de l’équipe » montre la régularité de chacun.',
+            manager: '« Encadrement » montre la régularité de chaque chef des ventes ; un clic sur un chef ouvre son équipe. « À recevoir en priorité » : les vendeurs de ton périmètre.' } },
+        { title: 'Planifier', body: 'Deux clics depuis la ligne d’un vendeur : la date, l’heure et l’ordre du jour (pastilles de points récurrents ou texte libre). « Planifier les 5 premiers » d’un coup ; « Mener maintenant » démarre l’entretien tout de suite.' },
+        { title: 'Mener l’entretien', body: 'La fiche ouvre sur la revue des engagements, pré-remplit le bilan avec les constats chiffrés (commandes, affaires à relancer, leads, RDV) et propose des engagements datés et chiffrés. Le mode réunion met les chiffres en grand.' },
+        { title: 'Enregistrer', body: 'Pendant l’entretien, pas après : sinon la bilatérale reste « non renseignée » et ressort en retard. La suivante est proposée à la bonne cadence, planifiable d’un clic.' },
+      ] },
+    { id: 'crm-team', product: 'crm', category: 'Management', duration: '2 min', available: true, aud: ENC,
+      title: 'Piloter son équipe', subtitle: 'Le rituel de la semaine',
+      intro: 'Les écrans de l’encadrement, dans l’ordre où on s’en sert.',
+      steps: [
+        { title: 'Chaque matin', body: 'Suivi activité › Point du matin : un vendeur après l’autre, ses opportunités qui bloquent et une action chacun. Puis Leads management : « À traiter maintenant » et le Pool.' },
+        { title: 'Dans la journée', body: 'Suivi activité › En direct, sur téléphone : commandes, simulations, leads et RDV du jour. Lead management › En souffrance : prévenir ou réattribuer.' },
+        { title: 'Chaque semaine', body: 'Une bilatérale par vendeur : préparée sur ses chiffres, enregistrée pendant l’entretien, avec des engagements datés.' },
+        { title: 'Chaque mois', body: 'Objectifs : la cible, la répartition, l’enregistrement. Performances (Ventes et Leads) pour suivre le rythme.' },
+      ] },
+    { id: 'crm-delco', product: 'crm', category: 'Management', duration: '2 min', available: true, aud: ENC,
+      title: 'Delco (assistant IA)', subtitle: 'Signaux et questions', tour: 'delco',
+      intro: 'Delco lit les données de ton périmètre et te signale ce qui mérite ton attention. On le trouve sur sa page et dans la fiche de chaque lead.',
+      steps: [
+        { title: 'Le brief et le radar', body: 'Les sujets du moment, regroupés (« 14 leads sans premier contact · 7 vendeurs »), à déplier par vendeur ou par site. Le radar : une bulle par sujet, taille = volume, distance au centre = ancienneté, couleur = priorité.' },
+        { title: 'Analyser, plus tard', body: '« Analyser » envoie le sujet au chat ; « Plus tard » l’écarte.' },
+        { title: 'Le chat', body: 'Pose une question métier : Delco répond avec des chiffres justes, au fil de la rédaction. Un pouce sous chaque réponse pour dire si elle t’a servi.' },
+        { title: 'Rien sans ton clic', body: 'Quand Delco propose un RDV ou un message, il affiche une carte « Valider / Ignorer » : rien n’est fait sans ton accord.' },
+      ] },
+
+    /* Téléphone : 3CX (plus d'application Android chez Team Colin) */
+    { id: 'tel-appeler', product: 'phone', category: 'Téléphone 3CX', duration: '1 min', available: true, aud: ALL4,
+      title: 'Appeler un client', subtitle: 'Depuis One Data, avec ton poste',
+      intro: 'Tu appelles depuis One Data ; ton poste 3CX (combiné ou application 3CX) porte la voix.',
+      steps: [
+        { title: 'Appeler', body: 'Le bouton « Appeler » de la fiche client ou de la fiche d’un lead, ou un clic sur un numéro de téléphone : ton poste 3CX compose le numéro.' },
+        { title: 'Pendant l’appel', body: 'Un panneau en bas à droite suit l’appel (chronomètre, client). Tu décroches et raccroches toujours sur ton combiné ou ton téléphone.' },
+        { title: 'Si rien ne se passe', body: 'Le panneau le dit (pas de poste, poste injoignable) et se referme seul. Vérifie que ton poste 3CX est connecté ; sinon copie le numéro.' },
+        { title: 'Après', body: 'L’appel est rangé dans les contacts du client. Sur un lead, dis ce qui s’est passé : voir « Après l’appel ».' },
+      ] },
+    { id: 'tel-entrant', product: 'phone', category: 'Téléphone 3CX', duration: '1 min', available: true, aud: ALL4,
+      title: 'Un client t’appelle', subtitle: 'Le panneau d’appel',
+      intro: 'Quand ton poste sonne, One Data affiche qui appelle, avant même que tu décroches.',
+      steps: [
+        { title: 'À la sonnerie', body: 'Le panneau montre le client (s’il est connu) et la préconisation de Delco. « Voir la fiche » ouvre sa fiche client.' },
+        { title: 'Ta ligne', body: 'Ton poste et ta ligne directe sont ceux de l’annuaire 3CX, repris automatiquement dans One Data (menu de ton compte › Annuaire).' },
+      ] },
   ].concat(TUTOS_LEADS);
 
   /* =======================  ÉTAT  ======================= */
@@ -486,25 +500,29 @@ OD.define('tutos', {
   }
   function clear(n) { while (n.firstChild) n.removeChild(n.firstChild); }
   function norm(s) { return (s || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, ''); }
-  function detectBrand() { const ua = win.navigator.userAgent || ''; for (const k in BRANDS) { const m = BRANDS[k].match; if (m && m.test(ua)) return k; } return null; }
 
   function visibleTutos() {
     const p = posteLeads();
     return TUTOS.filter(t => (t.aud || ALL).includes(group) && (t.poste == null || t.poste === p));
   }
+  const ORDRE_CAT = ['Démarrer', 'Piloter son activité', 'Le client', 'Management', 'Téléphone 3CX'];
   function tourOf(t) { return (t.tourBy && t.tourBy[group]) || t.tour || null; }
   // Ordre des sous-sections Lead management : premiers pas, le poste de
   // l'utilisateur, les autres postes, les questions fréquentes.
   function rangCat(c) {
-    const mien = { vendeur: 'Vendeur', chef: 'Chef des ventes', manager: 'Direction', vroom: 'Plateau VROOM' }[group];
-    return c === 'Premiers pas' ? 0 : c === mien ? 1 : c === 'Questions fréquentes' ? 9 : 5;
+    const mien = { vendeur: 'Vendeur', chef: 'Encadrement', manager: 'Encadrement', vroom: 'Vroom Team' }[group];
+    if (c === 'Premiers pas') return 0;
+    if (c === mien) return 1;
+    if (c === 'Au quotidien') return 2;
+    if (c === 'Questions fréquentes') return 9;
+    const i = ORDRE_CAT.indexOf(c);
+    return i === -1 ? 5 : 10 + i;
   }
   function suivants(t) {
-    if (t.product !== 'leads') return [];
-    const ls = visibleTutos().filter(x => x.product === 'leads' && x.available);
+    const ls = visibleTutos().filter(x => x.product === t.product && x.available);
     return ls.map((x, i) => [x, i]).sort((a, b) => (rangCat(a[0].category) - rangCat(b[0].category)) || (a[1] - b[1])).map(a => a[0]).filter(x => x.id !== t.id);
   }
-  const PRODUITS = { leads: 'Lead management', crm: 'CRM', phone: 'Téléphone' };
+  const PRODUITS = { leads: 'Lead management', crm: 'CRM', phone: 'Téléphone 3CX' };
   function learnable() { return visibleTutos().filter(t => t.available); }
   function isLearned(t) { return !!state.learned[t.id]; }
   function scorePct() { const L = learnable(); return L.length ? Math.round(L.filter(isLearned).length / L.length * 100) : 0; }
@@ -602,7 +620,7 @@ OD.define('tutos', {
 
   /* =======================  RENDER  ======================= */
   let mount;
-  function build(root) { injectCSS(); mount = root; mount.className = 'od-tutos'; if (!state.brand) { state.brand = detectBrand(); saveState(); } win.addEventListener('hashchange', routeFromHash); routeFromHash(); }
+  function build(root) { injectCSS(); mount = root; mount.className = 'od-tutos'; win.addEventListener('hashchange', routeFromHash); routeFromHash(); }
   function routeFromHash() { const m = (win.location.hash || '').match(/tuto=([\w-]+)/); const t = m && visibleTutos().find(x => x.id === m[1] && x.available); if (t) renderDetail(t); else renderHome(); }
   function go(id) { win.location.hash = id ? ('tuto=' + id) : ''; try { (mount && mount.scrollIntoView) && mount.scrollIntoView({ block: 'start' }); } catch (e) {} }
 
@@ -654,7 +672,7 @@ OD.define('tutos', {
     const chips = el('div', { class: 'od-chips' });
     const aLeads = visibleTutos().some(t => t.product === 'leads');
     if (curFilter === 'leads' && !aLeads) curFilter = 'all';
-    (aLeads ? [['all', 'Tout'], ['leads', 'Lead management'], ['crm', 'CRM'], ['phone', 'Application téléphone']] : [['all', 'Tout'], ['phone', 'Application téléphone'], ['crm', 'CRM']]).forEach(([k, lbl]) => chips.appendChild(el('button', { class: 'od-chip' + (curFilter === k ? ' on' : ''), text: lbl, onclick: () => { curFilter = k; renderHome(); } })));
+    (aLeads ? [['all', 'Tout'], ['leads', 'Lead management'], ['crm', 'CRM'], ['phone', 'Téléphone 3CX']] : [['all', 'Tout'], ['crm', 'CRM'], ['phone', 'Téléphone 3CX']]).forEach(([k, lbl]) => chips.appendChild(el('button', { class: 'od-chip' + (curFilter === k ? ' on' : ''), text: lbl, onclick: () => { curFilter = k; renderHome(); } })));
     mount.appendChild(chips);
     mount.appendChild(el('div', { id: 'od-list' }));
     updateList();
@@ -662,11 +680,11 @@ OD.define('tutos', {
 
   function suggestions() {
     if (group === 'vroom') return ['Les boutons Prendre sont grisés', 'Comment qualifier un lead ?', 'Que deviennent mes transferts ?'];
-    if (posteLeads() && group === 'chef') return ['Comment solder le stock ?', 'Lire le mur', 'Comment suivre mon équipe ?'];
-    if (posteLeads() && group === 'vendeur') return ['Que faire après un appel ?', 'Prendre un lead dans la piscine', 'Mon téléphone ne sonne pas'];
-    if (group === 'vendeur') return ['Mon téléphone ne sonne pas', 'Comment passer un appel ?', 'Comment créer une propale ?'];
-    if (group === 'chef') return ['Comment suivre mon équipe ?', 'Lire le tableau de bord', 'Paramétrer mon téléphone'];
-    return ['Suivre l\u2019adoption par site', 'Lire les performances', 'Premiers pas avec One Data'];
+    if (posteLeads() && group === 'chef') return ['Réattribuer un lead en souffrance', 'Planifier une bilatérale', 'Créer une campagne'];
+    if (posteLeads() && group === 'vendeur') return ['Que faire après un appel ?', 'Prendre un lead dans le Pool', 'Relancer un client de campagne'];
+    if (group === 'vendeur') return ['Comment appeler un client ?', 'Où voir les affaires d\u2019un client ?', 'Lire mon tableau de bord'];
+    if (group === 'chef') return ['Planifier une bilatérale', 'Lire le point du matin', 'Fixer les objectifs du mois'];
+    return ['Lire le suivi d\u2019activité', 'Choisir un site dans mon périmètre', 'Lire les performances leads'];
   }
 
   function updateList() {
@@ -683,7 +701,6 @@ OD.define('tutos', {
     ordre.forEach(p => {
       const ls = list.filter(t => t.product === p);
       if (ordre.length > 1 || p === 'leads') box.appendChild(el('div', { class: 'od-sec od-sec-' + p, text: PRODUITS[p] }));
-      if (p !== 'leads') { const g = el('div', { class: 'od-grid' }); ls.forEach(t => g.appendChild(card(t))); box.appendChild(g); return; }
       const cats = []; ls.forEach(t => { if (!cats.includes(t.category)) cats.push(t.category); });
       cats.sort((x, y) => rangCat(x) - rangCat(y));
       cats.forEach(c => {
@@ -722,8 +739,7 @@ OD.define('tutos', {
       });
       wrap.appendChild(tb);
     }
-    if (t.type === 'phoneSetup') renderPhoneSetup(wrap, t);
-    else (t.steps || []).forEach((s, i) => wrap.appendChild(step(i + 1, s)));
+    (t.steps || []).forEach((s, i) => wrap.appendChild(step(i + 1, s)));
     if (t.tip) wrap.appendChild(el('div', { class: 'od-tip', html: t.tip }));
     const suite = suivants(t);
     if (suite.length) {
@@ -746,40 +762,6 @@ OD.define('tutos', {
     body.appendChild(el('div', { class: 'st-b', text: (s.bodyBy && s.bodyBy[group]) || s.body }));
     if (s.action) { const b = el('button', { class: 'od-act', text: s.action.label }); b.addEventListener('click', () => { const v = s.action.copy || ''; if (win.navigator.clipboard) win.navigator.clipboard.writeText(v).then(() => toast('Lien copié.'), () => toast(v)); else toast(v); }); body.appendChild(b); }
     row.appendChild(body); return row;
-  }
-
-  function renderPhoneSetup(wrap, t) {
-    wrap.appendChild(el('div', { class: 'od-sec-title', text: 'Ta marque de téléphone' }));
-    const chips = el('div', { class: 'od-chips' });
-    Object.keys(BRANDS).forEach(k => chips.appendChild(el('button', { class: 'od-chip' + (state.brand === k ? ' on' : ''), text: BRANDS[k].label, onclick: () => { state.brand = k; saveState(); renderDetail(t); } })));
-    wrap.appendChild(chips);
-
-    const items = []; PERMS.forEach(p => items.push(p));
-    const bk = state.brand;
-    if (bk && BRANDS[bk]) BRANDS[bk].steps.forEach((s, i) => items.push({ id: 'brand:' + bk + ':' + i, label: s }));
-
-    const prog = el('div', { class: 'od-progress' }); const bar = el('i'); prog.appendChild(bar);
-    const progL = el('div', { class: 'od-progress-l' });
-    const ready = el('div', { class: 'od-ready', html: '<span>\u2713</span> Tout est prêt : tu peux recevoir les appels.' });
-    function refresh() { const done = items.filter(it => state.checks[it.id]).length; bar.style.width = (items.length ? Math.round(done / items.length * 100) : 0) + '%'; progL.textContent = done + ' / ' + items.length + ' validé' + (done > 1 ? 's' : ''); const full = items.length > 0 && done === items.length; ready.classList.toggle('on', full); if (full && !state.learned['phone-setup']) { state.learned['phone-setup'] = true; saveState(); } }
-
-    wrap.appendChild(el('div', { class: 'od-sec-title', text: 'Autorisations' }));
-    PERMS.forEach(p => wrap.appendChild(checkRow(p, refresh)));
-    if (bk && BRANDS[bk]) { wrap.appendChild(el('div', { class: 'od-sec-title', text: BRANDS[bk].label + ' \u2014 batterie & arrière-plan' })); BRANDS[bk].steps.forEach((s, i) => wrap.appendChild(checkRow({ id: 'brand:' + bk + ':' + i, label: s }, refresh))); }
-    else wrap.appendChild(el('p', { class: 'intro', text: 'Choisis ta marque pour afficher les réglages batterie.' }));
-
-    wrap.appendChild(prog); wrap.appendChild(progL); wrap.appendChild(ready);
-    wrap.appendChild(el('div', { class: 'od-tip', html: '<b>Teste un appel entrant.</b> Demande à un collègue de t\u2019appeler, téléphone verrouillé : l\u2019écran d\u2019appel doit s\u2019afficher.' }));
-    refresh();
-  }
-
-  function checkRow(item, onChange) {
-    const row = el('div', { class: 'od-check' + (state.checks[item.id] ? ' done' : '') });
-    row.appendChild(el('div', { class: 'od-box', html: CHK }));
-    const txt = el('div', {}); txt.appendChild(el('div', { class: 'ck-l', text: item.label })); if (item.help) txt.appendChild(el('div', { class: 'ck-h', text: item.help }));
-    row.appendChild(txt);
-    row.addEventListener('click', () => { state.checks[item.id] = !state.checks[item.id]; row.classList.toggle('done', state.checks[item.id]); saveState(); onChange && onChange(); });
-    return row;
   }
 
   /* =======================  BOOT  ======================= */
