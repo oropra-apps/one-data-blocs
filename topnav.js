@@ -1,5 +1,8 @@
 // ============================================================================
-//  TOP NAV — module One Data (OD.define)  v45 — SÉLECTEUR DE PÉRIMÈTRE
+//  TOP NAV — module One Data (OD.define)  v46 — COCKPIT MARKETING
+//  v46 (17/11/2026) : menu Leads, entrée « Cockpit marketing » (page
+//    /cockpit-marketing, module cockpit-mkt) visible des seuls rôles 1, 2, 5,
+//    6, 7 et 8 (nouveau champ roles des items de menu).
 //  v45 (13/11/2026) : à droite de la pastille du Pool (Leads), une pastille VERTE
 //    compte les clients à relancer dans les campagnes du site choisi : ceux à
 //    prendre en libre-service et ceux déjà pris par l'utilisateur, non traités
@@ -240,6 +243,7 @@ OD.define('topnav', {
     bilat:     '/bilaterales',
     activite:  '/activite',
     marketing: '/marketing',
+    cockpitMkt: '/cockpit-marketing',
     voListe:   '/vo-liste',
     vnListe:   '/vn-liste',
     vnConfig:  '/bdc-vn',
@@ -429,7 +433,8 @@ OD.define('topnav', {
     ] },
     { label: 'Leads', leads: true, items: [
       { t: 'Leads management', p: P.marketing, leads: true },
-      { t: 'Leads performances', p: P.perf, vue: 'leads' }
+      { t: 'Leads performances', p: P.perf, vue: 'leads' },
+      { t: 'Cockpit marketing', p: P.cockpitMkt, roles: [1, 2, 5, 6, 7, 8] }
     ] },
     { label: 'Véhicules', items: [
       { t: 'Stock VN', p: P.vnListe },
@@ -622,10 +627,11 @@ OD.define('topnav', {
     var __leadsBadge = (__roleMenu === 3 || __roleMenu === 4);
     MENUS.forEach(function (m, mi) {
       if (__prep) return;
-      if (!m.items.some(function (it) { return __masque.indexOf(it.p) === -1; })) return;
+      if (!m.items.some(function (it) { return __masque.indexOf(it.p) === -1 && (!it.roles || it.roles.indexOf(__roleMenu) !== -1); })) return;
       let items = '';
       m.items.forEach(function (it) {
         if (__masque.indexOf(it.p) !== -1) return;
+        if (it.roles && it.roles.indexOf(__roleMenu) === -1) return;
         items += '<a data-page="' + it.p + '"' + (it.vue ? ' data-vue="' + it.vue + '"' : '') + '>' + esc(it.t) +
           (it.badge ? '<span class="od-pill od-notifs-pill" style="display:none"></span>' : '') +
           (it.leads && __leadsBadge ? '<span class="od-pill od-leads-pill" style="display:none"></span><span class="od-pill od-camp-pill" style="display:none"></span>' : '') + '</a>';
