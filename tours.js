@@ -1,27 +1,30 @@
 // ============================================================================
-//  VISITES GUIDÉES (« Montre-moi en vrai ») — module One Data (OD.define) v4
+//  VISITES GUIDÉES (« Montre-moi en vrai ») — module One Data (OD.define) v6
 //  Module app-level : une ancre masquée dans le header partagé suffit pour
 //  tout le site. Aucune dépendance Supabase. Expose window.OneDataTour ;
 //  délégation de clic sur [data-tour-launch] ; reprise auto via localStorage.
 //  NB : nommé 'tours' — 'tutos' est déjà pris par le module centre d'aide.
 //
-//  v4 (06/10/2026, Team Colin — publish-targets : tours = teamcolin)
-//    · Une visite par tuto du lead management (lead-mgmt v55+ : le poste
-//      expose window.__lmtcTour pour ouvrir une fiche d'exemple où aucun
-//      geste n'est enregistré).
-//    · Visites reprises sur les écrans actuels : tableau de bord (v50,
-//      vendeur / chef / direction / marketing, et plateau VROOM), gestion des
-//      ventes (kanban v50), suivi d'activité (v5), performances (v19),
-//      objectifs (v11).
-//    · Moteur : étape « optional » jugée à l'affichage (passée si sa cible
-//      n'apparaît pas), actions asynchrones, garde « requires » (sélecteur ou
-//      fonction), nettoyage « fin » à la sortie, cible retrouvée quand la page
-//      se redessine, bulle placée à côté des panneaux hauts.
+//  v6 (17/11/2026, Team Colin — publish-targets : tours = teamcolin)
+//    · Lead management : toutes les visites refaites sur le poste actuel
+//      (lead-mgmt v127) : Accueil, Pool, Congélateur, À rappeler, Relances,
+//      Campagnes, Suivis, Historique, En souffrance, fiche plein écran ;
+//      plateau Vroom Team : Pool BACS, Rappels dus, Transferts, Campagnes,
+//      Mes actions, Nouveau lead. Les visites v4/v5 visaient l'ancien poste
+//      (onglets « À faire », « Piscine », « Mur ») : elles ne démarraient
+//      plus ou pointaient dans le vide.
+//    · Suivi d'activité refait (activite v16 : un écran par rôle — Ma journée,
+//      En direct, Point du matin, Site, Groupe).
+//    · Performances : vue Ventes corrigée, nouvelle visite de la vue Leads.
+//    · Nouvelles visites : Démarrer (barre du haut), Fiche client,
+//      Propositions commerciales, Bilatérales (vendeur et encadrement), Delco.
+//    · Moteur : cible { css, has } (premier élément visible dont le texte
+//      contient « has ») ; chemin de page direct (path) en plus de pageId.
 //  Les visites ne cliquent jamais un bouton qui écrit en base.
 // ============================================================================
 /* ---------------------------------------------------------------------
    Propriétés d'étape :
-     target   : { css } | { tour:'data-tour' } | { text }   (élément à surligner)
+     target   : { css } | { css, has } | { tour:'data-tour' } | { text }
      optional : true → étape passée si sa cible n'apparaît pas (≈ 2,5 s)
      requires : 'css' | function → étape gardée seulement si vrai AU DÉMARRAGE
      action   : function(doc) (peut être async) | { click:'css' } → exécutée
@@ -39,34 +42,44 @@ OD.define('tours', {
      ===================================================================== */
   const sleep = ms => new Promise(r => setTimeout(r, ms));
   const clic = sel => () => { const n = doc.querySelector(sel); if (n) n.click(); };
+  const txt = n => String((n && n.textContent) || '').replace(/\s+/g, ' ').trim().toLowerCase();
   function frontWin() { try { return (window.wwLib && wwLib.getFrontWindow && wwLib.getFrontWindow()) || win; } catch (e) { return win; } }
-  // Lead management : le poste expose window.__lmtcTour (lead-mgmt v55+).
+  // Lead management : le poste expose window.__lmtcTour (fiche d'exemple où
+  // aucun geste n'est enregistré).
   function lmApi() { const f = frontWin(); return (f && f.__lmtcTour) || win.__lmtcTour || null; }
-  const lmExemple = async () => { const t = lmApi(); if (t && t.exemple) { await t.exemple(); await sleep(250); } };
+  const lmExemple = async () => { const t = lmApi(); if (t && t.exemple) { await t.exemple(); await sleep(350); } };
   const lmFermer = () => { const t = lmApi(); if (t && t.fermer) t.fermer(); };
-  const onglet = id => clic('.lmtc .poste .tabs [data-id="' + id + '"]');
-  // Le poste ouvert, reconnu à ses onglets.
-  const VEND = '.lmtc .tabs [data-id="afaire"]';
-  const CHEF = '.lmtc .tabs [data-id="relayer"]';
-  const DIR = '.lmtc .tabs [data-id="relais"]';
-  const PLAT = '.lmtc .tabs [data-id="rappels"]';
-  const SITE = '.lmtc .tabs [data-id="afaire"], .lmtc .tabs [data-id="relayer"], .lmtc .tabs [data-id="relais"]';
+  const onglet = id => async () => { const n = doc.querySelector('.lmtc .tabs [data-a="tab"][data-id="' + id + '"]'); if (n && !n.classList.contains('on')) { n.click(); await sleep(250); } };
+  // Les postes, reconnus à leurs onglets et à leur titre.
+  const PLAT = '.lmtc .tabs [data-id="transferts"]';
+  const VEND = '.lmtc .tabs [data-id="arappeler"]';
+  const SITE = '.lmtc .tabs [data-id="bloques"], .lmtc .tabs [data-id="arappeler"]';
+  const ENC = '.lmtc .tabs [data-id="bloques"]';
+  const estDirection = () => !!doc.querySelector(ENC) && /direction/.test(txt(doc.querySelector('.lmtc .hello-l, .lmtc .ac-sup')));
+  const estChef = () => !!doc.querySelector(ENC) && !estDirection();
   const LM_PAGE = '99519997-f935-471a-9147-b0118191b991';
   const ACCUEIL = 'f84d6f00-de35-45b9-ae23-c1f1e46bfa69';
-  // Direction sur le mur des sites : les visites du chef ouvrent d'abord un
-  // site (le plus chargé, en tête du mur), puis y reviennent à la fin.
-  const siteDirection = async () => {
-    if (doc.querySelector(CHEF)) return;
-    const b = doc.querySelector('.lmtc table.mur.sites [data-a="voir-site"]');
-    if (b) { b.click(); win.__odtSiteOuvert = true; await sleep(300); }
-  };
-  const finSite = () => { lmFermer(); if (win.__odtSiteOuvert) { win.__odtSiteOuvert = false; const r = doc.querySelector('.lmtc [data-a="retour-sites"]'); if (r) r.click(); } };
-  const lm = (steps, extra) => Object.assign({ pageId: LM_PAGE, rootCheck: '.lmtc .poste .tabs', fin: lmFermer, steps }, extra || {});
+  const lm = (steps, extra) => Object.assign({ pageId: LM_PAGE, path: '/marketing', rootCheck: '.lmtc .tabs', fin: lmFermer, steps }, extra || {});
   const FIN = (titre, body) => ({ title: titre, body });
-  // Pied de la fiche (sites) : un des quatre gestes du chef des ventes.
+  // Fiche du lead (sites) : gestes du chef, issues de l'appel.
   const mode = id => clic('.lmtc-ov .drawer [data-a="mode"][data-id="' + id + '"]');
-  const res = id => clic('.lmtc-ov .drawer [data-a="res"][data-id="' + id + '"]');
-  const issue = id => clic('.lmtc-ov .drawer [data-a="issue"][data-id="' + id + '"]');
+  const res = id => async () => { const n = doc.querySelector('.lmtc-ov .drawer [data-a="res"][data-id="' + id + '"]'); if (n) { n.click(); await sleep(200); } };
+  const issue = id => async () => { const n = doc.querySelector('.lmtc-ov .drawer [data-a="issue"][data-id="' + id + '"]'); if (n) { n.click(); await sleep(200); } };
+  const carteFiche = has => ({ css: '.lmtc-ov .drawer .fx-card', has });
+  const secPlat = has => ({ css: '.lmtc-ov .drawer section', has });
+  // Suivi d'activité : bascule d'écran.
+  const ecran = v => async () => { const b = doc.querySelector('#act-root [data-seg="ecran"] [data-v="' + v + '"]'); if (b && b.getAttribute('aria-pressed') !== 'true') { b.click(); await sleep(900); } };
+  const aEcran = v => () => !!doc.querySelector('#act-root [data-seg="ecran"] [data-v="' + v + '"]');
+  // Fiche client : onglet.
+  const ficheOnglet = k => async () => { const b = doc.querySelector('#oropra-fiche-shell .fs-tab[data-tab="' + k + '"]'); if (b && !b.classList.contains('on')) { b.click(); await sleep(500); } };
+  // Barre du haut : ouvre / ferme un menu déroulant par son libellé.
+  function menuTop(lib) {
+    return async () => {
+      const b = [...doc.querySelectorAll('a,button,[role="button"],div,span')].find(n => txt(n) === lib.toLowerCase() && n.getClientRects().length && n.closest('header, nav, [class*="nav"]'));
+      if (b) { try { b.dispatchEvent(new MouseEvent('mouseenter', { bubbles: true })); b.dispatchEvent(new MouseEvent('mouseover', { bubbles: true })); } catch (e) {} b.click(); await sleep(300); }
+    };
+  }
+  const fermerMenus = () => { try { doc.body.dispatchEvent(new MouseEvent('mousedown', { bubbles: true })); doc.body.click(); } catch (e) {} };
 
   const TOURS = {
 
@@ -74,118 +87,292 @@ OD.define('tours', {
        LEAD MANAGEMENT — vue d'ensemble, un par poste
        ================================================================= */
     'lm-vendeur': lm([
-      FIN('Ton poste vendeur', 'Je te montre ton poste en moins d’une minute. Clique « Suivant ».'),
-      { action: onglet('afaire'), target: { css: '.lmtc .situ .situ-t' }, title: 'La situation', body: 'Une phrase dit combien de personnes tu as à appeler et combien de leads sont libres dans la piscine du site.' },
-      { target: { css: '.lmtc .situ .kpis' }, title: 'Les chiffres du jour', body: 'Tes premiers contacts et tes prises du jour, ce qui reste à faire, la piscine et tes relances de campagne.' },
-      { target: { css: '.lmtc .poste .sig' }, title: 'Les signaux', body: 'Ce qui vient d’arriver : un lead qualifié par le plateau, un lead que ton chef te confie, un rappel. Chaque signal porte son bouton ; « Vu » le retire.' },
-      { target: { css: '.lmtc .poste .tabs' }, title: 'Tes trois onglets', body: 'À faire, la piscine du site et tes campagnes. Le chiffre passe en rouge dès qu’un lead est hors délai.' },
-      { target: { css: '.lmtc .poste .panel' }, title: 'À faire', body: 'Tes leads pas encore contactés, le plus pressé en tête, puis tes relances. Chaque ligne dit quoi faire et pourquoi.' },
-      { action: onglet('piscine'), target: { css: '.lmtc .poste .panel' }, title: 'La piscine du site', body: 'Les leads que personne n’a pris. « Prendre » met le lead à ton nom : il passe dans « À faire ».' },
-      { action: onglet('campagnes'), target: { css: '.lmtc .poste .panel' }, title: 'Mes campagnes', body: 'Les clients que ton chef t’a confiés. Un clic ouvre la fiche du client : appelle, puis fais ton compte rendu.' },
-      { action: onglet('afaire'), optional: true, target: { css: '.lmtc .situ [data-a="ancien"]' }, title: 'L’écran précédent', body: '« Tableaux détaillés » ramène aux cycles, au kanban et à la synthèse.' },
-      FIN('À toi de jouer', 'Commence par le haut de « À faire ». Chaque geste a sa visite dans la section Lead management des tutos.'),
+      FIN('Ton poste vendeur', 'Je te montre ton poste Lead management en une minute. Clique « Suivant ».'),
+      { action: onglet('accueil'), target: { css: '.lmtc .ac-h' }, title: 'Ta journée', body: 'Ton site, la date, combien de clients tu as à rappeler (et combien sont en retard), et combien de leads sont libres dans le Pool.' },
+      { optional: true, target: { css: '.lmtc .ac-ks' }, title: 'Les quatre chiffres', body: 'À rappeler, en retard, dans le Pool, et les leads qualifiés pour toi par la Vroom Team.' },
+      { optional: true, target: { css: '.lmtc .ac-next' }, title: 'À faire maintenant', body: 'Le lead le plus urgent. Le tien : « Appeler » ou « Ouvrir la fiche ». Sinon, le plus pressé du Pool : « Prendre ».' },
+      { optional: true, target: { css: '.lmtc .ac-g > .ac-c:not(.pool)' }, title: 'À rappeler', body: 'Tes leads, le plus urgent en haut. Les « pas joint » remontent à l’heure du rappel que tu as choisie.' },
+      { optional: true, target: { css: '.lmtc .ac-c.pool' }, title: 'Le Pool du site', body: 'Les leads que personne n’a pris : premier arrivé, premier servi. « Prendre » le met à ton nom et ouvre sa fiche.' },
+      { optional: true, target: { css: '.lmtc .ac-side' }, title: 'Aussi à faire', body: 'Tes relances (clients déjà essayés) et tes campagnes. Un lead de la Vroom Team t’attend ? Donne ton avis sur sa qualification dans la fiche.' },
+      { target: { css: '.lmtc .tabs' }, title: 'Les onglets', body: 'Accueil, Pool, Congélateur, À rappeler, Relances, Campagnes, Suivis, Historique. Le chiffre passe en rouge quand un lead est en retard.' },
+      { optional: true, target: { css: '.lmtc .outils' }, title: 'Les filtres', body: 'VN / VO si tu vends les deux, Particuliers / Pros, « Rappels programmés » (aujourd’hui et demain) et la période de réception.' },
+      FIN('À toi de jouer', 'Commence par « À faire maintenant ». Chaque geste a sa visite dans la section Lead management des tutos.'),
     ]),
 
     'lm-chef': lm([
-      FIN('Ton poste chef des ventes', 'Je te montre ton poste en moins d’une minute. Clique « Suivant ».'),
-      { action: onglet('mur'), target: { css: '.lmtc .situ .situ-t' }, title: 'La situation', body: 'Combien de leads sont hors délai dans la piscine, combien sont pris sans appel, et les premiers contacts de l’équipe aujourd’hui.' },
-      { target: { css: '.lmtc .situ .kpis' }, title: 'Les chiffres du site', body: 'Leads libres, chez les vendeurs, au plateau VROOM, ouverts depuis plus de 24 h (et les archives), et le délai moyen de premier contact.' },
-      { target: { css: '.lmtc .poste .sig' }, title: 'Les signaux', body: 'Ce qui demande ton intervention, chacun avec son bouton. « Vu » le retire.' },
-      { target: { css: '.lmtc table.mur:not(.sites)' }, title: 'Le mur', body: 'Qui a la main sur quoi, et depuis combien de temps. Chaque lead ouvert est compté une fois, chez la personne qui l’a en main.' },
-      { action: onglet('relayer'), target: { css: '.lmtc .poste .panel' }, title: 'À relayer', body: 'Ce qui reste en plan, groupe par groupe, avec le geste proposé : attribuer, rendre, renvoyer, confier au plateau, solder le stock.' },
-      { action: onglet('campagnes'), target: { css: '.lmtc .poste .panel' }, title: 'Campagnes', body: 'L’avancement de chaque campagne, vendeur par vendeur, et « Créer une campagne ».' },
-      { action: onglet('mur'), title: 'À toi de jouer', body: 'Un coup d’œil au mur, puis « À relayer ». Chaque geste a sa visite dans la section Lead management des tutos.' },
+      FIN('Ton poste chef des ventes', 'Je te montre ton poste Lead management en une minute. Clique « Suivant ».'),
+      { action: onglet('accueil'), target: { css: '.lmtc .ac-h, .lmtc .hello' }, title: 'Ton site aujourd’hui', body: 'Combien de leads attendent un vendeur dans le Pool, et combien demandent ton intervention.' },
+      { optional: true, target: { css: '.lmtc .ac-ks' }, title: 'Les chiffres du site', body: 'Dans le Pool (dont hors délai), chez les vendeurs, en souffrance, venus de la Vroom Team, et la part de leads rappelés dans le délai sur 30 jours.' },
+      { optional: true, target: { css: '.lmtc .perim' }, title: 'Ton périmètre', body: 'Si tu encadres plusieurs sites, choisis-en un ici : l’Accueil, le Pool et les listes le suivent.' },
+      { optional: true, target: { css: '.lmtc .ac-c.urg' }, title: 'À traiter maintenant', body: 'Les leads en souffrance chez tes vendeurs, le plus urgent en haut. « Agir » ouvre la fiche : réattribuer, rendre au Pool, renvoyer, clore.' },
+      { optional: true, target: { css: '.lmtc .ac-c.pool' }, title: 'Le Pool', body: 'Filtre Tous, Hors délai, VN, VO. En libre-service, les vendeurs se servent ; tu peux prendre un lead (« Pour moi ») ou l’attribuer (« Attribuer… »).' },
+      { optional: true, target: { css: '.lmtc .ac-side' }, title: 'Ton équipe et le pilotage', body: 'Pour chaque vendeur : leads ouverts et en souffrance. Dessous : la règle d’attribution du site, les campagnes et, s’il y en a, les leads ouverts depuis plus de 24 h à solder.' },
+      { target: { css: '.lmtc .tabs' }, title: 'Les onglets', body: 'Accueil, Pool, Congélateur, Mes leads (si tu vends aussi), En souffrance, Campagnes, Suivis, Historique.' },
+      { optional: true, target: { css: '.lmtc .k-vend-sel' }, title: 'L’écran d’un vendeur', body: 'Choisis un vendeur pour voir exactement son écran : son Pool, ses leads à rappeler, ses relances. En lecture seule.' },
+      FIN('À toi de jouer', 'Un coup d’œil à « À traiter maintenant », puis au Pool. Chaque geste a sa visite dans la section Lead management.'),
     ]),
 
     'lm-direction': lm([
-      { action: clic('.lmtc [data-a="retour-sites"]'), title: 'Ton poste direction', body: 'Je te montre ton poste en moins d’une minute. Clique « Suivant ».' },
-      { action: onglet('mur'), target: { css: '.lmtc .situ .situ-t' }, title: 'La situation', body: 'Les trois délais de premier contact les plus longs sur 30 jours, et les leads ouverts depuis plus de 24 h.' },
-      { target: { css: '.lmtc .situ .kpis' }, title: 'Les chiffres du périmètre', body: 'Leads reçus sur 7 jours, en piscine, hors délai, ouverts depuis plus de 24 h, encore au plateau VROOM.' },
-      { target: { css: '.lmtc .poste .sig' }, title: 'Les signaux', body: 'Ce qui demande une attention, site par site.' },
-      { target: { css: '.lmtc table.mur.sites' }, title: 'Le mur des sites', body: 'Une ligne par site : où en sont les leads maintenant, puis le délai de premier contact et la part dans le délai sur 30 jours.' },
-      { action: onglet('relais'), target: { css: '.lmtc .poste .panel' }, title: 'Le relais', body: 'De BACS au premier appel, en temps médian par site. Les segments hachurés n’appartiennent à personne : c’est là que le temps se perd.' },
-      { action: onglet('campagnes'), target: { css: '.lmtc .poste .panel' }, title: 'Campagnes', body: 'Les campagnes de tout ton périmètre, et la création d’une campagne.' },
-      { action: onglet('mur'), title: 'À toi de jouer', body: 'Repère le site le plus lent, puis ouvre son mur.' },
+      FIN('Ton poste direction', 'Je te montre ton poste Lead management en une minute. Clique « Suivant ».'),
+      { target: { css: '.lmtc .hello' }, title: 'La situation', body: 'Ton périmètre, les leads qui attendent dans le Pool (dont hors délai) et les leads en souffrance chez les vendeurs.' },
+      { optional: true, target: { css: '.lmtc .perim' }, title: 'Le périmètre', body: 'Tous mes sites, ou une marque, une affaire, un site. Sur un site que tu n’encadres pas, tu lis tout : c’est le chef des ventes qui agit.' },
+      { action: onglet('pool'), target: { css: '.lmtc .panel' }, title: 'Le Pool', body: 'Les leads libres du périmètre, le plus pressé en tête, chacun avec son site et son délai.' },
+      { action: onglet('bloques'), target: { css: '.lmtc .panel' }, title: 'En souffrance', body: 'Vendeur par vendeur : les leads pris sans appel, hors délai, gardés plus de 24 h ou injoignables après trois essais.' },
+      { action: onglet('campagnes'), target: { css: '.lmtc .panel' }, title: 'Campagnes', body: 'L’avancement des campagnes de ton périmètre, et « Créer une campagne ».' },
+      { target: { css: '.lmtc .tabs' }, title: 'Les onglets', body: 'Pool, Congélateur, En souffrance, Campagnes, Suivis, Historique.' },
+      { action: onglet('pool'), title: 'À toi de jouer', body: 'Choisis un site dans le périmètre pour voir son Pool et son équipe comme son chef des ventes.' },
     ]),
 
     'lm-plateau': lm([
-      FIN('Ton poste plateau VROOM', 'Je te montre ton poste en moins d’une minute. Clique « Suivant ».'),
-      { action: onglet('piscine'), target: { css: '.lmtc .situ .situ-t' }, title: 'La situation', body: 'Combien de leads sont libres et hors délai dans la piscine BACS, depuis quand attend le plus ancien, et les rappels dus.' },
-      { target: { css: '.lmtc .situ .kpis' }, title: 'Les chiffres du plateau', body: 'Pris, qualifiés, rappels, abandonnés aujourd’hui ; l’âge de la copie BACS ; et le report dans BACS, « automatique » quand tout passe.' },
-      { optional: true, target: { css: '.lmtc .bd' }, title: 'Le canal BACS', body: 'Rouge : aucune session BACS ne répond, ouvre BACS et connecte-toi. Bleu : tes gestes passent par un collègue. Orange : des gestes attendent.' },
-      { target: { css: '.lmtc .poste .sig' }, title: 'Les signaux', body: 'Nouveau lead, hors délai, rappel, relais bloqué : chaque signal porte son bouton. « Vu » le retire.' },
-      { target: { css: '.lmtc .poste .tabs' }, title: 'Tes quatre onglets', body: 'La piscine BACS, les rappels, les transferts et les campagnes.' },
-      { target: { css: '.lmtc .poste .panel' }, title: 'La piscine BACS', body: 'Du plus ancien au plus récent. « Prendre » réserve le lead à ton nom, le passe en Accepté dans BACS et ouvre sa fiche.' },
-      { action: onglet('rappels'), target: { css: '.lmtc .poste .panel' }, title: 'Rappels', body: 'Injoignables et projets long terme, du plus en retard au plus lointain.' },
-      { action: onglet('transferts'), target: { css: '.lmtc .poste .panel' }, title: 'Transferts', body: 'Ce que deviennent tes leads qualifiés. Après 2 h sans contact, « Relancer le chef » alerte le site.' },
-      { action: onglet('campagnes'), target: { css: '.lmtc .poste .panel' }, title: 'Campagnes', body: 'Les campagnes BACS. « Filtrer » restreint tes files à une campagne.' },
-      { action: onglet('piscine'), title: 'À toi de jouer', body: 'Prends le plus ancien. Garde l’onglet BACS ouvert et connecté : One Data y écrit pour toi.' },
+      FIN('Ton poste Vroom Team', 'Je te montre ton poste en une minute. Clique « Suivant ».'),
+      { target: { css: '.lmtc .hello' }, title: 'Ta situation', body: 'Leads à traiter dans le Pool BACS, rappels dus, et ce que tu as fait aujourd’hui : pris, transférés, abandonnés. Si BACS n’a pas été relu depuis 2 h, c’est écrit ici.' },
+      { optional: true, target: { css: '.lmtc .hello .cta' }, title: 'Prendre le suivant', body: 'Le prochain lead à traiter, « Demande client (1h) » d’abord. Un clic : il est réservé à ton nom et sa fiche s’ouvre.' },
+      { optional: true, target: { css: '.lmtc .voyant' }, title: 'Le voyant BACS', body: 'Vert : BACS connecté, tes gestes y partent. Orange : des gestes attendent. Rouge : BACS fermé ou des échecs.' },
+      { optional: true, target: { css: '.lmtc .b1h' }, title: 'Demande client (1h)', body: 'Pénalité constructeur au-delà d’une heure : ces leads restent en bandeau sur tous les onglets tant qu’ils attendent.' },
+      { target: { css: '.lmtc .tabs' }, title: 'Tes cinq onglets', body: 'Pool BACS, Rappels dus, Transferts, Campagnes, Mes actions.' },
+      { optional: true, target: { css: '.lmtc .outils' }, title: 'Rechercher, créer', body: 'Recherche un lead par nom, téléphone ou e-mail ; « + Nouveau lead » pour un appel entrant ; VN / VO ; la période.' },
+      { action: onglet('piscine'), target: { css: '.lmtc .panel' }, title: 'Le Pool BACS', body: 'Les leads BACS à prendre, groupés : Demande client (1h), Relance concession (48h), autres, trafic atelier.' },
+      FIN('À toi de jouer', 'Prends le suivant. Garde l’onglet BACS ouvert et connecté : One Data y écrit pour toi.'),
     ]),
 
     /* =================================================================
-       LEAD MANAGEMENT — une visite par tuto
+       LEAD MANAGEMENT — premiers pas
        ================================================================= */
     'lm-delais': lm([
       FIN('Délais et couleurs', 'Chaque lead a un délai de premier contact. Je te montre où le lire.'),
-      { requires: VEND, action: onglet('afaire'), optional: true, target: { css: '.lmtc .poste .panel .tm' }, title: 'Le minuteur', body: 'À gauche de chaque ligne : le temps écoulé et, dessous, le délai de la source. Vert tant que moins de 60 % du délai est consommé, orange au-delà, rouge une fois dépassé.' },
-      { requires: CHEF, action: onglet('mur'), target: { css: '.lmtc table.mur:not(.sites) thead' }, title: 'Les colonnes du mur', body: 'Dans les temps (vert), À risque (orange, plus de 60 % du délai consommé), Hors délai (rouge), puis Ouverts + 24 h.' },
-      { requires: DIR, action: onglet('mur'), target: { css: '.lmtc table.mur.sites thead' }, title: 'Les colonnes du mur des sites', body: 'Dans les temps, À risque, Hors délai, Ouverts + 24 h pour chaque site, puis le délai moyen de premier contact sur 30 jours.' },
-      { requires: PLAT, action: onglet('piscine'), optional: true, target: { css: '.lmtc .poste .panel .lr .tm' }, title: 'Le minuteur', body: 'Depuis combien de temps le lead attend, coloré selon le délai de sa source : vert, orange à 60 %, rouge au-delà.' },
-      { target: { css: '.lmtc .poste .tabs' }, title: 'Le chiffre des onglets', body: 'Il passe en rouge dès qu’un lead de la file est hors délai.' },
-      { requires: '.lmtc .situ .kpis', target: { css: '.lmtc .situ .kpis' }, title: 'Les chiffres du haut', body: 'Ils comptent aussi les leads hors délai et ceux ouverts depuis plus de 24 h.' },
-      FIN('Le délai dépend de la source', 'Site constructeur : 30 min. Campagne marketing BACS : 1 h. Autre demande BACS : 2 h. Showroom et trafic atelier : 4 h. Lead transmis par le plateau : 2 h pour le site.'),
+      { requires: VEND, action: onglet('arappeler'), optional: true, target: { css: '.lmtc .panel .lr .tm' }, title: 'Le compte à rebours', body: 'Vert : le temps qu’il reste avant le délai. Orange : moins de 40 % du délai restant. Rouge « +12 min hors délai » : délai dépassé. Au-delà de 24 h, la date d’arrivée.' },
+      { requires: SITE, action: onglet('pool'), optional: true, target: { css: '.lmtc .panel .lg-t, .lmtc .panel .lr .tm, .lmtc .cartes .age' }, title: 'Dans le Pool', body: 'Le gros chiffre : l’attente depuis l’arrivée sur le site. Dessous : « hors délai » ou ce qu’il reste (« reste 2 h »).' },
+      { requires: PLAT, action: onglet('piscine'), optional: true, target: { css: '.lmtc .panel .lr .tm' }, title: 'Le minuteur du plateau', body: 'Depuis la réception dans BACS, coloré selon le délai de la source. « Demande client (1h) » : pénalité constructeur au-delà d’une heure.' },
+      { target: { css: '.lmtc .tabs' }, title: 'Le chiffre des onglets', body: 'Il passe en rouge dès qu’un lead de la liste est en retard.' },
+      { requires: SITE, action: lmExemple, optional: true, target: { css: '.lmtc-ov .drawer .fx-del' }, title: 'Dans la fiche', body: 'L’anneau se remplit à mesure que le délai passe : « À rappeler avant 10:45 », ou « Délai dépassé de 27 min ». Le délai du site se compte en heures ouvrées.' },
+      { action: lmFermer, title: 'À retenir', body: 'Un créneau choisi par le client (message automatique) remplace le compte à rebours : on rappelle à l’heure qu’il a demandée.' },
     ]),
 
     'lm-bacs-sites': lm([
-      FIN('Ce qui part dans BACS', 'Pour un lead BACS, tes gestes sont reportés automatiquement dans BACS. Je t’ouvre une fiche pour te montrer où le voir.'),
-      { action: lmExemple, target: { css: '.lmtc-ov .drawer .dr-h' }, title: 'La fiche du lead', body: 'L’étiquette « BACS » dit que le lead vient de BACS : ses gestes y seront reportés.' },
-      { optional: true, target: { css: '.lmtc-ov .drawer .env' }, title: 'Dans BACS', body: 'Chaque envoi et son résultat : « Fait à 10:42 », « En attente » ou « Échec » avec la raison. « Relancer l’envoi » remet un échec en route.' },
-      { target: { css: '.lmtc-ov .drawer .dr-f' }, title: 'Les gestes', body: 'RDV : le rendez-vous part dans BACS. Attribuer : le vendeur devient propriétaire. Autre site : site et propriétaire mis à jour. Clore : abandon avec le motif. Confier au plateau : rappel VROOM dans 30 min.' },
-      { optional: true, target: { css: '.lmtc-ov .drawer .row.pied .hint' }, title: 'Le rappel en bas', body: 'Il dit si le lead est un lead BACS ou un lead hors BACS, enregistré seulement dans One Data.' },
-      FIN('Ce qui reste dans One Data', 'Joint sans RDV, Pas joint et Rendre à la piscine ne modifient pas BACS.'),
+      FIN('Ce qui part dans BACS', 'Pour un lead venu de BACS, tes gestes sont reportés dans BACS : tu n’as pas à y retourner.'),
+      { optional: true, target: { css: '.lmtc .bacs-l' }, title: 'BACS fermé sur ce poste', body: 'Ce bandeau apparaît quand aucun onglet BACS n’est ouvert dans ton navigateur : les gestes sur les leads BACS sont alors refusés. Ouvre BACS, connecte-toi.' },
+      { action: lmExemple, target: { css: '.lmtc-ov .drawer .fx-c1' }, title: 'La demande', body: 'La source et, pour un lead BACS, son statut BACS.' },
+      { optional: true, target: { css: '.lmtc-ov .drawer .env' }, title: 'Dans BACS', body: 'Chaque envoi et son résultat : fait, en attente ou échec avec la raison. Un échec se relance.' },
+      { target: { css: '.lmtc-ov .drawer .fx-c3 .dr-f' }, title: 'Les gestes reportés', body: 'Le RDV, l’attribution, le renvoi vers un autre site, la clôture (avec son motif) et le retour à la Vroom Team partent dans BACS.' },
+      { optional: true, target: { css: '.lmtc-ov .drawer .row.pied .hint' }, title: 'Le rappel en bas', body: 'Il dit si c’est un lead BACS ou un lead hors BACS, enregistré seulement dans One Data.' },
+      { action: lmFermer, title: 'Ce qui reste dans One Data', body: 'Joint sans RDV, Pas joint et Rendre au Pool ne modifient pas BACS. Rien n’a été enregistré pendant la visite.' },
     ]),
 
-    'lm-v-afaire': lm([
-      { action: onglet('afaire'), target: { css: '.lmtc .situ .situ-t' }, title: 'À faire : qui appeler maintenant', body: 'La phrase du haut compte les personnes à appeler.' },
-      { target: { css: '.lmtc .poste .panel' }, title: 'La liste', body: 'Tes leads pas encore contactés, le plus pressé en tête, puis tes relances de campagne.' },
-      { optional: true, target: { css: '.lmtc .poste .panel .todo .todo-v' }, title: 'Quoi faire', body: '« Appeler » pour un premier contact, « Rappeler » avec le numéro de la tentative, « Relancer » pour une campagne.' },
-      { optional: true, target: { css: '.lmtc .poste .panel .todo .why' }, title: 'Pourquoi', body: 'Qualifié par le plateau VROOM, attribué par ton chef, ou pas joint au dernier essai.' },
-      { optional: true, target: { css: '.lmtc .poste .panel .todo .tm' }, title: 'Le délai', body: 'Le temps écoulé depuis l’arrivée sur le site, et le délai de la source.' },
-      { optional: true, target: { css: '.lmtc .poste .panel > .foot' }, title: 'Les leads plus anciens', body: 'Tes leads de plus de 30 jours encore à ton nom : ils ne sont plus à appeler en priorité, ton chef les solde.' },
-      { action: lmExemple, target: { css: '.lmtc-ov .drawer .canaux' }, title: 'Ouvre et appelle', body: 'Un clic sur une ligne ouvre la fiche à droite : Appeler (3CX), WhatsApp, Email, SMS, et la fiche client.' },
-      { optional: true, target: { css: '.lmtc-ov .drawer .qualif' }, title: 'La qualification du plateau', body: 'Ce que le plateau VROOM a appris : lis-la avant d’appeler.' },
-      FIN('Ensuite', 'En bas de la fiche, dis ce qui s’est passé : voir la visite « Après l’appel ».'),
+    /* =================================================================
+       LEAD MANAGEMENT — vendeur
+       ================================================================= */
+    'lm-v-pool': lm([
+      { action: onglet('pool'), target: { css: '.lmtc .tabs [data-id="pool"]' }, title: 'Le Pool du site', body: 'Les leads que personne n’a pris : site web, Leboncoin, La Centrale, e-mails, et les leads transmis par la Vroom Team.' },
+      { optional: true, target: { css: '.lmtc .panel .ph' }, title: 'Libre-service', body: 'Premier arrivé, premier servi. Un lead pris et non traité (ni appel, ni geste) dans le quart d’heure revient tout seul dans le Pool.' },
+      { optional: true, target: { css: '.lmtc .panel .lr' }, title: 'Un lead', body: 'Le temps, le nom, la demande (véhicule ou qualification), le détail du message, la source et les étiquettes : Pro, Qualifié par la Vroom Team…' },
+      { optional: true, target: { css: '.lmtc .panel .lr [data-a="prendre"]' }, title: 'Prendre', body: 'Le lead passe à ton nom, dans « À rappeler », et sa fiche s’ouvre.' },
+      { optional: true, target: { css: '.lmtc .panel .resa-l' }, title: 'Réservé', body: 'Un collègue regarde ce lead en ce moment.' },
+      { optional: true, target: { css: '.lmtc .seg-u[aria-label="Clientèle"]' }, title: 'Particuliers / Pros', body: 'Ne montre que les particuliers ou que les professionnels (société, SIRET).' },
+      FIN('Un lead BACS manque ?', 'Chez Toyota, les demandes BACS passent d’abord par la Vroom Team, qui les qualifie avant de les envoyer au site. À Lexus Sceaux, elles arrivent directement dans le Pool.'),
     ]),
 
-    'lm-v-piscine': lm([
-      { action: onglet('piscine'), target: { css: '.lmtc .poste .tabs [data-id="piscine"]' }, title: 'La piscine du site', body: 'Les leads du site que personne n’a pris : premier arrivé, premier servi.' },
-      { target: { css: '.lmtc .poste .panel' }, title: 'Les leads libres', body: 'Du plus pressé au moins pressé, avec leur délai.' },
-      { optional: true, target: { css: '.lmtc .poste .panel .lr [data-a="prendre"]' }, title: 'Prendre', body: 'Met le lead à ton nom : il passe dans « À faire » et sa fiche s’ouvre.' },
-      { optional: true, target: { css: '.lmtc .poste .panel .lr.resa' }, title: 'Réservé', body: 'Un collègue regarde ce lead jusqu’à l’heure indiquée.' },
-      { optional: true, target: { css: '.lmtc .poste .panel .lr .tags' }, title: 'Les étiquettes', body: 'Source, campagne, « Qualifié par VROOM »… « Aussi en piscine BACS » : appelle-le normalement, il sortira de la piscine du plateau.' },
-      { action: onglet('afaire'), title: 'Un lead BACS manque ?', body: 'Il est encore au plateau VROOM : il arrivera sur le site une fois qualifié.' },
+    'lm-v-fiche': lm([
+      FIN('La fiche du lead', 'Je t’ouvre une fiche d’exemple : rien n’y est enregistré.'),
+      { action: lmExemple, target: { css: '.lmtc-ov .drawer .fx-h' }, title: 'L’en-tête', body: 'Le client, son rang dans ta liste (« Lead 2 sur 5 »), le site, qui l’a en main ; « Lead suivant » à droite.' },
+      { optional: true, target: { css: '.lmtc-ov .drawer .fx-del' }, title: 'Le délai', body: 'Avant quand rappeler, ou le créneau choisi par le client.' },
+      { target: { css: '.lmtc-ov .drawer .fx-c1' }, title: 'La demande', body: 'Ce que le client a demandé (VN ou VO, véhicule, message complet), la source, la date, ses coordonnées et « Ouvrir la fiche client ».' },
+      { optional: true, target: { css: '.lmtc-ov .drawer .fx-card.vr' }, title: 'Ce que la Vroom Team a appris', body: 'Projet, modèle, échéance, reprise, financement, note pour toi. Dis en un clic si la qualification était bonne.' },
+      { target: { css: '.lmtc-ov .drawer .fx-call' }, title: 'Appeler, écrire', body: 'Appeler (par ton poste 3CX), SMS, WhatsApp, E-mail : la fenêtre propose des modèles adaptés au lead.' },
+      { optional: true, target: carteFiche('Message automatique'), title: 'Le message automatique', body: 'Ce que le client a reçu à l’arrivée de sa demande (RCS, SMS ou e-mail) : envoyé, remis, lu, lien ouvert, et sa réponse.' },
+      { optional: true, target: carteFiche('Delco'), title: 'Delco, avant d’appeler', body: 'Ce qu’il faut savoir : stock disponible, véhicule à reprendre, affaire déjà en cours, autres demandes, passages atelier.' },
+      { optional: true, target: { css: '.lmtc-ov .drawer .fx-tiles' }, title: 'Ce que le groupe sait de lui', body: 'Son véhicule, ses passages atelier, ses achats.' },
+      { optional: true, target: carteFiche('Fil du client'), title: 'Le fil du client', body: 'BACS, One Data, Vroom Team, appels, messages, RDV, atelier : les derniers événements, avec qui.' },
+      { target: { css: '.lmtc-ov .drawer .fx-c3' }, title: 'Le résultat de l’appel', body: 'À droite, après l’appel : voir la visite « Après l’appel ».' },
+      { action: lmFermer, title: 'À toi de jouer', body: 'La fiche d’exemple est fermée : rien n’a été enregistré.' },
     ]),
 
     'lm-v-apres': lm([
-      FIN('Après l’appel', 'Je t’ouvre une fiche pour te montrer comment dire ce qui s’est passé.'),
-      { action: async () => { await lmExemple(); if (doc.querySelector(CHEF) || doc.querySelector(DIR)) { mode('resultat')(); await sleep(150); } res('rdv')(); },
+      FIN('Après l’appel', 'Je t’ouvre une fiche d’exemple pour te montrer comment dire ce qui s’est passé.'),
+      { action: async () => { await lmExemple(); if (doc.querySelector('.lmtc-ov .drawer [data-a="mode"][data-id="resultat"]')) { mode('resultat')(); await sleep(200); } await res('rdv')(); },
         target: { css: '.lmtc-ov .drawer [role="radiogroup"][aria-label^="Résultat"]' }, title: 'Quatre issues', body: 'Joint · RDV, Joint · sans RDV, Pas joint, Clore.' },
-      { action: res('rdv'), target: { css: '.lmtc-ov .drawer .dr-f' }, title: 'Joint · RDV', body: 'Date, durée, objet, puis « Enregistrer le RDV » : il s’inscrit dans ton agenda et le lead est contacté. Il faut une fiche client rattachée.' },
-      { action: res('joint'), target: { css: '.lmtc-ov .drawer .dr-f' }, title: 'Joint · sans RDV', body: 'Le lead est contacté, avec une note si tu veux. Il sort de « À faire ».' },
-      { action: res('pasjoint'), target: { css: '.lmtc-ov .drawer .dr-f' }, title: 'Pas joint', body: 'La tentative est notée (1, 2, 3 sur 3). Le lead reste dans « À faire » et revient en signal « Rappel » deux heures plus tard.' },
-      { action: res('clore'), target: { css: '.lmtc-ov .drawer .dr-f' }, title: 'Clore', body: 'Avec un motif : pas intéressé, injoignable, parti à la concurrence, doublon, fausse demande, autre.' },
-      { requires: VEND, optional: true, target: { css: '.lmtc-ov .drawer [data-a="rendre"]' }, title: 'Rendre à la piscine', body: 'Ce lead n’est pas pour toi ? Il redevient libre pour tes collègues.' },
-      FIN('À toi de jouer', 'Rien n’a été enregistré pendant la visite.'),
+      { action: res('rdv'), target: { css: '.lmtc-ov .drawer .fx-c3 .dr-f' }, title: 'Joint · RDV', body: 'L’objet (RDV vente, essai, estimation de reprise, livraison VN ou VO), la date, les invités, puis enregistrer : le RDV va dans ton agenda et, pour un lead BACS, dans BACS.' },
+      { action: res('joint'), target: { css: '.lmtc-ov .drawer .fx-c3 .dr-f' }, title: 'Joint · sans RDV', body: 'Une note si tu veux, puis « Enregistrer le contact ». Le lead sort de tes leads à rappeler.' },
+      { action: res('pasjoint'), target: { css: '.lmtc-ov .drawer .fx-c3 .dr-f' }, title: 'Pas joint', body: 'Choisis la prochaine tentative (dans 1 h, 2 h, ce soir, demain…) puis « Noter la tentative 1 sur 3 ». Le lead passe dans Relances, rangé à cette heure.' },
+      { action: res('clore'), target: { css: '.lmtc-ov .drawer .fx-c3 .dr-f' }, title: 'Clore', body: 'Avec un motif : pas intéressé, injoignable, parti à la concurrence, doublon, fausse demande, autre. Un lead BACS est aussi clos dans BACS.' },
+      { requires: VEND, optional: true, target: { css: '.lmtc-ov .drawer [data-a="rendre"]' }, title: 'Rendre au Pool', body: 'Ce lead n’est pas pour toi ? Il redevient libre pour tes collègues.' },
+      { action: lmFermer, title: 'À retenir', body: 'Sans fiche client rattachée, « Joint » te demande d’abord de choisir la bonne fiche ou d’en créer une. Rien n’a été enregistré pendant la visite.' },
+    ]),
+
+    'lm-v-rappeler': lm([
+      { action: onglet('arappeler'), target: { css: '.lmtc .tabs [data-id="arappeler"]' }, title: 'À rappeler', body: 'Tes leads pas encore contactés, le plus urgent en haut.' },
+      { optional: true, target: { css: '.lmtc .panel .lr' }, title: 'Une ligne', body: 'Le délai (ou l’heure du rappel), le client, sa demande et son état : nouveau, qualifié par la Vroom Team, retour au Pool dans 9 min…' },
+      { optional: true, target: { css: '.lmtc .panel .lr [data-a="appeler"]' }, title: 'Appeler', body: 'Ouvre la fiche et lance l’appel.' },
+      { optional: true, target: { css: '.lmtc .panel > .foot' }, title: 'Les leads anciens', body: 'Tes leads reçus il y a plus de 30 jours : ils ne sont plus à appeler en priorité, ton chef des ventes les solde.' },
+      { action: onglet('relances'), target: { css: '.lmtc .tabs [data-id="relances"]' }, title: 'Relances', body: 'Les clients déjà essayés sans les joindre (« pas joint ×2 »), à l’heure du rappel que tu as choisie. Rouge quand un rappel est dû.' },
+      { optional: true, target: { css: '.lmtc .acc-f' }, title: 'Rappels programmés', body: 'Ne garde que les leads à rappeler aujourd’hui ou demain, créneaux choisis par les clients compris.' },
+      FIN('À retenir', 'Après trois essais sans joindre le client, ton chef des ventes le voit en souffrance.'),
+    ]),
+
+    'lm-congelateur': lm([
+      { action: onglet('congelateur'), target: { css: '.lmtc .tabs [data-id="congelateur"]' }, title: 'Le Congélateur', body: 'Les leads que la Vroom Team a abandonnés dans BACS, avec le motif. Une deuxième chance pour le site.' },
+      { optional: true, target: { css: '.lmtc .panel .ph' }, title: 'Sans délai', body: 'Ici, aucun délai ni alerte : un lead repris ne revient pas au Pool tout seul.' },
+      { optional: true, target: { css: '.lmtc .panel .lr.cg' }, title: 'Un lead congelé', body: 'Reçu le…, la demande, abandonné le…, et le motif de la Vroom Team avec son commentaire.' },
+      { optional: true, target: { css: '.lmtc .panel [data-a="cg-prendre"]' }, title: 'Prendre', body: 'Le lead passe à ton nom (À rappeler, ou Mes leads pour un chef) et repasse « Accepté » dans BACS.' },
+      FIN('S’il n’aboutit pas', 'Dans sa fiche, « Remettre au congélateur » le rend à tes collègues, avec ton commentaire.'),
     ]),
 
     'lm-v-campagnes': lm([
-      { action: onglet('campagnes'), target: { css: '.lmtc .poste .tabs [data-id="campagnes"]' }, title: 'Mes campagnes', body: 'Les clients que ton chef des ventes t’a confiés dans une campagne.' },
-      { target: { css: '.lmtc .poste .panel' }, title: 'Une campagne', body: 'Pour chacune : tes clients, ceux déjà traités, ceux à relancer, les propositions et les commandes.' },
-      { optional: true, target: { css: '.lmtc .poste .panel .todo' }, title: 'Un client à relancer', body: 'Un clic ouvre sa fiche : appelle-le, puis fais ton compte rendu. La relance est alors comptée comme traitée.' },
-      { optional: true, target: { css: '.lmtc .poste .panel .todo .tm' }, title: 'Depuis quand', body: 'Les jours depuis le lancement ; orange au-delà de trois jours.' },
-      { action: onglet('afaire'), title: 'Dans « À faire » aussi', body: 'Tes relances de campagne apparaissent à la fin de la liste « À faire ».' },
+      { action: onglet('campagnes'), target: { css: '.lmtc .tabs [data-id="campagnes"]' }, title: 'Campagnes', body: 'Les clients à relancer d’une campagne de ton site (ex. « Lexus Black Friday ») : libre-service, comme le Pool.' },
+      { optional: true, target: { css: '.lmtc .panel .cp-kpis' }, title: 'L’avancement', body: 'À prendre, pris par l’équipe, traités, propositions, commandes, et tes clients.' },
+      { optional: true, target: { css: '.lmtc .panel .cp-flt, .lmtc .panel [data-x="cp-q"]' }, title: 'Les filtres', body: 'Nom, ville ou immatriculation ; modèle ; critère : simulation BACS, renouvellement, 100 000 km, passage atelier récent, joignable sur mobile…' },
+      { optional: true, target: { css: '.lmtc .panel .lr.cp-l' }, title: 'Un client', body: 'Son indice de priorité sur 100, son véhicule (modèle, immatriculation, année, km), ses passages atelier et les raisons de la priorité.' },
+      { optional: true, target: { css: '.lmtc .panel [data-a="camp-prendre"]' }, title: 'Je prends', body: 'Le client passe à ton nom, dans « À relancer par vous ».' },
+      { optional: true, target: { css: '.lmtc .panel [data-a="camp-traiter"]' }, title: 'Traiter', body: 'Ouvre le panneau : numéros, e-mail, véhicule, raisons, puis le résultat (RDV pris, à rappeler, messagerie, pas intéressé, déjà équipé, ne plus appeler) ou « Rendre ».' },
+      FIN('À retenir', 'Une relance est comptée comme traitée dès que tu as noté son résultat.'),
     ]),
 
+    'lm-suivis': lm([
+      { action: onglet('suivis'), target: { css: '.lmtc .tabs [data-id="suivis"]' }, title: 'Suivis', body: 'Un client rappelle ? Retrouve sa demande et vois où elle en est, même si un collègue la suit.' },
+      { target: { css: '.lmtc .panel .hist-f' }, title: 'Rechercher', body: 'Nom, téléphone, e-mail ou véhicule. Sans recherche : les demandes prises en charge ces 60 derniers jours, ou encore ouvertes.' },
+      { optional: true, target: { css: '.lmtc .panel table.hist' }, title: 'Le tableau', body: 'Client, demande, suivi par, dernier geste, statut (et statut BACS), suite prévue. Un clic ouvre la fiche du client.' },
+      FIN('Plusieurs sites', 'La recherche porte d’abord sur le site choisi en haut ; sans résultat, elle cherche sur tes autres sites et le signale.'),
+    ]),
+
+    'lm-historique': lm([
+      { action: onglet('historique'), target: { css: '.lmtc .tabs [data-id="historique"]' }, title: 'Historique', body: 'Les leads traités et ce qui a été fait : pris, attribué, joint, RDV posé, pas joint, clos…' },
+      { optional: true, target: { css: '.lmtc .panel .hist-f' }, title: 'Les filtres', body: 'Période, recherche, statut, résultat, source ; pour un chef, le vendeur.' },
+      { optional: true, target: { css: '.lmtc .panel table.hist' }, title: 'Le tableau', body: 'Le geste, son auteur, le statut actuel du lead (vendu, en cours chez un collègue…). Un clic rouvre le lead ou la fiche client.' },
+      FIN('À retenir', 'L’Historique suit le site choisi en haut à droite.'),
+    ]),
+
+    /* =================================================================
+       LEAD MANAGEMENT — chef des ventes, direction
+       ================================================================= */
+    'lm-c-pool': lm([
+      { action: onglet('pool'), target: { css: '.lmtc .tabs [data-id="pool"]' }, title: 'Le Pool', body: 'Les leads du site sans vendeur, le plus pressé en tête.' },
+      { optional: true, target: { css: '.lmtc .panel .regle' }, title: 'La règle du site', body: 'Libre-service (les vendeurs se servent), par le chef, ou automatique. « Modifier » la change.' },
+      { optional: true, target: { css: '.lmtc .panel .lg-t' }, title: 'Le temps', body: 'L’attente depuis l’arrivée sur le site ; dessous, la situation face au délai de rappel.' },
+      { optional: true, target: { css: '.lmtc .cartes > *' }, title: 'Un lead', body: 'Le client, sa demande, sa source ; « + 1 autre demande » si le même contact a déjà écrit au site.' },
+      { optional: true, target: { css: '.lmtc .cartes [data-a="choix"], .lmtc .cartes [data-a="attribuer-sugg"], .lmtc .cartes [data-a="attribuer"]' }, title: 'Attribuer', body: 'Le vendeur suggéré (le moins chargé de l’équipe) ou un autre. En libre-service, l’attribution reste possible, en second.' },
+      { optional: true, target: { css: '.lmtc .cartes [data-a="prendre"]' }, title: 'Je le prends', body: 'Si tu vends aussi : le lead passe dans « Mes leads ».' },
+      { optional: true, target: { css: '.lmtc .panel .stock-l' }, title: 'Le stock', body: 'Les leads ouverts depuis plus de 24 h faussent les délais du site : « Solder le stock ».' },
+      { optional: true, target: { css: '.lmtc .panel .team' }, title: 'L’équipe', body: 'Chaque vendeur, ses leads en cours et en souffrance.' },
+      FIN('À toi de jouer', 'Rien n’a été attribué pendant la visite.'),
+    ]),
+
+    'lm-c-souffrance': lm([
+      { action: onglet('bloques'), target: { css: '.lmtc .tabs [data-id="bloques"]' }, title: 'En souffrance', body: 'Les leads qui n’avancent pas chez un vendeur.' },
+      { optional: true, target: { css: '.lmtc .panel section.vend' }, title: 'Un vendeur', body: 'Ses leads en souffrance, le plus ancien, et les appels déjà faits sans réponse.' },
+      { optional: true, target: { css: '.lmtc .panel [data-a="prevenir"]' }, title: 'Prévenir', body: 'Le vendeur reçoit une alerte avec la liste de ses leads en souffrance.' },
+      { optional: true, target: { css: '.lmtc .panel [data-a="tout-reattr"]' }, title: 'Tout réattribuer…', body: 'Ses leads passent à un autre vendeur, ou retournent au Pool.' },
+      { optional: true, target: { css: '.lmtc .panel .lien-r' }, title: 'Lead par lead', body: '« Réattribuer › » ouvre la fiche du lead.' },
+      { optional: true, target: { css: '.lmtc .panel > .foot' }, title: 'La définition', body: 'Pris sans appel depuis plus de 20 min, délai dépassé, gardé plus de 24 h, ou trois essais sans joindre le client.' },
+      FIN('À toi de jouer', 'Prévenir d’abord ; réattribuer si rien ne bouge.'),
+    ]),
+
+    'lm-c-fiche': lm([
+      FIN('Agir sur un lead', 'Je t’ouvre la fiche d’un lead : rien n’y est enregistré.'),
+      { action: lmExemple, target: { css: '.lmtc-ov .drawer .fx-h' }, title: 'La fiche', body: 'Le lead, son site, qui l’a en main, et son délai.' },
+      { optional: true, target: { css: '.lmtc-ov .drawer [role="radiogroup"][aria-label="Geste"]' }, title: 'Quatre gestes', body: 'Attribuer (ou réattribuer), Résultat d’appel, Autre site, Clore.' },
+      { optional: true, action: mode('attribuer'), target: { css: '.lmtc-ov .drawer #dr-vendeur' }, title: 'Attribuer', body: 'Choisis le vendeur. Dessous : « Confier à la Vroom Team » (lead BACS, Toyota), « Rendre au Pool », ou « Je le prends ».' },
+      { optional: true, action: mode('resultat'), target: { css: '.lmtc-ov .drawer .fx-c3 .dr-f' }, title: 'Résultat d’appel', body: 'Si tu as appelé toi-même : RDV, joint, pas joint ou clore.' },
+      { optional: true, action: mode('renvoyer'), target: { css: '.lmtc-ov .drawer #dr-site' }, title: 'Autre site', body: 'Le lead part dans le Pool du site choisi, délai remis à zéro. BACS reçoit le nouveau site.' },
+      { optional: true, action: mode('clore'), target: { css: '.lmtc-ov .drawer #clore-motif' }, title: 'Clore', body: 'Avec un motif. Un lead BACS est aussi abandonné dans BACS.' },
+      { action: lmFermer, title: 'Vue de pilotage', body: 'Sur un site que tu n’encadres pas, tu lis la fiche sans pouvoir agir. Rien n’a été modifié pendant la visite.' },
+    ]),
+
+    'lm-c-comme': lm([
+      { target: { css: '.lmtc .k-vend-sel' }, title: 'L’écran d’un vendeur', body: 'Le même sélecteur que dans la gestion des ventes.' },
+      { action: async () => { const b = doc.querySelector('.lmtc [data-a="comme-menu"]'); if (b && b.getAttribute('aria-expanded') !== 'true') { b.click(); await sleep(250); } }, optional: true, target: { css: '.lmtc .k-vpanel' }, title: 'Choisis un vendeur', body: 'Recherche, puis un clic : tu vois son Pool, ses leads à rappeler, ses relances, comme lui.' },
+      { action: async () => { const b = doc.querySelector('.lmtc [data-a="comme-menu"]'); if (b && b.getAttribute('aria-expanded') === 'true') { b.click(); await sleep(200); } }, title: 'En lecture seule', body: 'Un bandeau le rappelle ; « Revenir à ma vue » le referme. Pour agir sur un de ses leads, ouvre-le depuis ta vue.' },
+    ]),
+
+    'lm-c-solder': lm([
+      { optional: true, action: onglet('accueil'), target: { css: '.lmtc .ac-side [data-a="solder"]' }, title: 'Ouverts depuis plus de 24 h', body: 'Sur l’Accueil, dans Pilotage : le nombre de leads ouverts depuis plus de 24 h, et « solder ».' },
+      { optional: true, action: onglet('pool'), target: { css: '.lmtc .panel .stock-l' }, title: 'Au pied du Pool', body: 'Les mêmes leads, avec « Solder le stock ».' },
+      { optional: true, action: clic('.lmtc [data-a="solder"]'), target: { css: '.lmtc-ov .modal' }, title: 'La fenêtre', body: 'Elle compte les leads, dont ceux venus de BACS, puis propose : confier à la Vroom Team, répartir sur l’équipe, ou clore sans suite (« stock avant déploiement »).' },
+      { action: lmFermer, title: 'Appliquer', body: 'Rien ne part sans ton clic. Je ferme la fenêtre sans rien appliquer.' },
+    ]),
+
+    'lm-campagnes': lm([
+      { action: onglet('campagnes'), target: { css: '.lmtc .tabs [data-id="campagnes"]' }, title: 'Campagnes', body: 'Les campagnes internes de ton périmètre sur 90 jours.' },
+      { optional: true, target: { css: '.lmtc .panel table.camp-t' }, title: 'Le suivi', body: 'Cibles, traitées (avec la barre d’avancement), à relancer, propositions, commandes, vendeurs. L’avancement se lit avant le résultat.' },
+      { optional: true, action: clic('.lmtc .panel table.camp-t tr.clic'), target: { css: '.lmtc .panel tr.vdet' }, title: 'Vendeur par vendeur', body: 'Un clic sur une campagne montre qui avance.' },
+      { optional: true, action: clic('.lmtc .panel [data-a="creer-camp"]'), target: { css: '.lmtc-ov .modal' }, title: 'Créer une campagne', body: 'Les clients se choisissent par critères (site, particuliers ou sociétés, marque, modèle, âge et kilométrage du véhicule, départements), avec ou sans répartition entre les vendeurs.' },
+      { action: lmFermer, title: 'Sans répartition', body: 'Une campagne lancée sans répartition fonctionne comme le Pool : chaque vendeur prend lui-même les clients dans son onglet Campagnes. Rien n’a été créé pendant la visite.' },
+    ]),
+
+    /* =================================================================
+       LEAD MANAGEMENT — Vroom Team
+       ================================================================= */
+    'lm-p-pool': lm([
+      { action: onglet('piscine'), target: { css: '.lmtc .tabs [data-id="piscine"]' }, title: 'Le Pool BACS', body: 'Les leads « À affecter » ou « Nouveau » de BACS, prêts à être pris.' },
+      { optional: true, target: { css: '.lmtc .panel .barre .seg' }, title: 'Moins de 24 h, plus de 24 h, stock', body: 'Les leads frais d’abord ; les plus anciens à part ; « Stock accepté » : acceptés il y a plus de 14 jours, sans suite.' },
+      { optional: true, target: { css: '.lmtc .panel .chips.filtres' }, title: 'Les sources', body: 'Une pastille par source avec son nombre ; un clic ajoute ou retire une source.' },
+      { optional: true, target: { css: '.lmtc .panel .grp' }, title: 'Les groupes', body: 'Demande client (1h) à prendre maintenant, Relance concession (48h), autres leads, trafic atelier par date de RDV.' },
+      { optional: true, target: { css: '.lmtc .panel .lr' }, title: 'Un lead', body: 'Depuis quand il attend, le client, son site, sa demande et ses étiquettes.' },
+      { optional: true, target: { css: '.lmtc .panel .lr [data-a="prendre"]' }, title: 'Prendre', body: 'Réserve le lead à ton nom quelques minutes, le passe en Accepté dans BACS et ouvre sa fiche.' },
+      FIN('À retenir', 'Un lead arrivé dans BACS après la dernière lecture n’est pas encore visible : la phrase du haut dit quand BACS a été relu.'),
+    ]),
+
+    'lm-p-traiter': lm([
+      FIN('Traiter un lead', 'Je t’ouvre une fiche d’exemple : rien n’est réservé, rien ne part dans BACS.'),
+      { action: lmExemple, target: { css: '.lmtc-ov .drawer .dr-h' }, title: 'La fiche', body: 'Le client et sa demande.' },
+      { optional: true, target: secPlat('Client'), title: 'Le client', body: 'Retrouvé dans One Data par son numéro ; sinon cherché dans BACS, ou « nouveau client ».' },
+      { optional: true, target: secPlat('Délai'), title: 'Le délai', body: 'Depuis la réception BACS ; ta réservation se prolonge tant que la fiche est ouverte.' },
+      { optional: true, target: { css: '.lmtc-ov .drawer .canaux, .lmtc-ov .drawer .tel' }, title: 'Appeler', body: 'Le numéro, « Copier », et les canaux.' },
+      { optional: true, target: { css: '.lmtc-ov .drawer .qf' }, title: 'Qualifier', body: 'Projet, modèle, échéance, reprise, financement, note pour le vendeur : c’est ce qu’il lira avant d’appeler.' },
+      { optional: true, target: { css: '.lmtc-ov .drawer .sites' }, title: 'Orienter', body: 'Le site BACS, puis ceux où le client a un dossier, puis les autres sites de la marque, chacun avec ses leads en attente.' },
+      { optional: true, target: { css: '.lmtc-ov .drawer #q-vendeur' }, title: 'L’attribution', body: 'Le Pool de la concession (règle du site) par défaut, ou un vendeur précis.' },
+      { optional: true, target: { css: '.lmtc-ov .drawer .dr-f .issues' }, title: 'L’issue', body: 'Qualifié, Injoignable, Projet long terme, Abandonner : voir la visite « Les quatre issues ».' },
+      { optional: true, target: { css: '.lmtc-ov .drawer [data-a="liberer"]' }, title: 'Libérer', body: 'Rend le lead sans rien faire ; fermer la fiche fait de même.' },
+      { action: lmFermer, title: 'À toi de jouer', body: 'La fiche d’exemple est fermée : rien n’a été enregistré.' },
+    ]),
+
+    'lm-p-issues': lm([
+      { action: async () => { await lmExemple(); await issue('qualifier')(); }, target: { css: '.lmtc-ov .drawer .dr-f' }, title: 'Qualifié', body: '« Transférer à … » : le lead part au site choisi avec ta qualification. BACS : Qualifié, site et propriétaire.' },
+      { action: issue('injoignable'), target: { css: '.lmtc-ov .drawer .dr-f' }, title: 'Injoignable', body: 'Un rappel dans 2 h, demain 9 h, après-demain 9 h ou à une date ; e-mail et SMS au client si tu les coches. BACS : Injoignable temporairement.' },
+      { action: issue('long_terme'), target: { css: '.lmtc-ov .drawer .dr-f' }, title: 'Projet long terme', body: 'Un rappel à la date choisie ; le lead revient dans Rappels dus.' },
+      { action: issue('abandon'), target: { css: '.lmtc-ov .drawer .dr-f' }, title: 'Abandonner', body: 'Un commentaire pour BACS et le motif BACS. Le lead part au Congélateur, où un vendeur peut le reprendre.' },
+      { action: lmFermer, title: 'Les autres demandes du client', body: 'S’il a plusieurs demandes ouvertes sur le site, une case propose de les clore comme doublons (ou de les abandonner avec le même motif). Rien n’a été enregistré.' },
+    ]),
+
+    'lm-p-rappels': lm([
+      { action: onglet('rappels'), target: { css: '.lmtc .tabs [data-id="rappels"]' }, title: 'Rappels dus', body: 'Injoignables et projets long terme, du plus en retard au plus lointain.' },
+      { optional: true, target: { css: '.lmtc .panel .lbl-s' }, title: 'Le compte', body: 'Combien de rappels sont dus, sur combien de programmés.' },
+      { optional: true, target: { css: '.lmtc .panel .lr .tm' }, title: 'Le minuteur', body: '« Maintenant », « retard 2 h 10 » ou « dans 1 h 30 », avec l’heure prévue.' },
+      { optional: true, target: { css: '.lmtc .panel .ph-r .seg' }, title: 'Les miens', body: 'Ne garde que les leads dont tu as fait le dernier geste.' },
+      { optional: true, target: { css: '.lmtc .panel .grp.garr' }, title: 'L’arriéré BACS', body: 'Les rappels promis dans BACS avant One Data, à traiter aussi.' },
+      FIN('À toi de jouer', 'Le bouton de ligne prend le lead et ouvre sa fiche.'),
+    ]),
+
+    'lm-p-transferts': lm([
+      { action: onglet('transferts'), target: { css: '.lmtc .tabs [data-id="transferts"]' }, title: 'Transferts', body: 'Ce que deviennent les leads qualifiés. Le site a 2 h pour prendre un transfert.' },
+      { optional: true, target: { css: '.lmtc .panel .lr .lr-a' }, title: 'L’état', body: 'Contacté par … en …, En attente chez …, Chef relancé, Converti, Clos par le site, Suivi dans BACS.' },
+      { optional: true, target: { css: '.lmtc .panel [data-a="relancer"]' }, title: 'Relancer le chef', body: 'Après 2 h sans contact : une alerte part aux chefs des ventes du site.' },
+      { optional: true, target: { css: '.lmtc .panel .ph-r .seg' }, title: 'Tout le plateau ou les miens', body: 'Filtre sur tes propres transferts.' },
+      FIN('À toi de jouer', 'Surveille les transferts sans contact au-delà de 2 h.'),
+    ]),
+
+    'lm-p-campagnes': lm([
+      { action: onglet('campagnes'), target: { css: '.lmtc .tabs [data-id="campagnes"]' }, title: 'Campagnes BACS', body: 'Reçus, à prendre, acceptés, en rappel, qualifiés, abandonnés et taux de qualification, campagne par campagne.' },
+      { optional: true, target: { css: '.lmtc .panel table.camp-t [data-a="campagne"]' }, title: 'Filtrer', body: 'Restreint le Pool, les rappels et les transferts à cette campagne.' },
+      { optional: true, target: { css: '.lmtc .filtre-actif' }, title: 'Le bandeau du filtre', body: 'Il reste sous les onglets tant que le filtre est actif ; « Retirer le filtre » le referme.' },
+      FIN('À retenir', 'La phrase du haut et le bandeau « Demande client (1h) » comptent toujours tout le plateau.'),
+    ]),
+
+    'lm-p-actions': lm([
+      { action: onglet('actions'), target: { css: '.lmtc .tabs [data-id="actions"]' }, title: 'Mes actions', body: 'Tes gestes, dans One Data et directement dans BACS.' },
+      { optional: true, target: { css: '.lmtc .panel .barre .seg' }, title: 'La période', body: 'Aujourd’hui, hier, 7 jours…' },
+      { optional: true, target: { css: '.lmtc .panel .lr .tags' }, title: 'Le report dans BACS', body: 'Reporté dans BACS, en route, refusé par BACS (survole pour la raison), non reporté, fait dans BACS.' },
+      { optional: true, target: { css: '.lmtc .panel [data-a="corriger"]' }, title: 'Corriger', body: 'Une erreur ? « Corriger » la reporte dans BACS, tracée à ton nom. Si un vendeur a déjà la main, la correction attend le superviseur.' },
+      FIN('Un refus de BACS', 'Un bandeau rouge liste les gestes refusés : ne les retraite pas, « Signaler au support ».'),
+    ]),
+
+    'lm-p-nouveau': lm([
+      { target: { css: '.lmtc .outils [data-a="nouveau"]' }, title: '+ Nouveau lead', body: 'Un client appelle sans demande dans BACS : crée son lead ici.' },
+      { optional: true, action: clic('.lmtc .outils [data-a="nouveau"]'), target: { css: '.lmtc-ov .drawer' }, title: 'La fiche de création', body: 'Le client (retrouvé par son numéro ou nouveau), la demande, la concession. Si le client a déjà une demande ouverte, la fiche le signale.' },
+      { action: lmFermer, target: { css: '.lmtc .outils [data-x="vr-q"]' }, title: 'Rechercher un lead', body: 'Nom, téléphone ou e-mail : la recherche porte sur tout le plateau. Rien n’a été créé pendant la visite.' },
+    ]),
+
+    /* =================================================================
+       LEAD MANAGEMENT — depuis le tableau de bord
+       ================================================================= */
     'lm-dashboard': {
       pageId: ACCUEIL, rootCheck: '#dash-root .dpouls',
       fin: () => { const f = doc.querySelector('#dash-root #dash-tiroir [data-role="fermer"]'); if (f) f.click(); },
@@ -201,196 +388,154 @@ OD.define('tours', {
       ],
     },
 
-    'lm-c-mur': lm([
-      { action: async () => { onglet('mur')(); await siteDirection(); onglet('mur')(); }, target: { css: '.lmtc table.mur:not(.sites)' }, title: 'Le mur', body: 'Chaque lead ouvert est compté une fois, chez la personne qui l’a en main.' },
-      { target: { css: '.lmtc table.mur:not(.sites) tr.pisc' }, title: 'La piscine en tête', body: 'Personne n’y a la main : c’est la première ligne à regarder.' },
-      { target: { css: '.lmtc table.mur:not(.sites) thead' }, title: 'Les colonnes', body: 'Dans les temps, À risque, Hors délai, Ouverts + 24 h, et les premiers contacts de chacun aujourd’hui.' },
-      { optional: true, target: { css: '.lmtc table.mur:not(.sites) tr.vroom' }, title: 'Au plateau VROOM', body: 'Les leads BACS de ton site pas encore qualifiés par le plateau.' },
-      { optional: true, target: { css: '.lmtc [data-a="autres-vendeurs"]' }, title: 'Les autres vendeurs', body: 'Ceux sans lead en cours sont repliés ici.' },
-      { target: { css: '.lmtc .panel .ph-r .seg' }, title: 'Compter depuis', body: 'L’arrivée sur le site (le transfert du plateau, sinon la réception) ou la réception dans BACS.' },
-      { optional: true, target: { css: '.lmtc .site-chips' }, title: 'Tes sites', body: 'Si tu encadres plusieurs sites, change de site ici.' },
-      { optional: true, target: { css: '.lmtc table.mur:not(.sites) .cell[data-a="cell"]' }, title: 'Clique un chiffre', body: 'Je clique pour toi : la liste de ces leads s’ouvre dans le volet de droite.' },
-      { optional: true, action: clic('.lmtc table.mur:not(.sites) .cell[data-a="cell"]'), target: { css: '.lmtc-ov .drawer .dr-b.vol' }, title: 'Le volet', body: 'Les leads de la case, le plus ancien en tête. Chaque ligne s’ouvre.' },
-      { optional: true, action: clic('.lmtc-ov .drawer .dr-b.vol .lr'), target: { css: '.lmtc-ov .drawer [data-a="retour-liste"]' }, title: 'Retour à la liste', body: 'La fiche s’ouvre dans le même volet ; ce bouton ramène à la liste.' },
-      { action: lmFermer, title: 'À toi de jouer', body: 'La croix, Échap ou un clic à côté ferment le volet.' },
-    ], { fin: finSite }),
-
-    'lm-c-relayer': lm([
-      { action: async () => { await siteDirection(); onglet('relayer')(); }, target: { css: '.lmtc .poste .tabs [data-id="relayer"]' }, title: 'À relayer', body: 'Ce qui reste en plan, groupe par groupe.' },
-      { target: { css: '.lmtc .poste .panel' }, title: 'Les groupes', body: 'Hors délai dans la piscine, pris sans appel depuis plus de 20 min, autre marque demandée, injoignables après 3 tentatives, stock de plus de 24 h.' },
-      { optional: true, target: { css: '.lmtc .poste .panel [data-a="attribuer-regle"]' }, title: 'Tout attribuer selon la règle', body: 'Répartit d’un coup les leads hors délai de la piscine, avec la règle du site.' },
-      { optional: true, target: { css: '.lmtc .poste .panel .grp' }, title: 'Un groupe', body: 'Son titre dit le problème, son compteur le nombre de leads.' },
-      { optional: true, target: { css: '.lmtc .poste .panel .rel' }, title: 'Une ligne', body: 'Le lead, depuis quand, chez qui. Un clic sur le nom ouvre sa fiche.' },
-      { optional: true, target: { css: '.lmtc .poste .panel .rel-a' }, title: 'Le geste proposé', body: 'Attribuer (le moins chargé est conseillé), rendre, renvoyer vers un autre site, confier au plateau VROOM ou clore.' },
-      { optional: true, target: { css: '.lmtc .poste .panel [data-a="solder"]' }, title: 'Solder le stock', body: 'Les leads de plus de 24 h se traitent en une fois : voir la visite « Solder le stock ».' },
-      { action: onglet('mur'), title: 'À toi de jouer', body: 'Vide les groupes du haut d’abord : ce sont les plus pressés.' },
-    ], { fin: finSite }),
-
-    'lm-c-fiche': lm([
-      FIN('Agir sur un lead', 'Je t’ouvre la fiche d’un lead de ton site.'),
-      { action: lmExemple, target: { css: '.lmtc-ov .drawer .dr-h' }, title: 'La fiche', body: 'Le lead, son site, qui l’a en main ; dessous, délais, contact et demande.' },
-      { optional: true, target: { css: '.lmtc-ov .drawer [role="radiogroup"][aria-label="Geste"]' }, title: 'Quatre gestes', body: 'Attribuer, Résultat d’appel, Autre site, Clore.' },
-      { optional: true, action: mode('attribuer'), target: { css: '.lmtc-ov .drawer #dr-vendeur' }, title: 'Attribuer', body: 'Choisis le vendeur : sa charge en cours est affichée, le moins chargé est conseillé.' },
-      { optional: true, target: { css: '.lmtc-ov .drawer [data-a="confier"], .lmtc-ov .drawer [data-a="rendre"]' }, title: 'Confier ou rendre', body: '« Confier au plateau VROOM » (lead BACS) : rappel au plateau dans 30 min. « Rendre à la piscine » : de nouveau libre.' },
-      { optional: true, action: mode('resultat'), target: { css: '.lmtc-ov .drawer .dr-f' }, title: 'Résultat d’appel', body: 'Si tu as appelé toi-même : RDV, joint, pas joint ou clore.' },
-      { optional: true, action: mode('renvoyer'), target: { css: '.lmtc-ov .drawer #dr-site' }, title: 'Autre site', body: 'Le lead part dans la piscine du site choisi, délai remis à zéro ; BACS reçoit le nouveau site.' },
-      { optional: true, action: mode('clore'), target: { css: '.lmtc-ov .drawer #clore-motif' }, title: 'Clore', body: 'Avec un motif. Un lead BACS est aussi abandonné dans BACS.' },
-      { optional: true, target: { css: '.lmtc-ov .drawer .dr-f > .hint' }, title: 'Vue de pilotage', body: 'Sur un site que tu n’encadres pas, tu lis tout mais n’agis pas.' },
-      FIN('À toi de jouer', 'Rien n’a été modifié pendant la visite.'),
-    ]),
-
-    'lm-c-solder': lm([
-      { action: async () => { await siteDirection(); onglet('mur')(); }, optional: true, target: { css: '.lmtc table.mur:not(.sites) tr.pisc .cell.stock' }, title: 'Le stock', body: 'Les leads de la piscine sans contact depuis plus de 24 h. Sur le mur, le bouton « Solder le stock » est au pied du volet de cette case.' },
-      { action: onglet('relayer'), optional: true, target: { css: '.lmtc .poste .panel .rel:has([data-a="solder"])' }, title: 'À solder en une fois', body: 'Dans « À relayer », la dernière ligne compte tous les leads ouverts depuis plus de 24 h, archives comprises.' },
-      { optional: true, action: clic('.lmtc .poste .panel [data-a="solder"]'), target: { css: '.lmtc-ov .modal .mb-h' }, title: 'Le compte exact', body: 'La fenêtre compte les leads, dont ceux venant de BACS, avant tout geste.' },
-      { optional: true, target: { css: '.lmtc-ov .modal label.opt:nth-of-type(1)' }, title: 'Confier au plateau VROOM', body: 'Les leads BACS repartent au plateau, qui rappelle et requalifie. Les autres restent ouverts.' },
-      { optional: true, target: { css: '.lmtc-ov .modal label.opt:nth-of-type(2)' }, title: 'Répartir sur l’équipe', body: 'Selon la règle du site, le moins chargé d’abord.' },
-      { optional: true, target: { css: '.lmtc-ov .modal label.opt:nth-of-type(3)' }, title: 'Clore sans suite', body: '« Stock avant déploiement » : ils sortent des délais, rien n’est effacé, BACS n’est pas modifié.' },
-      { optional: true, target: { css: '.lmtc-ov .modal [data-a="solder-ok"]' }, title: 'Appliquer', body: 'Rien ne part sans ce clic. Je ferme la fenêtre sans rien appliquer.' },
-      { action: () => { lmFermer(); onglet('mur')(); }, title: 'À toi de jouer', body: 'Les leads encore au plateau ne sont jamais soldés.' },
-    ], { fin: finSite }),
-
-    'lm-campagnes': lm([
-      { action: onglet('campagnes'), target: { css: '.lmtc .poste .tabs [data-id="campagnes"]' }, title: 'Campagnes', body: 'Les campagnes internes de ton périmètre sur 90 jours.' },
-      { optional: true, target: { css: '.lmtc .poste .panel .camp-t' }, title: 'Le suivi', body: 'Cibles, traitées, à relancer, propositions, commandes.' },
-      { optional: true, action: clic('.lmtc .poste .panel .camp-t tr.clic'), target: { css: '.lmtc .poste .panel .vdet' }, title: 'Vendeur par vendeur', body: 'Un clic sur une campagne montre qui avance.' },
-      { optional: true, action: clic('.lmtc .poste .panel [data-a="creer-camp"]'), target: { css: '.lmtc-ov .modal .mb' }, title: 'Créer une campagne', body: 'Les clients se choisissent par critères : site, particuliers ou sociétés, marque, modèle, âge et kilométrage du véhicule, départements.' },
-      { optional: true, target: { css: '.lmtc-ov .modal [data-a="camp-estimer"]' }, title: 'Estimer d’abord', body: 'La cible et sa répartition sont estimées avant tout envoi ; « Lancer » demande une seconde confirmation.' },
-      { action: lmFermer, title: 'À toi de jouer', body: 'Rien n’a été créé pendant la visite.' },
-    ]),
-
-    'lm-d-sites': lm([
-      { action: () => { clic('.lmtc [data-a="retour-sites"]')(); onglet('mur')(); }, target: { css: '.lmtc table.mur.sites' }, title: 'Le mur des sites', body: 'Une ligne par site de ton périmètre.' },
-      { target: { css: '.lmtc table.mur.sites thead' }, title: 'Maintenant, puis sur la durée', body: 'Dans les temps, à risque, hors délai, ouverts + 24 h, au plateau ; puis délai moyen de premier contact et part dans le délai sur 30 jours, leads reçus sur 7 jours.' },
-      { optional: true, target: { css: '.lmtc table.mur.sites .arch' }, title: 'Les archives', body: 'Les leads de plus de 30 jours, comptés à part.' },
-      { optional: true, target: { css: '.lmtc table.mur.sites [data-a="voir-site"]' }, title: 'Ouvrir un site', body: 'Je l’ouvre pour toi : c’est le mur du chef des ventes.' },
-      { optional: true, action: clic('.lmtc table.mur.sites [data-a="voir-site"]'), target: { css: '.lmtc table.mur:not(.sites)' }, title: 'Le mur du site', body: 'Qui a la main sur quoi. Un clic sur un chiffre ouvre la liste dans le volet de droite.' },
-      { optional: true, target: { css: '.lmtc [data-a="retour-sites"]' }, title: 'Tous les sites', body: 'Ramène au mur des sites.' },
-      { action: clic('.lmtc [data-a="retour-sites"]'), title: 'À toi de jouer', body: 'Commence par le site qui a le plus de rouge.' },
-    ]),
-
-    'lm-d-relais': lm([
-      { action: () => { clic('.lmtc [data-a="retour-sites"]')(); onglet('relais')(); }, target: { css: '.lmtc .poste .panel' }, title: 'Le relais', body: 'Le chemin d’un lead, de BACS au premier appel, en temps médian par site.' },
-      { optional: true, target: { css: '.lmtc .poste .panel .lg' }, title: 'Quatre segments', body: 'Attente en piscine BACS, traitement par le plateau VROOM, attente sur le site, vendeur avant l’appel.' },
-      { optional: true, target: { css: '.lmtc .poste .panel .rl' }, title: 'Un site', body: 'Sa durée totale, segment par segment. Les segments hachurés n’appartiennent à personne : c’est là que le temps se perd.' },
-      { action: onglet('mur'), title: 'À toi de jouer', body: 'Ouvre le mur du site le plus lent pour voir où ça bloque.' },
-    ]),
-
-    'lm-p-bacs': lm([
-      FIN('BACS : un onglet ouvert, rien d’autre', 'One Data écrit dans BACS pour toi, par ta session BACS ouverte dans ce navigateur avec l’extension.'),
-      { optional: true, target: { css: '.lmtc .bd' }, title: 'Le bandeau', body: 'Rouge : aucune session BACS ne répond, les gestes sont bloqués. Bleu : tes gestes passent par un collègue. Orange : des gestes attendent.' },
-      { target: { css: '.lmtc .situ .kpis .k:nth-child(6)' }, title: 'Copie BACS', body: 'L’âge de la dernière lecture de BACS. Orange au-delà de 2 h, rouge au-delà de 24 h : recharge l’onglet BACS.' },
-      { target: { css: '.lmtc .situ .kpis .k:nth-child(7)' }, title: 'Report dans BACS', body: '« automatique » quand tout passe ; sinon les gestes en attente, les échecs, ou « bloqué ».' },
-      { action: lmExemple, optional: true, target: { css: '.lmtc-ov .drawer .env' }, title: 'Dans BACS', body: 'Sur chaque fiche : ce qui est parti et son résultat. Un échec se relance avec « Relancer l’envoi ».' },
-      { optional: true, target: { css: '.lmtc-ov .drawer .row.pied .hint' }, title: 'Le rappel en bas de fiche', body: 'Il dit si le geste partira automatiquement dans BACS, ou s’il est bloqué.' },
-      { action: lmFermer, title: 'À toi de jouer', body: 'Garde l’onglet BACS ouvert et connecté. Une session de la veille a souvent expiré.' },
-    ]),
-
-    'lm-p-signaux': lm([
-      { target: { css: '.lmtc .poste .sig' }, title: 'Les signaux du plateau', body: 'Ce qui demande une action, pour tout le plateau, même avec un filtre de campagne.' },
-      { optional: true, target: { css: '.lmtc .poste .sig .sg' }, title: 'Un signal', body: 'Son type (Nouveau lead, Hors délai, Rappel, Relais bloqué, Report BACS, Copie BACS…), son heure et ce qu’il annonce.' },
-      { optional: true, target: { css: '.lmtc .poste .sig .sg-a' }, title: 'Son bouton', body: 'Il traite le signal : Prendre, Prendre le plus ancien, Appeler, Voir les rappels, Relancer le chef, Ouvrir la fiche.' },
-      { optional: true, target: { css: '.lmtc .poste .sig [data-a="ack"]' }, title: 'Vu', body: 'Retire le signal de la liste ; ce choix reste mémorisé dans ton navigateur.' },
-      FIN('À retenir', 'Un signal qui apparaît pendant que l’écran est ouvert clignote quelques secondes.'),
-    ]),
-
-    'lm-p-piscine': lm([
-      { action: () => { onglet('piscine')(); clic('.lmtc .barre [data-a="stock"][data-id=""]')(); }, target: { css: '.lmtc .poste .panel' }, title: 'La piscine BACS', body: 'Les leads « À affecter » ou « Nouveau » de moins de 60 jours, et ceux acceptés ces 14 derniers jours restés sans suite, du plus ancien au plus récent.' },
-      { optional: true, target: { css: '.lmtc .poste .panel .chips.filtres' }, title: 'Les sources', body: 'Une pastille par source, avec son nombre. Le trafic atelier est masqué par défaut ; un clic ajoute ou retire une source.' },
-      { optional: true, target: { css: '.lmtc .poste .panel .lr .tm' }, title: 'Le minuteur', body: 'Depuis combien de temps le lead attend, coloré selon le délai de sa source.' },
-      { optional: true, target: { css: '.lmtc .poste .panel .lr [data-a="prendre"]' }, title: 'Prendre', body: 'Réserve le lead à ton nom 5 minutes, le passe en Accepté dans BACS et ouvre sa fiche.' },
-      { optional: true, target: { css: '.lmtc .poste .panel .barre .seg' }, title: 'Le stock accepté', body: 'Je bascule pour toi : les leads acceptés il y a plus de 14 jours, jamais qualifiés ni abandonnés.' },
-      { optional: true, action: clic('.lmtc .barre [data-a="stock"][data-id="1"]'), target: { css: '.lmtc .poste .panel' }, title: 'Le stock accepté', body: 'Le bouton de ligne devient « Rappeler » : on reprend le lead, on rappelle, puis on choisit une issue.' },
-      { action: clic('.lmtc .barre [data-a="stock"][data-id=""]'), target: { css: '.lmtc .situ .kpis .k:nth-child(6)' }, title: 'La copie BACS', body: 'Un lead arrivé dans BACS après la dernière lecture n’est pas encore visible. Tes gestes, eux, comptent tout de suite.' },
-    ]),
-
-    'lm-p-traiter': lm([
-      { action: onglet('piscine'), target: { css: '.lmtc .poste .panel .lr [data-a="prendre"], .lmtc .poste .tabs [data-id="piscine"]' }, title: 'Prendre', body: 'Réserve le lead à ton nom 5 minutes et le passe en Accepté dans BACS. Pour la visite, j’ouvre une fiche d’exemple : rien n’est réservé ni enregistré.' },
-      { action: lmExemple, target: { css: '.lmtc-ov .drawer .delais' }, title: 'Les délais', body: 'Depuis la réception BACS ; et, tant que la fiche est ouverte, ta réservation prolongée automatiquement.' },
-      { target: { css: '.lmtc-ov .drawer .canaux' }, title: 'Appeler', body: 'Appeler (3CX), WhatsApp, Email, SMS.' },
-      { optional: true, target: { css: '.lmtc-ov .drawer .qf' }, title: 'Qualifier', body: 'Projet, modèle visé, échéance, reprise, financement, note pour le vendeur. Facultatif, mais c’est ce que le vendeur lira avant d’appeler.' },
-      { optional: true, target: { css: '.lmtc-ov .drawer .sites' }, title: 'Orienter', body: 'Le site BACS, puis ceux où le client a un dossier, puis les autres sites de la marque, chacun avec ses leads en attente.' },
-      { optional: true, target: { css: '.lmtc-ov .drawer #q-vendeur' }, title: 'Le vendeur', body: '« Tour de rôle du site » par défaut : le moins chargé. Ou un vendeur précis.' },
-      { optional: true, target: { css: '.lmtc-ov .drawer .dr-f .issues' }, title: 'L’issue', body: 'Qualifié, Injoignable, Projet long terme, Abandonner : voir la visite « Les quatre issues ».' },
-      { optional: true, target: { css: '.lmtc-ov .drawer [data-a="liberer"]' }, title: 'Libérer', body: 'Rend le lead sans rien faire ; fermer la fiche fait de même.' },
-      { action: lmFermer, title: 'À toi de jouer', body: 'La fiche d’exemple est fermée : rien n’a été enregistré.' },
-    ]),
-
-    'lm-p-issues': lm([
-      { action: async () => { await lmExemple(); issue('qualifier')(); }, target: { css: '.lmtc-ov .drawer .dr-f' }, title: 'Qualifié', body: 'Le lead part au site choisi avec ta qualification ; attribué au vendeur choisi ou par tour de rôle. BACS : Qualifié, site et propriétaire.' },
-      { action: issue('injoignable'), target: { css: '.lmtc-ov .drawer .dr-f' }, title: 'Injoignable', body: 'Une tentative de plus et un rappel : dans 2 h, demain 9 h, après-demain 9 h ou à une date. BACS : Injoignable temporairement et date de rappel.' },
-      { action: issue('long_terme'), target: { css: '.lmtc-ov .drawer .dr-f' }, title: 'Projet long terme', body: 'Un rappel à la date choisie, dans 30 jours par défaut ; le lead revient dans Rappels 7 jours avant.' },
-      { action: issue('abandon'), target: { css: '.lmtc-ov .drawer .dr-f' }, title: 'Abandonner', body: 'Avec un motif BACS. Le lead est clos dans One Data s’il y existe.' },
-      { action: lmFermer, title: 'À toi de jouer', body: 'Fiche d’exemple : rien n’a été enregistré.' },
-    ]),
-
-    'lm-p-rappels': lm([
-      { action: onglet('rappels'), target: { css: '.lmtc .poste .panel' }, title: 'Rappels', body: 'Injoignables, projets long terme et intéressés tenus par le plateau, du plus en retard au plus lointain.' },
-      { optional: true, target: { css: '.lmtc .poste .panel .lr .tm' }, title: 'Le minuteur', body: '« Maintenant », « retard 2 h 10 » ou « dans 1 h 30 », avec la date prévue.' },
-      { optional: true, target: { css: '.lmtc .poste .panel .lr .tags' }, title: 'Statut et tentatives', body: 'Le statut BACS et le nombre de tentatives déjà faites.' },
-      { optional: true, target: { css: '.lmtc .poste .panel .ph-r .seg' }, title: 'Les miens', body: 'Ne garde que les leads dont tu as fait le dernier geste.' },
-      { action: onglet('piscine'), title: 'À toi de jouer', body: 'Le bouton de ligne prend le lead et ouvre sa fiche.' },
-    ]),
-
-    'lm-p-transferts': lm([
-      { action: onglet('transferts'), target: { css: '.lmtc .poste .panel' }, title: 'Transferts', body: 'Les leads qualifiés par le plateau ces 30 derniers jours. Le site a 2 h pour les contacter.' },
-      { optional: true, target: { css: '.lmtc .poste .panel .lr .lr-a' }, title: 'L’état', body: 'Contacté par … en …, En attente chez …, Relancer le chef, Chef relancé, Converti · Clos par le site, Suivi dans BACS.' },
-      { optional: true, target: { css: '.lmtc .poste .panel [data-a="relancer"]' }, title: 'Relancer le chef', body: 'Après 2 h sans contact : une alerte part aux chefs des ventes du site, dans leur page Notifications.' },
-      { optional: true, target: { css: '.lmtc .poste .panel .ph-r .seg' }, title: 'Les miens', body: 'Ne garde que tes transferts.' },
-      { action: onglet('piscine'), title: 'À toi de jouer', body: 'Surveille les transferts sans contact au-delà de 2 h.' },
-    ]),
-
-    'lm-p-campagnes': lm([
-      { action: onglet('campagnes'), target: { css: '.lmtc .poste .panel .camp-t, .lmtc .poste .panel' }, title: 'Campagnes BACS', body: 'Les campagnes des 90 derniers jours, hors trafic atelier : reçus, à prendre, acceptés, en rappel, qualifiés, abandonnés, taux de qualification.' },
-      { optional: true, target: { css: '.lmtc .poste .panel .camp-t [data-a="campagne"]' }, title: 'Filtrer', body: 'Je filtre pour toi : la piscine, les rappels et les transferts se restreignent à cette campagne.' },
-      { optional: true, action: clic('.lmtc .poste .panel .camp-t [data-a="campagne"]:not([data-id=""])'), target: { css: '.lmtc .filtre-actif' }, title: 'Le bandeau du filtre', body: 'Il reste sous les onglets tant que le filtre est actif, avec les nombres de la campagne.' },
-      { optional: true, target: { css: '.lmtc .filtre-actif [data-a="campagne"]' }, title: 'Retirer le filtre', body: 'La phrase et les signaux comptent toujours tout le plateau.' },
-      { action: () => { clic('.lmtc .filtre-actif [data-a="campagne"]')(); onglet('piscine')(); }, title: 'À toi de jouer', body: 'Le filtre est retiré.' },
-    ]),
-
-    'lm-faq-sites': lm([
-      FIN('Questions fréquentes', 'Je te montre où trouver chaque réponse.'),
-      { requires: CHEF, action: onglet('mur'), optional: true, target: { css: '.lmtc table.mur:not(.sites) tr.vroom' }, title: 'Un lead BACS manque dans la piscine', body: 'Il est encore au plateau VROOM : le mur le montre sur cette ligne.' },
-      { requires: CHEF, optional: true, target: { css: '.lmtc .panel > .foot' }, title: 'Le stock compte plus que le mur', body: 'Le mur ne montre que les leads de moins de 30 jours ; les plus anciens sont comptés en archives et soldés avec le reste.' },
-      { action: lmExemple, target: { css: '.lmtc-ov .drawer .canaux' }, title: 'Appeler ne fait rien', body: 'Sans téléphonie 3CX active, le navigateur ouvre le numéro avec l’application du poste ; « Copier » reste disponible.' },
-      { optional: true, target: { css: '.lmtc-ov .drawer .env' }, title: 'Un envoi en échec', body: 'La raison est sous le geste ; « Relancer l’envoi » le remet en route.' },
-      { action: lmFermer, target: { css: '.lmtc .situ [data-a="ancien"]' }, title: 'Retrouver l’ancien écran', body: '« Tableaux détaillés » : cycles, kanban, synthèse, règles d’attribution.' },
-    ]),
-
-    'lm-faq-plateau': lm([
-      FIN('Questions fréquentes du plateau', 'Je te montre où trouver chaque réponse.'),
-      { optional: true, target: { css: '.lmtc .bd' }, title: 'Boutons grisés', body: 'Bandeau rouge : aucune session BACS ne répond. Ouvre BACS et connecte-toi ; tout se réactive dans les 15 secondes.' },
-      { target: { css: '.lmtc .situ .kpis .k:nth-child(6)' }, title: 'Piscine vide mais leads dans BACS', body: 'Regarde l’âge de la copie BACS ; si elle est ancienne, recharge l’onglet BACS.' },
-      { action: onglet('piscine'), optional: true, target: { css: '.lmtc .poste .panel .chips.filtres' }, title: 'Puis les sources', body: 'Le trafic atelier est masqué par défaut.' },
-      { optional: true, target: { css: '.lmtc .filtre-actif' }, title: 'Un onglet ne colle pas à la phrase', body: 'Un filtre de campagne est actif : les onglets ne comptent que cette campagne.' },
-      { optional: true, target: { css: '.lmtc .poste .panel .lr.resa' }, title: '« Réservé par … »', body: 'Un collègue traite ce lead ; il redevient libre à l’heure indiquée.' },
-      FIN('Fiche fermée par erreur', 'Le lead est libéré : reprends-le avec « Prendre ». La qualification saisie est perdue, rien n’a été enregistré à moitié.'),
-    ]),
 
     /* =================================================================
-       LEAD MANAGEMENT — écran précédent (marketing, secrétariat : v48)
+       DÉMARRER — la barre du haut
        ================================================================= */
-    'lead-management': {
-      pageId: LM_PAGE,
-      rootCheck: '#lead-mgmt-root .lm-toggle',
+    'demarrer': {
+      path: '/accueil', pageId: ACCUEIL, rootCheck: '.od-bar .od-menus',
+      fin: fermerMenus,
       steps: [
-        { title: 'Lead Management', body: 'Le poste de pilotage des leads et des cycles commerciaux. La visite s’adapte à ce que tu vois à l’écran.' },
-        { target: { css: '#lead-mgmt-root .lm-toggle' }, title: 'Les vues', body: 'Bascule ici entre les différentes vues de la page.' },
-        { optional: true, target: { css: '#lead-mgmt-root .lm-team' }, title: 'Ton équipe', body: 'Déplie réseau, affaire et site. Clique un site pour le définir comme site global, ou un vendeur pour consulter son détail.' },
-        { optional: true, target: { css: '#lead-mgmt-root #lm-range' }, title: 'La période', body: 'Choisis la fenêtre d’analyse : un clic sur la date de début, un clic sur la date de fin.' },
-        { optional: true, target: { css: '#lead-mgmt-root .lm-synth-kpi' }, title: 'Tes indicateurs', body: 'Cycles actifs, wins, taux de conversion et délai de premier contact sur la période.' },
-        { optional: true, target: { css: '#lead-mgmt-root .lm-synth-2col' }, title: 'Le classement', body: 'Tes meilleurs performers et ceux à soutenir, selon le taux de transformation.' },
-        { optional: true, target: { css: '#lead-mgmt-root [data-section="campagnes"]' }, title: 'Les campagnes', body: 'Ici, le ROI de tes campagnes de sollicitation : de la sollicitation jusqu’au win.' },
-        { optional: true, action: { click: '#lead-mgmt-root .lm-toggle [data-view="a_traiter"]' }, target: { css: '#lead-mgmt-root .kpi-bar' }, title: 'Tes indicateurs du jour', body: 'SLA dépassé, à traiter, relances dues, cycles chauds, cycles ouverts.' },
-        { optional: true, target: { css: '#lead-mgmt-root .card' }, title: 'Un cycle à traiter', body: 'Chaque carte est un cycle. La couleur et le délai signalent l’urgence. Clique pour ouvrir la fiche client.' },
-        { optional: true, action: { click: '#lead-mgmt-root .lm-toggle [data-view="pipeline"]' }, target: { css: '#lead-mgmt-root .lm-kanban' }, title: 'Le pipeline', body: 'Tes cycles répartis par étape : Nouveau, En cours, Avancé, Clos.' },
-        { action: { click: '#lead-mgmt-root .lm-toggle [data-view="a_traiter"]' }, title: 'À toi de jouer', body: 'Traite tes leads à temps : c’est souvent là que la vente se gagne.' },
+        FIN('Bienvenue dans One Data', 'Je te montre la barre du haut : tout part d’elle.'),
+        { target: { css: '.od-bar .od-menus' }, title: 'Les menus', body: 'Clients, Ventes, Management, Leads, Véhicules. Survole un menu pour voir ses pages ; ce que tu vois dépend de ton rôle.' },
+        { optional: true, target: { css: '#od-recherche' }, title: 'La recherche', body: 'Un client, une immatriculation, un VIN, un téléphone, une affaire : tape quelques lettres, les résultats arrivent rangés par catégorie. Raccourci : Ctrl K.' },
+        { optional: true, target: { css: '.od-client-btn' }, title: 'Le dernier client', body: 'Le client que tu as ouvert en dernier : un clic rouvre sa fiche. L’horloge à côté rouvre les clients récents.' },
+        { optional: true, target: { css: '.od-site' }, title: 'Le site', body: 'Le site sur lequel tu travailles. Tableau de bord, listes, Pool et stocks le suivent ; si tu es sur plusieurs sites, change-le ici.' },
+        { optional: true, target: { css: '.od-user-btn' }, title: 'Ton compte', body: 'Mon compte, Annuaire, Tutos (ce centre d’aide), Email Support, Se déconnecter.' },
+        FIN('Le O en bas à droite', 'Le O de One Data : un clic pour donner ton avis ou signaler un problème, à l’écrit ou à la voix. La réponse de l’équipe arrive dans le même fil.'),
       ],
     },
 
     /* =================================================================
-       TABLEAU DE BORD (dashboard v50 Team Colin)
+       FICHE CLIENT
        ================================================================= */
+    'fiche-client': {
+      path: '/fiche-client', pageId: '259f1951-a2d4-4b90-ac83-0b3febe1d4ec', rootCheck: '#oropra-fiche-shell .fs-tabs',
+      steps: [
+        FIN('La fiche client', 'Je te montre la fiche du dernier client ouvert. Rien n’y est modifié.'),
+        { target: { css: '#oropra-fiche-shell .fs-head' }, title: 'L’en-tête', body: 'Le nom, le téléphone, l’e-mail, le type (particulier ou société) et la ville. « B » ouvre le compte du client dans BACS quand il y est relié.' },
+        { optional: true, target: { css: '#oropra-fiche-shell .fs-actions' }, title: 'Contacter', body: 'Appeler (par ton poste 3CX), WhatsApp, Email, SMS, RPV : chaque échange se range tout seul dans l’historique du client.' },
+        { target: { css: '#oropra-fiche-shell .fs-tabs' }, title: 'Les onglets', body: 'Fiche client, Likes, Contacts, RDV, Véhicules, P. Commerciales, Entreprise (ou Interlocuteurs pour une société), Entourage, Historique client.' },
+        { action: ficheOnglet('fiche'), optional: true, target: { css: '#oropra-fiche-shell .cf-cols' }, title: 'Fiche client', body: 'Identité, contact, adresse, profil, véhicule déclaré, commentaires. Le petit picto copie l’e-mail ou le portable. « Modifier la fiche » pour corriger.' },
+        { optional: true, target: { css: '#oropra-fiche-shell .cs' }, title: 'Consentements', body: 'Reflétés de BACS, marque par marque (Toyota, Lexus) : l’état, la date et les huit canaux.' },
+        { action: ficheOnglet('contacts'), optional: true, target: { css: '#oropra-fiche-shell .fs-pane[data-pane="contacts"]' }, title: 'Contacts', body: 'Tous les échanges du cycle en cours : appels (avec résumé), SMS, WhatsApp, e-mails, RPV, leads. En bas, les leads déjà clôturés.' },
+        { action: ficheOnglet('rdv'), optional: true, target: { css: '#oropra-fiche-shell .fs-pane[data-pane="rdv"]' }, title: 'RDV', body: 'Les rendez-vous du client : à venir, en retard, passés, traités. « Ajouter un RDV » ouvre l’agenda sur ce client.' },
+        { action: ficheOnglet('vehicules'), optional: true, target: { css: '#oropra-fiche-shell .fs-pane[data-pane="vehicules"]' }, title: 'Véhicules', body: 'Son parc : modèle, VIN (un clic le copie), mise en circulation, et ses factures atelier, quel que soit le site.' },
+        { action: ficheOnglet('pcom'), optional: true, target: { css: '#oropra-fiche-shell .fs-pane[data-pane="pcom"]' }, title: 'P. Commerciales', body: 'Ses affaires : simulations et commandes BACS, version par version. Voir le tuto « Propositions commerciales ».' },
+        { action: ficheOnglet('historique'), optional: true, target: { css: '#oropra-fiche-shell .fs-pane[data-pane="historique"]' }, title: 'Historique client', body: 'Ses cycles commerciaux, du premier contact au résultat : un clic ouvre les échanges du cycle.' },
+        { action: ficheOnglet('fiche'), title: 'À retenir', body: 'La fiche est commune à tout le groupe : un client connu d’un autre site garde son historique.' },
+      ],
+    },
+
+    'pcom': {
+      path: '/fiche-client', pageId: '259f1951-a2d4-4b90-ac83-0b3febe1d4ec', rootCheck: '#oropra-fiche-shell .fs-tabs',
+      steps: [
+        { action: ficheOnglet('pcom'), target: { css: '#oropra-fiche-shell .fs-tab[data-tab="pcom"]' }, title: 'P. Commerciales', body: 'Le suivi commercial du client, affaire par affaire.' },
+        { optional: true, target: { css: '#pcom-root .outils' }, title: 'Les filtres', body: 'VN ou VO, et le statut des affaires.' },
+        { optional: true, target: { css: '#pcom-root .ln' }, title: 'Une affaire', body: 'Une intention d’achat : l’opportunité BACS avec ses simulations et ses commandes. Où on en est, depuis quand rien ne bouge, le montant de la commande.' },
+        { optional: true, target: { css: '#pcom-root .plier, #pcom-root .vers' }, title: 'Les versions', body: 'Déplie une affaire : chaque version avec son écart de prix, celle qui est retenue, celles qui ont été refusées.' },
+        { optional: true, target: { css: '#pcom-root .frise' }, title: 'Plus ancien', body: 'Au-delà de 12 mois, les affaires passent sur une frise.' },
+        FIN('Créer ou modifier', 'Chez Team Colin, simulations et commandes se font dans BACS : elles remontent ici toutes seules. La loupe consulte un document, « B » l’ouvre dans BACS.'),
+      ],
+    },
+
+    /* =================================================================
+       BILATÉRALES
+       ================================================================= */
+    'bilaterales': {
+      path: '/bilaterales', pageId: '7bfcfe73-4e89-40cf-bc84-1e07ddb478a6', rootCheck: '#bil-root .vs-next, #bil-root .bil-tab',
+      steps: [
+        FIN('Bilatérales', 'L’entretien régulier entre un vendeur et son chef des ventes. Je te montre la page.'),
+        // Vendeur
+        { requires: '#bil-root .vs-next', target: { css: '#bil-root .vs-next' }, title: 'Ma prochaine bilatérale', body: 'Planifiée par ton chef des ventes dans son agenda : elle apparaît ici et dans le tien, avec son ordre du jour.' },
+        { requires: '#bil-root .vs-next', optional: true, target: { css: '#bil-root .prio-kpis' }, title: 'Mes engagements', body: 'La dernière bilatérale, les engagements en cours et ceux que tu as tenus.' },
+        { requires: '#bil-root .vs-next', optional: true, target: { css: '#bil-root .vs-ch' }, title: 'Ce qui sera regardé', body: 'Tes chiffres du mois, les mêmes que ceux de ton chef : commandes, affaires à relancer, leads non contactés, RDV.' },
+        // Chef des ventes et direction
+        { requires: '#bil-root .bil-tab', target: { css: '#bil-root .bil-tab' }, title: 'Les onglets', body: 'Suivi de l’équipe, À recevoir en priorité, et Encadrement pour la direction.' },
+        { requires: '#bil-root .bil-tab', optional: true, action: clic('#bil-root .bil-tab[data-tab="prio"]'), target: { css: '#bil-root .next-box, #bil-root .prio-head' }, title: 'À recevoir en priorité', body: 'Tes vendeurs classés par un score expliqué : écart à l’objectif, baisse de transformation, ancienneté de la dernière bilatérale, engagements non tenus.' },
+        { requires: '#bil-root .bil-tab', optional: true, target: { css: '#bil-root .pr-plan, #bil-root .pq-plan' }, title: 'Planifier', body: 'Deux clics : la date, l’heure et l’ordre du jour (pastilles de points récurrents ou texte libre). « Mener maintenant » démarre l’entretien tout de suite.' },
+        { requires: '#bil-root .bil-tab', optional: true, action: clic('#bil-root .bil-tab[data-tab="site"]'), target: { css: '#bil-root .bil-tab[data-tab="site"]' }, title: 'Suivi de l’équipe', body: 'La régularité de chacun : 1 bilatérale par semaine et par vendeur minimum.' },
+        FIN('Pendant l’entretien', 'La fiche ouvre sur la revue des engagements, pré-remplit le bilan avec les chiffres, propose des engagements datés et chiffrés. Enregistre-la pendant l’entretien : la suivante est proposée d’un clic.'),
+      ],
+    },
+
+    /* =================================================================
+       DELCO (chef des ventes, direction)
+       ================================================================= */
+    'delco': {
+      path: '/delco', pageId: 'da5005d5-42e4-4b37-9d42-f8b8728ddb0e', rootCheck: '#dp-root, #cp-root',
+      steps: [
+        FIN('Delco', 'L’assistant de One Data : il lit tes données et te signale ce qui mérite ton attention.'),
+        { optional: true, target: { css: '#dp-root' }, title: 'Le brief', body: 'Les sujets du moment, regroupés : « 14 leads sans premier contact · 7 vendeurs ». Déplie un sujet pour le détail par vendeur ou par site.' },
+        { optional: true, target: { css: '#dp-root svg' }, title: 'Le radar', body: 'Une bulle par sujet : la taille dit le volume, la distance au centre l’ancienneté du cas le plus vieux, la couleur la priorité.' },
+        { optional: true, target: { css: '#cp-root' }, title: 'Le chat', body: 'Pose une question métier : Delco répond avec des chiffres justes. « Analyser » sur un sujet le lui envoie.' },
+        FIN('Rien sans ton clic', 'Quand Delco propose un RDV ou un message, il affiche une carte « Valider / Ignorer » : rien n’est fait sans ton accord.'),
+      ],
+    },
+
+    /* =================================================================
+       SUIVI D'ACTIVITÉ (activite v16) — un écran par rôle
+       ================================================================= */
+    'act-vendeur': {
+      path: '/activite', pageId: '55717966-7e07-4957-9969-399198cce1ad', rootCheck: '#act-root .rail',
+      steps: [
+        { action: ecran('vendeur'), target: { css: '#act-root .rail' }, title: 'Ma journée', body: 'Ton site et le filtre Tous, VN, VO, Pro.' },
+        { optional: true, target: { css: '#act-root .band' }, title: 'L’essentiel', body: 'Une phrase (« 3 opportunités attendent une relance »), puis tes commandes du mois, tes relances en retard, tes opportunités actives et les jours ouvrés restants.' },
+        { optional: true, target: { css: '#act-root [data-g="anneau"]' }, title: 'Commandes signées', body: 'Tes commandes du mois face à ton objectif.' },
+        { optional: true, target: { css: '#act-root .card', has: 'carte de mes opportunités' }, title: 'La carte de mes opportunités', body: 'Une bulle par opportunité, de la taille de son montant, rangée par étape (commande, simulation, sans simulation) et par jours depuis la dernière activité. Dans la zone rouge : délai de relance dépassé.' },
+        { optional: true, target: { css: '#act-root .card', has: 'Aujourd' }, title: 'Aujourd’hui', body: 'Tes actions du jour, la plus en retard d’abord : lead à contacter, opportunité à relancer. Un clic ouvre la fiche du client.' },
+        FIN('À retenir', 'Délai de relance : 3 jours pour une simulation ou une commande, 7 jours pour une opportunité sans simulation.'),
+      ],
+    },
+
+    'act-chef': {
+      path: '/activite', pageId: '55717966-7e07-4957-9969-399198cce1ad', rootCheck: '#act-root .rail',
+      steps: [
+        FIN('Suivi d’activité', 'Un écran par question. Je te montre En direct, puis le Point du matin.'),
+        { optional: true, target: { css: '#act-root .seg.ecrans' }, title: 'Les écrans', body: 'En direct, Point du matin, Site et, pour la direction, Groupe.' },
+        { requires: aEcran('direct'), action: ecran('direct'), optional: true, target: { css: '#act-root .rail' }, title: 'En direct', body: 'La journée de la concession, pensée pour le téléphone : un jour (ou une période) au choix, comparé à la même heure il y a 7 jours. Il se met à jour tout seul chaque minute.' },
+        { requires: aEcran('direct'), optional: true, target: { css: '#act-root .tuiles' }, title: 'Les tuiles du jour', body: 'Commandes, simulations, opportunités, leads, RDV, Pool : un clic filtre le fil de la journée sur ce type d’événement.' },
+        { requires: aEcran('chef'), action: ecran('chef'), target: { css: '#act-root .rail' }, title: 'Point du matin', body: 'Avec qui, sur quoi, avec quel levier : la période (aujourd’hui, hier, 7 jours, ce mois) et le filtre VN, VO, Pro.' },
+        { requires: aEcran('chef'), optional: true, target: { css: '#act-root .team' }, title: 'L’équipe', body: 'Un vendeur par onglet ; un nombre rouge signale ses opportunités bloquées.' },
+        { requires: aEcran('chef'), optional: true, target: { css: '#act-root .band' }, title: 'Le vendeur choisi', body: 'Ses opportunités bloquées et la valeur en jeu, ce qui manque pour l’objectif, ses simulations en cours et la part de ses leads joints.' },
+        { requires: aEcran('chef'), optional: true, target: { css: '#act-root .card', has: 'Opportunités qui bloquent' }, title: 'Opportunités qui bloquent', body: 'Par valeur en jeu, avec le levier proposé : « Ouvrir la fiche », ou « Note pour … » pour lui écrire sans quitter l’écran.' },
+        { requires: aEcran('chef'), optional: true, target: { css: '#act-root .card', has: 'en un regard' }, title: 'L’équipe en un regard', body: 'Chaque vendeur placé selon son atteinte d’objectif et ses opportunités bloquées : à accompagner en priorité ceux qui cumulent les deux.' },
+        { requires: aEcran('site'), action: ecran('site'), optional: true, target: { css: '#act-root .rail' }, title: 'Site', body: 'Le mois se joue-t-il, et où ça fuit : commandes, parcours opportunité → simulation → commande, pourquoi on perd, leads web, vendeurs côte à côte.' },
+        FIN('À toi de jouer', 'Le matin : Point du matin, un vendeur après l’autre, une action chacun.'),
+      ],
+    },
+
+    'act-direction': {
+      path: '/activite', pageId: '55717966-7e07-4957-9969-399198cce1ad', rootCheck: '#act-root .rail',
+      steps: [
+        FIN('Suivi d’activité', 'Quel site, quel écart. Je te montre l’écran Groupe puis l’écran Site.'),
+        { optional: true, target: { css: '#act-root .seg.ecrans' }, title: 'Les écrans', body: 'En direct, Point du matin, Site, Groupe.' },
+        { requires: aEcran('groupe'), action: ecran('groupe'), optional: true, target: { css: '#act-root .band' }, title: 'Groupe', body: 'Les commandes du groupe face à l’objectif et la projection de fin de mois.' },
+        { requires: aEcran('groupe'), optional: true, target: { css: '#act-root .card', has: 'Transformation et financement' }, title: 'Transformation et financement', body: 'Une bulle par site, de la taille de ses commandes ; un clic ouvre le site.' },
+        { requires: aEcran('groupe'), optional: true, target: { css: '#act-root .card', has: 'mérite une question' }, title: 'Ce qui mérite une question', body: 'Les écarts détectés automatiquement entre les sites.' },
+        { requires: aEcran('site'), action: ecran('site'), optional: true, target: { css: '#act-root .card', has: 'Parcours' }, title: 'Le parcours', body: 'Opportunités → simulées → commandes : ce qui passe chaque étape, ce qui s’y perd.' },
+        { requires: aEcran('site'), optional: true, target: { css: '#act-root .card', has: 'Pourquoi on perd' }, title: 'Pourquoi on perd', body: 'Les motifs d’abandon des 90 derniers jours.' },
+        { requires: aEcran('site'), optional: true, target: { css: '#act-root .card', has: 'côte à côte' }, title: 'Les vendeurs côte à côte', body: 'Appels, RDV, simulations, commandes de chacun sur la période.' },
+        FIN('À retenir', 'Commandes : VN au jour de la transmission au constructeur, VO validées ou en attente d’approbation, hors grands comptes.'),
+      ],
+    },
+
+    /* =================================================================
+       PERFORMANCES — vue Leads
+       ================================================================= */
+    'perf-leads': {
+      path: '/performances', pageId: '1499f15f-e8cb-4561-aea8-bdeeeb080b68', rootCheck: '[data-vue="leads"]',
+      steps: [
+        { action: async () => { const b = doc.querySelector('[data-vue="leads"]'); if (b && !b.classList.contains('on')) { b.click(); await sleep(1500); } }, target: { css: '[data-vue="leads"]' }, title: 'La vue Leads', body: 'Les indicateurs du lead management, sur la période et le périmètre choisis. Le menu Leads › Leads performances y mène directement.' },
+        { optional: true, target: { css: '.pl-root .pl-tiles' }, title: 'Six chiffres clés', body: 'Leads reçus, contactés, délai du premier contact (médian), part dans le délai, rendez-vous, commandes, avec leur tendance.' },
+        { optional: true, target: { css: '.pl-root .pl-card', has: 'Du lead à la commande' }, title: 'Du lead à la commande', body: 'Chaque étape et ce qu’elle garde de la précédente.' },
+        { optional: true, target: { css: '.pl-root .pl-card', has: 'rapidité paie' }, title: 'La rapidité paie', body: 'Ce que deviennent les leads selon le temps mis à les contacter.' },
+        { optional: true, target: { css: '.pl-root .pl-card', has: 'Quand arrivent' }, title: 'Quand arrivent les leads', body: 'Par jour et par heure : de quoi caler les présences.' },
+        { optional: true, target: { css: '.pl-root .pl-card', has: 'Par vendeur' }, title: 'Par vendeur', body: 'Leads, contactés, délai médian, dans le délai (vert au-delà de 80 %), RDV, commandes. Aussi par source, par site et pour la Vroom Team.' },
+        { action: async () => { const b = doc.querySelector('[data-vue="ventes"]'); if (b) b.click(); }, title: 'Retour aux ventes', body: '« Ventes » ramène aux commandes face aux objectifs.' },
+      ],
+    },
+
     'tdb': {
       pageId: ACCUEIL, rootCheck: '#dash-root .dpouls',
       fin: () => { const f = doc.querySelector('#dash-root #dash-tiroir [data-role="fermer"]'); if (f) f.click(); },
@@ -425,7 +570,7 @@ OD.define('tours', {
     },
 
     /* =================================================================
-       GESTION DES VENTES (kanban v50)
+       GESTION DES VENTES (kanban v82)
        ================================================================= */
     'gestion-ventes': {
       pageId: '9e90d49a-215f-4c2b-b2bb-2d7c4f9aabd6',
@@ -451,39 +596,14 @@ OD.define('tours', {
     },
 
     /* =================================================================
-       SUIVI D'ACTIVITÉ (activite v5)
-       ================================================================= */
-    'suivi-activite': {
-      pageId: '55717966-7e07-4957-9969-399198cce1ad',
-      rootCheck: '#act-root .act-bar',
-      fin: () => { const c = doc.querySelector('#act-root #act-cmp-toggle.on'); if (c) c.click(); },
-      steps: [
-        { title: 'Suivi d’activité', body: 'Contacts, RDV, propositions et transformation de l’équipe. Je te montre la page.' },
-        { target: { css: '#act-root #act-range' }, title: 'La période', body: 'Du 1er du mois à aujourd’hui à chaque arrivée. Un clic sur le début, un clic sur la fin : tout se recharge.' },
-        { optional: true, target: { css: '#act-root .act-toggle' }, title: 'Le type', body: 'Tous, VN, VO ou VN/VO : filtre toute la page.' },
-        { optional: true, target: { css: '#act-root #act-export' }, title: 'Exporter', body: 'Toute la page dans un fichier Excel.' },
-        { optional: true, target: { css: '#act-root .act-sel-banner' }, title: 'Le périmètre affiché', body: 'La ligne choisie dans l’arbre ; « 📍 site global » quand c’est le site de la barre du haut. « ✕ » revient à tout le périmètre.' },
-        { optional: true, target: { css: '#act-root .act-kpi-grid' }, title: 'Le résumé', body: 'Contacts (entrants et sortants), RDV, propositions créées, BDC, wins (transformation), abandons.' },
-        { optional: true, target: { css: '#act-root .act-charts > .act-card:nth-child(1)' }, title: 'Contacts par jour', body: 'Une courbe par entité du même niveau que ta sélection, et la moyenne en pointillés. Total, entrants ou sortants ; moyenne mobile sur 7 jours.' },
-        { optional: true, target: { css: '#act-root .act-charts > .act-card:nth-child(2)' }, title: 'Le pipeline dans le temps', body: 'Propositions, BDC, wins et abandons, en cumulé ou au jour le jour.' },
-        { optional: true, target: { css: '#act-root .act-tree' }, title: 'Le périmètre', body: 'Réseau, affaire, site, type, vendeur. Un clic sur une ligne filtre la page ; un site devient le site global ; un second clic revient à tout.' },
-        { optional: true, target: { css: '#act-root .act-hm' }, title: 'La cadence', body: 'Les contacts de chaque vendeur, jour par jour. Plus c’est foncé, plus il y en a ; les dimanches en rouge.' },
-        { optional: true, target: { css: '#act-root .act-vtable' }, title: 'Par vendeur', body: 'Contacts, mix des canaux (téléphone, WhatsApp, SMS, RPV), RDV, relances, abandons, propositions, BDC, wins.' },
-        { optional: true, target: { css: '#act-root #act-cmp-toggle' }, title: 'Comparer', body: 'Je l’active pour toi : clique ensuite deux lignes de l’arbre.' },
-        { optional: true, action: () => { const c = doc.querySelector('#act-root #act-cmp-toggle'); if (c && !c.classList.contains('on')) c.click(); }, target: { css: '#act-root .act-card:has(.act-cmp-chips)' }, title: 'Le comparateur', body: 'Deux lignes, même période, mêmes filtres : la meilleure valeur ressort sur chaque mesure.' },
-        { action: () => { const c = doc.querySelector('#act-root #act-cmp-toggle.on'); if (c) c.click(); }, title: 'À toi de jouer', body: 'Le comparateur est refermé.' },
-      ],
-    },
-
-    /* =================================================================
-       PERFORMANCES (performances v19, profil Team Colin)
+       PERFORMANCES (performances v31, vue Ventes, profil Team Colin)
        ================================================================= */
     'performances': {
       pageId: '1499f15f-e8cb-4561-aea8-bdeeeb080b68',
       rootCheck: '#perf-root .pf-bar',
       fin: () => { const x = doc.querySelector('#perf-drawer .pfd-x'); if (x) x.click(); },
       steps: [
-        { title: 'Performances', body: 'Ton réalisé face aux objectifs du reporting commandes. Je te montre la page.' },
+        { action: async () => { const b = doc.querySelector('[data-vue="ventes"]'); if (b && !b.classList.contains('on')) { b.click(); await sleep(900); } }, title: 'Performances', body: 'Ton réalisé face aux objectifs du reporting commandes (vue Ventes). Je te montre la page.' },
         { target: { css: '#perf-root #pf-range' }, title: 'La période', body: 'Du 1er du mois à aujourd’hui à chaque arrivée. Sur plusieurs mois, des pastilles permettent de lire un mois ou le cumul.' },
         { target: { css: '#perf-root .pf-toggle:has([data-vnvo])' }, title: 'Le type', body: 'Tous, VN, VO ou VN/VO.' },
         { optional: true, target: { css: '#perf-root .pf-toggle:has([data-seg])' }, title: 'L’activité', body: 'Réseau (par défaut, hors grands comptes), Grands comptes, ou Tous.' },
@@ -548,9 +668,10 @@ OD.define('tours', {
     if (!t) return null;
     try {
       if (t.css) {
-        // Premier élément VISIBLE parmi ceux qui correspondent.
-        const all = doc.querySelectorAll(t.css);
-        for (const n of all) if (visible(n)) return n;
+        // Premier élément VISIBLE parmi ceux qui correspondent ; avec « has »,
+        // le premier dont le texte contient « has » (casse ignorée).
+        const all = doc.querySelectorAll(t.css), h = t.has ? String(t.has).toLowerCase() : null;
+        for (const n of all) if (visible(n) && (!h || (n.textContent || '').replace(/\s+/g, ' ').toLowerCase().indexOf(h) !== -1)) return n;
         return null;
       }
       if (t.tour) return doc.querySelector('[data-tour="' + t.tour + '"]');
@@ -673,11 +794,18 @@ OD.define('tours', {
     if (i > tour.steps.length - 1) { end(); return; }
     idx = i; const step = tour.steps[idx]; const mon = ++jeton;
     btnNext.disabled = true;
-    tipTitle.textContent = step.title || '';
-    tipBody.textContent = step.body || '';
-    tipStep.textContent = (idx + 1) + ' / ' + tour.steps.length;
-    btnPrev.style.visibility = idx === 0 ? 'hidden' : 'visible';
-    btnNext.textContent = idx >= tour.steps.length - 1 ? 'Terminer' : 'Suivant';
+    // v6 : rien ne s'affiche tant que la cible de l'étape n'est pas trouvée —
+    // plus de bulle au texte neuf posée sur la zone de l'étape précédente, ni
+    // d'étape facultative qui s'affiche puis disparaît.
+    curNode = null; hl.style.display = 'none'; tip.style.visibility = 'hidden';
+    const afficher = () => {
+      tipTitle.textContent = step.title || '';
+      tipBody.textContent = step.body || '';
+      tipStep.textContent = (idx + 1) + ' / ' + tour.steps.length;
+      btnPrev.style.visibility = idx === 0 ? 'hidden' : 'visible';
+      btnNext.textContent = idx >= tour.steps.length - 1 ? 'Terminer' : 'Suivant';
+      btnNext.disabled = false; tip.style.visibility = 'visible';
+    };
     if (step.action) { try { await runAction(step.action); } catch (e) {} }
     if (mon !== jeton || !tour) return;
     const limite = step.optional ? 2500 : 4000, t0 = Date.now();
@@ -685,18 +813,18 @@ OD.define('tours', {
       if (mon !== jeton || !tour) return;
       const node = step.target ? resolveTarget(step.target) : null;
       if (node) {
-        curNode = node; btnNext.disabled = false;
+        curNode = node; afficher();
         try { node.scrollIntoView({ block: 'center', behavior: 'smooth' }); } catch (e) {}
-        setTimeout(reposition, 320);
+        reposition(); setTimeout(reposition, 360);
       } else if (step.target && Date.now() - t0 < limite) { setTimeout(find, 200); }
       else if (step.target && step.optional) {
         // Cible absente : l'étape ne concerne pas cet écran, on passe.
         const j = idx + dir;
-        if (j < 0) go(idx + 1, 1); else if (j > tour.steps.length - 1) { curNode = null; hl.style.display = 'none'; btnNext.disabled = false; centerTip(); }
-        else go(j, dir);
-      } else { curNode = null; hl.style.display = 'none'; btnNext.disabled = false; centerTip(); }
+        if (j >= 0 && j <= tour.steps.length - 1) go(j, dir);
+        else if (j < 0) go(idx + 1, 1);
+        else { curNode = null; afficher(); centerTip(); }
+      } else { curNode = null; afficher(); centerTip(); }
     })();
-    centerTip();
   }
 
   function reposition() {
@@ -757,6 +885,9 @@ OD.define('tours', {
     '9e90d49a-215f-4c2b-b2bb-2d7c4f9aabd6': '/pipe-commercial',
     '99519997-f935-471a-9147-b0118191b991': '/marketing',
     '55717966-7e07-4957-9969-399198cce1ad': '/activite',
+    '7bfcfe73-4e89-40cf-bc84-1e07ddb478a6': '/bilaterales',
+    'da5005d5-42e4-4b37-9d42-f8b8728ddb0e': '/delco',
+    '259f1951-a2d4-4b90-ac83-0b3febe1d4ec': '/fiche-client',
     '1499f15f-e8cb-4561-aea8-bdeeeb080b68': '/performances',
     'c9b4f9a6-460a-4365-8a06-95e30a13cbdb': '/objectifs',
   };
