@@ -1,5 +1,8 @@
 // ============================================================================
-//  VISITES GUIDÉES (« Montre-moi en vrai ») — module One Data (OD.define) v8
+//  VISITES GUIDÉES (« Montre-moi en vrai ») — module One Data (OD.define) v9
+//  v9 (17/11/2026) : numérotation « 3 / 6 » sur les seules étapes affichées
+//    (les étapes sautées ne comptent plus) ; étape « frise » retirée de la
+//    visite Propositions commerciales.
 //  v8 (17/11/2026) : Propositions commerciales — les filtres (.flt) et la
 //    synthèse étaient sautés (mauvais repère) ; la visite déplie la
 //    première affaire pour montrer ses versions, puis la referme.
@@ -447,7 +450,6 @@ OD.define('tours', {
         { optional: true, target: { css: '#pcom-root .ln' }, title: 'Une affaire', body: 'Une intention d’achat : l’opportunité BACS avec ses simulations et ses commandes. Le véhicule, le vendeur et le site, le nombre de documents et de versions, la fourchette de prix, les jours sans mouvement et l’état.' },
         { optional: true, action: async () => { if (!doc.querySelector('#pcom-root .det')) { const b = doc.querySelector('#pcom-root .ln'); if (b) { b.click(); win.__odtPcomOuvert = true; await sleep(400); } } },
           target: { css: '#pcom-root .det' }, title: 'Les versions', body: 'Je déplie l’affaire : chaque version avec son écart de prix, celle qui est retenue, et les abandonnées (à afficher ou masquer). La loupe consulte un document, « B » l’ouvre dans BACS.' },
-        { optional: true, target: { css: '#pcom-root .frise' }, title: 'Plus ancien', body: 'Au-delà de 12 mois, les affaires passent sur une frise.' },
         FIN('Créer ou modifier', 'Chez Team Colin, simulations et commandes se font dans BACS : elles remontent ici et dans la gestion des ventes toutes seules.'),
       ],
     },
@@ -800,6 +802,15 @@ OD.define('tours', {
   }
   function hide() { if (catcher) catcher.style.display = 'none'; if (tip) tip.style.display = 'none'; if (hl) hl.style.display = 'none'; clearInterval(veille); }
 
+  // v9 : la numérotation ne compte que les étapes affichées. Le total = étapes
+  // déjà vues + étapes restantes qui s'afficheront probablement (sans cible,
+  // obligatoires, précédées d'une action, ou dont la cible est déjà là).
+  let vues = [];
+  function numero(i) {
+    vues = vues.filter(k => k < i); vues.push(i);
+    const reste = tour.steps.slice(i + 1).filter(st => !st.target || !st.optional || st.action || resolveTarget(st.target)).length;
+    return vues.length + ' / ' + (vues.length + reste);
+  }
   async function go(i, dir) {
     if (!tour) return;
     dir = dir || 1;
@@ -814,7 +825,7 @@ OD.define('tours', {
     const afficher = () => {
       tipTitle.textContent = step.title || '';
       tipBody.textContent = step.body || '';
-      tipStep.textContent = (idx + 1) + ' / ' + tour.steps.length;
+      tipStep.textContent = numero(idx);
       btnPrev.style.visibility = idx === 0 ? 'hidden' : 'visible';
       btnNext.textContent = idx >= tour.steps.length - 1 ? 'Terminer' : 'Suivant';
       btnNext.disabled = false; tip.style.visibility = 'visible';
@@ -883,7 +894,7 @@ OD.define('tours', {
     buildUI();
     const eff = def.steps.filter(s => !s.requires || garde(s.requires));
     tour = { id: tourId, def, steps: eff.length ? eff : def.steps.slice() };
-    idx = 0; curNode = null;
+    idx = 0; curNode = null; vues = [];
     win.__odtActif = { next: () => { if (!btnNext.disabled) btnNext.click(); }, prev: () => btnPrev.click() };
     show(); go(0, 1);
   }
