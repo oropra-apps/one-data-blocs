@@ -1,5 +1,8 @@
 // ============================================================================
 //  PERFORMANCES ÉQUIPE — module One Data (OD.define)  v1
+//  v32 (17/11/2026) : vue LEADS — filtre VN / VO (VN + VO, VN, VO) dans la
+//    barre, à côté de la période et du périmètre. perf_leads(…, p_univers) ;
+//    classement des leads identique au lead management (lead_univers).
 //  v31 (02/11/2026) : tuiles au design One Data (fond bleu très pâle, sans
 //    bordure ni ombre, coins 8 px, chiffres en bleu, aucun rouge ni beige).
 //    Liseré bleu à gauche au survol, seulement sur une tuile cliquable ;
@@ -2522,7 +2525,7 @@ OD.define('performances', {
       return { bouton: bouton, ouvrir: ouvrir, fermer: fermer, fmt: fmt, moisEnCours: moisEnCours };
     }
     const DPL = odPeriodeKit(doc, doc.defaultView || window);
-    const L = window.__OD_PERF_LEADS__ = window.__OD_PERF_LEADS__ || { preset: 'mois', site: null };
+    const L = window.__OD_PERF_LEADS__ = window.__OD_PERF_LEADS__ || { preset: 'mois', site: null, univers: null };
     let data = null, charge = false, erreur = null, jeton = 0;
     injecterCssLeads();
 
@@ -2557,7 +2560,7 @@ OD.define('performances', {
       const t = ++jeton; charge = false; erreur = null; rendre();
       const [d, f] = periodeL();
       try {
-        const r = await sb.rpc('perf_leads', { p_deb: d, p_fin: f, p_sites: L.site ? [Number(L.site)] : null });
+        const r = await sb.rpc('perf_leads', { p_deb: d, p_fin: f, p_sites: L.site ? [Number(L.site)] : null, p_univers: L.univers || null });
         if (t !== jeton) return;
         if (r.error) throw r.error;
         data = r.data || {}; charge = true;
@@ -2669,12 +2672,15 @@ OD.define('performances', {
         h += '<span class="pl-lbl">Périmètre</span><select class="pl-sel" data-pl-site><option value="">Tous mes sites</option>'
           + sites.map(s => '<option value="' + s.id_site + '"' + (String(L.site) === String(s.id_site) ? ' selected' : '') + '>' + e(propre(s.site)) + '</option>').join('') + '</select>';
       }
+      // v32 : filtre VN / VO
+      h += '<span class="pl-lbl">Univers</span><div class="pl-seg">'
+        + [['', 'VN + VO'], ['VN', 'VN'], ['VO', 'VO']].map(u => '<button type="button" class="' + ((L.univers || '') === u[0] ? 'on' : '') + '" data-pl-univ="' + u[0] + '">' + u[1] + '</button>').join('') + '</div>';
       const [d, f] = periodeL();
       h += '<span class="pl-per">' + DPL.bouton(d, f, 'data-pl-dp="1"', 'Choisir les dates') + '</span></div>';
       if (!charge) { host.innerHTML = h + '<div class="pl-vide">Chargement des indicateurs…</div>'; lier(); return; }
       if (erreur) { host.innerHTML = h + '<div class="pl-vide err">Les indicateurs n\'ont pas pu être chargés : ' + e(erreur) + '</div>'; lier(); return; }
       const k = data.kpi || {}, p = data.prec || {};
-      if (!k.recus) { host.innerHTML = h + '<div class="pl-vide">Aucun lead reçu sur cette période et ce périmètre.</div>'; lier(); return; }
+      if (!k.recus) { host.innerHTML = h + '<div class="pl-vide">Aucun lead ' + (L.univers ? L.univers + ' ' : '') + 'reçu sur cette période et ce périmètre.</div>'; lier(); return; }
       const tc = pct(k.contactes, k.recus), td = pct(k.dans_delai, k.recus), tr = pct(k.rdv, k.recus), tcd = pct(k.cde, k.recus);
       const pc = pct(p.contactes, p.recus), pdd = pct(p.dans_delai, p.recus), pr = pct(p.rdv, p.recus), pcd = pct(p.cde, p.recus);
       h += '<div class="pl-tiles">'
@@ -2702,7 +2708,7 @@ OD.define('performances', {
           + tuile('Leads traités', t.n, '', '', '') + tuile('Contactés', fmtPct(pct(t.c, t.n)), '', '', '') + tuile('Dans le délai', fmtPct(pct(t.dd, t.n)), '', '', niveauDelai(pct(t.dd, t.n)))
           + tuile('Rendez-vous', t.rdv, '', '', '') + tuile('Commandes', t.cde, '', '', '') + '</div>' + tableau(vroom, 'Opérateur', { nom: r => propre(r.cle) }), true);
       }
-      h += '<p class="pl-note pied">Un lead compte dans la période où il est reçu. Exclus : doublons, fausses demandes, demandes hors périmètre et trafic atelier. Le suivi en temps réel (qui a la main, ce qui attend) reste dans le lead management.</p>';
+      h += '<p class="pl-note pied">' + (L.univers ? 'Filtre ' + L.univers + ' : les leads dont l\'univers n\'a pas pu être déterminé ne sont comptés qu\'en « VN + VO ». ' : '') + 'Un lead compte dans la période où il est reçu. Exclus : doublons, fausses demandes, demandes hors périmètre et trafic atelier. Le suivi en temps réel (qui a la main, ce qui attend) reste dans le lead management.</p>';
       host.innerHTML = h;
       lier();
     }
@@ -2712,6 +2718,7 @@ OD.define('performances', {
       if (bdp) bdp.addEventListener('click', () => { const [d0] = periodeL(); DPL.ouvrir(bdp, d0, (a, z) => { L.du = a; L.au = z; charger(); }); });
       const s = host.querySelector('[data-pl-site]');
       if (s) s.addEventListener('change', () => { L.site = s.value || null; charger(); });
+      host.querySelectorAll('[data-pl-univ]').forEach(b => b.addEventListener('click', () => { L.univers = b.getAttribute('data-pl-univ') || null; charger(); }));
     }
     function injecterCssLeads() {
       if (doc.getElementById('pl-css')) return;
