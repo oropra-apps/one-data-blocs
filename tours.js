@@ -1,5 +1,9 @@
 // ============================================================================
-//  VISITES GUIDÉES (« Montre-moi en vrai ») — module One Data (OD.define) v6
+//  VISITES GUIDÉES (« Montre-moi en vrai ») — module One Data (OD.define) v7
+//  v7 (17/11/2026) : passage d'une étape à l'autre accéléré — une étape
+//    facultative absente est passée aussitôt (150 ms, 1,2 s après une
+//    action) au lieu de 2,5 s ; Propositions commerciales : étape « Pas
+//    encore d'affaire » quand le client n'en a aucune.
 //  Module app-level : une ancre masquée dans le header partagé suffit pour
 //  tout le site. Aucune dépendance Supabase. Expose window.OneDataTour ;
 //  délégation de clic sur [data-tour-launch] ; reprise auto via localStorage.
@@ -431,6 +435,7 @@ OD.define('tours', {
       path: '/fiche-client', pageId: '259f1951-a2d4-4b90-ac83-0b3febe1d4ec', rootCheck: '#oropra-fiche-shell .fs-tabs',
       steps: [
         { action: ficheOnglet('pcom'), target: { css: '#oropra-fiche-shell .fs-tab[data-tab="pcom"]' }, title: 'P. Commerciales', body: 'Le suivi commercial du client, affaire par affaire.' },
+        { optional: true, target: { css: '#pcom-root > .vide' }, title: 'Pas encore d’affaire', body: 'Ce client n’a aucune affaire : dès qu’une simulation ou une commande est faite dans BACS, elle apparaît ici. Ouvre un client qui a des affaires pour voir la suite de la visite.' },
         { optional: true, target: { css: '#pcom-root .outils' }, title: 'Les filtres', body: 'VN ou VO, et le statut des affaires.' },
         { optional: true, target: { css: '#pcom-root .ln' }, title: 'Une affaire', body: 'Une intention d’achat : l’opportunité BACS avec ses simulations et ses commandes. Où on en est, depuis quand rien ne bouge, le montant de la commande.' },
         { optional: true, target: { css: '#pcom-root .plier, #pcom-root .vers' }, title: 'Les versions', body: 'Déplie une affaire : chaque version avec son écart de prix, celle qui est retenue, celles qui ont été refusées.' },
@@ -808,15 +813,20 @@ OD.define('tours', {
     };
     if (step.action) { try { await runAction(step.action); } catch (e) {} }
     if (mon !== jeton || !tour) return;
-    const limite = step.optional ? 2500 : 4000, t0 = Date.now();
+    // v6.1 : une étape facultative sans action est jugée tout de suite (la
+    // page est déjà dessinée) ; avec une action (onglet, fiche d'exemple), on
+    // laisse 1,2 s à l'écran pour se dessiner. Avant : 2,5 s d'attente par
+    // étape absente, bulle masquée — un parcours sur un client sans affaire
+    // restait près de 10 s sans rien afficher.
+    const limite = step.optional ? (step.action ? 1200 : 150) : 3000, t0 = Date.now();
     (function find() {
       if (mon !== jeton || !tour) return;
       const node = step.target ? resolveTarget(step.target) : null;
       if (node) {
         curNode = node; afficher();
         try { node.scrollIntoView({ block: 'center', behavior: 'smooth' }); } catch (e) {}
-        reposition(); setTimeout(reposition, 360);
-      } else if (step.target && Date.now() - t0 < limite) { setTimeout(find, 200); }
+        reposition(); setTimeout(reposition, 300);
+      } else if (step.target && Date.now() - t0 < limite) { setTimeout(find, 100); }
       else if (step.target && step.optional) {
         // Cible absente : l'étape ne concerne pas cet écran, on passe.
         const j = idx + dir;
