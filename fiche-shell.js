@@ -1,5 +1,7 @@
 // ============================================================================
-//  FICHE CLIENT — SHELL — module One Data (OD.define)  v17
+//  FICHE CLIENT — SHELL — module One Data (OD.define)  v18
+//  v18 (18/11/2026) : « Appeler » compose le fixe quand le client n'a pas de
+//  mobile ; sans aucun numéro, un message le dit (le clic ne faisait rien).
 //  v17 (04/11/2026) : onglet « Entourage » (module entourage v1) sur la fiche
 //  d'un particulier : conjoint, enfants, parents, parrain… comme la rubrique
 //  Entourage de BACS. Absent sur une société.
@@ -108,7 +110,7 @@ OD.define('fiche-shell', {
     if (idvu == null) { state.client = null; return; }
     try {
       const { data, error } = await sb.from('CLIENT')
-        .select('IDVu, CIVILITE, NOM, PRENOM, EMAIL, TEl_MOB, idmultivu, code_postal, ville')
+        .select('IDVu, CIVILITE, NOM, PRENOM, EMAIL, TEl_MOB, TEL_FIXE, idmultivu, code_postal, ville')
         .eq('IDVu', idvu).single();
       if (error) throw error;
       state.client = data; state.idvu = idvu;
@@ -216,8 +218,10 @@ OD.define('fiche-shell', {
   function callClient() {
     if (!peutAppeler()) return;
     const c = state.client; if (!c) return;
-    const to = normPhone(c.TEl_MOB);
-    if (!to) return;
+    // v18 : mobile, sinon fixe ; sans aucun numéro, on le dit au lieu de ne rien faire.
+    const brut = (c.TEl_MOB && String(c.TEl_MOB).trim()) ? c.TEl_MOB : c.TEL_FIXE;
+    const to = normPhone(brut);
+    if (!to) { try { alert('Aucun numéro de téléphone n\'est renseigné sur cette fiche : ajoutez un mobile ou un fixe pour pouvoir appeler ce client.'); } catch (e) {} return; }
 
     // 1) Tenant equipe 3CX : le PBX fait sonner le poste du vendeur, puis le client.
     const cx = pick3cx();
@@ -237,7 +241,7 @@ OD.define('fiche-shell', {
         const call = await device.connect({ params: { To: to } });
         globalThis.__ONE_DATA__ = globalThis.__ONE_DATA__ || {}; globalThis.__ONE_DATA__.call = call;
         try { window._twilioCall = call; window.parent._twilioCall = call; window.top._twilioCall = call; } catch (e) {}
-        if (UI) UI.incall({ name: clientName(c), number: c.TEl_MOB, idvu: c.IDVu, client: c });
+        if (UI) UI.incall({ name: clientName(c), number: brut, idvu: c.IDVu, client: c });
         call.on('accept', () => { if (UI) { UI.answer(); UI.minimize(true); } });
         call.on('disconnect', () => { if (UI) UI.close(); try { window._twilioCall = null; window.parent._twilioCall = null; window.top._twilioCall = null; } catch (e) {} if (globalThis.__ONE_DATA__) globalThis.__ONE_DATA__.call = null; });
       } catch (e) { console.error('[fiche-shell] VoIP', e); }
