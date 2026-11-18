@@ -1,5 +1,8 @@
 // ============================================================================
 //  PERFORMANCES ÉQUIPE — module One Data (OD.define)  v1
+//  v35 (18/11/2026) : colonne « Avec devis » = tous les clients qui ont un
+//    devis (contacts récents compris) ; « sans devis » séparé entre contacts
+//    de plus de 7 jours et contacts récents. Le taux reste jugé à 7 jours.
 //  v34 (18/11/2026) : taux de devis jugé sur les seuls contacts de plus de
 //    7 jours (un contact récent avec devis faisait monter le taux à 100 %
 //    sur 7 jours) ; « jour même » rapporté à tous les clients avec devis.
@@ -2847,6 +2850,10 @@ OD.define('performances', {
     const PRESETS = [['7j', '7 jours'], ['30j', '30 jours'], ['mois', 'Ce mois-ci'], ['moisprec', 'Mois dernier'], ['90j', '90 jours']];
     function periodeP() { return (P.du && P.au) ? [P.du, P.au] : bornes(P.preset); }
     function taux(o) { return pct(o.ok || 0, (o.ok || 0) + (o.manque || 0)); }
+    // v35 : « avec devis » compte TOUS les clients qui ont un devis, contacts
+    // récents compris ; le taux, lui, ne juge que les contacts de plus de 7 j.
+    function avecDevis(o) { return o.avec_devis != null ? o.avec_devis : (o.ok || 0); }
+    function recentsSans(o) { return Math.max(0, (o.attente || 0) - Math.max(0, avecDevis(o) - (o.ok || 0))); }
     function niveau(p) { return p == null ? 'n' : p >= 80 ? 'ok' : p >= 50 ? 'warn' : 'crit'; }
     function dateCourte(s) { if (!s) return ''; const d = new Date(String(s).length <= 10 ? s + 'T12:00:00' : s); return d.toLocaleDateString('fr-FR', { day: '2-digit', month: 'short' }); }
     const LIB_TYP = { lead: 'Lead', appel: 'Appel entrant', rdv: 'Rendez-vous' };
@@ -2881,10 +2888,10 @@ OD.define('performances', {
     function tableSources(rows) {
       if (!rows || !rows.length) return '<div class="pl-vide">Aucun client croisé sur la période.</div>';
       const maxN = Math.max(1, ...rows.map(r => r.croises));
-      return '<div class="pl-tw"><table class="pl-t"><thead><tr><th>Origine du contact</th><th>Clients croisés</th><th>Avec devis</th><th>Sans devis</th><th>En attente</th><th>Taux de devis</th></tr></thead><tbody>'
+      return '<div class="pl-tw"><table class="pl-t"><thead><tr><th>Origine du contact</th><th>Clients croisés</th><th>Avec devis</th><th title="Contact de plus de 7 jours, toujours sans devis">Sans devis<br><small>contact &gt; 7 j</small></th><th title="Contact de moins de 7 jours, pas encore de devis">Sans devis<br><small>contact récent</small></th><th>Taux de devis<br><small>contacts &gt; 7 j</small></th></tr></thead><tbody>'
         + rows.map(r => '<tr><td class="l">' + e(r.src || LIB_TYP[r.typ] || r.typ) + '</td>'
           + '<td><span class="pl-vol"><i style="width:' + Math.max(4, 100 * r.croises / maxN) + '%"></i><b>' + r.croises + '</b></span></td>'
-          + '<td>' + r.ok + '</td><td>' + (r.manque || '<span class="pl-na">0</span>') + '</td><td>' + (r.attente || '<span class="pl-na">0</span>') + '</td>'
+          + '<td>' + (avecDevis(r) || '<span class="pl-na">0</span>') + '</td><td>' + (r.manque ? '<b class="pp-manque">' + r.manque + '</b>' : '<span class="pl-na">0</span>') + '</td><td>' + (recentsSans(r) || '<span class="pl-na">0</span>') + '</td>'
           + '<td>' + pill(taux(r), (r.ok + r.manque) < 3) + '</td></tr>').join('')
         + '</tbody></table></div>';
     }
@@ -2898,13 +2905,14 @@ OD.define('performances', {
         if (ta !== tb) return (ta == null ? 101 : ta) - (tb == null ? 101 : tb);
         return b.manque - a.manque;
       });
-      return '<div class="pl-tw"><table class="pl-t pp-t"><thead><tr><th>Vendeur</th><th>Clients croisés</th><th>Taux de devis</th><th>Sans devis</th><th>En attente</th><th>Devis le jour même</th><th>Devis créés</th><th>Devis dormants</th><th>Devis → commande</th></tr></thead><tbody>'
+      return '<div class="pl-tw"><table class="pl-t pp-t"><thead><tr><th>Vendeur</th><th>Clients croisés</th><th>Taux de devis<br><small>contacts &gt; 7 j</small></th><th>Avec devis</th><th>Sans devis<br><small>contact &gt; 7 j</small></th><th>Sans devis<br><small>contact récent</small></th><th>Devis le jour même</th><th>Devis créés</th><th>Devis dormants</th><th>Devis → commande</th></tr></thead><tbody>'
         + rows.map(v => {
           const tx = taux(v), faible = (v.ok + v.manque) < 3;
           return '<tr class="pp-row" data-pp-user="' + v.id_user + '" title="Voir le détail des clients"><td class="l">' + e(propre(v.nom)) + (v.role === 3 ? ' <small class="pp-tag">chef des ventes</small>' : '') + '<br><small>' + e(propre(v.site || '')) + '</small></td>'
             + '<td>' + v.croises + '</td><td>' + pill(tx, faible) + '</td>'
+            + '<td>' + (avecDevis(v) || '<span class="pl-na">0</span>') + '</td>'
             + '<td>' + (v.manque ? '<b class="pp-manque">' + v.manque + '</b>' : '<span class="pl-na">0</span>') + '</td>'
-            + '<td>' + (v.attente || '<span class="pl-na">0</span>') + '</td>'
+            + '<td>' + (recentsSans(v) || '<span class="pl-na">0</span>') + '</td>'
             + '<td>' + (v.avec_devis ? fmtPct(pct(v.jour_meme, v.avec_devis)) : '<span class="pl-na">—</span>') + '</td>'
             + '<td>' + (v.devis || '<span class="pl-na">0</span>') + '</td>'
             + '<td>' + (v.dormants ? v.dormants + ' <small>' + pct(v.dormants, v.devis) + ' %</small>' : '<span class="pl-na">0</span>') + '</td>'
@@ -2929,12 +2937,11 @@ OD.define('performances', {
       const k = data.kpi || {}, p = data.prec || {};
       if (!k.croises && !k.devis) { host.innerHTML = h + '<div class="pl-vide">Aucun client croisé ni devis sur cette période et ce périmètre.</div>'; lier(); return; }
       const tx = taux(k), txp = (p.ok || p.manque) ? taux(p) : null;
-      const attDevis = Math.max(0, (k.avec_devis || 0) - (k.ok || 0));
       h += '<div class="pl-tiles">'
         + tuile('Taux de devis', fmtPct(tx), tx == null ? 'aucun contact de plus de 7 jours : prenez une période plus longue' : (k.ok || 0) + ' clients avec devis sur ' + ((k.ok || 0) + (k.manque || 0)), tx == null ? '' : tendancePts(tx, txp), tx == null ? '' : niveau(tx),
             'Part des clients croisés (lead contacté, appel entrant de plus d\'1 min, rendez-vous en concession) qui ont un devis dans BACS, créé dans les 30 jours avant le contact ou les 7 jours après. Seuls les contacts de plus de 7 jours sont jugés : les plus récents ont encore le temps de recevoir leur devis.')
-        + tuile('Clients croisés', k.croises || 0, (k.attente || 0) + ' encore dans le délai de 7 jours' + (attDevis ? ', dont ' + attDevis + ' déjà avec devis' : ''), '', '')
-        + tuile('Sans devis', k.manque || 0, 'clients croisés il y a plus de 7 jours', '', (k.manque ? 'warn' : 'ok'))
+        + tuile('Clients croisés', k.croises || 0, avecDevis(k) + ' déjà avec un devis BACS · ' + (k.devis || 0) + ' devis créés sur la période', '', '')
+        + tuile('Sans devis', k.manque || 0, 'contacts de plus de 7 jours' + (recentsSans(k) ? ' · ' + recentsSans(k) + ' contacts récents encore sans devis' : ''), '', (k.manque ? 'warn' : ''))
         + tuile('Devis le jour même', fmtPct(pct(k.jour_meme || 0, k.avec_devis || 0)), (k.jour_meme || 0) + ' devis faits le jour du contact', '', '',
             'Parmi les clients qui ont un devis : part dont le devis est créé le jour du contact, ou avant (BACS ne donne que la date de création, sans l\'heure).')
         + tuile('Devis dormants', fmtPct(pct(k.dormants || 0, k.devis || 0)), (k.dormants || 0) + ' devis sans relance sous 72 h', '', '',
@@ -3011,6 +3018,7 @@ OD.define('performances', {
       st.textContent = `
 .pp-t tbody tr.pp-row{cursor:pointer}
 .pp-t tbody tr.pp-row:hover td{background:#f5f8fc}
+.pl-t th small{font-size:9.5px;font-weight:700;letter-spacing:0;text-transform:none;color:#a3b2c7}
 .pp-t td.l small{color:#8b99b0;font-weight:600;font-size:11px}
 .pp-t td.l small.pp-tag{background:#eef4fc;color:#2a5ea9;border-radius:999px;padding:1px 7px;font-weight:700;font-size:10px}
 .pp-manque{color:#c0524f}
