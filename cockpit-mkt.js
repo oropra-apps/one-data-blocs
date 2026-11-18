@@ -1,5 +1,7 @@
 // ============================================================================
-//  COCKPIT MARKETING — module One Data (OD.define)   v5 — PROFIL TEAM COLIN
+//  COCKPIT MARKETING — module One Data (OD.define)   v6 — PROFIL TEAM COLIN
+//  v6 (17/11/2026) : responsive mobile — tableaux en fiches, onglets courts,
+//    barre d'audience flottante dans Composer, champs à 16 px (pas de zoom iOS).
 //  v5 (17/11/2026) : logo = « O » One Data qui décompose la lumière ; PRISME
 //    signe chaque onglet (ligne d'en-tête) et chaque bloc qu'il produit.
 //  v4 (17/11/2026) : marque « PRISME by One Data » (bandeau, onglet PRISME,
@@ -249,6 +251,8 @@ OD.define('cockpit-mkt', {
 #mkt-root .deciles .c:nth-child(n+4) i{background:#a9c3e6}
 #mkt-root .deciles .c span{font-size:11px;color:var(--ink-3)} #mkt-root .deciles .c b{font-size:11px;color:var(--bleu-f)}
 #mkt-root .compo{display:grid;grid-template-columns:minmax(0,1.05fr) minmax(0,1fr);gap:14px;align-items:start}
+#mkt-root .onglets .ct{display:none}
+#mkt-root .aud-flottant{display:none}
 #mkt-root .champ{margin-bottom:12px}
 #mkt-root .champ>.l{font-size:11px;font-weight:800;letter-spacing:.06em;text-transform:uppercase;color:var(--ink-3);margin-bottom:5px}
 #mkt-root .puces{display:flex;flex-wrap:wrap;gap:6px}
@@ -276,7 +280,58 @@ OD.define('cockpit-mkt', {
 #mkt-root .tuile .v{font-size:24px;font-weight:800;color:var(--bleu-f)}
 #mkt-root .tuile p{margin:4px 0 0;font-size:12.5px}
 #mkt-root .gros{font-size:20px;font-weight:800;color:var(--bleu-f)}
-@media (max-width:980px){#mkt-root .voies{grid-template-columns:1fr} #mkt-root .compo{grid-template-columns:1fr} #mkt-root .collant{position:static}}
+@media (max-width:980px){#mkt-root .voies{grid-template-columns:1fr} #mkt-root .compo{grid-template-columns:minmax(0,1fr)} #mkt-root .collant{position:static}
+ #mkt-root .aud-flottant{display:flex;align-items:center;gap:8px;position:fixed;left:12px;right:12px;bottom:max(12px,env(safe-area-inset-bottom));z-index:60;border:0;border-radius:14px;padding:11px 14px;
+  background:var(--bleu-f);color:#fff;font:inherit;font-size:14px;text-align:left;box-shadow:0 8px 24px rgba(31,74,133,.28);cursor:pointer;transition:opacity .2s,transform .2s}
+ #mkt-root .aud-flottant span{flex:1;min-width:0} #mkt-root .aud-flottant b{color:#fff}
+ #mkt-root .aud-flottant .vers{flex:none;font-weight:800;color:#bfe9df}
+ #mkt-root .aud-flottant.charge{opacity:.85} #mkt-root .aud-flottant.cache{opacity:0;transform:translateY(20px);pointer-events:none}
+ #mkt-root .aud-flottant svg circle[stroke="#32AFA4"]{stroke:#53bda7}
+ #mkt-root .compo>.card:first-child{padding-bottom:70px}}
+@media (max-width:640px){
+ #mkt-root .defil{overflow:visible}
+ #mkt-root .tbl,#mkt-root .tbl tbody{display:block;width:100%}
+ #mkt-root .tbl thead{display:none}
+ #mkt-root .tbl tr{display:block;border:1px solid var(--line);border-radius:11px;padding:8px 11px;margin-bottom:8px;background:#fff}
+ #mkt-root .tbl tr.sousl{background:var(--tuile);margin-left:12px}
+ #mkt-root .tbl td{display:flex;align-items:center;justify-content:flex-end;gap:10px;border:0;padding:4px 0;text-align:right;white-space:normal}
+ #mkt-root .tbl td.n{white-space:normal}
+ #mkt-root .tbl td::before{content:attr(data-l);flex:none;margin-right:auto;max-width:48%;text-align:left;font-size:10.5px;font-weight:800;letter-spacing:.05em;text-transform:uppercase;color:var(--ink-3)}
+ #mkt-root .tbl td[data-l=""]::before{display:none}
+ #mkt-root .tbl td:first-child{display:block;text-align:left;padding:2px 0 7px;margin-bottom:3px;border-bottom:1px solid var(--line);font-size:14px}
+ #mkt-root .tbl td:first-child::before{display:none}
+ #mkt-root .tbl td:empty{display:none}
+ #mkt-root .tbl td .barre{flex:1;max-width:45%}
+ #mkt-root .tbl td .fact{flex:none}
+ #mkt-root .tbl tr.sousl td:first-child{font-size:13px}
+}
+@media (max-width:560px){
+ #mkt-root{padding:12px 10px 50px} #mkt-root h1{font-size:20px}
+ #mkt-root .kpi .v{font-size:22px} #mkt-root .card{padding:13px;border-radius:12px}
+ #mkt-root .bande{grid-template-columns:repeat(2,minmax(0,1fr));gap:8px} #mkt-root .kpi{padding:10px 11px} #mkt-root .kpi .l{font-size:9.5px}
+ #mkt-root .tete{flex-wrap:nowrap;align-items:flex-start} #mkt-root .tete .btn{padding:7px 10px;font-size:12px;flex:none}
+ #mkt-root .prisme-bandeau{display:flex;flex-wrap:wrap;border-radius:12px;font-size:11.5px;row-gap:2px}
+ #mkt-root .prisme-bandeau .sep{display:none} #mkt-root .prisme-bandeau>span{white-space:nowrap}
+ #mkt-root .perim .seg{display:flex;flex:1 1 100%} #mkt-root .perim .seg button{flex:1;padding:8px 4px}
+ #mkt-root .perim select{flex:1 1 100%;min-width:0;width:100%} #mkt-root .perl{display:none}
+ #mkt-root .onglets{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:2px;padding:3px}
+ #mkt-root .onglets button{padding:8px 2px;font-size:12.5px;display:flex;align-items:center;justify-content:center;gap:3px}
+ #mkt-root .onglets button svg{width:18px;height:14px}
+ #mkt-root .onglets .lg{display:none} #mkt-root .onglets .ct{display:inline}
+ #mkt-root .prisme-onglet{display:grid;grid-template-columns:auto minmax(0,1fr);align-items:start;font-size:12px}
+ #mkt-root .prisme-onglet svg{margin-top:1px}
+ #mkt-root .brief{font-size:14px}
+ #mkt-root .props{grid-template-columns:minmax(0,1fr)}
+ #mkt-root .tuiles{grid-template-columns:minmax(0,1fr)}
+ #mkt-root .prisme-lettres{grid-template-columns:repeat(2,minmax(0,1fr))}
+ #mkt-root .prisme-lettres em{display:none}
+ #mkt-root .deciles{height:110px;gap:4px} #mkt-root .deciles .c b{font-size:10px}
+ #mkt-root input[type=text],#mkt-root input[type=number],#mkt-root select{font-size:16px}
+ #mkt-root input[type=number]{width:76px}
+ #mkt-root .ligne{gap:6px}
+ #mkt-root .ligne .btn{flex:1 1 auto}
+ #mkt-root .puce{padding:6px 11px;font-size:13px}
+}
 @media (max-width:560px){#mkt-root{padding:12px 10px 50px} #mkt-root .kpi .v{font-size:22px} #mkt-root .card{padding:13px}}
 `;
     const style = document.createElement('style'); style.textContent = CSS; R.appendChild(style);
@@ -378,9 +433,9 @@ OD.define('cockpit-mkt', {
         '<button class="btn sec" data-act="recharger">Actualiser</button></div>';
       h += bandeauPrisme();
       h += selecteurPerimetre();
-      h += '<div class="onglets">' + [['moments', 'Moments'], ['composer', 'Composer une campagne'], ['campagnes', 'Campagnes'], ['moteur', 'PRISME']]
+      h += '<div class="onglets">' + [['moments', 'Moments'], ['composer', '<span class="lg">Composer une campagne</span><span class="ct">Composer</span>'], ['campagnes', 'Campagnes'], ['moteur', 'PRISME']]
         .map(o => '<button data-onglet="' + o[0] + '" class="' + (S.onglet === o[0] ? 'on' : '') + '">' + (o[0] === 'moteur' ? LOGO + ' ' : '') + o[1] + '</button>').join('') + '</div>';
-      if (s) h += '<div class="prisme-onglet">' + LOGO + '<span><b>PRISME</b> ' + esc(SOUS_ONGLET[S.onglet] || '') + '</span><span class="fact">· lecture du ' + esc(dfr(s.date_ref)) + '</span></div>';
+      if (s) h += '<div class="prisme-onglet">' + LOGO + '<span><b>PRISME</b> ' + esc(SOUS_ONGLET[S.onglet] || '') + ' <span class="fact">· lecture du ' + esc(dfr(s.date_ref)) + '</span></span></div>';
       if (S.err) h += '<div class="alerte">Le cockpit n\'a pas pu charger les scores : ' + esc(S.err) + '</div>';
       if (S.chargement && !s) h += '<div class="card vide">Chargement des parcours clients…</div>';
       else if (s) {
@@ -390,6 +445,8 @@ OD.define('cockpit-mkt', {
         else h += vueMoteur();
       }
       corps.innerHTML = h;
+      etiqueter(corps);
+      suivreAudience();
       if (S.onglet === 'composer') rendreAudience();
     }
 
@@ -541,8 +598,34 @@ OD.define('cockpit-mkt', {
         '<div class="sous" style="margin-top:4px">Le groupe témoin est tiré au hasard et n\'est jamais sollicité : c\'est lui qui prouve ce que la campagne a rapporté.</div></div>';
       h += '<div class="ligne"><button class="btn sec" data-act="raz">Tout effacer</button></div>';
       h += '</div><div class="collant"><div class="card" id="mkt-aud"></div></div></div>';
+      h += '<button class="aud-flottant" id="mkt-flot" data-act="voir-aud"></button>';
       return h;
     }
+    // Sur mobile, chaque ligne de tableau devient une fiche : chaque cellule reçoit
+    // le libellé de sa colonne (data-l), affiché par le CSS à la place de l'en-tête.
+    function etiqueter(racine) {
+      racine.querySelectorAll('table.tbl').forEach(t => {
+        const th = Array.from(t.querySelectorAll('thead th')).map(x => x.textContent.trim());
+        t.querySelectorAll('tbody tr').forEach(tr => Array.from(tr.children).forEach((td, i) => td.setAttribute('data-l', th[i] || '')));
+      });
+    }
+    // Barre flottante de Composer (mobile) : le résultat de l'audience reste visible
+    // pendant qu'on coche les critères ; elle s'efface quand le bloc d'audience est à l'écran.
+    let obsAud = null;
+    function majFlottant() {
+      const f = corps.querySelector('#mkt-flot'); if (!f) return;
+      const a = S.audience, cas = (a && a.cascade) || [], fin = Number((cas[cas.length - 1] || {}).n) || 0;
+      f.innerHTML = LOGO + '<span>' + (a ? '<b>' + n0(fin) + ' clients</b> · ' + n0(a.achats_attendus) + ' achats attendus' : 'Calcul de l\'audience…') + '</span><span class="vers">Voir ↓</span>';
+      f.classList.toggle('charge', !!S.audCharge);
+    }
+    function suivreAudience() {
+      try { if (obsAud) obsAud.disconnect(); } catch (e) { }
+      const box = corps.querySelector('#mkt-aud'), f = corps.querySelector('#mkt-flot');
+      if (!box || !f || typeof IntersectionObserver === 'undefined') return;
+      obsAud = new IntersectionObserver(e => { f.classList.toggle('cache', e[0].isIntersecting); }, { threshold: 0.05 });
+      obsAud.observe(box);
+    }
+
     function rendreAudience() {
       const box = corps.querySelector('#mkt-aud'); if (!box) return;
       const a = S.audience, c = S.crit;
@@ -582,6 +665,8 @@ OD.define('cockpit-mkt', {
           '</tbody></table></div>';
       } else if (!S.audCharge) h += '<div class="vide">Aucun client ne correspond.</div>';
       box.innerHTML = h;
+      etiqueter(box);
+      majFlottant();
     }
 
     function ligneResultat(lib, x, extra) {
@@ -717,6 +802,7 @@ OD.define('cockpit-mkt', {
       else if (act === 'prop') { const p = propositions()[Number(t.dataset.i)]; if (p) versComposer(Object.assign({ canal: p.canal }, p.crit), p.t); }
       else if (act === 'etat') versComposer({ etats: [t.dataset.k] }, ETATS[t.dataset.k].t);
       else if (act === 'coh') { const k = t.dataset.k; versComposer({ segments: [k.split('-')[0]], archetypes: [k] }, 'Cohorte ' + nomCohorte(k)); }
+      else if (act === 'voir-aud') { const b = corps.querySelector('#mkt-aud'); if (b) try { b.scrollIntoView({ behavior: 'smooth', block: 'start' }); } catch (e) { b.scrollIntoView(); } }
       else if (act === 'drill') choisirPer(t.dataset.niv, t.dataset.k);
       else if (act === 'campdet') { const id = t.dataset.id; S.ouvertCamp[id] = !S.ouvertCamp[id]; rendre(); }
       else if (act === 'cycle') { S.crit.exclure_cycle_ouvert = !S.crit.exclure_cycle_ouvert; S.confirm = null; rendre(); planifierAudience(); }
