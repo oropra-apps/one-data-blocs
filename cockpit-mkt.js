@@ -1,5 +1,8 @@
 // ============================================================================
-//  COCKPIT MARKETING — module One Data (OD.define)   v6 — PROFIL TEAM COLIN
+//  COCKPIT MARKETING — module One Data (OD.define)   v7 — PROFIL TEAM COLIN
+//  v7 (17/11/2026) : opérations commerciales (vente privée, portes ouvertes…) —
+//    fichier dimensionné sur la capacité d'appel et classé par PRISME, vendeurs
+//    ou prestataire (fichier d'appel tracé), bilan RDV + ventes contre témoin.
 //  v6 (17/11/2026) : responsive mobile — tableaux en fiches, onglets courts,
 //    barre d'audience flottante dans Composer, champs à 16 px (pas de zoom iOS).
 //  v5 (17/11/2026) : logo = « O » One Data qui décompose la lumière ; PRISME
@@ -69,8 +72,25 @@ OD.define('cockpit-mkt', {
       onglet: 'moments', synth: null, err: null, chargement: true,
       crit: critDefaut(), nom: '', motif: '', audience: null, audErr: null, audCharge: false, audSeq: 0,
       confirm: null, envoi: false, message: null, campagnes: null, campErr: null, ouvertCoh: null,
-      per: { niveau: 'groupe', valeur: null }, perim: null, ouvertCamp: {}
+      per: { niveau: 'groupe', valeur: null }, perim: null, ouvertCamp: {}, op: opDefaut()
     };
+    // Opération commerciale ponctuelle : 1 à 3 jours d'appels pour caler des RDV
+    function opDefaut() {
+      return { actif: false, type: 'Vente privée', debut: '', fin: '', executant: 'vendeurs', mode: 'libre', prestataire: '',
+        appelants: 4, heures: 12, appels_heure: 12, tentatives: 2, cout: '' };
+    }
+    const TYPES_OP = ['Vente privée', 'Portes ouvertes', 'Temps fort commercial', 'Déstockage VO', 'Lancement de modèle', 'Fins de contrat LOA / LLD', 'Autre'];
+    function capacite() {
+      const o = S.op, n = x => Math.max(0, Number(x) || 0);
+      return Math.floor(n(o.appelants) * n(o.heures) * n(o.appels_heure) / Math.max(1, n(o.tentatives) || 1));
+    }
+    function opPayload() {
+      const o = S.op;
+      return { type: o.type, debut: o.debut, fin: o.fin || o.debut, executant: o.executant, mode: o.mode, prestataire: o.prestataire.trim(),
+        appelants: Number(o.appelants) || 0, heures: Number(o.heures) || 0, appels_heure: Number(o.appels_heure) || 0,
+        tentatives: Number(o.tentatives) || 1, cout: Number(o.cout) || 0 };
+    }
+    const euros = v => nf.format(Math.round(Number(v) || 0)) + ' €';
     function critDefaut() {
       return { segments: [], etats: [], archetypes: [], etapes: [], marques: [], financements: [],
         decile_max: null, age_min_mois: null, age_max_mois: null, canal: 'telephone',
@@ -252,6 +272,20 @@ OD.define('cockpit-mkt', {
 #mkt-root .deciles .c span{font-size:11px;color:var(--ink-3)} #mkt-root .deciles .c b{font-size:11px;color:var(--bleu-f)}
 #mkt-root .compo{display:grid;grid-template-columns:minmax(0,1.05fr) minmax(0,1fr);gap:14px;align-items:start}
 #mkt-root .onglets .ct{display:none}
+#mkt-root .seg.bascule{display:flex;margin-bottom:14px} #mkt-root .seg.bascule button{flex:1}
+#mkt-root .op-bloc{background:var(--tuile);border:1px solid var(--line);border-radius:12px;padding:12px 12px 2px;margin:2px 0 14px}
+#mkt-root .op-bloc select,#mkt-root .op-bloc input[type=text]{width:100%}
+#mkt-root .op-grille{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px}
+#mkt-root .op-grille label{display:flex;flex-direction:column;gap:4px;font-size:11.5px;font-weight:700;color:var(--ink-2)}
+#mkt-root .op-grille label em{font-style:normal;font-weight:400;font-size:10.5px;color:var(--ink-3)}
+#mkt-root .op-grille input{width:100%}
+#mkt-root .op-cap{margin-top:8px;font-size:13px;color:var(--ink-2)} #mkt-root .op-cap b{color:var(--bleu-f)}
+#mkt-root input[type=date]{font:inherit;font-size:13.5px;color:var(--ink);border:1px solid #d6e2f2;border-radius:9px;padding:6px 9px;background:#fff}
+#mkt-root .op-dim{border:1px solid var(--line);border-radius:12px;padding:12px;margin:10px 0;background:linear-gradient(135deg,#fff,var(--tuile))}
+#mkt-root .op-dim>.l{display:flex;align-items:center;gap:6px;font-size:11px;font-weight:800;letter-spacing:.06em;text-transform:uppercase;color:var(--bleu-f)}
+#mkt-root .op-chiffres{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin:8px 0}
+#mkt-root .op-chiffres b{display:block;font-size:22px;font-weight:800;color:var(--bleu-f);font-variant-numeric:tabular-nums}
+#mkt-root .op-chiffres span{font-size:11.5px;color:var(--ink-3)}
 #mkt-root .aud-flottant{display:none}
 #mkt-root .champ{margin-bottom:12px}
 #mkt-root .champ>.l{font-size:11px;font-weight:800;letter-spacing:.06em;text-transform:uppercase;color:var(--ink-3);margin-bottom:5px}
@@ -326,7 +360,10 @@ OD.define('cockpit-mkt', {
  #mkt-root .prisme-lettres{grid-template-columns:repeat(2,minmax(0,1fr))}
  #mkt-root .prisme-lettres em{display:none}
  #mkt-root .deciles{height:110px;gap:4px} #mkt-root .deciles .c b{font-size:10px}
- #mkt-root input[type=text],#mkt-root input[type=number],#mkt-root select{font-size:16px}
+ #mkt-root input[type=text],#mkt-root input[type=number],#mkt-root input[type=date],#mkt-root select{font-size:16px}
+ #mkt-root .op-grille{grid-template-columns:repeat(2,minmax(0,1fr))}
+ #mkt-root .op-chiffres b{font-size:19px}
+ #mkt-root .seg.bascule button{font-size:12.5px;padding:8px 6px}
  #mkt-root input[type=number]{width:76px}
  #mkt-root .ligne{gap:6px}
  #mkt-root .ligne .btn{flex:1 1 auto}
@@ -378,6 +415,7 @@ OD.define('cockpit-mkt', {
       if (c.age_max_mois != null && c.age_max_mois !== '') o.age_max_mois = Number(c.age_max_mois);
       o.canal = c.canal; o.exclure_cycle_ouvert = !!c.exclure_cycle_ouvert;
       o.pression_jours = Number(c.pression_jours); o.temoin_pct = Number(c.temoin_pct);
+      if (S.op.actif) { o.canal = 'telephone'; o.capacite_clients = capacite(); }
       return o;
     }
     async function chargerAudience() {
@@ -576,8 +614,13 @@ OD.define('cockpit-mkt', {
         .filter(x => !c.segments.length || c.segments.indexOf(x.segment) !== -1)
         .map(x => [x.segment + '-' + x.archetype, (x.segment === 'B2B' && x.libelle.indexOf('Pros') !== 0 ? 'Pros · ' : '') + x.libelle]);
       let h = '<div class="compo"><div class="card">';
-      h += '<h2>Audience</h2>';
-      h += '<div class="champ"><div class="l">Nom de la campagne</div><input type="text" data-champ="nom" maxlength="120" placeholder="Ex. Reprise fenêtre de renouvellement – décembre" value="' + esc(S.nom) + '"></div>';
+      const op = S.op;
+      h += '<div class="seg bascule"><button data-act="mode-op" data-v="0" class="' + (op.actif ? '' : 'on') + '">Campagne au fil de l\'eau</button>' +
+        '<button data-act="mode-op" data-v="1" class="' + (op.actif ? 'on' : '') + '">Opération commerciale</button></div>';
+      h += '<h2>' + (op.actif ? 'Opération' : 'Audience') + '</h2>';
+      h += '<div class="champ"><div class="l">' + (op.actif ? 'Nom de l\'opération' : 'Nom de la campagne') + '</div><input type="text" data-champ="nom" maxlength="120" placeholder="' +
+        (op.actif ? 'Ex. Vente privée Lexus – 6 et 7 décembre' : 'Ex. Reprise fenêtre de renouvellement – décembre') + '" value="' + esc(S.nom) + '"></div>';
+      if (op.actif) h += blocOperation();
       h += '<div class="champ"><div class="l">Type de client</div>' + puces('segments', [['B2C', 'Particuliers'], ['B2B', 'Professionnels']]) + '</div>';
       h += '<div class="champ"><div class="l">Moment du parcours</div>' + puces('etats', ORDRE_ETATS.map(k => [k, ETATS[k].t])) + '</div>';
       h += '<div class="champ"><div class="l">Prochaine étape probable</div>' + puces('etapes', ['ACHAT_VN', 'ACHAT_VO', 'PROJET', 'LEAD', 'ATELIER', 'SORTIE'].map(k => [k, ETAPES[k]])) + '</div>';
@@ -589,7 +632,9 @@ OD.define('cockpit-mkt', {
         '<span>Âge du véhicule</span><input type="number" min="0" max="400" data-champ="age_min_mois" placeholder="min" value="' + esc(c.age_min_mois == null ? '' : c.age_min_mois) + '">' +
         '<span>à</span><input type="number" min="0" max="400" data-champ="age_max_mois" placeholder="max" value="' + esc(c.age_max_mois == null ? '' : c.age_max_mois) + '"><span>mois</span></div></div>';
       h += '<h2 style="margin-top:16px">Canal et garde-fous</h2>';
-      h += '<div class="champ"><div class="l">Canal</div><div class="puces">' + Object.keys(CANAUX).map(k => '<button class="puce' + (c.canal === k ? ' on' : '') + '" data-canal="' + k + '">' + CANAUX[k] + '</button>').join('') + '</div>' +
+      if (op.actif) h += '<div class="champ"><div class="l">Canal</div><div class="puces"><button class="puce on" disabled>Téléphone</button></div>' +
+        '<div class="sous" style="margin-top:4px">Une opération se joue au téléphone : seuls les clients qui acceptent d\'être appelés sont retenus.</div></div>';
+      else h += '<div class="champ"><div class="l">Canal</div><div class="puces">' + Object.keys(CANAUX).map(k => '<button class="puce' + (c.canal === k ? ' on' : '') + '" data-canal="' + k + '">' + CANAUX[k] + '</button>').join('') + '</div>' +
         '<div class="sous" style="margin-top:4px">Le consentement de chaque client est vérifié pour le canal choisi.</div></div>';
       h += '<div class="champ"><div class="ligne">' +
         '<button class="puce' + (c.exclure_cycle_ouvert ? ' on' : '') + '" data-act="cycle">Écarter les clients déjà suivis par un vendeur</button>' +
@@ -601,6 +646,44 @@ OD.define('cockpit-mkt', {
       h += '<button class="aud-flottant" id="mkt-flot" data-act="voir-aud"></button>';
       return h;
     }
+    function blocOperation() {
+      const o = S.op, cap = capacite();
+      const num = (k, lib, aide) => '<label>' + lib + '<input type="number" min="0" step="1" data-op="' + k + '" value="' + esc(o[k]) + '">' + (aide ? '<em>' + aide + '</em>' : '') + '</label>';
+      return '<div class="op-bloc">' +
+        '<div class="champ"><div class="l">Type d\'opération</div><select data-op="type">' + TYPES_OP.map(t => '<option' + (o.type === t ? ' selected' : '') + '>' + esc(t) + '</option>').join('') + '</select></div>' +
+        '<div class="champ"><div class="l">Dates des appels</div><div class="ligne"><span>du</span><input type="date" data-op="debut" value="' + esc(o.debut) + '"><span>au</span><input type="date" data-op="fin" value="' + esc(o.fin) + '"></div></div>' +
+        '<div class="champ"><div class="l">Qui appelle</div><div class="puces">' +
+          '<button class="puce' + (o.executant === 'vendeurs' ? ' on' : '') + '" data-opv="executant" data-v="vendeurs">Les vendeurs</button>' +
+          '<button class="puce' + (o.executant === 'prestataire' ? ' on' : '') + '" data-opv="executant" data-v="prestataire">Un prestataire</button></div>' +
+          (o.executant === 'vendeurs'
+            ? '<div class="puces" style="margin-top:6px"><button class="puce' + (o.mode === 'libre' ? ' on' : '') + '" data-opv="mode" data-v="libre">Libre-service</button>' +
+              '<button class="puce' + (o.mode === 'habituel' ? ' on' : '') + '" data-opv="mode" data-v="habituel">Vendeur habituel</button></div>' +
+              '<div class="sous" style="margin-top:4px">Chaque client devient une sollicitation numérotée par priorité PRISME : n° 1 à appeler en premier.</div>'
+            : '<input type="text" data-op="prestataire" maxlength="80" style="margin-top:6px" placeholder="Nom du prestataire (tracé au registre)" value="' + esc(o.prestataire) + '">' +
+              '<div class="sous" style="margin-top:4px">Le prestataire reçoit un fichier d\'appel classé par priorité PRISME, sans le groupe témoin.</div>') + '</div>' +
+        '<div class="champ"><div class="l">Capacité d\'appel</div><div class="op-grille">' +
+          num('appelants', 'Appelants') + num('heures', 'Heures par appelant', 'sur toute l\'opération') +
+          num('appels_heure', 'Appels par heure') + num('tentatives', 'Tentatives par client') + '</div>' +
+          '<div class="op-cap" id="mkt-cap">' + capTexte(cap) + '</div></div>' +
+        '<div class="champ"><div class="l">Coût de l\'opération (facultatif)</div><div class="ligne"><input type="number" min="0" step="100" data-op="cout" placeholder="€" value="' + esc(o.cout) + '"><span>€ — pour calculer le coût par vente supplémentaire</span></div></div>' +
+        '</div>';
+    }
+    function capTexte(cap) {
+      const o = S.op;
+      return cap > 0 ? n0((Number(o.appelants) || 0) * (Number(o.heures) || 0) * (Number(o.appels_heure) || 0)) + ' appels ÷ ' + n0(Math.max(1, Number(o.tentatives) || 1)) + ' tentatives = <b>' + n0(cap) + ' clients</b> à appeler'
+        : 'Renseignez les appelants, les heures et le rythme d\'appel.';
+    }
+    function manqueOperation(a) {
+      const o = S.op, m = [];
+      if (!S.nom.trim()) m.push('le nom');
+      if (!o.debut) m.push('la date de début');
+      if (o.fin && o.debut && o.fin < o.debut) m.push('une date de fin après le début');
+      if (capacite() <= 0) m.push('la capacité d\'appel');
+      if (o.executant === 'prestataire' && !o.prestataire.trim()) m.push('le nom du prestataire');
+      if (a && a.operation && !(Number(a.operation.a_appeler) > 0)) m.push('des clients dans l\'audience');
+      return m;
+    }
+
     // Sur mobile, chaque ligne de tableau devient une fiche : chaque cellule reçoit
     // le libellé de sa colonne (data-l), affiché par le CSS à la place de l'en-tête.
     function etiqueter(racine) {
@@ -615,7 +698,9 @@ OD.define('cockpit-mkt', {
     function majFlottant() {
       const f = corps.querySelector('#mkt-flot'); if (!f) return;
       const a = S.audience, cas = (a && a.cascade) || [], fin = Number((cas[cas.length - 1] || {}).n) || 0;
-      f.innerHTML = LOGO + '<span>' + (a ? '<b>' + n0(fin) + ' clients</b> · ' + n0(a.achats_attendus) + ' achats attendus' : 'Calcul de l\'audience…') + '</span><span class="vers">Voir ↓</span>';
+      const o = a && S.op.actif ? a.operation : null;
+      f.innerHTML = LOGO + '<span>' + (!a ? 'Calcul de l\'audience…' : o ? '<b>' + n0(o.a_appeler) + ' à appeler</b> · ' + n0(o.attendus) + ' achats attendus'
+        : '<b>' + n0(fin) + ' clients</b> · ' + n0(a.achats_attendus) + ' achats attendus') + '</span><span class="vers">Voir ↓</span>';
       f.classList.toggle('charge', !!S.audCharge);
     }
     function suivreAudience() {
@@ -636,15 +721,42 @@ OD.define('cockpit-mkt', {
       const finale = Number((cas[cas.length - 1] || {}).n) || 0;
       const temoins = cas.length >= 2 ? (Number(cas[cas.length - 2].n) || 0) - finale : 0;
       h += '<div class="cascade' + (S.audCharge ? '" style="opacity:.55' : '') + '">' + cas.map(e => '<div class="e"><span class="lb">' + esc(e.etape) + '</span><span class="nb">' + n0(e.n) + '</span><div class="barre"><i style="width:' + Math.max(0.5, (Number(e.n) || 0) / max * 100) + '%"></i></div></div>').join('') + '</div>';
-      h += '<div class="resume"><b>' + n0(finale) + ' clients</b> à contacter' + (c.canal ? ' par ' + esc(CANAUX[c.canal]).toLowerCase() : '') + ' · <b>' + n0(a.achats_attendus) + '</b> achats attendus sans action' +
-        (temoins > 0 ? ' · ' + n0(temoins) + ' gardés en témoin' : '') + '</div>';
-      if (a.par_site && a.par_site.length) {
-        h += '<div class="sous" style="margin-bottom:10px">' + a.par_site.slice(0, 8).map(x => esc(x.nom_site) + ' ' + n0(x.n)).join(' · ') + (a.par_site.length > 8 ? ' · …' : '') + '</div>';
+      const opA = S.op.actif ? a.operation : null;
+      if (opA) {
+        const part = Number(opA.attendus_audience) ? Number(opA.attendus) / Number(opA.attendus_audience) : 0;
+        h += '<div class="op-dim"><div class="l">' + LOGO + ' Fichier PRISME de l\'opération</div><div class="op-chiffres">' +
+          '<div><b>' + n0(opA.a_appeler) + '</b><span>clients à appeler</span></div>' +
+          '<div><b>' + n0(opA.attendus) + '</b><span>achats attendus dans le fichier</span></div>' +
+          '<div><b>' + pct(part, 0) + '</b><span>des achats attendus de toute l\'audience</span></div></div>' +
+          '<div class="sous">Les ' + n0(opA.a_appeler) + ' clients les mieux classés par PRISME parmi ' + n0(opA.eligibles) + ' éligibles' +
+          (opA.score_min != null ? ' (dernier retenu : score ' + pct(opA.score_min) + ')' : '') + '. ' +
+          (Number(opA.temoins) ? n0(opA.temoins) + ' clients du fichier sont tirés au hasard et ne seront pas appelés : c\'est le groupe témoin.' : 'Sans groupe témoin, le bilan ne pourra pas isoler l\'effet de l\'opération.') + '</div>' +
+          (Number(opA.eligibles) < Number(opA.capacite) ? '<div class="alerte" style="margin-bottom:0">L\'audience (' + n0(opA.eligibles) + ' clients) est plus petite que la capacité (' + n0(opA.capacite) + ') : élargissez les critères ou réduisez les moyens.</div>' : '') + '</div>';
+        if (opA.par_site && opA.par_site.length) h += '<div class="sous" style="margin-bottom:10px">' + opA.par_site.slice(0, 8).map(x => esc(x.nom_site) + ' ' + n0(x.n)).join(' · ') + (opA.par_site.length > 8 ? ' · …' : '') + '</div>';
+      } else {
+        h += '<div class="resume"><b>' + n0(finale) + ' clients</b> à contacter' + (c.canal ? ' par ' + esc(CANAUX[c.canal]).toLowerCase() : '') + ' · <b>' + n0(a.achats_attendus) + '</b> achats attendus sans action' +
+          (temoins > 0 ? ' · ' + n0(temoins) + ' gardés en témoin' : '') + '</div>';
+        if (a.par_site && a.par_site.length) {
+          h += '<div class="sous" style="margin-bottom:10px">' + a.par_site.slice(0, 8).map(x => esc(x.nom_site) + ' ' + n0(x.n)).join(' · ') + (a.par_site.length > 8 ? ' · …' : '') + '</div>';
+        }
       }
       // actions
       const okNom = S.nom.trim().length > 0, okNb = finale > 0 && !S.envoi;
       if (S.message) h += '<div class="' + (S.message.ok ? 'resume' : 'alerte') + '">' + S.message.t + '</div>';
-      if (S.confirm) {
+      if (S.op.actif) {
+        const manque = manqueOperation(a), o = S.op, na = opA ? Number(opA.a_appeler) : 0, nt = opA ? Number(opA.temoins) : 0;
+        if (S.confirm === 'operation') {
+          h += '<div class="info">' + (o.executant === 'vendeurs'
+              ? n0(na) + ' sollicitations « Marketing Affaire » vont être créées sur <b>' + esc(libPerimetre()) + '</b>, ' + (o.mode === 'habituel' ? 'au nom du <b>vendeur habituel</b> de chaque client (libre-service s\'il n\'en a pas)' : 'en <b>libre-service</b>') +
+                ', numérotées par priorité PRISME.'
+              : 'Le fichier d\'appel de <b>' + n0(na) + ' clients</b>, classés par priorité PRISME, va être téléchargé pour <b>' + esc(o.prestataire) + '</b>. La transmission est tracée au registre.') +
+            (nt ? ' ' + n0(nt) + ' clients restent en témoin : ils ne sont ni sollicités ni dans le fichier.' : '') +
+            '<div class="ligne" style="margin-top:8px"><button class="btn vert" data-act="confirmer"' + (S.envoi ? ' disabled' : '') + '>' + (S.envoi ? 'Création…' : 'Confirmer') + '</button><button class="btn sec" data-act="annuler">Annuler</button></div></div>';
+        } else {
+          h += '<div class="ligne" style="margin-bottom:6px"><button class="btn" data-act="lancer" data-mode="operation"' + (manque.length || S.envoi ? ' disabled' : '') + '>Créer l\'opération</button></div>';
+          if (manque.length) h += '<div class="sous">Il manque ' + manque.join(', ') + '.</div>';
+        }
+      } else if (S.confirm) {
         h += '<div class="info">' + n0(finale) + ' sollicitations « Marketing Affaire » vont être créées sur le périmètre <b>' + esc(libPerimetre()) + '</b>, ' +
           (S.confirm === 'libre' ? 'en <b>libre-service</b> : le premier vendeur qui les prend en devient responsable.' : 'au nom du <b>vendeur habituel</b> de chaque client (libre-service s\'il n\'en a pas).') +
           (temoins > 0 ? ' ' + n0(temoins) + ' clients restent en témoin.' : '') + '<div class="ligne" style="margin-top:8px"><button class="btn vert" data-act="confirmer"' + (S.envoi ? ' disabled' : '') + '>' + (S.envoi ? 'Création…' : 'Confirmer') + '</button><button class="btn sec" data-act="annuler">Annuler</button></div></div>';
@@ -653,12 +765,12 @@ OD.define('cockpit-mkt', {
           '<button class="btn sec" data-act="lancer" data-mode="habituel"' + (okNom && okNb ? '' : ' disabled') + '>Au vendeur habituel</button></div>';
         if (!okNom) h += '<div class="sous">Donnez un nom à la campagne pour la lancer.</div>';
       }
-      h += '<div class="champ" style="margin-top:12px"><div class="l">Extraction pour un routeur</div><div class="ligne"><input type="text" data-champ="motif" style="flex:1;min-width:180px" placeholder="Motif (obligatoire, tracé au registre)" value="' + esc(S.motif) + '">' +
+      if (!S.op.actif) h += '<div class="champ" style="margin-top:12px"><div class="l">Extraction pour un routeur</div><div class="ligne"><input type="text" data-champ="motif" style="flex:1;min-width:180px" placeholder="Motif (obligatoire, tracé au registre)" value="' + esc(S.motif) + '">' +
         '<button class="btn sec" data-act="export"' + (S.motif.trim() && finale > 0 && !S.envoi ? '' : ' disabled') + '>Extraire en CSV</button></div></div>';
       // aperçu
       const ap = a.apercu || [];
       if (ap.length) {
-        h += '' + h2p('Les plus chauds selon PRISME', 'margin-top:14px') + '<div class="defil"><table class="tbl"><thead><tr><th>Client</th><th>Moment</th><th>Prochaine étape</th><th class="n">Score PRISME</th></tr></thead><tbody>' +
+        h += '' + h2p(S.op.actif ? 'Le haut du fichier PRISME' : 'Les plus chauds selon PRISME', 'margin-top:14px') + '<div class="defil"><table class="tbl"><thead><tr><th>Client</th><th>Moment</th><th>Prochaine étape</th><th class="n">Score PRISME</th></tr></thead><tbody>' +
           ap.slice(0, 25).map(x => '<tr><td><button class="lien" data-fiche="' + esc(x.id_client) + '">' + esc(x.nom) + '</button><div class="fact">' + esc([x.ville, x.nom_site].filter(Boolean).join(' · ')) + '</div>' +
             (Array.isArray(x.facteurs) && x.facteurs.length ? '<div class="fact">' + esc(x.facteurs.slice(0, 2).map(f => f.facteur).join(' · ')) + '</div>' : '') + '</td>' +
             '<td>' + esc((ETATS[x.etat] || {}).t || x.etat) + '<div class="fact">' + esc(x.archetype_libelle || '') + '</div></td><td>' + esc(ETAPES[x.etape] || x.etape || '–') + '</td><td class="n">' + pct(x.p_achat) + '</td></tr>').join('') +
@@ -669,28 +781,31 @@ OD.define('cockpit-mkt', {
       majFlottant();
     }
 
-    function ligneResultat(lib, x, extra) {
+    function ligneResultat(lib, x, extra, sansSol) {
       const cib = Number(x.cibles) || 0, pris = cib ? (Number(x.pris) || 0) / cib : 0, tr = cib ? (Number(x.traites) || 0) / cib : 0;
       const tem = Number(x.temoins) || 0, tc = cib ? (Number(x.commandes) || 0) / cib : null, tt = tem ? (Number(x.commandes_temoin) || 0) / tem : null;
       const dd = (tc != null && tt != null) ? Math.round((tc - tt) * cib) : null;
+      const rdv = Number(x.rdv) || 0, rdvt = Number(x.rdv_temoin) || 0;
       return '<tr' + (extra ? ' class="sousl"' : '') + '><td>' + lib + '</td><td class="n">' + n0(cib) + '</td>' +
+        (sansSol ? '<td class="fact">appels du prestataire</td><td class="fact">–</td>' :
         '<td><div class="barre"><i style="width:' + (pris * 100) + '%"></i></div><div class="fact">' + pct(pris, 0) + '</div></td>' +
-        '<td><div class="barre"><i style="width:' + (tr * 100) + '%;background:var(--vert)"></i></div><div class="fact">' + pct(tr, 0) + '</div></td>' +
+        '<td><div class="barre"><i style="width:' + (tr * 100) + '%;background:var(--vert)"></i></div><div class="fact">' + pct(tr, 0) + '</div></td>') +
+        '<td class="n">' + n0(rdv) + '<div class="fact">' + (cib ? pct(rdv / cib) : '–') + (tem ? ' · témoin ' + pct(rdvt / tem) : '') + '</div></td>' +
         '<td class="n">' + n0(x.commandes) + '</td><td class="n">' + pct(tc) + '</td><td class="n">' + pct(tt) + '<div class="fact">' + n0(tem) + ' clients</div></td>' +
         '<td class="n">' + (dd == null ? '–' : (dd > 0 ? '<span class="tag vert">+' + n0(dd) + '</span>' : '<span class="tag or">' + n0(dd) + '</span>')) + '</td></tr>';
     }
-    const CHAMPS_RES = ['cibles', 'temoins', 'pris', 'traites', 'commandes', 'commandes_temoin'];
-    const TETE_RES = '<th class="n">Sollicités</th><th>Prises en main</th><th>Traitées</th><th class="n">Commandes</th><th class="n">Taux</th><th class="n">Témoin</th><th class="n">Dues</th>';
+    const CHAMPS_RES = ['cibles', 'temoins', 'pris', 'traites', 'commandes', 'commandes_temoin', 'rdv', 'rdv_temoin'];
+    const TETE_RES = '<th class="n">Sollicités</th><th>Prises en main</th><th>Traitées</th><th class="n">RDV</th><th class="n">Commandes</th><th class="n">Taux</th><th class="n">Témoin</th><th class="n">Dues</th>';
     function vueCampagnes() {
       if (S.campagnes == null) { if (!S.campCharge) chargerCampagnes(); return '<div class="card vide">Chargement des campagnes…</div>'; }
       let h = '';
       if (S.campErr) h += '<div class="alerte">' + esc(S.campErr) + '</div>';
       const l = S.campagnes || [], sous = SOUS_NIVEAU[S.per.niveau];
-      if (!l.length) return h + '<div class="card vide">Aucune campagne lancée depuis le cockpit sur ce périmètre.<div style="margin-top:10px"><button class="btn" data-onglet="composer">Composer une campagne</button></div></div>';
+      if (!l.length) return h + '<div class="card vide">Aucune campagne ni opération lancée depuis le cockpit sur ce périmètre.<div style="margin-top:10px"><button class="btn" data-onglet="composer">Composer une campagne</button></div></div>';
       const somme = c => l.reduce((a, x) => a + (Number(x[c]) || 0), 0);
       const dues = l.reduce((a, c) => a + Math.max(0, Number(c.commandes_dues) || 0), 0);
-      h += '<div class="bande">' + kpi('Campagnes', n0(l.length), 'touchant ce périmètre') + kpi('Clients sollicités', n0(somme('cibles')), 'hors groupes témoins') +
-        kpi('Commandes', n0(somme('commandes')), 'dans les 90 jours') + kpi('Commandes dues aux campagnes', n0(dues), 'au-delà du groupe témoin') + '</div>';
+      h += '<div class="bande">' + kpi('Campagnes et opérations', n0(l.length), 'touchant ce périmètre') + kpi('Clients sollicités', n0(somme('cibles')), 'hors groupes témoins') +
+        kpi('RDV et commandes', n0(somme('rdv')) + ' · ' + n0(somme('commandes')), 'dans la fenêtre de mesure') + kpi('Commandes dues aux campagnes', n0(dues), 'au-delà du groupe témoin') + '</div>';
       // toutes campagnes confondues, au niveau inférieur du périmètre
       if (sous) {
         const tout = []; l.forEach(c => (c.par_site || []).forEach(x => tout.push(x)));
@@ -700,14 +815,20 @@ OD.define('cockpit-mkt', {
             g.map(x => ligneResultat('<button class="lien" data-act="drill" data-niv="' + sous + '" data-k="' + esc(x.cle) + '">' + esc(x.lib) + '</button>', x)).join('') + '</tbody></table></div></div>';
         }
       }
-      h += '<div class="card">' + h2p('Résultats mesurés par PRISME') + '<div class="sous" style="margin:-4px 0 10px">Une commande compte si elle arrive dans les 90 jours après le lancement. Les commandes dues à la campagne sont l\'écart avec le groupe témoin, ramené au nombre de clients sollicités. Chiffres limités au périmètre choisi.</div><div class="defil"><table class="tbl"><thead><tr>' +
+      h += '<div class="card">' + h2p('Résultats mesurés par PRISME') + '<div class="sous" style="margin:-4px 0 10px">Campagne : RDV et commandes dans les 90 jours après le lancement. Opération : RDV pris pendant l\'opération, commandes jusqu\'à 30 jours après sa fin. Les commandes dues sont l\'écart avec le groupe témoin, ramené au nombre de clients sollicités. Chiffres limités au périmètre choisi.</div><div class="defil"><table class="tbl"><thead><tr>' +
         '<th>Campagne</th>' + TETE_RES + '</tr></thead><tbody>' +
         l.map(c => {
           const ouvert = !!S.ouvertCamp[c.id];
-          let r = ligneResultat('<b style="color:var(--bleu-f)">' + esc(c.nom) + '</b><div class="fact">' + esc(dfr(c.cree_le)) + ' · ' + (c.mode === 'habituel' ? 'vendeur habituel' : 'libre-service') +
-            ' · ' + esc(CANAUX[(c.criteres || {}).canal] || '') + '</div>' +
-            (sous ? '<button class="lien" data-act="campdet" data-id="' + c.id + '">' + (ouvert ? 'Masquer le détail' : TITRE_NIV[sous].replace('Par', 'Détail par')) + '</button>' : ''), c);
-          if (ouvert && sous) r += regrouper(c.par_site || [], sous, CHAMPS_RES).sort((a, b) => b.cibles - a.cibles).map(x => ligneResultat('<span style="padding-left:14px">' + esc(x.lib) + '</span>', x, true)).join('');
+          const est = c.type === 'operation', o = c.operation || {}, dd = Number(c.commandes_dues);
+          const meta = est
+            ? '<span class="tag">Opération</span> ' + esc(o.type || '') + ' · ' + esc(dfr(c.debut)) + (c.fin && c.fin !== c.debut ? ' → ' + esc(dfr(c.fin)) : '') + ' · ' +
+              (c.executant === 'prestataire' ? 'prestataire ' + esc(o.prestataire || '') : (c.mode === 'habituel' ? 'vendeurs habituels' : 'vendeurs, libre-service')) +
+              (Number(c.cout) ? ' · coût ' + euros(c.cout) + (dd > 0 ? ' · ' + euros(Number(c.cout) / dd) + ' par vente en plus' : '') : '')
+            : esc(dfr(c.cree_le)) + ' · ' + (c.mode === 'habituel' ? 'vendeur habituel' : 'libre-service') + ' · ' + esc(CANAUX[(c.criteres || {}).canal] || '');
+          let r = ligneResultat('<b style="color:var(--bleu-f)">' + esc(c.nom) + '</b><div class="fact">' + meta + '</div>' +
+            (est && c.executant === 'prestataire' ? '<button class="lien" data-act="fichier" data-id="' + c.id + '" data-nom="' + esc(c.nom) + '" style="margin-right:12px">Fichier d\'appel</button>' : '') +
+            (sous ? '<button class="lien" data-act="campdet" data-id="' + c.id + '">' + (ouvert ? 'Masquer le détail' : TITRE_NIV[sous].replace('Par', 'Détail par')) + '</button>' : ''), c, false, est && c.executant === 'prestataire');
+          if (ouvert && sous) r += regrouper(c.par_site || [], sous, CHAMPS_RES).sort((a, b) => b.cibles - a.cibles).map(x => ligneResultat('<span style="padding-left:14px">' + esc(x.lib) + '</span>', x, true, est && c.executant === 'prestataire')).join('');
           return r;
         }).join('') + '</tbody></table></div></div>';
       return h;
@@ -755,12 +876,48 @@ OD.define('cockpit-mkt', {
     async function lancer() {
       const mode = S.confirm; if (!mode) return;
       S.envoi = true; rendreAudience();
+      if (mode === 'operation') {
+        try {
+          const o = opPayload();
+          const r = await rpc('mkt_operation_creer', { p_nom: S.nom.trim(), p_criteres: critPourBase(), p_operation: o, p_site_ids: sites(), p_viewer_id_user: viewer() });
+          let fichier = '';
+          if (o.executant === 'prestataire') {
+            const n = await telechargerFichier(r.id, r.nom, 'Fichier d\'appel de l\'opération « ' + r.nom + ' » transmis à ' + o.prestataire);
+            fichier = ' Fichier d\'appel de <b>' + n0(n) + '</b> clients téléchargé pour ' + esc(o.prestataire) + '.';
+          }
+          S.message = { ok: true, t: 'Opération « ' + esc(r.nom) + ' » créée : <b>' + n0(r.cibles) + '</b> clients à appeler' + (r.temoins ? ', ' + n0(r.temoins) + ' en témoin' : '') + '.' +
+            (o.executant === 'vendeurs' ? ' Les sollicitations sont dans le Pool, numérotées par priorité PRISME.' : fichier) + ' Le bilan est dans l\'onglet Campagnes.' };
+          S.confirm = null; S.campagnes = null;
+        } catch (e) { S.message = { ok: false, t: 'L\'opération n\'a pas été créée : ' + esc(e.message || e) }; }
+        S.envoi = false; chargerAudience(); return;
+      }
       try {
         const r = await rpc('mkt_campagne_creer', { p_nom: S.nom.trim(), p_criteres: critPourBase(), p_mode: mode, p_site_ids: sites(), p_viewer_id_user: viewer() });
         S.message = { ok: true, t: 'Campagne « ' + esc(r.nom) + ' » lancée : <b>' + n0(r.cibles) + '</b> sollicitations créées' + (r.temoins ? ', ' + n0(r.temoins) + ' clients en témoin' : '') + '. Suivez-la dans l\'onglet Campagnes.' };
         S.confirm = null; S.campagnes = null;
       } catch (e) { S.message = { ok: false, t: 'La campagne n\'a pas été créée : ' + esc(e.message || e) }; }
       S.envoi = false; chargerAudience();
+    }
+    // CSV (séparateur ;, BOM UTF-8 pour Excel)
+    function telechargerCsv(cols, lignes, nomFichier) {
+      const cel = v => { const s = v == null ? '' : String(v); return /[";\n\r]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s; };
+      const txt = [cols.map(c => c[1]).join(';')].concat(lignes.map(x => cols.map(c => cel(x[c[0]])).join(';'))).join('\r\n');
+      const blob = new Blob(['\ufeff' + txt], { type: 'text/csv;charset=utf-8' });
+      const a = document.createElement('a'); a.href = URL.createObjectURL(blob);
+      a.download = nomFichier.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9.]+/g, '-').replace(/^-|-$/g, '');
+      document.body.appendChild(a); a.click(); setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1000);
+    }
+    const telFr = v => { const s = String(v || ''); return /^\+33\d{9}$/.test(s) ? ('0' + s.slice(3)).replace(/(\d{2})(?=\d)/g, '$1 ') : s; };
+    async function telechargerFichier(id, nom, motif) {
+      const l = await rpc('mkt_operation_fichier', { p_id_campagne: Number(id), p_motif: motif, p_viewer_id_user: viewer() }) || [];
+      const cols = [['priorite', 'Priorité'], ['civilite', 'Civilité'], ['prenom', 'Prénom'], ['nom', 'Nom'], ['telephone', 'Téléphone'], ['telephone_2', 'Téléphone 2'],
+        ['code_postal', 'Code postal'], ['ville', 'Ville'], ['concession', 'Concession'], ['moment', 'Moment'], ['a_savoir', 'À savoir avant d\'appeler'],
+        ['prochaine_etape', 'Prochaine étape probable'], ['score_prisme', 'Score PRISME'], ['id_client', 'Réf. client'], ['resultat', 'Résultat de l\'appel'], ['rdv', 'Date du RDV']];
+      telechargerCsv(cols, l.map(x => Object.assign({}, x, {
+        telephone: telFr(x.telephone), telephone_2: telFr(x.telephone_2), moment: (ETATS[x.moment] || {}).t || x.moment,
+        prochaine_etape: ETAPES[x.prochaine_etape] || x.prochaine_etape, score_prisme: x.score_prisme == null ? '' : pct(x.score_prisme), resultat: '', rdv: ''
+      })), 'operation-' + nom + '-' + new Date().toISOString().slice(0, 10) + '.csv');
+      return l.length;
     }
     async function exporter() {
       S.envoi = true; S.message = null; rendreAudience();
@@ -796,6 +953,7 @@ OD.define('cockpit-mkt', {
         if (t.dataset.puce === 'segments') S.crit.archetypes = S.crit.archetypes.filter(a => !S.crit.segments.length || S.crit.segments.indexOf(a.split('-')[0]) !== -1);
         S.confirm = null; S.message = null; rendre(); planifierAudience(); return;
       }
+      if (t.dataset.opv) { S.op[t.dataset.opv] = t.dataset.v; S.confirm = null; rendre(); return; }
       if (t.dataset.canal) { S.crit.canal = t.dataset.canal; S.confirm = null; S.message = null; rendre(); planifierAudience(); return; }
       const act = t.dataset.act;
       if (act === 'recharger') { S.campagnes = null; chargerPerimetre().then(chargerSynthese).then(() => { if (S.onglet === 'composer') chargerAudience(); }); }
@@ -804,6 +962,12 @@ OD.define('cockpit-mkt', {
       else if (act === 'coh') { const k = t.dataset.k; versComposer({ segments: [k.split('-')[0]], archetypes: [k] }, 'Cohorte ' + nomCohorte(k)); }
       else if (act === 'voir-aud') { const b = corps.querySelector('#mkt-aud'); if (b) try { b.scrollIntoView({ behavior: 'smooth', block: 'start' }); } catch (e) { b.scrollIntoView(); } }
       else if (act === 'drill') choisirPer(t.dataset.niv, t.dataset.k);
+      else if (act === 'mode-op') { S.op.actif = t.dataset.v === '1'; S.confirm = null; S.message = null; rendre(); planifierAudience(); }
+      else if (act === 'fichier') {
+        const id = t.dataset.id, nom = t.dataset.nom; t.disabled = true;
+        telechargerFichier(id, nom, 'Nouveau téléchargement du fichier d\'appel de l\'opération « ' + nom + ' »')
+          .catch(e => alert('Fichier indisponible : ' + (e.message || e))).then(() => { t.disabled = false; });
+      }
       else if (act === 'campdet') { const id = t.dataset.id; S.ouvertCamp[id] = !S.ouvertCamp[id]; rendre(); }
       else if (act === 'cycle') { S.crit.exclure_cycle_ouvert = !S.crit.exclure_cycle_ouvert; S.confirm = null; rendre(); planifierAudience(); }
       else if (act === 'raz') { S.crit = critDefaut(); S.nom = ''; S.confirm = null; S.message = null; rendre(); planifierAudience(); }
@@ -813,12 +977,23 @@ OD.define('cockpit-mkt', {
       else if (act === 'export') exporter();
     });
     corps.addEventListener('input', ev => {
+      const k = ev.target.dataset && ev.target.dataset.op;
+      if (k) {
+        S.op[k] = ev.target.value; S.confirm = null;
+        if (['appelants', 'heures', 'appels_heure', 'tentatives'].indexOf(k) !== -1) {
+          const c = corps.querySelector('#mkt-cap'); if (c) c.innerHTML = capTexte(capacite());
+          planifierAudience();
+        } else rendreAudience();
+        return;
+      }
       const f = ev.target.dataset && ev.target.dataset.champ; if (!f) return;
-      if (f === 'nom') { const avant = !!S.nom.trim(); S.nom = ev.target.value; if (avant !== !!S.nom.trim()) majBoutons(); return; }
+      if (f === 'nom') { const avant = !!S.nom.trim(); S.nom = ev.target.value; if (S.op.actif) rendreAudience(); else if (avant !== !!S.nom.trim()) majBoutons(); return; }
       if (f === 'motif') { const avant = !!S.motif.trim(); S.motif = ev.target.value; if (avant !== !!S.motif.trim()) majBoutons(); return; }
       if (f === 'age_min_mois' || f === 'age_max_mois') { const v = ev.target.value; S.crit[f] = v === '' ? null : Math.max(0, parseInt(v, 10) || 0); planifierAudience(); }
     });
     corps.addEventListener('change', ev => {
+      const k = ev.target.dataset && ev.target.dataset.op;
+      if (k) { S.op[k] = ev.target.value; S.confirm = null; rendreAudience(); return; }
       const f = ev.target.dataset && ev.target.dataset.champ; if (!f) return;
       if (f === 'perval') { choisirPer(S.per.niveau, ev.target.value); return; }
       if (f === 'decile_max') S.crit.decile_max = ev.target.value ? Number(ev.target.value) : null;
