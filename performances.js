@@ -1,5 +1,11 @@
 // ============================================================================
 //  PERFORMANCES ÉQUIPE — module One Data (OD.define)  v1
+//  v33 (18/11/2026) : vue PROCESS (Team Colin) — respect des process : taux de
+//    devis BACS des clients croisés (leads contactés, appels entrants > 1 min,
+//    rendez-vous en concession), devis le jour même, devis dormants, devis →
+//    commande ; classement par vendeur et panneau des clients sans devis.
+//    Une fonction SQL propre au tenant : perf_process_devis(). Bascule
+//    « Ventes | Leads | Process » ; #process dans l'adresse ouvre la vue.
 //  v32 (17/11/2026) : vue LEADS — filtre VN / VO (VN + VO, VN, VO) dans la
 //    barre, à côté de la période et du périmètre. perf_leads(…, p_univers) ;
 //    classement des leads identique au lead management (lead_univers).
@@ -118,15 +124,16 @@ OD.define('performances', {
   // v27 : deux vues, « Ventes » (le module historique) et « Leads ».
   const __estTC = window.__OD_PERF_PROFILE__ === 'teamcolin'
     || String((ctx.tenant || {}).supabase_url || '').indexOf('ieztupavcdnubmpbjvuq') !== -1;
-  let __leadsHote = null, __bascule = null, __ventesHote = null;
+  let __leadsHote = null, __bascule = null, __ventesHote = null, __processHote = null;
   if (__estTC) {
     const d0 = __anchor.ownerDocument || document;
     __anchor.innerHTML = '';
     __bascule = d0.createElement('div'); __bascule.className = 'pl-bascule'; __bascule.setAttribute('role', 'tablist');
-    __bascule.innerHTML = '<button type="button" role="tab" data-vue="ventes">Ventes</button><button type="button" role="tab" data-vue="leads">Leads</button>';
+    __bascule.innerHTML = '<button type="button" role="tab" data-vue="ventes">Ventes</button><button type="button" role="tab" data-vue="leads">Leads</button><button type="button" role="tab" data-vue="process">Process</button>';
     __ventesHote = d0.createElement('div');
     __leadsHote = d0.createElement('div'); __leadsHote.className = 'pl-root';
-    __anchor.appendChild(__bascule); __anchor.appendChild(__ventesHote); __anchor.appendChild(__leadsHote);
+    __processHote = d0.createElement('div'); __processHote.className = 'pl-root';
+    __anchor.appendChild(__bascule); __anchor.appendChild(__ventesHote); __anchor.appendChild(__leadsHote); __anchor.appendChild(__processHote);
     __anchor = __ventesHote;
   }
   __anchor.id = 'perf-root';
@@ -2802,25 +2809,253 @@ OD.define('performances', {
 `;
       (doc.head || doc.documentElement).appendChild(st);
     }
+    return { charger, rendre, DPL };
+  }
+
+  // ==========================================================================
+  //  v33 (18/11/2026) — VUE « PROCESS » (Team Colin) : respect des process.
+  //  Demande d'Aurélien Guyomard (DG) : chaque client croisé par un vendeur
+  //  (lead contacté, appel entrant décroché de plus d'1 min, rendez-vous en
+  //  concession) doit avoir un devis dans BACS. Une seule fonction SQL,
+  //  perf_process_devis(deb, fin, sites, id_user) — propre au tenant.
+  //  Clic sur un vendeur : panneau latéral avec ses clients sans devis, en
+  //  attente, et ses devis dormants ; chaque client ouvre sa fiche sur
+  //  l'onglet des propositions commerciales.
+  // ==========================================================================
+  function montageProcess(host, DPL) {
+    const P = window.__OD_PERF_PROCESS__ = window.__OD_PERF_PROCESS__ || { preset: 'mois', site: null };
+    let data = null, charge = false, erreur = null, jeton = 0;
+    injecterCssProcess();
+
+    function e(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])); }
+    function propre(s) { s = String(s || '').trim(); if (!s || s !== s.toUpperCase()) return s; return s.toLowerCase().replace(/(^|[\s\-'’])([a-zà-ÿ])/g, (m, a, b) => a + b.toUpperCase()); }
+    function pct(a, b) { return b ? Math.round(100 * a / b) : null; }
+    function fmtPct(v) { return v == null ? '—' : v + ' %'; }
+    function ymdP(d) { return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'); }
+    function bornes(p) {
+      const n = new Date(); n.setHours(12, 0, 0, 0);
+      const moinsJ = k => { const d = new Date(n); d.setDate(d.getDate() - k); return d; };
+      if (p === '7j') return [ymdP(moinsJ(6)), ymdP(n)];
+      if (p === '30j') return [ymdP(moinsJ(29)), ymdP(n)];
+      if (p === '90j') return [ymdP(moinsJ(89)), ymdP(n)];
+      if (p === 'moisprec') { const a = new Date(n.getFullYear(), n.getMonth() - 1, 1, 12), b = new Date(n.getFullYear(), n.getMonth(), 0, 12); return [ymdP(a), ymdP(b)]; }
+      return [ymdP(new Date(n.getFullYear(), n.getMonth(), 1, 12)), ymdP(n)];
+    }
+    const PRESETS = [['7j', '7 jours'], ['30j', '30 jours'], ['mois', 'Ce mois-ci'], ['moisprec', 'Mois dernier'], ['90j', '90 jours']];
+    function periodeP() { return (P.du && P.au) ? [P.du, P.au] : bornes(P.preset); }
+    function taux(o) { return pct(o.ok || 0, (o.ok || 0) + (o.manque || 0)); }
+    function niveau(p) { return p == null ? 'n' : p >= 80 ? 'ok' : p >= 50 ? 'warn' : 'crit'; }
+    function dateCourte(s) { if (!s) return ''; const d = new Date(String(s).length <= 10 ? s + 'T12:00:00' : s); return d.toLocaleDateString('fr-FR', { day: '2-digit', month: 'short' }); }
+    const LIB_TYP = { lead: 'Lead', appel: 'Appel entrant', rdv: 'Rendez-vous' };
+
+    async function charger() {
+      const t = ++jeton; charge = false; erreur = null; rendre();
+      const [d, f] = periodeP();
+      try {
+        const r = await sb.rpc('perf_process_devis', { p_deb: d, p_fin: f, p_sites: P.site ? [Number(P.site)] : null, p_id_user: null });
+        if (t !== jeton) return;
+        if (r.error) throw r.error;
+        data = r.data || {}; charge = true;
+      } catch (x) { if (t !== jeton) return; erreur = (x && x.message) || String(x); charge = true; }
+      rendre();
+    }
+
+    function tendancePts(cur, prev) {
+      if (cur == null || prev == null) return '<span class="pl-tr n">pas de comparaison</span>';
+      const d = cur - prev;
+      if (Math.abs(d) < 1) return '<span class="pl-tr n">= période précédente</span>';
+      return '<span class="pl-tr ' + (d > 0 ? 'ok' : 'crit') + '">' + (d > 0 ? '▲ +' : '▼ −') + Math.abs(Math.round(d)) + ' pts <small>vs période précédente</small></span>';
+    }
+    function tuile(titre, valeur, sous, trend, niv, aide) {
+      return '<div class="pl-tile ' + (niv || '') + '"' + (aide ? ' title="' + e(aide) + '"' : '') + '><span class="pl-tile-t">' + titre + '</span><b class="pl-tile-v">' + valeur + '</b>'
+        + (sous ? '<span class="pl-tile-s">' + sous + '</span>' : '') + (trend || '') + '</div>';
+    }
+    function carte(titre, sous, corps) {
+      return '<section class="pl-card large"><header><h3>' + titre + '</h3>' + (sous ? '<p>' + sous + '</p>' : '') + '</header>' + corps + '</section>';
+    }
+    function pill(p, faible) { return '<span class="pl-pill ' + (faible ? 'n' : niveau(p)) + '">' + fmtPct(p) + '</span>'; }
+
+    function tableSources(rows) {
+      if (!rows || !rows.length) return '<div class="pl-vide">Aucun client croisé sur la période.</div>';
+      const maxN = Math.max(1, ...rows.map(r => r.croises));
+      return '<div class="pl-tw"><table class="pl-t"><thead><tr><th>Origine du contact</th><th>Clients croisés</th><th>Avec devis</th><th>Sans devis</th><th>En attente</th><th>Taux de devis</th></tr></thead><tbody>'
+        + rows.map(r => '<tr><td class="l">' + e(r.src || LIB_TYP[r.typ] || r.typ) + '</td>'
+          + '<td><span class="pl-vol"><i style="width:' + Math.max(4, 100 * r.croises / maxN) + '%"></i><b>' + r.croises + '</b></span></td>'
+          + '<td>' + r.ok + '</td><td>' + (r.manque || '<span class="pl-na">0</span>') + '</td><td>' + (r.attente || '<span class="pl-na">0</span>') + '</td>'
+          + '<td>' + pill(taux(r), (r.ok + r.manque) < 3) + '</td></tr>').join('')
+        + '</tbody></table></div>';
+    }
+    function tableVendeurs(rows) {
+      rows = (rows || []).filter(v => v.croises > 0 || v.devis > 0);
+      if (!rows.length) return '<div class="pl-vide">Aucun vendeur sur la période.</div>';
+      rows = rows.slice().sort((a, b) => {
+        const fa = (a.ok + a.manque) < 3, fb = (b.ok + b.manque) < 3;
+        if (fa !== fb) return fa ? 1 : -1;
+        const ta = taux(a), tb = taux(b);
+        if (ta !== tb) return (ta == null ? 101 : ta) - (tb == null ? 101 : tb);
+        return b.manque - a.manque;
+      });
+      return '<div class="pl-tw"><table class="pl-t pp-t"><thead><tr><th>Vendeur</th><th>Clients croisés</th><th>Taux de devis</th><th>Sans devis</th><th>En attente</th><th>Devis le jour même</th><th>Devis créés</th><th>Devis dormants</th><th>Devis → commande</th></tr></thead><tbody>'
+        + rows.map(v => {
+          const tx = taux(v), faible = (v.ok + v.manque) < 3;
+          return '<tr class="pp-row" data-pp-user="' + v.id_user + '" title="Voir le détail des clients"><td class="l">' + e(propre(v.nom)) + (v.role === 3 ? ' <small class="pp-tag">chef des ventes</small>' : '') + '<br><small>' + e(propre(v.site || '')) + '</small></td>'
+            + '<td>' + v.croises + '</td><td>' + pill(tx, faible) + '</td>'
+            + '<td>' + (v.manque ? '<b class="pp-manque">' + v.manque + '</b>' : '<span class="pl-na">0</span>') + '</td>'
+            + '<td>' + (v.attente || '<span class="pl-na">0</span>') + '</td>'
+            + '<td>' + (v.ok ? fmtPct(pct(v.jour_meme, v.ok)) : '<span class="pl-na">—</span>') + '</td>'
+            + '<td>' + (v.devis || '<span class="pl-na">0</span>') + '</td>'
+            + '<td>' + (v.dormants ? v.dormants + ' <small>' + pct(v.dormants, v.devis) + ' %</small>' : '<span class="pl-na">0</span>') + '</td>'
+            + '<td>' + (v.transfo ? v.transfo + ' <small>' + pct(v.transfo, v.devis) + ' %</small>' : '<span class="pl-na">0</span>') + '</td></tr>';
+        }).join('') + '</tbody></table></div>';
+    }
+
+    function rendre() {
+      if (!host.isConnected) return;
+      injecterCssProcess();
+      const sites = (data && data.sites) || [];
+      let h = '<div class="pl-bar"><span class="pl-lbl">Période</span><div class="pl-seg">'
+        + PRESETS.map(p => '<button type="button" class="' + (!P.du && P.preset === p[0] ? 'on' : '') + '" data-pp-preset="' + p[0] + '">' + p[1] + '</button>').join('') + '</div>';
+      if (sites.length > 1) {
+        h += '<span class="pl-lbl">Périmètre</span><select class="pl-sel" data-pp-site><option value="">Tous mes sites</option>'
+          + sites.map(s => '<option value="' + s.id_site + '"' + (String(P.site) === String(s.id_site) ? ' selected' : '') + '>' + e(propre(s.site)) + '</option>').join('') + '</select>';
+      }
+      const [d, f] = periodeP();
+      h += '<span class="pl-per">' + (DPL ? DPL.bouton(d, f, 'data-pp-dp="1"', 'Choisir les dates') : '') + '</span></div>';
+      if (!charge) { host.innerHTML = h + '<div class="pl-vide">Chargement des indicateurs…</div>'; lier(); return; }
+      if (erreur) { host.innerHTML = h + '<div class="pl-vide err">Les indicateurs n\'ont pas pu être chargés : ' + e(erreur) + '</div>'; lier(); return; }
+      const k = data.kpi || {}, p = data.prec || {};
+      if (!k.croises && !k.devis) { host.innerHTML = h + '<div class="pl-vide">Aucun client croisé ni devis sur cette période et ce périmètre.</div>'; lier(); return; }
+      const tx = taux(k), txp = (p.ok || p.manque) ? taux(p) : null;
+      h += '<div class="pl-tiles">'
+        + tuile('Taux de devis', fmtPct(tx), (k.ok || 0) + ' clients avec devis sur ' + ((k.ok || 0) + (k.manque || 0)), tendancePts(tx, txp), niveau(tx),
+            'Part des clients croisés (lead contacté, appel entrant de plus d\'1 min, rendez-vous en concession) qui ont un devis dans BACS, créé dans les 30 jours avant le contact ou les 7 jours après. Les contacts de moins de 7 jours ne comptent pas encore.')
+        + tuile('Clients croisés', k.croises || 0, (k.attente || 0) + ' encore dans le délai de 7 jours', '', '')
+        + tuile('Sans devis', k.manque || 0, 'clients croisés il y a plus de 7 jours', '', (k.manque ? 'warn' : 'ok'))
+        + tuile('Devis le jour même', fmtPct(pct(k.jour_meme || 0, k.ok || 0)), (k.jour_meme || 0) + ' devis faits le jour du contact', '', '',
+            'Parmi les clients qui ont un devis : part dont le devis est créé le jour du contact, ou avant (BACS ne donne que la date de création, sans l\'heure).')
+        + tuile('Devis dormants', fmtPct(pct(k.dormants || 0, k.devis || 0)), (k.dormants || 0) + ' devis sans relance sous 72 h', '', '',
+            'Devis BACS créés sur la période, toujours au stade devis, sans aucun échange tracé avec le client dans les 72 h (appel, message, compte-rendu, rendez-vous). Les échanges faits hors One Data ne sont pas vus.')
+        + tuile('Devis → commande', fmtPct(pct(k.transfo || 0, k.devis || 0)), (k.transfo || 0) + ' sur ' + (k.devis || 0) + ' devis', '', '',
+            'Devis BACS créés sur la période dont le client a passé commande dans les 60 jours. Les devis récents n\'ont pas encore eu le temps de se transformer.')
+        + '</div>';
+      h += carte('Par origine du contact', 'D\'où viennent les clients croisés, et la part qui reçoit un devis.', tableSources(data.sources));
+      h += carte('Par vendeur', 'Classés du taux de devis le plus faible au plus élevé. Cliquez sur un vendeur pour voir ses clients sans devis. Vert au-delà de 80 %, orange de 50 à 80 %, rouge en dessous ; en gris, moins de 3 clients à juger.', tableVendeurs(data.vendeurs));
+      h += '<p class="pl-note pied">Un client compte une fois par vendeur sur la période, à son premier contact. Exclus : les clients qui ont déjà une commande dans les 120 jours précédents (suivi, livraison), les appels pris par l\'accueil et les leads écartés (doublons, fausses demandes, atelier). Les visites en showroom ne sont comptées que si un rendez-vous a été saisi.</p>';
+      host.innerHTML = h;
+      lier();
+    }
+
+    function lier() {
+      host.querySelectorAll('[data-pp-preset]').forEach(b => b.addEventListener('click', () => { P.preset = b.getAttribute('data-pp-preset'); P.du = P.au = null; charger(); }));
+      const bdp = host.querySelector('[data-pp-dp]');
+      if (bdp && DPL) bdp.addEventListener('click', () => { const [d0] = periodeP(); DPL.ouvrir(bdp, d0, (a, z) => { P.du = a; P.au = z; charger(); }); });
+      const s = host.querySelector('[data-pp-site]');
+      if (s) s.addEventListener('change', () => { P.site = s.value || null; charger(); });
+      host.querySelectorAll('[data-pp-user]').forEach(tr => tr.addEventListener('click', () => {
+        const id = Number(tr.getAttribute('data-pp-user'));
+        const v = ((data && data.vendeurs) || []).find(x => Number(x.id_user) === id);
+        ouvrirPanneau(id, v ? propre(v.nom) : 'Vendeur');
+      }));
+    }
+
+    function fermerPanneau() { const x = doc.getElementById('pp-drawer'); if (x) x.remove(); }
+    async function ouvrirPanneau(idUser, nom) {
+      fermerPanneau();
+      const wrap = doc.createElement('div'); wrap.id = 'pp-drawer';
+      wrap.innerHTML = '<div class="pp-voile"></div><aside class="pp-pan" role="dialog" aria-modal="true" aria-label="Clients du vendeur">'
+        + '<header><button type="button" class="pp-x" aria-label="Fermer">&times;</button><div class="pp-nom">' + e(nom) + '</div><div class="pp-sous">Chargement…</div></header>'
+        + '<div class="pp-corps"></div></aside>';
+      doc.body.appendChild(wrap);
+      wrap.querySelector('.pp-voile').addEventListener('click', fermerPanneau);
+      wrap.querySelector('.pp-x').addEventListener('click', fermerPanneau);
+      const onEsc = (ev) => { if (ev.key === 'Escape') { fermerPanneau(); doc.removeEventListener('keydown', onEsc); } };
+      doc.addEventListener('keydown', onEsc);
+      const [d, f] = periodeP();
+      let r = null;
+      try {
+        const res = await sb.rpc('perf_process_devis', { p_deb: d, p_fin: f, p_sites: P.site ? [Number(P.site)] : null, p_id_user: idUser });
+        if (res.error) throw res.error;
+        r = res.data || {};
+      } catch (x) {
+        if (!doc.getElementById('pp-drawer')) return;
+        wrap.querySelector('.pp-sous').textContent = 'Le détail n\'a pas pu être chargé : ' + ((x && x.message) || x);
+        return;
+      }
+      if (!doc.getElementById('pp-drawer')) return;
+      const det = r.detail || [], dorm = r.dormants || [];
+      const manque = det.filter(x => x.statut === 'manque'), attente = det.filter(x => x.statut === 'attente'), ok = det.filter(x => x.statut === 'ok');
+      wrap.querySelector('.pp-sous').innerHTML = '<span><b>' + manque.length + '</b> sans devis</span><span><b>' + attente.length + '</b> en attente</span><span><b>' + ok.length + '</b> avec devis</span><span><b>' + dorm.length + '</b> devis dormants</span>';
+      const ligne = (x, avecDevis) => '<li><button type="button" class="pp-cli" data-pp-fiche="' + e(x.id_client) + '"><b>' + e(propre(x.client) || ('Client ' + x.id_client)) + '</b>'
+        + '<span>' + e(x.src || LIB_TYP[x.typ] || x.typ) + ' · ' + e(dateCourte(x.le)) + (x.site ? ' · ' + e(propre(x.site)) : '') + (avecDevis && x.devis_le ? ' · devis du ' + e(dateCourte(x.devis_le)) : '') + '</span></button></li>';
+      const bloc = (titre, sous, items, rendu) => '<section class="pp-bloc"><h4>' + titre + ' <small>' + items.length + '</small></h4>' + (sous ? '<p>' + sous + '</p>' : '')
+        + (items.length ? '<ul>' + items.map(rendu).join('') + '</ul>' : '<p class="pp-vide">Aucun.</p>') + '</section>';
+      wrap.querySelector('.pp-corps').innerHTML =
+          bloc('Sans devis', 'Clients croisés il y a plus de 7 jours, sans devis dans BACS.', manque, x => ligne(x, false))
+        + bloc('En attente', 'Contact de moins de 7 jours : le devis peut encore venir.', attente, x => ligne(x, false))
+        + bloc('Devis dormants', 'Devis toujours ouverts, sans échange tracé dans les 72 h qui ont suivi.', dorm,
+            x => '<li><button type="button" class="pp-cli" data-pp-fiche="' + e(x.id_client) + '"><b>' + e(propre(x.client) || ('Client ' + x.id_client)) + '</b><span>devis du ' + e(dateCourte(x.devis_le)) + '</span></button></li>')
+        + (ok.length ? '<details class="pp-bloc"><summary>Avec devis <small>' + ok.length + '</small></summary><ul>' + ok.map(x => ligne(x, true)).join('') + '</ul></details>' : '');
+      wrap.querySelector('.pp-corps').addEventListener('click', (ev) => {
+        const b = ev.target.closest('[data-pp-fiche]');
+        if (b) { fermerPanneau(); ouvrirFicheClient(b.getAttribute('data-pp-fiche')); }
+      });
+    }
+
+    function injecterCssProcess() {
+      if (doc.getElementById('pp-css')) return;
+      const st = doc.createElement('style'); st.id = 'pp-css';
+      st.textContent = `
+.pp-t tbody tr.pp-row{cursor:pointer}
+.pp-t tbody tr.pp-row:hover td{background:#f5f8fc}
+.pp-t td.l small{color:#8b99b0;font-weight:600;font-size:11px}
+.pp-t td.l small.pp-tag{background:#eef4fc;color:#2a5ea9;border-radius:999px;padding:1px 7px;font-weight:700;font-size:10px}
+.pp-manque{color:#c0524f}
+#pp-drawer{position:fixed;inset:0;z-index:9999;font-family:inherit}
+#pp-drawer .pp-voile{position:absolute;inset:0;background:rgba(28,43,69,.28)}
+#pp-drawer .pp-pan{position:absolute;top:0;right:0;bottom:0;width:min(480px,100%);background:#fff;box-shadow:-8px 0 24px rgba(28,43,69,.14);display:flex;flex-direction:column;color:#1c2b45;font-size:13px}
+#pp-drawer header{padding:18px 20px 14px;border-bottom:1px solid #e3e9f3;position:relative}
+#pp-drawer .pp-x{position:absolute;top:12px;right:14px;border:0;background:none;font-size:24px;line-height:1;color:#7a98c5;cursor:pointer}
+#pp-drawer .pp-nom{font-size:16px;font-weight:800;color:#1F4A85;padding-right:30px}
+#pp-drawer .pp-sous{display:flex;flex-wrap:wrap;gap:4px 14px;margin-top:6px;font-size:12px;color:#5a6b86;font-weight:600}
+#pp-drawer .pp-sous b{color:#2a5ea9}
+#pp-drawer .pp-corps{overflow-y:auto;padding:8px 20px 24px;flex:1}
+#pp-drawer .pp-bloc{margin-top:14px}
+#pp-drawer .pp-bloc h4,#pp-drawer summary{margin:0 0 4px;font-size:13px;font-weight:800;color:#1F4A85;cursor:default}
+#pp-drawer summary{cursor:pointer}
+#pp-drawer .pp-bloc h4 small,#pp-drawer summary small{background:#eef4fc;color:#2a5ea9;border-radius:999px;padding:1px 8px;font-size:11px;margin-left:4px}
+#pp-drawer .pp-bloc p{margin:0 0 6px;font-size:11.5px;color:#7a98c5;font-weight:600}
+#pp-drawer ul{list-style:none;margin:0;padding:0;display:grid;gap:6px}
+#pp-drawer .pp-cli{width:100%;text-align:left;border:1px solid #e3e9f3;background:#fff;border-radius:8px;padding:8px 10px;cursor:pointer;font:inherit;display:grid;gap:2px}
+#pp-drawer .pp-cli:hover{border-color:#acc5e4;background:#f5f8fc}
+#pp-drawer .pp-cli b{color:#1F4A85;font-size:13px}
+#pp-drawer .pp-cli span{color:#5a6b86;font-size:11.5px;font-weight:600}
+#pp-drawer .pp-vide{color:#8b99b0}
+`;
+      (doc.head || doc.documentElement).appendChild(st);
+    }
     return { charger, rendre };
   }
 
   if (__estTC) {
     const ctlLeads = montageLeads(__leadsHote);
-    let leadsCharge = false;
+    const ctlProcess = montageProcess(__processHote, ctlLeads.DPL);
+    let leadsCharge = false, processCharge = false;
     const vue = (v) => {
+      if (['ventes', 'leads', 'process'].indexOf(v) < 0) v = 'ventes';
       window.__OD_PERF_VUE__ = v;
       __bascule.querySelectorAll('[data-vue]').forEach(b => { const on = b.getAttribute('data-vue') === v; b.classList.toggle('on', on); b.setAttribute('aria-selected', on); });
-      __ventesHote.style.display = v === 'leads' ? 'none' : '';
+      __ventesHote.style.display = v === 'ventes' ? '' : 'none';
       __leadsHote.style.display = v === 'leads' ? '' : 'none';
+      __processHote.style.display = v === 'process' ? '' : 'none';
       if (v === 'leads' && !leadsCharge) { leadsCharge = true; ctlLeads.charger(); }
+      if (v === 'process' && !processCharge) { processCharge = true; ctlProcess.charger(); }
     };
     __bascule.addEventListener('click', (ev) => { const b = ev.target.closest('[data-vue]'); if (b) vue(b.getAttribute('data-vue')); });
     // La barre du haut (topnav v35) bascule la vue sans recharger la page.
     try { window.__odPerfVue = vue; const W2 = (wwLib.getFrontWindow && wwLib.getFrontWindow()) || window; W2.__odPerfVue = vue; } catch (e) { window.__odPerfVue = vue; }
     let depart = window.__OD_PERF_VUE__ || 'ventes';
     try { const W3 = (wwLib.getFrontWindow && wwLib.getFrontWindow()) || window; if (W3.__OD_PERF_VUE__) depart = W3.__OD_PERF_VUE__; } catch (e) {}
-    try { const W = (wwLib.getFrontWindow && wwLib.getFrontWindow()) || window; if (/leads/i.test(W.location.hash || '')) depart = 'leads'; } catch (e) { if (/leads/i.test(location.hash || '')) depart = 'leads'; }
+    try { const W = (wwLib.getFrontWindow && wwLib.getFrontWindow()) || window; const hs = W.location.hash || ''; if (/leads/i.test(hs)) depart = 'leads'; else if (/process/i.test(hs)) depart = 'process'; } catch (e) { if (/leads/i.test(location.hash || '')) depart = 'leads'; else if (/process/i.test(location.hash || '')) depart = 'process'; }
     vue(depart);
   }
 
