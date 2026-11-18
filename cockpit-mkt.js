@@ -1,5 +1,8 @@
 // ============================================================================
-//  COCKPIT MARKETING — module One Data (OD.define)   v7 — PROFIL TEAM COLIN
+//  COCKPIT MARKETING — module One Data (OD.define)   v8 — PROFIL TEAM COLIN
+//  v8 (18/11/2026) : pression commerciale — onglet Pression (registre des contacts
+//    sortants, niveaux, vendeurs, signaux, clients au plafond, clients oubliés),
+//    charte du groupe éditable, appliquée à toutes les campagnes et opérations.
 //  v7 (17/11/2026) : opérations commerciales (vente privée, portes ouvertes…) —
 //    fichier dimensionné sur la capacité d'appel et classé par PRISME, vendeurs
 //    ou prestataire (fichier d'appel tracé), bilan RDV + ventes contre témoin.
@@ -72,7 +75,7 @@ OD.define('cockpit-mkt', {
       onglet: 'moments', synth: null, err: null, chargement: true,
       crit: critDefaut(), nom: '', motif: '', audience: null, audErr: null, audCharge: false, audSeq: 0,
       confirm: null, envoi: false, message: null, campagnes: null, campErr: null, ouvertCoh: null,
-      per: { niveau: 'groupe', valeur: null }, perim: null, ouvertCamp: {}, op: opDefaut()
+      per: { niveau: 'groupe', valeur: null }, perim: null, ouvertCamp: {}, op: opDefaut(), pression: null, presErr: null, presCharge: false, charte: null, charteEdit: null, charteMsg: null
     };
     // Opération commerciale ponctuelle : 1 à 3 jours d'appels pour caler des RDV
     function opDefaut() {
@@ -94,7 +97,7 @@ OD.define('cockpit-mkt', {
     function critDefaut() {
       return { segments: [], etats: [], archetypes: [], etapes: [], marques: [], financements: [],
         decile_max: null, age_min_mois: null, age_max_mois: null, canal: 'telephone',
-        exclure_cycle_ouvert: true, pression_jours: 30, temoin_pct: 10 };
+        exclure_cycle_ouvert: true, oublies: false, temoin_pct: 10 };
     }
 
     // ------------------------------------------------------------- outils
@@ -164,7 +167,7 @@ OD.define('cockpit-mkt', {
       }
       S.per = { niveau: niveau, valeur: niveau === 'groupe' ? null : valeur };
       ecrirePer();
-      S.audience = null; S.confirm = null; S.message = null; S.campagnes = null;
+      S.audience = null; S.confirm = null; S.message = null; S.campagnes = null; S.pression = null;
       chargerSynthese().then(() => { if (S.onglet === 'composer') chargerAudience(); });
     }
     function ouvrirFicheClient(id) {
@@ -272,6 +275,23 @@ OD.define('cockpit-mkt', {
 #mkt-root .deciles .c span{font-size:11px;color:var(--ink-3)} #mkt-root .deciles .c b{font-size:11px;color:var(--bleu-f)}
 #mkt-root .compo{display:grid;grid-template-columns:minmax(0,1.05fr) minmax(0,1fr);gap:14px;align-items:start}
 #mkt-root .onglets .ct{display:none}
+#mkt-root .charte-resume{display:flex;gap:8px;align-items:flex-start;font-size:12.5px;color:var(--ink-2);background:var(--tuile);border:1px solid var(--line);border-radius:11px;padding:9px 11px;margin:0 0 12px}
+#mkt-root .charte-resume b{color:var(--bleu-f)} #mkt-root .charte-resume svg{flex:none;margin-top:1px}
+#mkt-root .pile{display:flex;height:16px;border-radius:8px;overflow:hidden;background:var(--line)}
+#mkt-root .pile i,#mkt-root .pile-v i,#mkt-root .legende i{display:block}
+#mkt-root .n1{background:#a9c3e6} #mkt-root .n2{background:var(--bleu)} #mkt-root .n3{background:var(--or)} #mkt-root .n4{background:var(--or-f)}
+#mkt-root .legende{display:flex;flex-wrap:wrap;gap:6px 16px;margin-top:8px;font-size:12px;color:var(--ink-2)}
+#mkt-root .legende span{display:inline-flex;align-items:center;gap:6px} #mkt-root .legende b{color:var(--bleu-f)}
+#mkt-root .legende i{width:10px;height:10px;border-radius:3px}
+#mkt-root .semaines{display:flex;align-items:flex-end;gap:8px;height:150px;padding-top:4px}
+#mkt-root .semaines .c{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:flex-end;gap:4px;height:100%;min-width:0}
+#mkt-root .semaines .c b{font-size:11px;color:var(--bleu-f)} #mkt-root .semaines .c span{font-size:10.5px;color:var(--ink-3);white-space:nowrap}
+#mkt-root .pile-v{width:100%;max-width:46px;display:flex;flex-direction:column-reverse;border-radius:5px 5px 0 0;overflow:hidden;min-height:2px}
+#mkt-root .charte-grille{display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:10px}
+#mkt-root .charte-grille label{display:flex;flex-direction:column;gap:4px;background:var(--tuile);border:1px solid var(--line);border-radius:10px;padding:9px 11px}
+#mkt-root .charte-grille label span{font-size:12.5px;font-weight:800;color:var(--bleu-f)}
+#mkt-root .charte-grille label em{font-style:normal;font-size:11px;color:var(--ink-3)}
+#mkt-root .charte-grille input{width:100px}
 #mkt-root .seg.bascule{display:flex;margin-bottom:14px} #mkt-root .seg.bascule button{flex:1}
 #mkt-root .op-bloc{background:var(--tuile);border:1px solid var(--line);border-radius:12px;padding:12px 12px 2px;margin:2px 0 14px}
 #mkt-root .op-bloc select,#mkt-root .op-bloc input[type=text]{width:100%}
@@ -348,8 +368,10 @@ OD.define('cockpit-mkt', {
  #mkt-root .prisme-bandeau .sep{display:none} #mkt-root .prisme-bandeau>span{white-space:nowrap}
  #mkt-root .perim .seg{display:flex;flex:1 1 100%} #mkt-root .perim .seg button{flex:1;padding:8px 4px}
  #mkt-root .perim select{flex:1 1 100%;min-width:0;width:100%} #mkt-root .perl{display:none}
- #mkt-root .onglets{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:2px;padding:3px}
- #mkt-root .onglets button{padding:8px 2px;font-size:12.5px;display:flex;align-items:center;justify-content:center;gap:3px}
+ #mkt-root .onglets{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:2px;padding:3px}
+ #mkt-root .semaines{gap:4px} #mkt-root .semaines .c span{font-size:9px}
+ #mkt-root .charte-grille{grid-template-columns:minmax(0,1fr)}
+ #mkt-root .onglets button{padding:8px 1px;font-size:11.5px;display:flex;align-items:center;justify-content:center;gap:3px}
  #mkt-root .onglets button svg{width:18px;height:14px}
  #mkt-root .onglets .lg{display:none} #mkt-root .onglets .ct{display:inline}
  #mkt-root .prisme-onglet{display:grid;grid-template-columns:auto minmax(0,1fr);align-items:start;font-size:12px}
@@ -414,7 +436,7 @@ OD.define('cockpit-mkt', {
       if (c.age_min_mois != null && c.age_min_mois !== '') o.age_min_mois = Number(c.age_min_mois);
       if (c.age_max_mois != null && c.age_max_mois !== '') o.age_max_mois = Number(c.age_max_mois);
       o.canal = c.canal; o.exclure_cycle_ouvert = !!c.exclure_cycle_ouvert;
-      o.pression_jours = Number(c.pression_jours); o.temoin_pct = Number(c.temoin_pct);
+      if (c.oublies) o.oublies = true; o.temoin_pct = Number(c.temoin_pct);
       if (S.op.actif) { o.canal = 'telephone'; o.capacite_clients = capacite(); }
       return o;
     }
@@ -471,7 +493,7 @@ OD.define('cockpit-mkt', {
         '<button class="btn sec" data-act="recharger">Actualiser</button></div>';
       h += bandeauPrisme();
       h += selecteurPerimetre();
-      h += '<div class="onglets">' + [['moments', 'Moments'], ['composer', '<span class="lg">Composer une campagne</span><span class="ct">Composer</span>'], ['campagnes', 'Campagnes'], ['moteur', 'PRISME']]
+      h += '<div class="onglets">' + [['moments', 'Moments'], ['composer', '<span class="lg">Composer une campagne</span><span class="ct">Composer</span>'], ['campagnes', 'Campagnes'], ['pression', 'Pression'], ['moteur', 'PRISME']]
         .map(o => '<button data-onglet="' + o[0] + '" class="' + (S.onglet === o[0] ? 'on' : '') + '">' + (o[0] === 'moteur' ? LOGO + ' ' : '') + o[1] + '</button>').join('') + '</div>';
       if (s) h += '<div class="prisme-onglet">' + LOGO + '<span><b>PRISME</b> ' + esc(SOUS_ONGLET[S.onglet] || '') + ' <span class="fact">· lecture du ' + esc(dfr(s.date_ref)) + '</span></span></div>';
       if (S.err) h += '<div class="alerte">Le cockpit n\'a pas pu charger les scores : ' + esc(S.err) + '</div>';
@@ -480,6 +502,7 @@ OD.define('cockpit-mkt', {
         if (S.onglet === 'moments') h += vueMoments();
         else if (S.onglet === 'composer') h += vueComposer();
         else if (S.onglet === 'campagnes') h += vueCampagnes();
+        else if (S.onglet === 'pression') h += vuePression();
         else h += vueMoteur();
       }
       corps.innerHTML = h;
@@ -513,6 +536,7 @@ OD.define('cockpit-mkt', {
       moments: 'lit le parcours de chaque client et ce qu\'il va probablement faire',
       composer: 'calcule l\'audience et classe chaque client par probabilité d\'achat',
       campagnes: 'mesure ce que chaque campagne a vraiment rapporté, contre son groupe témoin',
+      pression: 'mesure la pression commerciale sur chaque client et applique la charte du groupe',
       moteur: 'montre sa fiabilité, testée sur des clients qu\'il n\'avait jamais vus'
     };
     function bandeauPrisme() {
@@ -638,9 +662,10 @@ OD.define('cockpit-mkt', {
         '<div class="sous" style="margin-top:4px">Le consentement de chaque client est vérifié pour le canal choisi.</div></div>';
       h += '<div class="champ"><div class="ligne">' +
         '<button class="puce' + (c.exclure_cycle_ouvert ? ' on' : '') + '" data-act="cycle">Écarter les clients déjà suivis par un vendeur</button>' +
-        '<span>Ne pas resolliciter avant</span><select data-champ="pression_jours">' + [[0, 'sans limite'], [15, '15 jours'], [30, '30 jours'], [60, '60 jours'], [90, '90 jours']].map(o => '<option value="' + o[0] + '"' + (Number(c.pression_jours) === o[0] ? ' selected' : '') + '>' + o[1] + '</option>').join('') + '</select>' +
+        '<button class="puce' + (c.oublies ? ' on' : '') + '" data-act="oublies">Seulement les clients oubliés</button>' +
         '<span>Groupe témoin</span><select data-champ="temoin_pct">' + [0, 5, 10, 20].map(v => '<option value="' + v + '"' + (Number(c.temoin_pct) === v ? ' selected' : '') + '>' + (v ? v + ' %' : 'aucun') + '</option>').join('') + '</select></div>' +
         '<div class="sous" style="margin-top:4px">Le groupe témoin est tiré au hasard et n\'est jamais sollicité : c\'est lui qui prouve ce que la campagne a rapporté.</div></div>';
+      h += '<div class="charte-resume">' + LOGO + '<span><b>Charte de pression du groupe</b> : ' + esc(resumeCharte()) + ' <button class="lien" data-onglet="pression">Voir ou modifier</button></span></div>';
       h += '<div class="ligne"><button class="btn sec" data-act="raz">Tout effacer</button></div>';
       h += '</div><div class="collant"><div class="card" id="mkt-aud"></div></div></div>';
       h += '<button class="aud-flottant" id="mkt-flot" data-act="voir-aud"></button>';
@@ -834,6 +859,108 @@ OD.define('cockpit-mkt', {
       return h;
     }
 
+    // ------------------------------------------------------------- pression commerciale
+    const CHARTE_CHAMPS = [
+      ['appels_30j', 'Appels par client', 'sur 30 jours, tous appelants (4 au plus pour du démarchage)'],
+      ['appels_marketing_30j', 'Dont appels marketing', 'sollicitations du marketing et appels de prestataire'],
+      ['sms_30j', 'SMS, RCS ou WhatsApp', 'sur 30 jours'],
+      ['emails_30j', 'E-mails', 'sur 30 jours'],
+      ['silence_apres_achat_j', 'Silence après un achat', 'jours sans sollicitation marketing'],
+      ['silence_apres_sollicitation_j', 'Silence après une sollicitation', 'jours avant la suivante'],
+      ['indice_max', 'Indice de pression maximal', 'au-delà, plus aucune sollicitation marketing']];
+    function resumeCharte() {
+      const r = (S.charte && S.charte.regles) || {};
+      if (!Object.keys(r).length) return 'chargement…';
+      return r.appels_30j + ' appels / 30 j dont ' + r.appels_marketing_30j + ' marketing · ' + r.sms_30j + ' SMS · ' + r.emails_30j + ' e-mails · silence de ' +
+        r.silence_apres_achat_j + ' j après un achat et de ' + r.silence_apres_sollicitation_j + ' j après une sollicitation · indice maximal ' + r.indice_max;
+    }
+    async function chargerCharte() {
+      try { S.charte = await rpc('mkt_charte', { p_viewer_id_user: viewer() }); } catch (e) { S.charte = null; }
+    }
+    let presSeq = 0;
+    async function chargerPression() {
+      const seq = ++presSeq; S.presCharge = true; S.presErr = null;
+      let d = null, err = null;
+      try { d = await rpc('mkt_pression', { p_site_ids: sites(), p_viewer_id_user: viewer() }); } catch (e) { err = e.message || String(e); }
+      if (seq !== presSeq) return;
+      S.pression = d; S.presErr = err; S.presCharge = false; rendre();
+    }
+    function vuePression() {
+      if (S.pression == null) { if (!S.presCharge) chargerPression(); return '<div class="card vide">Calcul de la pression commerciale…</div>'; }
+      const p = S.pression, c30 = p.contacts_30j || {}, nv = p.niveaux || {}, sg = p.signaux || {}, oub = p.oublies || {};
+      let h = '';
+      if (S.presErr) h += '<div class="alerte">' + esc(S.presErr) + '</div>';
+      h += '<div class="bande">' +
+        kpi('Clients contactés', n0(p.contactes_30j), 'sur 30 jours, tous canaux') +
+        kpi('Contacts sortants', n0(c30.total), n0(c30.appel) + ' appels · ' + n0(c30.sms) + ' SMS · ' + n0(c30.email) + ' e-mails · ' + n0(c30.sollicitation) + ' sollicitations') +
+        kpi('Au plafond de la charte', n0(p.satures), 'plus sollicitables sur au moins un canal') +
+        kpi('Clients oubliés', n0(oub.n), n0(oub.attendus) + ' achats attendus, aucun contact depuis 12 mois') + '</div>';
+      h += '<div class="info">Registre des contacts enregistrés dans One Data : appels téléphoniques, SMS et RCS, e-mails, WhatsApp, sollicitations et fichiers d\'appel confiés à un prestataire. ' +
+        'Les appels passés hors One Data ne sont pas comptés : les chiffres sont complets sur les sites qui utilisent toute la téléphonie One Data.</div>';
+      // niveaux
+      const tot = (nv.faible || 0) + (nv.moderee || 0) + (nv.elevee || 0) + (nv.saturee || 0);
+      const seg = [['faible', 'Faible', 'n1'], ['moderee', 'Modérée', 'n2'], ['elevee', 'Élevée', 'n3'], ['saturee', 'Saturée', 'n4']];
+      h += '<div class="card">' + h2p('Niveaux de pression') + '<div class="sous" style="margin:-4px 0 10px">Indice de pression de chaque client contacté ces 90 derniers jours : un appel pèse 3, une sollicitation 2, un SMS 1, un e-mail 0,5, et chaque contact pèse deux fois moins tous les 30 jours. ' +
+        n0(nv.aucun) + ' clients n\'ont eu aucun contact enregistré.</div>' +
+        (tot ? '<div class="pile">' + seg.map(x => (nv[x[0]] ? '<i class="' + x[2] + '" style="width:' + (nv[x[0]] / tot * 100) + '%" title="' + x[1] + '"></i>' : '')).join('') + '</div>' +
+          '<div class="legende">' + seg.map(x => '<span><i class="' + x[2] + '"></i>' + x[1] + ' <b>' + n0(nv[x[0]]) + '</b></span>').join('') + '</div>' : '<div class="vide">Aucun contact sortant enregistré sur la période.</div>') + '</div>';
+      // semaines
+      const sem = p.semaines || [];
+      if (sem.length) {
+        const mx = Math.max.apply(null, sem.map(w => (w.appel || 0) + (w.sms || 0) + (w.email || 0) + (w.sollicitation || 0)).concat([1]));
+        h += '<div class="card">' + h2p('Contacts sortants par semaine') + '<div class="semaines">' + sem.map(w => {
+          const t = (w.appel || 0) + (w.sms || 0) + (w.email || 0) + (w.sollicitation || 0);
+          return '<div class="c"><b>' + n0(t) + '</b><div class="pile-v" style="height:' + Math.max(2, t / mx * 100) + '%">' +
+            [['appel', 'n4'], ['sollicitation', 'n3'], ['sms', 'n2'], ['email', 'n1']].map(k => w[k[0]] ? '<i class="' + k[1] + '" style="flex:' + w[k[0]] + '"></i>' : '').join('') +
+            '</div><span>' + esc(new Date(w.semaine + 'T12:00:00').toLocaleDateString('fr-FR', { day: 'numeric', month: 'short' })) + '</span></div>';
+        }).join('') + '</div><div class="legende"><span><i class="n4"></i>Appels</span><span><i class="n3"></i>Sollicitations</span><span><i class="n2"></i>SMS</span><span><i class="n1"></i>E-mails</span></div></div>';
+      }
+      // comparatif
+      const sous = SOUS_NIVEAU[S.per.niveau];
+      if (sous && p.par_site) {
+        const g = regrouper(p.par_site, sous, ['clients', 'contacts', 'appels', 'sms', 'emails', 'satures']).sort((a, b) => b.contacts - a.contacts);
+        if (g.length > 1) h += '<div class="card">' + h2p(TITRE_NIV[sous] + ', sur 30 jours') + '<div class="defil"><table class="tbl"><thead><tr><th></th><th class="n">Clients contactés</th><th class="n">Contacts</th><th class="n">Appels</th><th class="n">SMS</th><th class="n">E-mails</th><th class="n">Au plafond</th></tr></thead><tbody>' +
+          g.map(x => '<tr><td><button class="lien" data-act="drill" data-niv="' + sous + '" data-k="' + esc(x.cle) + '">' + esc(x.lib) + '</button></td><td class="n">' + n0(x.clients) + '</td><td class="n">' + n0(x.contacts) + '</td><td class="n">' + n0(x.appels) +
+            '</td><td class="n">' + n0(x.sms) + '</td><td class="n">' + n0(x.emails) + '</td><td class="n">' + (x.satures ? '<span class="tag or">' + n0(x.satures) + '</span>' : '0') + '</td></tr>').join('') + '</tbody></table></div></div>';
+      }
+      // vendeurs
+      const vd = p.par_vendeur || [];
+      if (vd.length) h += '<div class="card">' + h2p('Qui sollicite le plus, sur 30 jours') + '<div class="defil"><table class="tbl"><thead><tr><th>Collaborateur</th><th class="n">Contacts</th><th class="n">Appels</th><th class="n">SMS</th><th class="n">E-mails</th><th class="n">Clients</th><th class="n">Dont au plafond</th></tr></thead><tbody>' +
+        vd.map(x => '<tr><td>' + esc(x.nom || ('Utilisateur ' + x.id_user)) + '</td><td class="n">' + n0(x.contacts) + '</td><td class="n">' + n0(x.appels) + '</td><td class="n">' + n0(x.sms) + '</td><td class="n">' + n0(x.emails) +
+          '</td><td class="n">' + n0(x.clients) + '</td><td class="n">' + (x.clients_satures ? '<span class="tag or">' + n0(x.clients_satures) + '</span>' : '0') + '</td></tr>').join('') + '</tbody></table></div></div>';
+      // signaux
+      h += '<div class="card">' + h2p('Signaux de sur-sollicitation, sur 30 jours') + '<div class="tuiles">' +
+        '<div class="tuile"><div class="v">' + n0(sg.refus_30j) + '</div><p>clients ont retiré un consentement (appels, SMS, e-mails, offres…).</p></div>' +
+        '<div class="tuile"><div class="v">' + n0(sg.stop_sms_30j) + '</div><p>réponses STOP à un SMS.</p></div>' +
+        '<div class="tuile"><div class="v">' + n0(sg.hors_plages) + '</div><p>appels sortants hors des plages de démarchage (lundi au vendredi, 10 h – 13 h et 14 h – 20 h).</p></div>' +
+        '<div class="tuile"><div class="v">' + n0(sg.appels_sans_reponse) + '</div><p>appels sortants restés sans réponse.</p></div></div></div>';
+      // clients au plafond
+      const ls = p.liste_satures || [];
+      if (ls.length) h += '<div class="card">' + h2p('Clients au plafond de la charte') + '<div class="sous" style="margin:-4px 0 10px">PRISME les écarte automatiquement des campagnes et opérations tant qu\'ils restent au plafond.</div><div class="defil"><table class="tbl"><thead><tr><th>Client</th><th class="n">Indice</th><th class="n">Appels</th><th class="n">SMS</th><th class="n">E-mails</th><th>Dernier contact</th></tr></thead><tbody>' +
+        ls.map(x => '<tr><td><button class="lien" data-fiche="' + esc(x.id_client) + '">' + esc(x.nom) + '</button><div class="fact">' + esc(x.nom_site || '') + '</div></td><td class="n">' + Number(x.indice).toLocaleString('fr-FR', { maximumFractionDigits: 1 }) +
+          '</td><td class="n">' + n0(x.appels_30j) + '</td><td class="n">' + n0(x.sms_30j) + '</td><td class="n">' + n0(x.emails_30j) + '</td><td>' + esc(dfr(x.dernier_contact)) + '</td></tr>').join('') + '</tbody></table></div></div>';
+      // oubliés
+      h += '<div class="card">' + h2p('Clients oubliés') + '<div class="brief"><b>' + n0(oub.n) + '</b> clients parmi les 30 % les plus chauds n\'ont eu aucun contact enregistré depuis 12 mois. PRISME y attend <b>' + n0(oub.attendus) +
+        '</b> achats. Sous-solliciter coûte aussi.</div><div style="margin-top:10px"><button class="btn" data-act="oublies-audience">En faire une audience</button></div></div>';
+      // charte
+      const r = S.charteEdit || (S.charte && S.charte.regles) || p.charte || {};
+      h += '<div class="card">' + h2p('Charte de pression du groupe') + '<div class="sous" style="margin:-4px 0 10px">Elle s\'applique à toutes les campagnes et opérations du cockpit : un client au plafond sur le canal choisi est écarté de l\'audience.' +
+        (S.charte && S.charte.par ? ' Dernière modification par ' + esc(S.charte.par) + ' le ' + esc(dfr(S.charte.maj)) + '.' : '') + '</div><div class="charte-grille">' +
+        CHARTE_CHAMPS.map(f => '<label><span>' + f[1] + '</span><input type="number" min="0" max="365" step="1" data-charte="' + f[0] + '" value="' + esc(r[f[0]] == null ? '' : r[f[0]]) + '"><em>' + f[2] + '</em></label>').join('') + '</div>' +
+        (S.charteMsg ? '<div class="' + (S.charteMsg.ok ? 'resume' : 'alerte') + '">' + esc(S.charteMsg.t) + '</div>' : '') +
+        '<div class="ligne" style="margin-top:10px"><button class="btn" data-act="charte-enr"' + (S.charteEdit ? '' : ' disabled') + '>Enregistrer la charte</button>' +
+        (S.charteEdit ? '<button class="btn sec" data-act="charte-annuler">Annuler</button>' : '') + '</div></div>';
+      return h;
+    }
+    async function enregistrerCharte() {
+      try {
+        S.charte = await rpc('mkt_charte_maj', { p_regles: S.charteEdit, p_viewer_id_user: viewer() });
+        S.charteEdit = null; S.charteMsg = { ok: true, t: 'Charte enregistrée : elle s\'applique dès maintenant à toutes les audiences.' };
+        S.audience = null; S.pression = null;
+      } catch (e) { S.charteMsg = { ok: false, t: 'Charte non enregistrée : ' + (e.message || e) }; }
+      rendre();
+    }
+
     function vueMoteur() {
       const m = (S.synth.modele || {}), me = m.metriques || {};
       const a = me.achat || {}, r = me.retour_atelier || {}, e = me.etape || {};
@@ -956,12 +1083,16 @@ OD.define('cockpit-mkt', {
       if (t.dataset.opv) { S.op[t.dataset.opv] = t.dataset.v; S.confirm = null; rendre(); return; }
       if (t.dataset.canal) { S.crit.canal = t.dataset.canal; S.confirm = null; S.message = null; rendre(); planifierAudience(); return; }
       const act = t.dataset.act;
-      if (act === 'recharger') { S.campagnes = null; chargerPerimetre().then(chargerSynthese).then(() => { if (S.onglet === 'composer') chargerAudience(); }); }
+      if (act === 'recharger') { S.campagnes = null; S.pression = null; chargerCharte(); chargerPerimetre().then(chargerSynthese).then(() => { if (S.onglet === 'composer') chargerAudience(); }); }
       else if (act === 'prop') { const p = propositions()[Number(t.dataset.i)]; if (p) versComposer(Object.assign({ canal: p.canal }, p.crit), p.t); }
       else if (act === 'etat') versComposer({ etats: [t.dataset.k] }, ETATS[t.dataset.k].t);
       else if (act === 'coh') { const k = t.dataset.k; versComposer({ segments: [k.split('-')[0]], archetypes: [k] }, 'Cohorte ' + nomCohorte(k)); }
       else if (act === 'voir-aud') { const b = corps.querySelector('#mkt-aud'); if (b) try { b.scrollIntoView({ behavior: 'smooth', block: 'start' }); } catch (e) { b.scrollIntoView(); } }
       else if (act === 'drill') choisirPer(t.dataset.niv, t.dataset.k);
+      else if (act === 'oublies') { S.crit.oublies = !S.crit.oublies; S.confirm = null; rendre(); planifierAudience(); }
+      else if (act === 'oublies-audience') versComposer({ oublies: true, decile_max: 3 }, 'Clients oubliés à fort potentiel');
+      else if (act === 'charte-enr') enregistrerCharte();
+      else if (act === 'charte-annuler') { S.charteEdit = null; S.charteMsg = null; rendre(); }
       else if (act === 'mode-op') { S.op.actif = t.dataset.v === '1'; S.confirm = null; S.message = null; rendre(); planifierAudience(); }
       else if (act === 'fichier') {
         const id = t.dataset.id, nom = t.dataset.nom; t.disabled = true;
@@ -977,6 +1108,14 @@ OD.define('cockpit-mkt', {
       else if (act === 'export') exporter();
     });
     corps.addEventListener('input', ev => {
+      const ck = ev.target.dataset && ev.target.dataset.charte;
+      if (ck) {
+        const avant = !!S.charteEdit;
+        if (!S.charteEdit) S.charteEdit = Object.assign({}, (S.charte && S.charte.regles) || (S.pression && S.pression.charte) || {});
+        S.charteEdit[ck] = ev.target.value === '' ? null : Number(ev.target.value); S.charteMsg = null;
+        if (!avant) { const b = corps.querySelector('[data-act="charte-enr"]'); if (b) b.disabled = false; }
+        return;
+      }
       const k = ev.target.dataset && ev.target.dataset.op;
       if (k) {
         S.op[k] = ev.target.value; S.confirm = null;
@@ -1013,6 +1152,7 @@ OD.define('cockpit-mkt', {
     S.per = lirePer();
     rendre();
     await chargerPerimetre();
+    chargerCharte().then(() => { if (S.onglet === 'composer') rendre(); });
     await chargerSynthese();
   }
 });
