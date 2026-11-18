@@ -1,4 +1,10 @@
 // ============================================================================
+//  v56 (18/11/2026) : COULEURS PLEINES dans « Livraisons du site » (préparateur)
+//    et dans « Agenda du site » (secrétaire commerciale, chefs) : les teintes
+//    pâles (10-16 %) donnaient un agenda quasi blanc. Livraisons, préparations,
+//    réceptions, « pas de livraison » et couleur de chaque personne passent en
+//    aplat, texte blanc. Livraison faite par le vendeur : même couleur, bord
+//    en pointillé bleu foncé.
 //  v55 (16/11/2026) : ORDRE DU JOUR des bilatérales. À la planification (et
 //    en modification, et pour « Mener l'entretien maintenant »), le chef
 //    choisit des points en pastilles — ses points les plus utilisés d'abord
@@ -495,13 +501,13 @@ OD.define('agenda', {
   function mapEventLivr(e) {
     const f = familleEvt(e), li = livInfo(e);
     const vendeurLivre = f === 'livraison' && li.livre_par === 'vendeur';
-    const c = f === 'livraison' ? (vendeurLivre ? '#7f9cc4' : couleurLivr(e)) : (CFG.colors[f] || CFG.colors.creneau);
+    const c = f === 'livraison' ? couleurLivr(e) : (CFG.colors[f] || CFG.colors.creneau);   // v56 : plus de gris pour le vendeur
     const qui = f === 'livraison' ? (li.vendeur ? prenomDe(li.vendeur) : '') : prenomDe(e.extra && e.extra.proprietaire);
     return {
       id: e.uid, title: (PICTO[f] ? PICTO[f] + ' ' : '') + composeTitle(e) + (qui ? ' · ' + qui : ''),
       start: toFc(e.event_start_time), end: toFc(e.event_end_time), allDay: false,
-      backgroundColor: f === 'livraison' && !vendeurLivre ? c : tint(c, 0.10), borderColor: f === 'livraison' && !vendeurLivre ? c : tint(c, 0.5),
-      textColor: f === 'livraison' && !vendeurLivre ? texteSur(c) : '#1F4A85',
+      backgroundColor: c, borderColor: vendeurLivre ? '#1F4A85' : c,   // v56 : aplat
+      textColor: f === 'livraison' ? texteSur(c) : '#ffffff',
       classNames: vendeurLivre ? ['ag-livr-vendeur'] : [],
       editable: !lectureSeule() && (!!e.can_edit && e.source_type === 'rdv'),
       extendedProps: Object.assign({ _accent: c }, e),
@@ -521,7 +527,7 @@ OD.define('agenda', {
       id: e.uid, title: pic + (journee && nomP ? nomP + ' · ' : '') + composeTitle(e),
       start: journee ? String(e.event_start_time || '').slice(0, 10) : toFc(e.event_start_time),
       end: journee ? null : toFc(e.event_end_time), allDay: journee,
-      backgroundColor: tint(c, 0.16), borderColor: tint(c, 0.16), textColor: '#1F4A85',
+      backgroundColor: c, borderColor: c, textColor: '#ffffff',   // v56 : aplat, une couleur par personne
       editable: (!!e.can_edit && (e.source_type === 'rdv' || e.source_type === 'bilat')) || relanceDeplacable(e),
       durationEditable: e.source_type !== 'rpv' || relanceDeplacable(e),
       extendedProps: Object.assign({ _accent: c }, e),
