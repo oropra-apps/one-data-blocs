@@ -1,5 +1,8 @@
 // ============================================================================
 //  PERFORMANCES ÉQUIPE — module One Data (OD.define)  v1
+//  v34 (18/11/2026) : taux de devis jugé sur les seuls contacts de plus de
+//    7 jours (un contact récent avec devis faisait monter le taux à 100 %
+//    sur 7 jours) ; « jour même » rapporté à tous les clients avec devis.
 //  v33 (18/11/2026) : vue PROCESS (Team Colin) — respect des process : taux de
 //    devis BACS des clients croisés (leads contactés, appels entrants > 1 min,
 //    rendez-vous en concession), devis le jour même, devis dormants, devis →
@@ -2902,7 +2905,7 @@ OD.define('performances', {
             + '<td>' + v.croises + '</td><td>' + pill(tx, faible) + '</td>'
             + '<td>' + (v.manque ? '<b class="pp-manque">' + v.manque + '</b>' : '<span class="pl-na">0</span>') + '</td>'
             + '<td>' + (v.attente || '<span class="pl-na">0</span>') + '</td>'
-            + '<td>' + (v.ok ? fmtPct(pct(v.jour_meme, v.ok)) : '<span class="pl-na">—</span>') + '</td>'
+            + '<td>' + (v.avec_devis ? fmtPct(pct(v.jour_meme, v.avec_devis)) : '<span class="pl-na">—</span>') + '</td>'
             + '<td>' + (v.devis || '<span class="pl-na">0</span>') + '</td>'
             + '<td>' + (v.dormants ? v.dormants + ' <small>' + pct(v.dormants, v.devis) + ' %</small>' : '<span class="pl-na">0</span>') + '</td>'
             + '<td>' + (v.transfo ? v.transfo + ' <small>' + pct(v.transfo, v.devis) + ' %</small>' : '<span class="pl-na">0</span>') + '</td></tr>';
@@ -2926,12 +2929,13 @@ OD.define('performances', {
       const k = data.kpi || {}, p = data.prec || {};
       if (!k.croises && !k.devis) { host.innerHTML = h + '<div class="pl-vide">Aucun client croisé ni devis sur cette période et ce périmètre.</div>'; lier(); return; }
       const tx = taux(k), txp = (p.ok || p.manque) ? taux(p) : null;
+      const attDevis = Math.max(0, (k.avec_devis || 0) - (k.ok || 0));
       h += '<div class="pl-tiles">'
-        + tuile('Taux de devis', fmtPct(tx), (k.ok || 0) + ' clients avec devis sur ' + ((k.ok || 0) + (k.manque || 0)), tendancePts(tx, txp), niveau(tx),
-            'Part des clients croisés (lead contacté, appel entrant de plus d\'1 min, rendez-vous en concession) qui ont un devis dans BACS, créé dans les 30 jours avant le contact ou les 7 jours après. Les contacts de moins de 7 jours ne comptent pas encore.')
-        + tuile('Clients croisés', k.croises || 0, (k.attente || 0) + ' encore dans le délai de 7 jours', '', '')
+        + tuile('Taux de devis', fmtPct(tx), tx == null ? 'aucun contact de plus de 7 jours : prenez une période plus longue' : (k.ok || 0) + ' clients avec devis sur ' + ((k.ok || 0) + (k.manque || 0)), tx == null ? '' : tendancePts(tx, txp), tx == null ? '' : niveau(tx),
+            'Part des clients croisés (lead contacté, appel entrant de plus d\'1 min, rendez-vous en concession) qui ont un devis dans BACS, créé dans les 30 jours avant le contact ou les 7 jours après. Seuls les contacts de plus de 7 jours sont jugés : les plus récents ont encore le temps de recevoir leur devis.')
+        + tuile('Clients croisés', k.croises || 0, (k.attente || 0) + ' encore dans le délai de 7 jours' + (attDevis ? ', dont ' + attDevis + ' déjà avec devis' : ''), '', '')
         + tuile('Sans devis', k.manque || 0, 'clients croisés il y a plus de 7 jours', '', (k.manque ? 'warn' : 'ok'))
-        + tuile('Devis le jour même', fmtPct(pct(k.jour_meme || 0, k.ok || 0)), (k.jour_meme || 0) + ' devis faits le jour du contact', '', '',
+        + tuile('Devis le jour même', fmtPct(pct(k.jour_meme || 0, k.avec_devis || 0)), (k.jour_meme || 0) + ' devis faits le jour du contact', '', '',
             'Parmi les clients qui ont un devis : part dont le devis est créé le jour du contact, ou avant (BACS ne donne que la date de création, sans l\'heure).')
         + tuile('Devis dormants', fmtPct(pct(k.dormants || 0, k.devis || 0)), (k.dormants || 0) + ' devis sans relance sous 72 h', '', '',
             'Devis BACS créés sur la période, toujours au stade devis, sans aucun échange tracé avec le client dans les 72 h (appel, message, compte-rendu, rendez-vous). Les échanges faits hors One Data ne sont pas vus.')
@@ -2940,7 +2944,7 @@ OD.define('performances', {
         + '</div>';
       h += carte('Par origine du contact', 'D\'où viennent les clients croisés, et la part qui reçoit un devis.', tableSources(data.sources));
       h += carte('Par vendeur', 'Classés du taux de devis le plus faible au plus élevé. Cliquez sur un vendeur pour voir ses clients sans devis. Vert au-delà de 80 %, orange de 50 à 80 %, rouge en dessous ; en gris, moins de 3 clients à juger.', tableVendeurs(data.vendeurs));
-      h += '<p class="pl-note pied">Un client compte une fois par vendeur sur la période, à son premier contact. Exclus : les clients qui ont déjà une commande dans les 120 jours précédents (suivi, livraison), les appels pris par l\'accueil et les leads écartés (doublons, fausses demandes, atelier). Les visites en showroom ne sont comptées que si un rendez-vous a été saisi.</p>';
+      h += '<p class="pl-note pied">Le taux de devis ne juge que les contacts de plus de 7 jours : sur une période courte, il peut ne rien y avoir à juger. Un client compte une fois par vendeur sur la période, à son premier contact. Exclus : les clients qui ont déjà une commande dans les 120 jours précédents (suivi, livraison), les appels pris par l\'accueil et les leads écartés (doublons, fausses demandes, atelier). Les visites en showroom ne sont comptées que si un rendez-vous a été saisi.</p>';
       host.innerHTML = h;
       lier();
     }
@@ -2991,7 +2995,7 @@ OD.define('performances', {
         + (items.length ? '<ul>' + items.map(rendu).join('') + '</ul>' : '<p class="pp-vide">Aucun.</p>') + '</section>';
       wrap.querySelector('.pp-corps').innerHTML =
           bloc('Sans devis', 'Clients croisés il y a plus de 7 jours, sans devis dans BACS.', manque, x => ligne(x, false))
-        + bloc('En attente', 'Contact de moins de 7 jours : le devis peut encore venir.', attente, x => ligne(x, false))
+        + bloc('En attente', 'Contact de moins de 7 jours : le devis peut encore venir (date du devis indiquée quand il existe déjà).', attente, x => ligne(x, true))
         + bloc('Devis dormants', 'Devis toujours ouverts, sans échange tracé dans les 72 h qui ont suivi.', dorm,
             x => '<li><button type="button" class="pp-cli" data-pp-fiche="' + e(x.id_client) + '"><b>' + e(propre(x.client) || ('Client ' + x.id_client)) + '</b><span>devis du ' + e(dateCourte(x.devis_le)) + '</span></button></li>')
         + (ok.length ? '<details class="pp-bloc"><summary>Avec devis <small>' + ok.length + '</small></summary><ul>' + ok.map(x => ligne(x, true)).join('') + '</ul></details>' : '');
