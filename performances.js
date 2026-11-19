@@ -1,5 +1,8 @@
 // ============================================================================
 //  PERFORMANCES ÉQUIPE — module One Data (OD.define)  v1
+//  v37 (19/11/2026) : vue Process — sélection de périmètre comme les ventes :
+//    arbre réseau → affaire → site → vendeur, clic = filtre de toute la vue,
+//    « clients › » sur un vendeur = sa liste de clients sans devis.
 //  v36 (18/11/2026) : vue Process remise à plat sur des règles simples —
 //    client croisé, avec devis / sans devis, taux = avec ÷ croisés, devis
 //    sans relance. Plus de délai d'attente de 7 jours ni d'indicateurs
@@ -2864,7 +2867,7 @@ OD.define('performances', {
       const t = ++jeton; charge = false; erreur = null; rendre();
       const [d, f] = periodeP();
       try {
-        const r = await sb.rpc('perf_process_devis', { p_deb: d, p_fin: f, p_sites: P.site ? [Number(P.site)] : null, p_id_user: null });
+        const r = await sb.rpc('perf_process_devis', { p_deb: d, p_fin: f, p_sites: null, p_id_user: null });
         if (t !== jeton) return;
         if (r.error) throw r.error;
         data = r.data || {}; charge = true;
@@ -2897,38 +2900,108 @@ OD.define('performances', {
           + '<td>' + pill(taux(r)) + '</td></tr>').join('')
         + '</tbody></table></div>';
     }
-    function tableVendeurs(rows) {
-      rows = (rows || []).filter(v => v.croises > 0 || v.devis > 0)
-        .sort((a, b) => (b.sans_devis - a.sans_devis) || (b.croises - a.croises));
-      if (!rows.length) return '<div class="pl-vide">Aucun vendeur sur la période.</div>';
-      return '<div class="pl-tw"><table class="pl-t pp-t"><thead><tr><th>Vendeur</th><th>Clients croisés</th><th>Avec devis</th><th>Sans devis</th><th>Taux de devis</th><th>Devis faits</th><th>Devis sans relance</th></tr></thead><tbody>'
-        + rows.map(v => '<tr class="pp-row" data-pp-user="' + v.id_user + '" title="Voir ses clients"><td class="l">' + e(propre(v.nom)) + (v.role === 3 ? ' <small class="pp-tag">chef des ventes</small>' : '') + '<br><small>' + e(propre(v.site || '')) + '</small></td>'
-          + '<td>' + (v.croises || NA) + '</td><td>' + (v.avec_devis || NA) + '</td>'
-          + '<td>' + (v.sans_devis ? '<b class="pp-manque">' + v.sans_devis + '</b>' : NA) + '</td>'
-          + '<td>' + (v.croises ? pill(taux(v)) : '<span class="pl-na">—</span>') + '</td>'
-          + '<td>' + (v.devis || NA) + '</td>'
-          + '<td>' + (v.sans_relance || NA) + '</td></tr>').join('')
-        + '</tbody></table></div>';
+    // --- v37 : arbre de périmètre (réseau → affaire → site → vendeur), comme
+    // Performances ventes. Le SQL rend des cellules site × vendeur ; tout est
+    // agrégé ici. Un clic sur une ligne filtre la vue (tuiles, origines) ;
+    // re-cliquer la ligne sélectionnée revient à tout le périmètre.
+    function idx() {
+      const S = {}, U = {};
+      ((data && data.sites) || []).forEach(s => { S[String(s.id_site)] = s; });
+      ((data && data.users) || []).forEach(u => { U[String(u.id_user)] = u; });
+      return { S, U };
+    }
+    function reseauDe(s) { return (s && s.reseau) || 'Sans réseau'; }
+    function affaireDe(s) { return (s && s.affaire) || 'Sans affaire'; }
+    function dansSel(c, sel, S) {
+      if (!sel || sel.level === 'all') return true;
+      const s = S[String(c.id_site)];
+      if (sel.level === 'reseau') return reseauDe(s) === sel.key;
+      if (sel.level === 'affaire') return affaireDe(s) === sel.key;
+      if (sel.level === 'site') return String(c.id_site) === String(sel.key);
+      if (sel.level === 'vendeur') return String(c.id_site) + '|' + String(c.id_user) === String(sel.key);
+      return true;
+    }
+    function somme(rows) {
+      const a = { croises: 0, avec_devis: 0, sans_devis: 0, devis: 0, sans_relance: 0 };
+      rows.forEach(r => { for (const k in a) a[k] += Number(r[k] || 0); });
+      return a;
+    }
+    function sitesDeSel(sel, S) {
+      if (!sel || sel.level === 'all') return null;
+      if (sel.level === 'site') return [Number(sel.key)];
+      if (sel.level === 'vendeur') return [Number(String(sel.key).split('|')[0])];
+      return Object.values(S).filter(s => sel.level === 'reseau' ? reseauDe(s) === sel.key : affaireDe(s) === sel.key).map(s => Number(s.id_site));
+    }
+    function cellsTree(sel, exp) {
+      const { S, U } = idx();
+      const cel = (data.cellules || []);
+      const R = {};
+      cel.forEach(c => {
+        const s = S[String(c.id_site)]; if (!s) return;
+        const r = reseauDe(s), a = affaireDe(s);
+        R[r] = R[r] || { label: r, rows: [], A: {} };
+        R[r].rows.push(c);
+        const A = R[r].A[a] = R[r].A[a] || { label: a, rows: [], S: {} };
+        A.rows.push(c);
+        const Sx = A.S[c.id_site] = A.S[c.id_site] || { label: propre(s.site), id: c.id_site, rows: [] };
+        Sx.rows.push(c);
+      });
+      const tri = (x, y) => (somme(y.rows).sans_devis - somme(x.rows).sans_devis) || (somme(y.rows).croises - somme(x.rows).croises);
+      const cls = (lvl, key) => (sel.level === lvl && String(sel.key) === String(key)) ? ' pp-sel' : '';
+      const ico = open => '<span class="pp-exp">' + (open ? '▾' : '▸') + '</span>';
+      const cells = a => '<td>' + (a.croises || NA) + '</td><td>' + (a.avec_devis || NA) + '</td>'
+        + '<td>' + (a.sans_devis ? '<b class="pp-manque">' + a.sans_devis + '</b>' : NA) + '</td>'
+        + '<td>' + (a.croises ? pill(taux(a)) : '<span class="pl-na">—</span>') + '</td>'
+        + '<td>' + (a.devis || NA) + '</td><td>' + (a.sans_relance || NA) + '</td>';
+      const reseaux = Object.values(R).sort(tri);
+      let body = '';
+      reseaux.forEach(Rx => {
+        const kR = 'r:' + Rx.label, oR = reseaux.length === 1 || !!exp[kR];
+        if (reseaux.length > 1)
+          body += '<tr class="pp-lv0' + cls('reseau', Rx.label) + '" data-pp-lvl="reseau" data-pp-key="' + e(Rx.label) + '" data-pp-label="' + e(propre(Rx.label)) + '" data-pp-exp="' + e(kR) + '"><td class="l">' + ico(oR) + e(propre(Rx.label)) + '</td>' + cells(somme(Rx.rows)) + '</tr>';
+        if (!oR) return;
+        const affs = Object.values(Rx.A).sort(tri);
+        affs.forEach(Ax => {
+          const kA = kR + '|a:' + Ax.label, oA = affs.length === 1 || !!exp[kA];
+          if (affs.length > 1)
+            body += '<tr class="pp-lv1' + cls('affaire', Ax.label) + '" data-pp-lvl="affaire" data-pp-key="' + e(Ax.label) + '" data-pp-label="' + e(propre(Ax.label)) + '" data-pp-exp="' + e(kA) + '"><td class="l">' + ico(oA) + e(propre(Ax.label)) + '</td>' + cells(somme(Ax.rows)) + '</tr>';
+          if (!oA) return;
+          const sts = Object.values(Ax.S).sort(tri);
+          sts.forEach(Sx => {
+            const kS = kA + '|s:' + Sx.id, oS = !!exp[kS];
+            body += '<tr class="pp-lv2' + cls('site', Sx.id) + '" data-pp-lvl="site" data-pp-key="' + Sx.id + '" data-pp-label="' + e(Sx.label) + '" data-pp-exp="' + e(kS) + '"><td class="l">' + ico(oS) + e(Sx.label) + '</td>' + cells(somme(Sx.rows)) + '</tr>';
+            if (!oS) return;
+            Sx.rows.slice().sort((x, y) => (y.sans_devis - x.sans_devis) || (y.croises - x.croises)).forEach(c => {
+              const u = U[String(c.id_user)] || {}, key = c.id_site + '|' + c.id_user, nom = propre(u.nom || ('#' + c.id_user));
+              body += '<tr class="pp-lv3' + cls('vendeur', key) + '" data-pp-lvl="vendeur" data-pp-key="' + e(key) + '" data-pp-label="' + e(nom + ' — ' + Sx.label) + '"><td class="l">' + e(nom)
+                + (Number(u.role) === 3 ? ' <small class="pp-tag">chef des ventes</small>' : '')
+                + ' <button type="button" class="pp-voir" data-pp-user="' + c.id_user + '" data-pp-site="' + c.id_site + '" title="Voir ses clients sans devis">clients ›</button></td>' + cells(c) + '</tr>';
+            });
+          });
+        });
+      });
+      if (!body) return '<div class="pl-vide">Aucun vendeur sur la période.</div>';
+      return '<div class="pl-tw"><table class="pl-t pp-t"><thead><tr><th>Périmètre</th><th>Clients croisés</th><th>Avec devis</th><th>Sans devis</th><th>Taux de devis</th><th>Devis faits</th><th>Devis sans relance</th></tr></thead><tbody>' + body + '</tbody></table></div>';
     }
 
     function rendre() {
       if (!host.isConnected) return;
       injecterCssProcess();
-      const sites = (data && data.sites) || [];
+      P.sel = P.sel || { level: 'all', key: null, label: 'Tout le périmètre' };
+      P.exp = P.exp || {};
       let h = '<div class="pl-bar"><span class="pl-lbl">Période</span><div class="pl-seg">'
         + PRESETS.map(p => '<button type="button" class="' + (!P.du && P.preset === p[0] ? 'on' : '') + '" data-pp-preset="' + p[0] + '">' + p[1] + '</button>').join('') + '</div>';
-      if (sites.length > 1) {
-        h += '<span class="pl-lbl">Périmètre</span><select class="pl-sel" data-pp-site><option value="">Tous mes sites</option>'
-          + sites.map(s => '<option value="' + s.id_site + '"' + (String(P.site) === String(s.id_site) ? ' selected' : '') + '>' + e(propre(s.site)) + '</option>').join('') + '</select>';
-      }
       const [d, f] = periodeP();
       h += '<span class="pl-per">' + (DPL ? DPL.bouton(d, f, 'data-pp-dp="1"', 'Choisir les dates') : '') + '</span></div>';
       h += '<div class="pp-regles"><b>La règle :</b> chaque client croisé par un vendeur — lead contacté, appel entrant de plus d\'1 minute, rendez-vous en concession — doit avoir un devis dans BACS. '
         + 'Un client sans devis est compté « sans devis » tant que le devis n\'est pas fait, même s\'il a été contacté hier : c\'est la liste à traiter.</div>';
       if (!charge) { host.innerHTML = h + '<div class="pl-vide">Chargement des indicateurs…</div>'; lier(); return; }
       if (erreur) { host.innerHTML = h + '<div class="pl-vide err">Les indicateurs n\'ont pas pu être chargés : ' + e(erreur) + '</div>'; lier(); return; }
-      const k = data.kpi || {}, p = data.prec || {};
-      if (!k.croises && !k.devis) { host.innerHTML = h + '<div class="pl-vide">Aucun client croisé ni devis sur cette période et ce périmètre.</div>'; lier(); return; }
+      const { S } = idx(), sel = P.sel;
+      const k = somme((data.cellules || []).filter(c => dansSel(c, sel, S)));
+      const p = somme((data.cellules_prec || []).filter(c => dansSel(c, sel, S)));
+      if (sel.level !== 'all') h += '<div class="pp-banner"><span>' + e(sel.label) + '</span><button type="button" data-pp-tout>× Tout le périmètre</button></div>';
+      if (!k.croises && !k.devis && sel.level === 'all') { host.innerHTML = h + '<div class="pl-vide">Aucun client croisé ni devis sur cette période.</div>'; lier(); return; }
       const tx = taux(k), txp = p.croises ? taux(p) : null;
       h += '<div class="pl-tiles">'
         + tuile('Clients croisés', k.croises || 0, 'leads contactés, appels entrants, rendez-vous', '', '')
@@ -2938,9 +3011,15 @@ OD.define('performances', {
         + tuile('Devis sans relance', k.sans_relance || 0, 'sur ' + (k.devis || 0) + ' devis faits sur la période', '', '',
             'Devis BACS faits sur la période, toujours ouverts, de plus de 3 jours, sans aucun appel, message, compte-rendu ni rendez-vous avec le client depuis. Les échanges faits hors One Data ne sont pas vus.')
         + '</div>';
-      h += carte('Par vendeur', 'Classés par nombre de clients sans devis. Cliquez sur un vendeur pour voir la liste de ses clients.', tableVendeurs(data.vendeurs));
-      h += carte('Par origine du contact', '', tableSources(data.sources));
-      h += '<p class="pl-note pied">Un client compte une fois par vendeur sur la période. Un devis compte s\'il a été fait dans BACS au plus tôt 30 jours avant le contact. Exclus : les clients qui ont passé commande dans les 120 derniers jours (suivi, livraison) et les appels pris par l\'accueil. La tendance compare à la période précédente de même durée.</p>';
+      h += carte('Périmètre', 'Cliquez une ligne pour filtrer la vue, recliquez-la pour revenir à tout le périmètre · ▸ pour déplier · « clients › » : la liste des clients d\'un vendeur.', cellsTree(sel, P.exp));
+      const agg = {};
+      (data.sources || []).filter(c => dansSel(c, sel, S)).forEach(r => {
+        const kk = r.typ + '|' + r.src;
+        agg[kk] = agg[kk] || { typ: r.typ, src: r.src, croises: 0, avec_devis: 0, sans_devis: 0 };
+        agg[kk].croises += r.croises; agg[kk].avec_devis += r.avec_devis; agg[kk].sans_devis += r.sans_devis;
+      });
+      h += carte('Par origine du contact', '', tableSources(Object.values(agg).sort((a, b) => b.croises - a.croises)));
+      h += '<p class="pl-note pied">Un client compte une fois par vendeur sur la période, sur le site du contact. Un devis compte s\'il a été fait dans BACS au plus tôt 30 jours avant le contact. Exclus : les clients qui ont passé commande dans les 120 derniers jours (suivi, livraison) et les appels pris par l\'accueil. La tendance compare à la période précédente de même durée.</p>';
       host.innerHTML = h;
       lier();
     }
@@ -2949,17 +3028,29 @@ OD.define('performances', {
       host.querySelectorAll('[data-pp-preset]').forEach(b => b.addEventListener('click', () => { P.preset = b.getAttribute('data-pp-preset'); P.du = P.au = null; charger(); }));
       const bdp = host.querySelector('[data-pp-dp]');
       if (bdp && DPL) bdp.addEventListener('click', () => { const [d0] = periodeP(); DPL.ouvrir(bdp, d0, (a, z) => { P.du = a; P.au = z; charger(); }); });
-      const s = host.querySelector('[data-pp-site]');
-      if (s) s.addEventListener('change', () => { P.site = s.value || null; charger(); });
-      host.querySelectorAll('[data-pp-user]').forEach(tr => tr.addEventListener('click', () => {
-        const id = Number(tr.getAttribute('data-pp-user'));
-        const v = ((data && data.vendeurs) || []).find(x => Number(x.id_user) === id);
-        ouvrirPanneau(id, v ? propre(v.nom) : 'Vendeur');
+      const tout = host.querySelector('[data-pp-tout]');
+      if (tout) tout.addEventListener('click', () => { P.sel = { level: 'all', key: null, label: 'Tout le périmètre' }; rendre(); });
+      host.querySelectorAll('tr[data-pp-lvl]').forEach(tr => tr.addEventListener('click', (ev) => {
+        const voir = ev.target.closest('.pp-voir');
+        if (voir) {
+          ev.stopPropagation();
+          const id = Number(voir.getAttribute('data-pp-user')), site = Number(voir.getAttribute('data-pp-site'));
+          const u = (data.users || []).find(x => Number(x.id_user) === id);
+          const s = (data.sites || []).find(x => Number(x.id_site) === site);
+          ouvrirPanneau(id, (u ? propre(u.nom) : 'Vendeur') + (s ? ' — ' + propre(s.site) : ''), [site]);
+          return;
+        }
+        const kExp = tr.getAttribute('data-pp-exp');
+        if (kExp && ev.target.closest('.pp-exp')) { P.exp[kExp] = !P.exp[kExp]; rendre(); return; }
+        const lvl = tr.getAttribute('data-pp-lvl'), key = tr.getAttribute('data-pp-key'), label = tr.getAttribute('data-pp-label');
+        if (P.sel.level === lvl && String(P.sel.key) === String(key)) P.sel = { level: 'all', key: null, label: 'Tout le périmètre' };
+        else { P.sel = { level: lvl, key, label }; if (kExp) P.exp[kExp] = true; }
+        rendre();
       }));
     }
 
     function fermerPanneau() { const x = doc.getElementById('pp-drawer'); if (x) x.remove(); }
-    async function ouvrirPanneau(idUser, nom) {
+    async function ouvrirPanneau(idUser, nom, sitesPanneau) {
       fermerPanneau();
       const wrap = doc.createElement('div'); wrap.id = 'pp-drawer';
       wrap.innerHTML = '<div class="pp-voile"></div><aside class="pp-pan" role="dialog" aria-modal="true" aria-label="Clients du vendeur">'
@@ -2973,7 +3064,7 @@ OD.define('performances', {
       const [d, f] = periodeP();
       let r = null;
       try {
-        const res = await sb.rpc('perf_process_devis', { p_deb: d, p_fin: f, p_sites: P.site ? [Number(P.site)] : null, p_id_user: idUser });
+        const res = await sb.rpc('perf_process_devis', { p_deb: d, p_fin: f, p_sites: sitesPanneau || null, p_id_user: idUser });
         if (res.error) throw res.error;
         r = res.data || {};
       } catch (x) {
@@ -3009,6 +3100,19 @@ OD.define('performances', {
 .pp-t td.l small{color:#8b99b0;font-weight:600;font-size:11px}
 .pp-t td.l small.pp-tag{background:#eef4fc;color:#2a5ea9;border-radius:999px;padding:1px 7px;font-weight:700;font-size:10px}
 .pp-manque{color:#c0524f}
+.pp-t tbody tr[data-pp-lvl]{cursor:pointer}
+.pp-t tbody tr[data-pp-lvl]:hover td{background:#f5f8fc}
+.pp-t tr.pp-lv0 td{font-weight:800;color:#1F4A85;background:#f7f9fd}
+.pp-t tr.pp-lv1 td.l{padding-left:22px;font-weight:700}
+.pp-t tr.pp-lv2 td.l{padding-left:34px;font-weight:700;color:#2a5ea9}
+.pp-t tr.pp-lv3 td.l{padding-left:58px;font-weight:600}
+.pp-t tr.pp-sel td{background:#e6effa !important}
+.pp-exp{display:inline-block;width:16px;color:#7a98c5;cursor:pointer}
+.pp-voir{margin-left:6px;border:1px solid #acc5e4;background:#fff;color:#2a5ea9;border-radius:999px;padding:1px 8px;font-size:10.5px;font-weight:700;cursor:pointer}
+.pp-voir:hover{background:#eef4fc}
+.pp-banner{display:flex;align-items:center;gap:10px;margin:0 0 12px}
+.pp-banner span{background:#2a5ea9;color:#fff;border-radius:999px;padding:4px 12px;font-size:12px;font-weight:700}
+.pp-banner button{border:0;background:none;color:#2a5ea9;font-weight:700;font-size:12px;cursor:pointer}
 .pp-regles{background:#eef4fc;border-radius:8px;padding:10px 14px;margin:0 0 14px;font-size:12.5px;color:#1F4A85;line-height:1.5}
 .pp-regles b{color:#2a5ea9}
 #pp-drawer{position:fixed;inset:0;z-index:9999;font-family:inherit}
