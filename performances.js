@@ -1,5 +1,6 @@
 // ============================================================================
 //  PERFORMANCES ÉQUIPE — module One Data (OD.define)  v1
+//  v39 (23/11/2026) : vue Process — filtre Univers VN + VO / VN / VO.
 //  v38 (23/11/2026) : vue Process — note d'exclusions mise à jour (appels
 //    entrants de sociétés, fiches de test, salariés du groupe).
 //  v37 (19/11/2026) : vue Process — sélection de périmètre comme les ventes :
@@ -2914,7 +2915,12 @@ OD.define('performances', {
     }
     function reseauDe(s) { return (s && s.reseau) || 'Sans réseau'; }
     function affaireDe(s) { return (s && s.affaire) || 'Sans affaire'; }
+    // v39 : filtre VN / VO. Un client croisé est VN ou VO selon son lead, sinon
+    // son devis, sinon la spécialité du vendeur ; indéterminé, il ne compte
+    // qu'en « VN + VO ».
+    function dansUnivers(c) { return !P.univers || c.uv === P.univers; }
     function dansSel(c, sel, S) {
+      if (!dansUnivers(c)) return false;
       if (!sel || sel.level === 'all') return true;
       const s = S[String(c.id_site)];
       if (sel.level === 'reseau') return reseauDe(s) === sel.key;
@@ -2936,7 +2942,7 @@ OD.define('performances', {
     }
     function cellsTree(sel, exp) {
       const { S, U } = idx();
-      const cel = (data.cellules || []);
+      const cel = (data.cellules || []).filter(dansUnivers);
       const R = {};
       cel.forEach(c => {
         const s = S[String(c.id_site)]; if (!s) return;
@@ -2993,6 +2999,8 @@ OD.define('performances', {
       P.exp = P.exp || {};
       let h = '<div class="pl-bar"><span class="pl-lbl">Période</span><div class="pl-seg">'
         + PRESETS.map(p => '<button type="button" class="' + (!P.du && P.preset === p[0] ? 'on' : '') + '" data-pp-preset="' + p[0] + '">' + p[1] + '</button>').join('') + '</div>';
+      h += '<span class="pl-lbl">Univers</span><div class="pl-seg">'
+        + [['', 'VN + VO'], ['VN', 'VN'], ['VO', 'VO']].map(u => '<button type="button" class="' + ((P.univers || '') === u[0] ? 'on' : '') + '" data-pp-univ="' + u[0] + '">' + u[1] + '</button>').join('') + '</div>';
       const [d, f] = periodeP();
       h += '<span class="pl-per">' + (DPL ? DPL.bouton(d, f, 'data-pp-dp="1"', 'Choisir les dates') : '') + '</span></div>';
       h += '<div class="pp-regles"><b>La règle :</b> chaque client croisé par un vendeur — lead contacté, appel entrant de plus d\'1 minute, rendez-vous en concession — doit avoir un devis dans BACS. '
@@ -3021,7 +3029,7 @@ OD.define('performances', {
         agg[kk].croises += r.croises; agg[kk].avec_devis += r.avec_devis; agg[kk].sans_devis += r.sans_devis;
       });
       h += carte('Par origine du contact', '', tableSources(Object.values(agg).sort((a, b) => b.croises - a.croises)));
-      h += '<p class="pl-note pied">Un client compte une fois par vendeur sur la période, sur le site du contact. Un devis compte s\'il a été fait dans BACS au plus tôt 30 jours avant le contact. Exclus : les clients qui ont passé commande dans les 120 derniers jours (suivi, livraison), les appels pris par l\'accueil, les appels entrants de sociétés (loueurs, partenaires, fournisseurs — les leads de sociétés restent comptés), les fiches de test et les salariés du groupe. La tendance compare à la période précédente de même durée.</p>';
+      h += '<p class="pl-note pied">Un client compte une fois par vendeur sur la période, sur le site du contact. Un devis compte s\'il a été fait dans BACS au plus tôt 30 jours avant le contact. Exclus : les clients qui ont passé commande dans les 120 derniers jours (suivi, livraison), les appels pris par l\'accueil, les appels entrants de sociétés (loueurs, partenaires, fournisseurs — les leads de sociétés restent comptés), les fiches de test et les salariés du groupe. La tendance compare à la période précédente de même durée. Filtre VN / VO : un client est classé selon son lead, sinon son devis, sinon la spécialité du vendeur ; s\'il reste indéterminé, il n\'apparaît qu\'en « VN + VO ».</p>';
       host.innerHTML = h;
       lier();
     }
@@ -3030,6 +3038,7 @@ OD.define('performances', {
       host.querySelectorAll('[data-pp-preset]').forEach(b => b.addEventListener('click', () => { P.preset = b.getAttribute('data-pp-preset'); P.du = P.au = null; charger(); }));
       const bdp = host.querySelector('[data-pp-dp]');
       if (bdp && DPL) bdp.addEventListener('click', () => { const [d0] = periodeP(); DPL.ouvrir(bdp, d0, (a, z) => { P.du = a; P.au = z; charger(); }); });
+      host.querySelectorAll('[data-pp-univ]').forEach(b => b.addEventListener('click', () => { P.univers = b.getAttribute('data-pp-univ') || null; rendre(); }));
       const tout = host.querySelector('[data-pp-tout]');
       if (tout) tout.addEventListener('click', () => { P.sel = { level: 'all', key: null, label: 'Tout le périmètre' }; rendre(); });
       host.querySelectorAll('tr[data-pp-lvl]').forEach(tr => tr.addEventListener('click', (ev) => {
@@ -3075,7 +3084,7 @@ OD.define('performances', {
         return;
       }
       if (!doc.getElementById('pp-drawer')) return;
-      const det = r.detail || [], relance = r.sans_relance || [];
+      const det = (r.detail || []).filter(x => !P.univers || x.uv === P.univers), relance = r.sans_relance || [];
       const sans = det.filter(x => !x.devis_le), avec = det.filter(x => x.devis_le);
       wrap.querySelector('.pp-sous').innerHTML = '<span><b>' + sans.length + '</b> sans devis</span><span><b>' + avec.length + '</b> avec devis</span><span><b>' + relance.length + '</b> devis sans relance</span>';
       const ligne = x => '<li><button type="button" class="pp-cli" data-pp-fiche="' + e(x.id_client) + '"><b>' + e(propre(x.client) || ('Client ' + x.id_client)) + '</b>'

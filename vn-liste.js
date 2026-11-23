@@ -14,6 +14,9 @@
 //    le détail (vn_bacs_fiche), avec un lien direct vers le véhicule dans BACS.
 //  * Le stock reste celui du DMS (v_liste_vn) : c'est lui qui dit ce qui est
 //    en stock, à quel prix et depuis quand ; BACS décrit la voiture.
+//  v16 (23/11/2026) : EXPORT EXCEL des véhicules affichés (bouton « Exporter »
+//    dans la barre de filtres) : onglet, filtres et recherche en cours, toutes
+//    pages confondues. Prix d'achat et marge seulement pour les rôles habilités.
 //  v15 (29/10/2026) : la liste s'ouvre filtrée sur le SITE CHOISI DANS LA BARRE DU
 //    HAUT (demande d'Antoine). Avant, le filtre n'était posé que si le site était
 //    déjà connu au premier affichage et présent dans le stock : la barre du haut
@@ -440,6 +443,7 @@ OD.define('vn-liste', {
       + sel('marque', 'Marque') + selModele() + sel('energie', 'Énergie')
       + selStatut() + sel('lieu', 'Lieu de stockage', 'lieu_stockage')
       + '<button class="vn-raz" id="vn-raz">Tout effacer</button>'
+      + '<button class="vn-xls" id="vn-xls" title="Exporter dans Excel les véhicules affichés (filtres en cours)">' + LOGO_XLS + '<span>Exporter</span></button>'
       + '</div>' + chips();
   }
   // Chips : type de véhicule (VP / VU) et AMC. Les compteurs tiennent compte de
@@ -745,6 +749,72 @@ OD.define('vn-liste', {
   function fermerFiche() { S.fiche = null; S.ficheBacs = null; rendre(); }
 
   // ───────────────────────────────────────────────────────────── evenements
+  // ─────────────────────────────────────────────────── export Excel (v16)
+  // Exporte les véhicules affichés : onglet + filtres + recherche en cours,
+  // toutes pages confondues, dans l'ordre de tri. Même fonction que la liste
+  // VO (export-xslx) ; repli en CSV si elle ne répond pas.
+  var LOGO_XLS = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="16" height="16"><rect x="2" y="2" width="20" height="20" rx="3" fill="#107C41"/><path fill="#fff" d="M7 8l2.5 4L7 16h1.8l1.7-2.8L12.2 16H14l-2.5-4L14 8h-1.8l-1.7 2.8L8.8 8z"/><path fill="#fff" d="M15 8h1.2v6.8H19V16h-4z"/></svg>';
+  function colsExport() {
+    var B = function (r, k) { var b = bacsDe(r); return b ? b[k] : null; };
+    var cols = [
+      ['Site', function (r) { return propre(r.site); }], ['Affaire', function (r) { return r.affaire; }], ['Réseau', function (r) { return r.reseau; }],
+      ['Statut', function (r) { return r.en_commande ? 'Commande : ' + libStatut(r.statut) : libStatut(r.statut); }],
+      ['Marque', function (r) { return marqueDe(r); }], ['Modèle', function (r) { return propre(r.modele); }], ['Famille', function (r) { return familleDe(r); }],
+      ['Version DMS', function (r) { return propre(r.version); }],
+      ['Finition BACS', function (r) { return B(r, 'finition'); }], ['Motorisation BACS', function (r) { return B(r, 'motorisation'); }],
+      ['Énergie', function (r) { return libEnergie(r.energie); }], ['Boîte', function (r) { return propre(r.boite); }],
+      ['Couleur', function (r) { return propre(r.couleur); }], ['Couleur intérieure', function (r) { return propre(r.couleur_interieur); }],
+      ['Millésime', function (r) { return r.millesime; }], ['Type', function (r) { return r.type_stock; }],
+      ['VIN', function (r) { return r.vin; }], ['Immatriculation', function (r) { return B(r, 'immatriculation') || r.immatriculation; }],
+      ['N° commande', function (r) { return numCommande(r); }],
+      ['Entrée en stock', function (r) { return notEmpty(r.date_entree_stock) ? dateFR(r.date_entree_stock) : ''; }],
+      ['Jours de stock', function (r) { return num(r.jours_de_stock); }],
+      ['Lieu de stockage', function (r) { return r.lieu_stockage; }],
+      ['Tarif catalogue', function (r) { return num(r.tarif_catalogue); }], ['Options', function (r) { return num(r.montant_options); }],
+      ['Prix de vente HT', function (r) { return num(r.prix_vente_ht); }], ['Prix de vente TTC', function (r) { return num(r.prix_vente_ttc); }]
+    ];
+    if (S.showPA) cols.push(['Prix d\'achat HT', function (r) { return num(r.prix_achat_ht); }], ['Marge HT', function (r) { return num(r.marge_ht); }]);
+    return cols.concat([
+      ['Réservé', function (r) { return r.reserve ? 'Oui' : 'Non'; }],
+      ['AMC', function (r) { var d = amcDate(r), c = amcCode(r); return amcActif(r) ? [c, d ? dateFR(d) : null].filter(notEmpty).join(' · ') || 'Oui' : ''; }],
+      ['Statut du parc BACS', function (r) { return libParc(B(r, 'statut_parc')); }],
+      ['CO2', function (r) { return num(r.co2); }], ['Puissance fiscale', function (r) { return num(r.puissance_fiscale); }]
+    ]);
+  }
+  function stampVn() { var d = new Date(), p = function (n) { return ('0' + n).slice(-2); }; return d.getFullYear() + p(d.getMonth() + 1) + p(d.getDate()); }
+  function lignesExport() {
+    var cols = colsExport(), l = triees(filtrees());
+    return { cols: cols, l: l, rows: l.map(function (r) { var o = {}; cols.forEach(function (c) { var v = c[1](r); o[c[0]] = v == null ? '' : v; }); return o; }) };
+  }
+  function csvVn(x) {
+    var aoa = [x.cols.map(function (c) { return c[0]; })].concat(x.l.map(function (r) { return x.cols.map(function (c) { var v = c[1](r); return v == null ? '' : v; }); }));
+    var csv = aoa.map(function (row) { return row.map(function (v) { var t = String(v).replace(/"/g, '""'); return /[";\n]/.test(t) ? '"' + t + '"' : t; }).join(';'); }).join('\r\n');
+    var blob = new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8;' });
+    var a = doc.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'stock_vn_' + stampVn() + '.csv'; doc.body.appendChild(a); a.click(); setTimeout(function () { a.remove(); }, 0);
+  }
+  async function exporterExcel(btn) {
+    var x = lignesExport();
+    if (!x.rows.length) return;
+    var lib = btn.innerHTML; btn.disabled = true; btn.innerHTML = LOGO_XLS + '<span>Export…</span>';
+    try {
+      var sess = await sb().auth.getSession();
+      var jwt = sess && sess.data && sess.data.session && sess.data.session.access_token;
+      if (!jwt) throw new Error('session absente');
+      var res = await fetch(ctx.tenant.supabase_url + '/functions/v1/export-xslx', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + jwt, 'apikey': ctx.tenant.supabase_anon_key },
+        body: JSON.stringify({ rows: x.rows, fileName: 'stock_vn_' + stampVn() + '.xlsx', sheetName: 'Stock VN', expiresIn: 300 })
+      });
+      if (!res.ok) throw new Error('HTTP ' + res.status);
+      var out = await res.json(), url = out.url || out.signed_url;
+      if (!url) throw new Error(out.error || 'pas de fichier');
+      var a = doc.createElement('a'); a.href = url; a.download = 'stock_vn_' + stampVn() + '.xlsx'; a.target = '_blank'; doc.body.appendChild(a); a.click(); setTimeout(function () { a.remove(); }, 0);
+    } catch (e) {
+      console.error('[vn] export xlsx', e);
+      csvVn(x);
+    } finally { btn.disabled = false; btn.innerHTML = lib; }
+  }
+
   function brancher() {
     var el = root(); if (!el) return;
     el.querySelectorAll('[data-ong]').forEach(function (b) {
@@ -793,6 +863,8 @@ OD.define('vn-liste', {
         }, 220);
       };
     }
+    var bx = el.querySelector('#vn-xls');
+    if (bx) bx.onclick = function () { exporterExcel(bx); };
     var raz = el.querySelector('#vn-raz');
     if (raz) raz.onclick = function () {
       S.f = { reseau: null, affaire: null, site: null, marque: null, modele: null,
@@ -830,6 +902,7 @@ OD.define('vn-liste', {
     + '.vn-filtres{display:flex;flex-wrap:wrap;gap:7px;margin-bottom:4px;align-items:center}'
     + '.vn-rech{flex:1 1 260px;min-width:220px;border:1px solid #e2eaf5;border-radius:9px;padding:8px 12px;font:inherit;font-size:13.5px;background:#fff;color:#1F4A85}'
     + '.vn-sel{border:1px solid #e2eaf5;border-radius:9px;padding:8px 10px;font:inherit;font-size:13px;background:#fff;color:#1F4A85;max-width:180px}'
+    + '.vn-xls{display:inline-flex;align-items:center;gap:6px;border:1px solid #acc5e4;background:#fff;color:#1F4A85;border-radius:8px;font:inherit;font-size:13px;font-weight:700;cursor:pointer;padding:7px 12px}.vn-xls:hover{background:#eef4fc}.vn-xls:disabled{opacity:.6;cursor:wait}'
     + '.vn-raz{border:none;background:none;color:#2a5ea9;font:inherit;font-size:13px;font-weight:600;cursor:pointer;padding:8px 6px}'
     + '.vn-chips{display:flex;flex-wrap:wrap;align-items:center;gap:7px;margin:10px 2px 2px}'
     + '.vn-chip-lab{font-size:11px;font-weight:800;letter-spacing:.05em;text-transform:uppercase;color:#7a98c5;margin-right:2px}'
