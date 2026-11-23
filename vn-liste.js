@@ -14,6 +14,9 @@
 //    le détail (vn_bacs_fiche), avec un lien direct vers le véhicule dans BACS.
 //  * Le stock reste celui du DMS (v_liste_vn) : c'est lui qui dit ce qui est
 //    en stock, à quel prix et depuis quand ; BACS décrit la voiture.
+//  v18 (23/11/2026) : photos rétablies et chargement allégé — fiches BACS en
+//    un appel (vn_bacs_resume_json, cache 10 min), stock + BACS d'abord, puis
+//    commandes ; au plus 3 requêtes en vol.
 //  v17 (23/11/2026) : CHARGEMENT RAPIDE — stock affiché d'abord, commandes en
 //    arrière-plan, pages en parallèle et triées (voir chargerLot).
 //  v16 (23/11/2026) : EXPORT EXCEL des véhicules affichés (bouton « Exporter »
@@ -239,44 +242,52 @@ OD.define('vn-liste', {
   //  * La fiche BACS (vn_bacs_resume) est lue en parallèle elle aussi et la
   //    liste se complète quand elle arrive.
   var TAILLE = 1000;
-  async function pagesParalleles(nb, lire) {
-    var tous = [];
-    for (var k = 0; k < nb; k++) tous.push(lire(k));
-    var res = await Promise.all(tous);
-    var out = [];
-    for (var m = 0; m < res.length; m++) {
-      if (res[m].error) throw res[m].error;
-      out = out.concat(res[m].data || []);
+  // Lit nb pages avec au plus `par` requêtes en vol : la base (instance du
+  // client) sature si toutes les pages partent d'un coup.
+  async function pagesParalleles(nb, lire, par) {
+    var res = new Array(nb), suivant = 0;
+    async function ouvrier() {
+      while (suivant < nb) {
+        var k = suivant++;
+        var r = await lire(k);
+        if (r.error) throw r.error;
+        res[k] = r.data || [];
+      }
     }
+    var ouvriers = [];
+    for (var w = 0; w < Math.min(par || 3, nb); w++) ouvriers.push(ouvrier());
+    await Promise.all(ouvriers);
+    var out = [];
+    for (var m = 0; m < nb; m++) out = out.concat(res[m] || []);
     return out;
   }
-  async function chargerLot(enCommande) {
-    var q = function () { var x = sb().from('v_liste_vn'); return x; };
-    var c = await q().select('identite_dms', { count: 'exact', head: true }).eq('en_commande', enCommande);
+  async function chargerLot(enCommande, par) {
+    var c = await sb().from('v_liste_vn').select('identite_dms', { count: 'exact', head: true }).eq('en_commande', enCommande);
     if (c.error) throw c.error;
     var nb = Math.max(1, Math.ceil((c.count || 0) / TAILLE));
     return pagesParalleles(Math.min(nb, 40), function (k) {
-      return q().select('*').eq('en_commande', enCommande).order('identite_dms').range(k * TAILLE, (k + 1) * TAILLE - 1);
-    });
+      return sb().from('v_liste_vn').select('*').eq('en_commande', enCommande).order('identite_dms').range(k * TAILLE, (k + 1) * TAILLE - 1);
+    }, par);
   }
   async function chargerBacs() {
+    var m = {};
+    var ranger = function (lot) { (lot || []).forEach(function (b) { if (b && b.commande) m[String(b.commande).trim()] = b; }); };
+    // v18 : un seul appel, servi depuis un cache rafraîchi toutes les 10 min.
     try {
-      // 5 pages lues en même temps ; on s'arrête au premier lot incomplet.
-      var m = {}, k = 0, fini = false;
-      while (!fini && k < 30) {
-        var lots = await Promise.all([0, 1, 2, 3, 4].map(function (d) {
-          return sb().rpc('vn_bacs_resume').order('commande').range((k + d) * TAILLE, (k + d + 1) * TAILLE - 1);
-        }));
-        for (var d = 0; d < lots.length; d++) {
-          if (lots[d].error) { fini = true; break; }
-          var lot = lots[d].data || [];
-          lot.forEach(function (b) { if (b && b.commande) m[String(b.commande).trim()] = b; });
-          if (lot.length < TAILLE) { fini = true; break; }
-        }
-        k += 5;
+      var j = await sb().rpc('vn_bacs_resume_json');
+      if (!j.error && Array.isArray(j.data)) { ranger(j.data); S.bacs = m; return; }
+    } catch (e) { }
+    // Repli (tenant sans cache) : l'ancienne lecture page par page.
+    try {
+      for (var k = 0; k < 30; k++) {
+        var r = await sb().rpc('vn_bacs_resume').order('commande').range(k * TAILLE, (k + 1) * TAILLE - 1);
+        if (r.error) break;
+        var lot = r.data || [];
+        ranger(lot);
+        if (lot.length < TAILLE) break;
       }
-      S.bacs = m;
     } catch (e) { /* fiche BACS absente chez ce tenant : liste DMS seule */ }
+    S.bacs = m;
   }
   function apresDonnees() {
     indexerPhotos();
@@ -289,10 +300,10 @@ OD.define('vn-liste', {
       var role = num(connectedUser().ID_Role);
       S.showPA = role != null && PA_ROLES.indexOf(role) !== -1;
     } catch (e) { S.showPA = false; }
-    var pBacs = chargerBacs().then(function () { if (!S.loading) { apresDonnees(); rendre(); } });
-    var pCmd = chargerLot(true);
+    // 1) Le stock et les fiches BACS (photos, finitions) ensemble, puis affichage.
     try {
-      S.raw = await chargerLot(false);
+      var r = await Promise.all([chargerLot(false, 3), chargerBacs()]);
+      S.raw = r[0];
     } catch (e) {
       S.error = (e && e.message) || String(e);
     }
@@ -300,14 +311,14 @@ OD.define('vn-liste', {
     S.loading = false;
     poserPerimetreParDefaut();
     rendre();
+    // 2) Les commandes constructeur ensuite, sans gêner la consultation.
     try {
-      var cmd = await pCmd;
+      var cmd = await chargerLot(true, 3);
       S.raw = S.raw.concat(cmd);
-    } catch (e) { console.warn('[vn] commandes', e); S.cmdErreur = (e && e.message) || String(e); }
+    } catch (e) { console.warn('[vn] commandes', e); }
     S.cmdCharge = true;
     apresDonnees();
     rendre();
-    await pBacs;
   }
 
   async function poserPerimetreParDefaut() {
