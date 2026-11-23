@@ -1,5 +1,7 @@
 // ============================================================================
 //  PERFORMANCES ÉQUIPE — module One Data (OD.define)  v1
+//  v38 (23/11/2026) : vue Process — note d'exclusions mise à jour (appels
+//    entrants de sociétés, fiches de test, salariés du groupe).
 //  v37 (19/11/2026) : vue Process — sélection de périmètre comme les ventes :
 //    arbre réseau → affaire → site → vendeur, clic = filtre de toute la vue,
 //    « clients › » sur un vendeur = sa liste de clients sans devis.
@@ -3019,7 +3021,7 @@ OD.define('performances', {
         agg[kk].croises += r.croises; agg[kk].avec_devis += r.avec_devis; agg[kk].sans_devis += r.sans_devis;
       });
       h += carte('Par origine du contact', '', tableSources(Object.values(agg).sort((a, b) => b.croises - a.croises)));
-      h += '<p class="pl-note pied">Un client compte une fois par vendeur sur la période, sur le site du contact. Un devis compte s\'il a été fait dans BACS au plus tôt 30 jours avant le contact. Exclus : les clients qui ont passé commande dans les 120 derniers jours (suivi, livraison) et les appels pris par l\'accueil. La tendance compare à la période précédente de même durée.</p>';
+      h += '<p class="pl-note pied">Un client compte une fois par vendeur sur la période, sur le site du contact. Un devis compte s\'il a été fait dans BACS au plus tôt 30 jours avant le contact. Exclus : les clients qui ont passé commande dans les 120 derniers jours (suivi, livraison), les appels pris par l\'accueil, les appels entrants de sociétés (loueurs, partenaires, fournisseurs — les leads de sociétés restent comptés), les fiches de test et les salariés du groupe. La tendance compare à la période précédente de même durée.</p>';
       host.innerHTML = h;
       lier();
     }
