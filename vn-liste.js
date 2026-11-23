@@ -14,6 +14,8 @@
 //    le détail (vn_bacs_fiche), avec un lien direct vers le véhicule dans BACS.
 //  * Le stock reste celui du DMS (v_liste_vn) : c'est lui qui dit ce qui est
 //    en stock, à quel prix et depuis quand ; BACS décrit la voiture.
+//  v17 (23/11/2026) : CHARGEMENT RAPIDE — stock affiché d'abord, commandes en
+//    arrière-plan, pages en parallèle et triées (voir chargerLot).
 //  v16 (23/11/2026) : EXPORT EXCEL des véhicules affichés (bouton « Exporter »
 //    dans la barre de filtres) : onglet, filtres et recherche en cours, toutes
 //    pages confondues. Prix d'achat et marge seulement pour les rôles habilités.
@@ -227,53 +229,87 @@ OD.define('vn-liste', {
   };
 
   // ───────────────────────────────────────────────────────────── donnees
+  // v17 (23/11/2026) : CHARGEMENT RAPIDE.
+  //  * Le stock (≈ 2 000 véhicules) est chargé d'abord et affiché aussitôt ;
+  //    les commandes constructeur (≈ 10 000 lignes, 80 % du volume) suivent en
+  //    arrière-plan. Les onglets Commandes / Tous attendent la fin du lot.
+  //  * Les pages de 1 000 lignes partent en parallèle (au lieu d'une à une),
+  //    triées par identite_dms : sans tri, la pagination PostgREST pouvait
+  //    rendre des doublons ou sauter des lignes.
+  //  * La fiche BACS (vn_bacs_resume) est lue en parallèle elle aussi et la
+  //    liste se complète quand elle arrive.
+  var TAILLE = 1000;
+  async function pagesParalleles(nb, lire) {
+    var tous = [];
+    for (var k = 0; k < nb; k++) tous.push(lire(k));
+    var res = await Promise.all(tous);
+    var out = [];
+    for (var m = 0; m < res.length; m++) {
+      if (res[m].error) throw res[m].error;
+      out = out.concat(res[m].data || []);
+    }
+    return out;
+  }
+  async function chargerLot(enCommande) {
+    var q = function () { var x = sb().from('v_liste_vn'); return x; };
+    var c = await q().select('identite_dms', { count: 'exact', head: true }).eq('en_commande', enCommande);
+    if (c.error) throw c.error;
+    var nb = Math.max(1, Math.ceil((c.count || 0) / TAILLE));
+    return pagesParalleles(Math.min(nb, 40), function (k) {
+      return q().select('*').eq('en_commande', enCommande).order('identite_dms').range(k * TAILLE, (k + 1) * TAILLE - 1);
+    });
+  }
   async function chargerBacs() {
     try {
-      // Pagination explicite : l'API plafonne chaque réponse à 1 000 lignes.
-      var m = {}, taille = 1000;
-      for (var i = 0; i < 30; i++) {
-        var r = await sb().rpc('vn_bacs_resume').order('commande').range(i * taille, (i + 1) * taille - 1);
-        if (r.error) break;
-        var lot = r.data || [];
-        lot.forEach(function (b) { if (b && b.commande) m[String(b.commande).trim()] = b; });
-        if (lot.length < taille) break;
+      // 5 pages lues en même temps ; on s'arrête au premier lot incomplet.
+      var m = {}, k = 0, fini = false;
+      while (!fini && k < 30) {
+        var lots = await Promise.all([0, 1, 2, 3, 4].map(function (d) {
+          return sb().rpc('vn_bacs_resume').order('commande').range((k + d) * TAILLE, (k + d + 1) * TAILLE - 1);
+        }));
+        for (var d = 0; d < lots.length; d++) {
+          if (lots[d].error) { fini = true; break; }
+          var lot = lots[d].data || [];
+          lot.forEach(function (b) { if (b && b.commande) m[String(b.commande).trim()] = b; });
+          if (lot.length < TAILLE) { fini = true; break; }
+        }
+        k += 5;
       }
       S.bacs = m;
     } catch (e) { /* fiche BACS absente chez ce tenant : liste DMS seule */ }
   }
-
-  async function charger() {
-    S.loading = true; S.error = null; rendre();
-    var pBacs = chargerBacs();
-    try {
-      var tout = [], depuis = 0, taille = 1000;
-      // Pagination explicite : PostgREST plafonne les reponses, et 12 000
-      // lignes passent au-dessus de la limite par defaut.
-      for (var i = 0; i < 30; i++) {
-        var r = await sb().from('v_liste_vn').select('*').range(depuis, depuis + taille - 1);
-        if (r.error) { S.error = r.error.message || String(r.error); break; }
-        var lot = r.data || [];
-        tout = tout.concat(lot);
-        if (lot.length < taille) break;
-        depuis += taille;
-      }
-      S.raw = tout;
-    } catch (e) {
-      S.error = (e && e.message) || String(e);
-    }
-    await pBacs;
+  function apresDonnees() {
     indexerPhotos();
     S.amcDbs = S.raw.some(function (r) { return notEmpty(r.code_amc) || r.date_amc; });
+  }
+
+  async function charger() {
+    S.loading = true; S.error = null; S.cmdCharge = false; rendre();
     try {
       var role = num(connectedUser().ID_Role);
       S.showPA = role != null && PA_ROLES.indexOf(role) !== -1;
     } catch (e) { S.showPA = false; }
+    var pBacs = chargerBacs().then(function () { if (!S.loading) { apresDonnees(); rendre(); } });
+    var pCmd = chargerLot(true);
+    try {
+      S.raw = await chargerLot(false);
+    } catch (e) {
+      S.error = (e && e.message) || String(e);
+    }
+    apresDonnees();
     S.loading = false;
     poserPerimetreParDefaut();
     rendre();
+    try {
+      var cmd = await pCmd;
+      S.raw = S.raw.concat(cmd);
+    } catch (e) { console.warn('[vn] commandes', e); S.cmdErreur = (e && e.message) || String(e); }
+    S.cmdCharge = true;
+    apresDonnees();
+    rendre();
+    await pBacs;
   }
 
-  // Le site selectionne dans la barre du haut donne le perimetre de depart.
   async function poserPerimetreParDefaut() {
     if (S.__perimetrePose) return;
     var api = siteApi();
@@ -385,6 +421,10 @@ OD.define('vn-liste', {
     if (S.loading) { el.innerHTML = coque('<div class="vn-vide"><span class="vn-spin"></span>Chargement du stock…</div>'); return; }
     if (S.error) { el.innerHTML = coque('<div class="vn-vide vn-err">' + esc(S.error) + '</div>'); return; }
 
+    if (S.onglet !== 'stock' && !S.cmdCharge) {
+      el.innerHTML = coque(entete() + '<div class="vn-vide"><span class="vn-spin"></span>Chargement des commandes constructeur…</div>');
+      brancher(); return;
+    }
     var l = triees(filtrees());
     var pages = Math.max(1, Math.ceil(l.length / S.perPage));
     if (S.page > pages) S.page = pages;
@@ -405,13 +445,13 @@ OD.define('vn-liste', {
       + '<p>Le parc disponible et les commandes constructeur attendues</p></div>'
       + '<div class="vn-onglets">'
         + ong('stock', 'En stock', nStock)
-        + ong('commandes', 'Commandes', nCmd)
-        + ong('tous', 'Tous', S.raw.length)
+        + ong('commandes', 'Commandes', S.cmdCharge ? nCmd : null)
+        + ong('tous', 'Tous', S.cmdCharge ? S.raw.length : null)
       + '</div></div>';
   }
   function ong(cle, lbl, n) {
     return '<button class="vn-ong' + (S.onglet === cle ? ' on' : '') + '" data-ong="' + cle + '">'
-      + esc(lbl) + '<span>' + ent(n) + '</span></button>';
+      + esc(lbl) + '<span>' + (n == null ? '<i class="vn-spin mini"></i>' : ent(n)) + '</span></button>';
   }
 
   // Quatre reperes, choisis pour la question d'un responsable VN : combien
@@ -902,6 +942,7 @@ OD.define('vn-liste', {
     + '.vn-filtres{display:flex;flex-wrap:wrap;gap:7px;margin-bottom:4px;align-items:center}'
     + '.vn-rech{flex:1 1 260px;min-width:220px;border:1px solid #e2eaf5;border-radius:9px;padding:8px 12px;font:inherit;font-size:13.5px;background:#fff;color:#1F4A85}'
     + '.vn-sel{border:1px solid #e2eaf5;border-radius:9px;padding:8px 10px;font:inherit;font-size:13px;background:#fff;color:#1F4A85;max-width:180px}'
+    + '.vn-spin.mini{width:10px;height:10px;border-width:2px;margin:0;vertical-align:middle}'
     + '.vn-xls{display:inline-flex;align-items:center;gap:6px;border:1px solid #acc5e4;background:#fff;color:#1F4A85;border-radius:8px;font:inherit;font-size:13px;font-weight:700;cursor:pointer;padding:7px 12px}.vn-xls:hover{background:#eef4fc}.vn-xls:disabled{opacity:.6;cursor:wait}'
     + '.vn-raz{border:none;background:none;color:#2a5ea9;font:inherit;font-size:13px;font-weight:600;cursor:pointer;padding:8px 6px}'
     + '.vn-chips{display:flex;flex-wrap:wrap;align-items:center;gap:7px;margin:10px 2px 2px}'
