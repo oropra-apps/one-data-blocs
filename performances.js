@@ -1,5 +1,9 @@
 // ============================================================================
 //  PERFORMANCES ÉQUIPE — module One Data (OD.define)  v1
+//  v41 (24/11/2026) : « Qui est en avance, qui est en retard » suit le niveau
+//    du périmètre, comme « Atteinte par… » : tout le groupe → par marque
+//    (réseau), une marque → par affaire, une affaire → par site, un site →
+//    par vendeur. Un niveau à un seul élément est sauté.
 //  v40 (24/11/2026) TEAM COLIN : objectifs Roole et Accessoires HT, posés
 //    dans la page Objectifs (taux × commandes du vendeur). Roole passe en KPI
 //    à objectif (volume / objectif, couleur au rythme, % des cdes conservé) ;
@@ -1493,9 +1497,11 @@ OD.define('performances', {
       html += '<div class="pf-card" style="margin-bottom:0">' + shead('var(--blue-dk)', 'Où en est-on du mois ?', sub)
         + '<div class="pf-c4-note">Réalisé en % de l\'objectif · trait orange : rythme attendu à date (' + Math.round(__prorata * 100) + ' %) · barre claire : projection de fin de mois au rythme actuel.</div>'
         + (ksA.length ? '<div class="pf-chart-wrap-tc" style="height:' + Math.max(hA, hB) + 'px"><canvas id="pf-ca"></canvas></div>' : '<div class="pf-empty">Aucun objectif sur ce périmètre.</div>') + '</div>';
-      html += '<div class="pf-card" style="margin-bottom:0">' + shead('var(--green)', 'Qui est en avance, qui est en retard', sub)
+      const dB = effectiveChildDim(selRows);
+      const parB = dB.dim === 'kpi' || dB.dim === 'vendeur' ? 'vendeur' : (dB.dim === 'reseau' ? 'marque' : dB.title);
+      html += '<div class="pf-card" style="margin-bottom:0">' + shead('var(--green)', 'Qui est en avance, qui est en retard — par ' + parB, sub)
         + '<div class="pf-cb-chips">' + ksB.map(k => '<span class="pf-chip ' + (state.cbKpi === k.r ? 'active' : '') + '" data-cbkpi="' + esc(k.r) + '">' + esc(k.label) + '</span>').join('') + '</div>'
-        + (nVend ? '<div class="pf-chart-wrap-tc" style="height:' + Math.max(hA, hB) + 'px"><canvas id="pf-cb"></canvas></div>' : '<div class="pf-empty">Aucun vendeur avec un objectif sur cet indicateur.</div>') + '</div>';
+        + (nVend ? '<div class="pf-chart-wrap-tc" style="height:' + Math.max(hA, hB) + 'px"><canvas id="pf-cb"></canvas></div>' : '<div class="pf-empty">Aucun objectif sur cet indicateur dans ce périmètre.</div>') + '</div>';
       html += '</div>';
     }
 
@@ -1734,11 +1740,17 @@ OD.define('performances', {
   // Seuls les vendeurs (et chefs) qui ont un objectif sur l'indicateur.
   function vendeursRythme(rows, kr) {
     const k = KPIS.find(x => x.r === kr); if (!k || !k.o) return [];
+    // v41 : regroupement au niveau suivant du périmètre (marque, affaire, site, vendeur).
+    const d = effectiveChildDim(rows);
+    const cle = d.dim === 'kpi' ? (r => String(vendeurId(r))) : d.keyFn;
+    const lib = d.dim === 'kpi' || d.dim === 'vendeur'
+      ? (r => r.nom_complet_affichage || r.nomComplet || ('Vendeur ' + vendeurId(r)))
+      : d.labelFn;
     const par = {};
     for (const r of rows) {
       if (!estVendeurPerf(r)) continue;
-      const id = String(vendeurId(r));
-      if (!par[id]) par[id] = { nom: r.nom_complet_affichage || r.nomComplet || ('Vendeur ' + id), r: 0, o: 0 };
+      const id = String(cle(r));
+      if (!par[id]) par[id] = { nom: lib(r), r: 0, o: 0 };
       par[id].r += num(r[k.r]); par[id].o += num(r[k.o]);
     }
     return Object.values(par).filter(v => v.o > 0)
