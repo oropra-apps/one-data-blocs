@@ -1,5 +1,8 @@
 // ============================================================================
-//  VROOM TEAM (plateau) — module One Data (OD.define 'plateau')  v13
+//  VROOM TEAM (plateau) — module One Data (OD.define 'plateau')  v14
+//  v14 (24/11/2026) : « Injoignable » : la case « E-mail envoyé par BACS »
+//    est retirée — l'e-mail part avec l'adresse du compte VROOM TEAM dans BACS,
+//    une boîte personnelle. plateau_rappel force aussi p_email à false. SMS gardé.
 //  v13 (13/11/2026) : PARTICULIER / PRO — étiquette « Pro » (+ société et SIRET
 //    connus) dans l'en-tête du lead. RPC plateau_clientele. Aucune affectation.
 //  v12 (13/11/2026) : DEMANDES DU MÊME CLIENT — quand le client a d'autres demandes
@@ -779,7 +782,7 @@
           + '<div class="chips" style="margin-top:12px">' + opts.map(function (o) { return '<button type="button" class="chip' + (S.rappel === o[0] ? ' on' : '') + '" data-a="rappel" data-id="' + o[0] + '">' + o[1] + '</button>'; }).join('') + '</div>'
           + (S.rappel === 'autre' ? '<div class="f"><input type="datetime-local" data-x="rappelDate" value="' + esc(S.rappelDate) + '" aria-label="Date du rappel"></div>' : '')
           + (i === 'injoignable' ? '<label class="ck"><input type="checkbox" data-x="smsBacs"' + (S.smsBacs ? ' checked' : '') + '><span>SMS « nous avons essayé de vous joindre » envoyé par BACS</span></label>'
-            + '<label class="ck"><input type="checkbox" data-x="mailBacs"' + (S.mailBacs ? ' checked' : '') + '><span>E-mail envoyé par BACS</span></label>' : '<p class="small muted" style="margin:12px 0 0">Le lead passe en « Projet Long Terme » dans BACS et vous revient à la date choisie.</p>')
+            /* v14 : plus de case « E-mail envoyé par BACS » (adresse BACS des comptes Vroom = boîte perso) */ : '<p class="small muted" style="margin:12px 0 0">Le lead passe en « Projet Long Terme » dans BACS et vous revient à la date choisie.</p>')
           + '</div>';
       }
       if (i === 'abandon') {
@@ -883,7 +886,7 @@
         } else if (i === 'injoignable' || i === 'long_terme') {
           var q = quandRappel();
           if (!q || isNaN(q.getTime()) || q.getTime() < Date.now() - 60000) throw new Error('Choisissez une date de rappel dans le futur.');
-          await rpc('plateau_rappel', { p_sf_lead_id: sf, p_type: i, p_rappel_le: q.toISOString(), p_note: S.note || null, p_email: i === 'injoignable' && S.mailBacs, p_sms: i === 'injoignable' && S.smsBacs });
+          await rpc('plateau_rappel', { p_sf_lead_id: sf, p_type: i, p_rappel_le: q.toISOString(), p_note: S.note || null, p_email: false, p_sms: i === 'injoignable' && S.smsBacs });
           msg = (i === 'injoignable' ? 'Rappel programmé ' : 'Projet long terme, rappel ') + (quand(q).length > 5 ? 'le ' : 'à ') + quand(q);
         } else if (i === 'abandon') {
           await rpc('plateau_abandonner', { p_sf_lead_id: sf, p_motif: S.motif, p_note: (S.noteAb || '').trim() || (S.note || '').trim() || null });

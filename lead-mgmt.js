@@ -1,6 +1,10 @@
 // ============================================================================
 //  LEAD MANAGEMENT — module One Data (OD.define 'lead-mgmt')
-//  VERSION TEAM COLIN (v127) — déploiement CIBLÉ (publish-targets :
+//  VERSION TEAM COLIN (v128) — déploiement CIBLÉ (publish-targets :
+//  v128 (24/11/2026) : « Injoignable » au plateau Vroom : la case « Envoyer
+//    l'e-mail au client » est masquée (l'e-mail BACS part avec l'adresse du
+//    compte VROOM TEAM dans BACS, une boîte personnelle). plateau_rappel force
+//    aussi p_email à false côté base. Le SMS reste proposé.
 //  v127 (16/11/2026) : vendeur restreint à une clientèle sur un site
 //    (lead_vendeur_clientele, ex. Adrien = pros seulement à L'Haÿ) : le Pool
 //    est filtré en base ; « Prendre » refusé avec un message clair.
@@ -1730,8 +1734,8 @@
           h += '<select id="r-quand" aria-label="Quand rappeler"><option value="2h">Dans 2 h</option><option value="demain">Demain 9 h</option><option value="apres">Après-demain 9 h</option><option value="autre">Autre date…</option></select>'
             + '<input type="datetime-local" id="r-date" value="' + dateLocale(new Date(Date.now() + 2 * 3600000)) + '" hidden>'
             + '<button type="button" class="btn pri" data-a="injoignable"' + dis() + '>Programmer le rappel</button>'
-            + (ecritBacs() ? '</div><div class="row inj-msg"><label class="hint"><input type="checkbox" id="r-email"> Envoyer l\u2019e-mail au client</label>'
-                + '<label class="hint"><input type="checkbox" id="r-sms"> Envoyer le SMS au client</label>' : '');
+            // v128 : plus d'e-mail BACS depuis le plateau (adresse BACS des comptes Vroom = boîte perso).
+            + (ecritBacs() ? '</div><div class="row inj-msg"><label class="hint"><input type="checkbox" id="r-sms"> Envoyer le SMS au client</label>' : '');
         } else if (issue === 'long_terme') {
           h += '<label class="hint" for="lt-date">Rappeler le</label><input type="date" id="lt-date" value="' + dateLocale(demainA(9, 30)).slice(0, 10) + '">'
             + '<button type="button" class="btn pri" data-a="long-terme"' + dis() + '>Programmer</button>';
