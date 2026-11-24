@@ -14,6 +14,10 @@
 //    le détail (vn_bacs_fiche), avec un lien direct vers le véhicule dans BACS.
 //  * Le stock reste celui du DMS (v_liste_vn) : c'est lui qui dit ce qui est
 //    en stock, à quel prix et depuis quand ; BACS décrit la voiture.
+//  v20 (24/11/2026) : véhicules INTROUVABLES dans BACS (cherchés par VIN puis
+//    n° de commande, sans résultat : autres marques, véhicules hors du périmètre
+//    du compte de récolte) distingués de ceux pas encore lus. Filtre Statut
+//    BACS : « Introuvable dans BACS », « Pas encore lu », « Sans n° de commande ».
 //  v19 (24/11/2026) : retours CODIR Team Colin.
 //  * AMC lu dans BACS : l'étiquette porte le code et la date AMC de la fiche
 //    véhicule BACS (« AMC 17 · 12/11/2026 »), plus le code DBS.
@@ -141,7 +145,12 @@ OD.define('vn-liste', {
     return ['AMC' + (amcCode(r) ? ' ' + amcCode(r) : ''), amcDate(r) ? dateFR(amcDate(r)) : null].filter(notEmpty).join(' · ');
   }
   // v19 : statut du parc BACS, « __aucun » = véhicule non lu dans BACS.
-  function parcDe(r) { var b = bacsDe(r); return b && notEmpty(b.statut_parc) ? b.statut_parc : '__aucun'; }
+  function parcDe(r) {
+    var b = bacsDe(r); if (b && notEmpty(b.statut_parc)) return b.statut_parc;
+    var c = numCommande(r); if (!c) return '__sanscde';
+    return S.absents[c] ? '__absent' : '__aucun';
+  }
+  var LIB_PARC_SPECIAL = { '__absent': 'Introuvable dans BACS', '__aucun': 'Pas encore lu dans BACS', '__sanscde': 'Sans n° de commande' };
   function bacsCharge() { for (var k in S.bacs) return true; return false; }
   // Photo : celle du véhicule (fiche BACS), à défaut celle d'un véhicule du
   // stock de même modèle et même teinte DMS (libellés identiques à la source).
@@ -228,7 +237,7 @@ OD.define('vn-liste', {
 
   // ───────────────────────────────────────────────────────────── etat
   var S = {
-    raw: [], bacs: {}, loading: true, error: null,
+    raw: [], bacs: {}, absents: {}, loading: true, error: null,
     onglet: 'stock',        // stock | commandes | tous
     recherche: '', page: 1,
     perPage: num(lsGet(CLE_PP)) || 20,
@@ -279,12 +288,17 @@ OD.define('vn-liste', {
     }, par);
   }
   async function chargerBacs() {
-    var m = {};
-    var ranger = function (lot) { (lot || []).forEach(function (b) { if (b && b.commande) m[String(b.commande).trim()] = b; }); };
+    var m = {}, abs = {};
+    // v20 : les véhicules introuvables dans BACS arrivent marqués « introuvable ».
+    var ranger = function (lot) { (lot || []).forEach(function (b) {
+      if (!b || !b.commande) return;
+      var c = String(b.commande).trim();
+      if (b.introuvable) abs[c] = b; else m[c] = b;
+    }); };
     // v18 : un seul appel, servi depuis un cache rafraîchi toutes les 10 min.
     try {
       var j = await sb().rpc('vn_bacs_resume_json');
-      if (!j.error && Array.isArray(j.data)) { ranger(j.data); S.bacs = m; return; }
+      if (!j.error && Array.isArray(j.data)) { ranger(j.data); S.bacs = m; S.absents = abs; return; }
     } catch (e) { }
     // Repli (tenant sans cache) : l'ancienne lecture page par page.
     try {
@@ -296,7 +310,7 @@ OD.define('vn-liste', {
         if (lot.length < TAILLE) break;
       }
     } catch (e) { /* fiche BACS absente chez ce tenant : liste DMS seule */ }
-    S.bacs = m;
+    S.bacs = m; S.absents = abs;
   }
   function apresDonnees() {
     indexerPhotos();
@@ -553,13 +567,14 @@ OD.define('vn-liste', {
     S.raw.forEach(function (r) { vus[parcDe(r)] = 1; });
     var vals = Object.keys(vus).sort(function (a, b) {
       var ia = ORDRE_PARC.indexOf(a), ib = ORDRE_PARC.indexOf(b);
-      if (a === '__aucun') ia = 99; if (b === '__aucun') ib = 99;
+      if (a.indexOf('__') === 0) ia = 90 + ['__absent', '__aucun', '__sanscde'].indexOf(a);
+      if (b.indexOf('__') === 0) ib = 90 + ['__absent', '__aucun', '__sanscde'].indexOf(b);
       return (ia < 0 ? 50 : ia) - (ib < 0 ? 50 : ib) || a.localeCompare(b);
     });
     if (S.f.parc && !vus[S.f.parc]) vals.unshift(S.f.parc);
     return '<select class="vn-sel' + (S.f.parc ? ' on' : '') + '" data-f="parc" title="Statut du véhicule dans BACS"><option value="">Statut BACS : tous</option>'
       + vals.map(function (v) {
-          return '<option value="' + esc(v) + '"' + (S.f.parc === v ? ' selected' : '') + '>' + esc(v === '__aucun' ? 'Non lu dans BACS' : 'BACS : ' + libParc(v)) + '</option>';
+          return '<option value="' + esc(v) + '"' + (S.f.parc === v ? ' selected' : '') + '>' + esc(LIB_PARC_SPECIAL[v] || 'BACS : ' + libParc(v)) + '</option>';
         }).join('') + '</select>';
   }
   function selStatut() {
@@ -648,7 +663,7 @@ OD.define('vn-liste', {
         + (ecartParc(r, b.statut_parc) ? '<div class="vl-m vl-warn">Livré dans BACS, encore au stock DMS</div>' : '')
         + (b.point_de_vente ? '<div class="vl-m">' + esc(propre(b.point_de_vente.replace(/^\d+\s+/, ''))) + '</div>' : '')
         + (b.facture_le ? '<div class="vl-m">Facturé le ' + esc(dateFR(b.facture_le)) + '</div>' : '')
-      : '<div class="vl-lbl">Véhicule BACS</div><div class="vl-m vl-muet">' + (cmd ? 'Pas encore lu' : 'Sans n° de commande') + '</div>';
+      : '<div class="vl-lbl">Véhicule BACS</div><div class="vl-m vl-muet">' + (!cmd ? 'Sans n° de commande' : S.absents[cmd] ? 'Introuvable dans BACS' : 'Pas encore lu') + '</div>';
     return '<div class="vl-row" data-id="' + esc(r.identite_dms) + '">'
       + '<div class="vl-img">' + vignette(r, b) + '</div>'
       + '<div class="vl-id">'
