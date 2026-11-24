@@ -32,6 +32,29 @@
 //  dans objectif_kpi) et ne sont jamais répartis sur elle. Quand tout le
 //  périmètre affiché est Lexus, les colonnes VU et Arval disparaissent du
 //  tableau, des fiches, de l'atelier et de la vue vendeur.
+//  v11 (16/11/2026, Team Colin) :
+//   - OBJECTIF DE COMMANDES TOTAL en tête : l'atelier affiche « Commandes
+//     particuliers » + « Commandes pro » = « Objectif commandes total » (saisie
+//     directe des deux, plus de taux pour le pro). Les taux PHEV / VU / Kinto /
+//     Arval se calculent sur ce total, M-1 compris. Le tableau gagne une
+//     première colonne « Cde total » (lecture seule, particuliers + pro) à
+//     chaque niveau : réseau, affaire, site, VN / VO, vendeur.
+//   - TABULATION dans le tableau : Tab passe à la cellule suivante,
+//     Maj+Tab à la précédente (Entrée valide, Échap annule, comme avant).
+//  objectifs-v12 (24/11/2026, Team Colin) — OBJECTIFS CALCULÉS PAR TAUX :
+//   - trois objectifs du fichier OBJECTIFS du groupe rejoignent la saisie :
+//     Financement (taux sur les commandes HORS loueurs, même base que la
+//     colonne FI de Performances), Roole (ex-gravage, taux sur les commandes
+//     totales) et Accessoires (montant HT par commande).
+//   - ils ne se saisissent pas cellule par cellule : chaque vendeur reçoit
+//     taux × ses propres commandes, recalculé dès qu'un taux change dans
+//     l'atelier ou qu'une commande change dans le tableau. Stockés dans
+//     objectif_kpi (fi, roole, accessoires) ; v_performances_tc prend
+//     l'objectif FI saisi et retombe sur la moitié des commandes hors loueurs
+//     quand il n'existe pas.
+//   - taux pré-remplis d'après les objectifs déjà enregistrés, sinon M-1.
+//   - tableau resserré (colonnes de 58 px) et coiffé de trois groupes :
+//     Commandes · Mix · Calculés par taux.
 //  Rendu dans __anchor ; SUPABASE_URL/KEY -> ctx.tenant ; getUserJwt() ->
 //  session du client runtime ; doc -> __anchor.ownerDocument. User = oropraUser.
 //  Périmètre 100% v_mon_perimetre (VAR_SITES retirée). 0 vestige.
@@ -110,14 +133,43 @@ const OBJ_VIEW = IS_TC ? 'v_objectifs_tc' : 'v_objectifs'
 // a quitté la saisie : son objectif vaut la moitié des commandes réalisées
 // hors loueurs et se calcule dans v_performances_tc.
 const OBJ_TABLE_FIELDS = IS_TC ? ['commandes'] : ['commandes', 'gravage', 'financements', 'contrat_service', 'waxoyl', 'contacts_jour']
-const KPI_TABLE_FIELDS = IS_TC ? ['pro', 'phev_ev', 'vu', 'kinto', 'arval'] : []
+const KPI_TABLE_FIELDS = IS_TC ? ['pro', 'phev_ev', 'vu', 'kinto', 'arval', 'fi', 'roole', 'accessoires'] : []
 const REAL_FIELDS = IS_TC
-  ? { commandes: 'part_realises', pro: 'pro_realises', phev_ev: 'phev_ev_realises', vu: 'vu_realises', kinto: 'kinto_realises', arval: 'arval_realises' }
+  ? { commandes: 'part_realises', pro: 'pro_realises', phev_ev: 'phev_ev_realises', vu: 'vu_realises', kinto: 'kinto_realises', arval: 'arval_realises',
+      fi: 'financements_hors_loueur', roole: 'gravages_realises', accessoires: 'accessoires_ht', cmd_hl: 'commandes_hors_loueur' }
   : { commandes: 'commandes_realisees', financements: 'financements_realises', contrat_service: 'contrats_service_realises', waxoyl: 'waxoyls_realises', gravage: 'gravages_realises' }
 const FIELDS = OBJ_TABLE_FIELDS.concat(KPI_TABLE_FIELDS)
 const SECONDARY = IS_TC
-  ? [{ k: 'pro', label: 'Pro' }, { k: 'phev_ev', label: 'PHEV / EV' }, { k: 'vu', label: 'VU' }, { k: 'kinto', label: 'Kinto' }, { k: 'arval', label: 'Arval' }]
+  ? [{ k: 'phev_ev', label: 'PHEV / EV' }, { k: 'vu', label: 'VU' }, { k: 'kinto', label: 'Kinto' }, { k: 'arval', label: 'Arval' }]
   : [{ k: 'financements', label: 'Financement' }, { k: 'contrat_service', label: 'CS' }, { k: 'waxoyl', label: 'Waxoyl' }, { k: 'gravage', label: 'Gravage' }]
+
+// --- Objectifs CALCULÉS par taux (Team Colin, 24/11/2026) ---
+// Valeur d'un vendeur = taux × SES commandes. base 'hl' : commandes hors
+// loueurs (total − Kinto − Arval), comme le FI de Performances. base 'tot' :
+// commandes totales. unite '€' : le taux est un montant par commande.
+const DERIVES = IS_TC
+  ? [{ k: 'fi', label: 'Financement', court: 'FI', unite: '%', base: 'hl', aide: 'sur les commandes hors loueurs' },
+     { k: 'roole', label: 'Roole', court: 'Roole', unite: '%', base: 'tot', aide: 'sur les commandes totales' },
+     { k: 'accessoires', label: 'Accessoires HT', court: 'Access.', unite: '€', base: 'tot', aide: 'par commande' }]
+  : []
+const DERIVE_KEYS = DERIVES.map(function (d) { return d.k })
+function estDerive(k) { return DERIVE_KEYS.indexOf(k) >= 0 }
+function deriveDef(k) { return DERIVES.find(function (d) { return d.k === k }) }
+function baseTot(r) { return num(r.commandes) + num(r.pro) }
+function baseHL(r) { return Math.max(0, baseTot(r) - num(r.kinto) - num(r.arval)) }
+function baseOf(r, d) { return d.base === 'hl' ? baseHL(r) : baseTot(r) }
+function deriveVal(r, k) { const d = deriveDef(k), t = num(state.cap && state.cap.taux ? state.cap.taux[k] : 0); return d.unite === '€' ? Math.round(baseOf(r, d) * t) : Math.round(baseOf(r, d) * t / 100) }
+// Recalcule les objectifs dérivés d'une ou plusieurs lignes avec les taux de l'atelier.
+function appliquerDerives(rows) {
+  if (!DERIVES.length || !rows || !rows.length) return
+  ensureCapDefaults()
+  rows.forEach(function (r) { DERIVES.forEach(function (d) { r[d.k] = deriveVal(r, d.k) }) })
+}
+function fmtEur(v) { return Math.round(num(v)).toLocaleString('fr-FR') + ' €' }
+function fmtK(k, v) { return k === 'accessoires' ? fmtEur(v) : String(Math.round(num(v))) }
+const BASES_DERIVES = DERIVES.length ? ['commandes', 'pro', 'kinto', 'arval'] : []
+// Tabulation : la ligne n'est pas redessinée, on met à jour ses cellules calculées sur place.
+function majDerivesLigne(td, r) { try { const tr = td.closest('tr'); if (!tr) return; tr.querySelectorAll('td[data-derive]').forEach(function (c) { c.textContent = fmtK(c.getAttribute('data-derive'), r[c.getAttribute('data-derive')]) }) } catch (e) { } }
 
 // --- Lexus : ni VU ni Arval (29/10/2026) ---
 const KPI_TOYOTA_SEUL = IS_TC ? ['vu', 'arval'] : []
@@ -157,13 +209,18 @@ window.__objState = state
 let data = [], realCur = {}, realM1 = {}, realOk = true, siteMeta = {}, userMeta = {}, originalSnap = {}, loading = false
 const MOIS_NOMS = ['Janvier', 'Février', 'Mars', 'Avril', 'Mai', 'Juin', 'Juillet', 'Août', 'Septembre', 'Octobre', 'Novembre', 'Décembre']
 const GKEYS = IS_TC
-  ? [{ k: 'commandes', label: 'Cde part.' }, { k: 'pro', label: 'Cde pro' }, { k: 'phev_ev', label: 'PHEV / EV' }, { k: 'vu', label: 'VU' }, { k: 'kinto', label: 'Kinto' }, { k: 'arval', label: 'Arval' }]
+  ? [{ k: 'cde_total', label: 'Total', calc: true, grp: 'Commandes' }, { k: 'commandes', label: 'Part.', grp: 'Commandes' }, { k: 'pro', label: 'Pro', grp: 'Commandes' },
+     { k: 'phev_ev', label: 'PHEV/EV', grp: 'Mix' }, { k: 'vu', label: 'VU', grp: 'Mix' }, { k: 'kinto', label: 'Kinto', grp: 'Mix' }, { k: 'arval', label: 'Arval', grp: 'Mix' },
+     { k: 'fi', label: 'FI', calc: true, derive: true, grp: 'Calculés par taux' }, { k: 'roole', label: 'Roole', calc: true, derive: true, grp: 'Calculés par taux' }, { k: 'accessoires', label: 'Access.', calc: true, derive: true, grp: 'Calculés par taux' }]
   : [{ k: 'commandes', label: 'Commandes' }, { k: 'gravage', label: 'Gravages' }, { k: 'financements', label: 'Financements' }, { k: 'contrat_service', label: 'CS' }, { k: 'waxoyl', label: 'Waxoyl' }, { k: 'contacts_jour', label: 'Contacts/j' }]
 const KPIS_SUIVI = IS_TC
-  ? [{ k: 'commandes', label: 'Commandes particuliers' }, { k: 'pro', label: 'Commandes pro' }, { k: 'phev_ev', label: 'PHEV / EV' }, { k: 'vu', label: 'VU' }, { k: 'kinto', label: 'Kinto' }, { k: 'arval', label: 'Arval' }]
+  ? [{ k: 'cde_total', label: 'Commandes total', calc: true }, { k: 'commandes', label: 'Commandes particuliers' }, { k: 'pro', label: 'Commandes pro' }, { k: 'phev_ev', label: 'PHEV / EV' }, { k: 'vu', label: 'VU' }, { k: 'kinto', label: 'Kinto' }, { k: 'arval', label: 'Arval' },
+     { k: 'fi', label: 'Financement (hors loueurs)' }, { k: 'roole', label: 'Roole' }, { k: 'accessoires', label: 'Accessoires HT', euro: true }]
   : [{ k: 'commandes', label: 'Commandes' }, { k: 'financements', label: 'Financements' }, { k: 'contrat_service', label: 'Contrat de service' }, { k: 'waxoyl', label: 'Waxoyl' }, { k: 'gravage', label: 'Gravage' }]
 
 // --- nombres / dates ---
+// Valeur d'un indicateur sur une ligne : « cde_total » = particuliers + pro.
+function valK(r, k) { return k === 'cde_total' ? num(r.commandes) + num(r.pro) : num(r[k]) }
 function num(v) { if (v == null) return 0; if (typeof v === 'number') return isNaN(v) ? 0 : v; const n = parseFloat(String(v).replace(',', '.').trim()); return isNaN(n) ? 0 : n }
 function ymOf(a, m) { return a + '-' + String(m).padStart(2, '0') }
 function prevYM(a, m) { let y = a, mo = m - 1; if (mo === 0) { mo = 12; y-- } return { annee: y, mois: mo, ym: ymOf(y, mo) } }
@@ -255,7 +312,7 @@ function snapshot() { originalSnap = {}; data.forEach(function (r) { const o = {
 function rowDirty(r) { const o = originalSnap[rowKey(r)]; if (!o) return true; for (const f of FIELDS) if (num(r[f]) !== o[f]) return true; return false }
 function dirtyRows() { return data.filter(rowDirty) }
 function isDirty() { return data.some(rowDirty) }
-function resetDraft() { data.forEach(function (r) { const o = originalSnap[rowKey(r)]; if (o) FIELDS.forEach(function (f) { r[f] = o[f] }) }); state.methode = 'manuel'; state.cap = null; state._saveMsg = null; renderObj() }
+function resetDraft() { state._autoDerive = false; data.forEach(function (r) { const o = originalSnap[rowKey(r)]; if (o) FIELDS.forEach(function (f) { r[f] = o[f] }) }); state.methode = 'manuel'; state.cap = null; state._saveMsg = null; renderObj() }
 async function saveDraft(btn) {
   const rows = dirtyRows(); if (!rows.length) return
   const old = btn.textContent; btn.disabled = true; btn.textContent = 'Enregistrement…'
@@ -318,14 +375,33 @@ async function saveKpiRow(r, jwt) {
 function scopeM1(col) { const users = [...new Set(scopeRows().map(function (r) { return r.id_user }))]; return users.reduce(function (a, u) { return a + realiseFor(realM1, u, col) }, 0) }
 function ensureCapDefaults() {
   const rows = scopeRows()
-  if (state.cap == null) state.cap = { commandes: null, taux: {}, contacts: null }
+  if (state.cap == null) state.cap = { commandes: null, pro: null, taux: {}, contacts: null }
   if (state.cap.taux == null) state.cap.taux = {}
   if (state.cap.commandes == null) state.cap.commandes = rows.reduce(function (a, r) { return a + num(r.commandes) }, 0)
-  const m1c = scopeM1(REAL_FIELDS.commandes)
-  SECONDARY.forEach(function (s) { if (state.cap.taux[s.k] == null) { let t = 0; if (realOk && m1c > 0) t = Math.round(scopeM1(REAL_FIELDS[s.k]) / m1c * 100); else { const oc = rows.reduce(function (a, r) { return a + num(r.commandes) }, 0), os = rows.reduce(function (a, r) { return a + num(r[s.k]) }, 0); t = oc > 0 ? Math.round(os / oc * 100) : 0 } state.cap.taux[s.k] = Math.max(0, Math.min(200, t)) } })
+  if (IS_TC && state.cap.pro == null) state.cap.pro = rows.reduce(function (a, r) { return a + (kpiApplicable(r, 'pro') ? num(r.pro) : 0) }, 0)
+  // Base des taux : commandes totales (particuliers + pro chez Team Colin).
+  const m1c = scopeM1(REAL_FIELDS.commandes) + (IS_TC ? scopeM1(REAL_FIELDS.pro) : 0)
+  SECONDARY.forEach(function (s) { if (state.cap.taux[s.k] == null) { let t = 0; if (realOk && m1c > 0) t = Math.round(scopeM1(REAL_FIELDS[s.k]) / m1c * 100); else { const oc = rows.reduce(function (a, r) { return a + num(r.commandes) + (IS_TC ? num(r.pro) : 0) }, 0), os = rows.reduce(function (a, r) { return a + num(r[s.k]) }, 0); t = oc > 0 ? Math.round(os / oc * 100) : 0 } state.cap.taux[s.k] = Math.max(0, Math.min(200, t)) } })
+  // Taux des objectifs calculés : d'abord ceux qu'impliquent les objectifs
+  // déjà enregistrés (rouvrir la page ne doit rien changer), sinon le réalisé
+  // M-1, sinon 50 % de financement (ancienne règle de Performances).
+  DERIVES.forEach(function (d) {
+    if (state.cap.taux[d.k] != null) return
+    const sv = rows.reduce(function (a, r) { return a + num(r[d.k]) }, 0)
+    const sb = rows.reduce(function (a, r) { return a + baseOf(r, d) }, 0)
+    let t = null
+    if (sv > 0 && sb > 0) t = d.unite === '€' ? sv / sb : sv / sb * 100
+    else if (realOk) {
+      const den = d.base === 'hl' ? scopeM1(REAL_FIELDS.cmd_hl) : m1c
+      if (den > 0) t = d.unite === '€' ? scopeM1(REAL_FIELDS[d.k]) / den : scopeM1(REAL_FIELDS[d.k]) / den * 100
+    }
+    if (t == null) t = d.k === 'fi' ? 50 : 0
+    state.cap.taux[d.k] = Math.max(0, Math.min(d.unite === '€' ? 100000 : 200, Math.round(t)))
+  })
   if (state.cap.contacts == null) { const f = {}; rows.forEach(function (r) { const v = num(r.contacts_jour); f[v] = (f[v] || 0) + 1 }); let best = 0, bc = -1; Object.keys(f).forEach(function (k) { if (f[k] > bc) { bc = f[k]; best = Number(k) } }); state.cap.contacts = best }
 }
-function cibleOf(k) { return Math.round(Math.max(0, parseInt(state.cap.commandes) || 0) * (num(state.cap.taux[k]) / 100)) }
+function capTotal() { return Math.max(0, parseInt(state.cap.commandes) || 0) + (IS_TC ? Math.max(0, parseInt(state.cap.pro) || 0) : 0) }
+function cibleOf(k) { return Math.round(capTotal() * (num(state.cap.taux[k]) / 100)) }
 function allocate(target, weights) { const n = weights.length; if (target <= 0 || n === 0) return new Array(n).fill(0); const sw = weights.reduce(function (a, b) { return a + b }, 0); if (sw <= 0) { const base = Math.floor(target / n), rem = target - base * n; const r = []; for (let i = 0; i < n; i++)r.push(base + (i < rem ? 1 : 0)); return r } const raw = weights.map(function (w) { return target * w / sw }); const res = raw.map(function (x) { return Math.floor(x) }); let rem = target - res.reduce(function (a, b) { return a + b }, 0); const ord = raw.map(function (x, i) { return { i: i, f: x - Math.floor(x) } }).sort(function (a, b) { return b.f - a.f }); for (let k = 0; k < rem; k++)res[ord[k % n].i]++; return res }
 function rowWeights(rows, mode) {
   if (mode === 'equitable') return rows.map(function () { return 1 })
@@ -339,11 +415,17 @@ function repartir() {
   ensureCapDefaults()
   const w = rowWeights(rows, state.methode)
   const cmd = allocate(Math.max(0, parseInt(state.cap.commandes) || 0), w); rows.forEach(function (r, i) { r.commandes = cmd[i] })
+  if (IS_TC) {
+    const ip = []; rows.forEach(function (r, i) { if (kpiApplicable(r, 'pro')) ip.push(i); else r.pro = 0 })
+    const ap = allocate(Math.max(0, parseInt(state.cap.pro) || 0), ip.map(function (i) { return w[i] }))
+    ip.forEach(function (i, j) { rows[i].pro = ap[j] })
+  }
   SECONDARY.forEach(function (s) {
     const idx = []; rows.forEach(function (r, i) { if (kpiApplicable(r, s.k)) idx.push(i); else r[s.k] = 0 })
     const arr = allocate(cibleOf(s.k), idx.map(function (i) { return w[i] }))
     idx.forEach(function (i, j) { rows[i][s.k] = arr[j] })
   })
+  appliquerDerives(rows)
   const c = Math.max(0, parseInt(state.cap.contacts) || 0); rows.forEach(function (r) { r.contacts_jour = c })
   state._saveMsg = null; renderObj()
 }
@@ -386,7 +468,7 @@ function makeDirtyBar(doc) {
   const bar = doc.createElement('div'); bar.className = 'obj-dirty'
   if (dirty) {
     bar.style.cssText = 'display:flex;align-items:center;gap:12px;flex-wrap:wrap;background:#faeeda;border:0.5px solid #fac055;border-radius:10px;padding:10px 14px;margin-bottom:16px'
-    const t = doc.createElement('span'); t.style.cssText = 'font-size:12px;color:#633806;font-weight:500'; t.textContent = 'Modifications non enregistrées'; bar.appendChild(t)
+    const t = doc.createElement('span'); t.style.cssText = 'font-size:12px;color:#633806;font-weight:500'; t.textContent = state._autoDerive ? 'Financement, Roole et accessoires calculés avec les taux de l\u2019atelier : à enregistrer' : 'Modifications non enregistrées'; bar.appendChild(t)
     const save = doc.createElement('button'); save.style.cssText = 'margin-left:auto;font-size:12px;font-weight:500;border:none;background:#2a5ea9;color:#fff;border-radius:6px;padding:6px 14px;cursor:pointer'; save.textContent = 'Enregistrer les objectifs'; save.addEventListener('click', function () { saveDraft(save) }); bar.appendChild(save)
     const rst = doc.createElement('button'); rst.style.cssText = 'font-size:12px;border:0.5px solid #acc5e4;background:#fff;color:#2a5ea9;border-radius:6px;padding:6px 12px;cursor:pointer'; rst.textContent = 'Réinitialiser'; rst.addEventListener('click', resetDraft); bar.appendChild(rst)
     state._saveMsg = null
@@ -423,16 +505,27 @@ function makeAtelier(doc) {
   // Cap : commandes + contacts (haut) ; taux -> cibles (bas)
   const cap = doc.createElement('div'); cap.className = 'obj-cap'; cap.style.cssText = 'margin-bottom:14px'
   const top = doc.createElement('div'); top.style.cssText = 'display:flex;gap:28px;flex-wrap:wrap;margin-bottom:14px'
+  const capLbl = function (t) { return '<div style="font-size:11px;color:#acc5e4;text-transform:uppercase;letter-spacing:.4px;margin-bottom:5px">' + t + '</div>' }
   const cCmd = doc.createElement('div')
-  cCmd.innerHTML = '<div style="font-size:11px;color:#acc5e4;text-transform:uppercase;letter-spacing:.4px;margin-bottom:5px">Cible commandes</div>'
+  cCmd.innerHTML = capLbl(IS_TC ? 'Commandes particuliers' : 'Cible commandes')
   const inCmd = numInput(state.cap.commandes, 92); inCmd.className = 'obj-cap'; inCmd.style.fontSize = '17px'; inCmd.style.fontWeight = '500'; cCmd.appendChild(inCmd); top.appendChild(cCmd)
+  let inPro = null, totVal = null
+  if (IS_TC) {
+    const plus = doc.createElement('div'); plus.style.cssText = 'align-self:flex-end;padding-bottom:6px;font-size:18px;color:#acc5e4'; plus.textContent = '+'; top.appendChild(plus)
+    const cPro = doc.createElement('div'); cPro.innerHTML = capLbl('Commandes pro')
+    inPro = numInput(state.cap.pro, 92); inPro.style.fontSize = '17px'; inPro.style.fontWeight = '500'; cPro.appendChild(inPro); top.appendChild(cPro)
+    const eqT = doc.createElement('div'); eqT.style.cssText = 'align-self:flex-end;padding-bottom:6px;font-size:18px;color:#acc5e4'; eqT.textContent = '='; top.appendChild(eqT)
+    const cTot = doc.createElement('div'); cTot.style.cssText = 'background:#eef3fb;border-radius:10px;padding:6px 14px'
+    cTot.innerHTML = capLbl('Objectif commandes total')
+    totVal = doc.createElement('div'); totVal.className = 'obj-cap-total'; totVal.style.cssText = 'font-size:22px;font-weight:700;color:#2a5ea9;line-height:1.2'; totVal.textContent = capTotal(); cTot.appendChild(totVal); top.appendChild(cTot)
+  }
   const cCon = doc.createElement('div')
   cCon.innerHTML = '<div style="font-size:11px;color:#acc5e4;text-transform:uppercase;letter-spacing:.4px;margin-bottom:5px">Contacts / jour</div>'
   const inCon = numInput(state.cap.contacts, 76); inCon.style.fontSize = '17px'; inCon.style.fontWeight = '500'; cCon.appendChild(inCon); top.appendChild(cCon)
   cap.appendChild(top)
 
   const secWrap = doc.createElement('div')
-  secWrap.innerHTML = '<div style="font-size:11px;color:#acc5e4;text-transform:uppercase;letter-spacing:.4px;margin-bottom:6px">Taux (pré-rempli M-1) → cible d\u2019équipe</div>'
+  secWrap.innerHTML = '<div style="font-size:11px;color:#acc5e4;text-transform:uppercase;letter-spacing:.4px;margin-bottom:6px">Taux (pré-rempli M-1, sur les commandes totales) → cible d\u2019équipe</div>'
   const grid = doc.createElement('div'); grid.style.cssText = 'display:grid;grid-template-columns:repeat(auto-fit,minmax(215px,1fr));gap:8px'
   const refs = {}
   const secAff = colonnesPour(SECONDARY, scopeRows())
@@ -445,12 +538,40 @@ function makeAtelier(doc) {
     const cible = numInput(cibleOf(s.k), 66); cible.style.color = '#2a5ea9'; cible.style.fontWeight = '500'
     refs[s.k] = { taux: taux, cible: cible }
     taux.addEventListener('input', function () { state.cap.taux[s.k] = Math.max(0, parseInt(taux.value) || 0); cible.value = cibleOf(s.k) })
-    cible.addEventListener('input', function () { const cmd = Math.max(0, parseInt(state.cap.commandes) || 0); const val = Math.max(0, parseInt(cible.value) || 0); state.cap.taux[s.k] = cmd > 0 ? Math.round(val / cmd * 100) : 0; taux.value = state.cap.taux[s.k] })
+    cible.addEventListener('input', function () { const cmd = capTotal(); const val = Math.max(0, parseInt(cible.value) || 0); state.cap.taux[s.k] = cmd > 0 ? Math.round(val / cmd * 100) : 0; taux.value = state.cap.taux[s.k] })
     cell.appendChild(lab); cell.appendChild(taux); cell.appendChild(pc); cell.appendChild(eq); cell.appendChild(cible); grid.appendChild(cell)
   })
   secWrap.appendChild(grid); cap.appendChild(secWrap)
 
-  inCmd.addEventListener('input', function () { state.cap.commandes = Math.max(0, parseInt(inCmd.value) || 0); secAff.forEach(function (s) { refs[s.k].cible.value = cibleOf(s.k) }); updateBalanceBar() })
+  // Objectifs calculés : un taux, appliqué à chaque vendeur sur ses commandes.
+  const drefs = {}
+  if (DERIVES.length) {
+    const dWrap = doc.createElement('div'); dWrap.style.cssText = 'margin-top:12px'
+    dWrap.innerHTML = '<div style="font-size:11px;color:#acc5e4;text-transform:uppercase;letter-spacing:.4px;margin-bottom:6px">Calculés pour chaque vendeur : taux × ses commandes → total d’équipe</div>'
+    const dGrid = doc.createElement('div'); dGrid.style.cssText = 'display:grid;grid-template-columns:repeat(auto-fit,minmax(215px,1fr));gap:8px'
+    DERIVES.forEach(function (d) {
+      const cell = doc.createElement('div'); cell.className = 'obj-derive'; cell.style.cssText = 'display:grid;grid-template-columns:minmax(0,1fr) 56px 26px 12px 66px;align-items:center;gap:5px;background:#eef8f5;border-radius:8px;padding:6px 9px;min-width:0'
+      cell.title = d.label + ' : ' + (d.unite === '€' ? 'montant HT ' : 'taux ') + d.aide
+      const lab = doc.createElement('span'); lab.style.cssText = 'font-size:11px;color:#3c8f7d;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0'; lab.textContent = d.label
+      const taux = numInput(state.cap.taux[d.k], 56); taux.className = 'obj-taux-' + d.k
+      const u = doc.createElement('span'); u.textContent = d.unite === '€' ? '€/cde' : '%'; u.style.cssText = 'font-size:10px;color:#7fbfb0;white-space:nowrap'
+      const eq = doc.createElement('span'); eq.textContent = '→'; eq.style.cssText = 'font-size:12px;color:#acc5e4;text-align:center'
+      const tot = doc.createElement('span'); tot.className = 'obj-derive-tot'; tot.style.cssText = 'font-size:13px;font-weight:700;color:#2a5ea9;text-align:right;white-space:nowrap;font-variant-numeric:tabular-nums'
+      drefs[d.k] = tot
+      taux.addEventListener('input', function () { state.cap.taux[d.k] = Math.max(0, parseInt(taux.value) || 0); majDerives() })
+      // À la validation (sortie du champ / Entrée), le taux est appliqué aux lignes.
+      taux.addEventListener('change', function () { state.cap.taux[d.k] = Math.max(0, parseInt(taux.value) || 0); appliquerDerives(scopeRows()); state._saveMsg = null; renderObj() })
+      cell.appendChild(lab); cell.appendChild(taux); cell.appendChild(u); cell.appendChild(eq); cell.appendChild(tot); dGrid.appendChild(cell)
+    })
+    dWrap.appendChild(dGrid); cap.appendChild(dWrap)
+  }
+  // Total d'équipe = somme des valeurs individuelles que le taux produira.
+  function majDerives() { DERIVES.forEach(function (d) { if (drefs[d.k]) drefs[d.k].textContent = fmtK(d.k, scopeRows().reduce(function (a, r) { return a + deriveVal(r, d.k) }, 0)) }) }
+  majDerives()
+
+  const majCap = function () { if (totVal) totVal.textContent = capTotal(); secAff.forEach(function (s) { refs[s.k].cible.value = cibleOf(s.k) }); updateBalanceBar() }
+  inCmd.addEventListener('input', function () { state.cap.commandes = Math.max(0, parseInt(inCmd.value) || 0); majCap() })
+  if (inPro) inPro.addEventListener('input', function () { state.cap.pro = Math.max(0, parseInt(inPro.value) || 0); majCap() })
   inCon.addEventListener('input', function () { state.cap.contacts = Math.max(0, parseInt(inCon.value) || 0) })
   card.appendChild(cap)
 
@@ -490,7 +611,7 @@ function makeAtelier(doc) {
 }
 function updateBalanceBar() {
   const rd = doc, fill = rd.querySelector('#obj-balfill'), pill = rd.querySelector('#obj-balpill'); if (!fill || !pill) return
-  const rows = scopeRows(), sum = rows.reduce(function (a, r) { return a + num(r.commandes) }, 0), target = Math.max(0, parseInt(state.cap && state.cap.commandes) || 0)
+  const rows = scopeRows(), sum = rows.reduce(function (a, r) { return a + num(r.commandes) + (IS_TC ? num(r.pro) : 0) }, 0), target = state.cap ? capTotal() : 0
   fill.style.width = (target > 0 ? Math.min(100, Math.round(sum / target * 100)) : 0) + '%'
   let bg, col, fc, txt
   if (target === 0) { bg = '#f0f2f5'; col = '#8a96a8'; fc = '#dde2ea'; txt = 'fixez une cible' }
@@ -503,26 +624,53 @@ function updateBalanceBar() {
 // --- édition cellule (brouillon, pas de PATCH) ---
 function makeEditableCell(r, field, doc) {
   const td = doc.createElement('td')
+  if (field === 'cde_total') { td.style.cssText = 'padding:' + CELL_PAD + ';text-align:center;font-size:12px;font-weight:700;color:#2a5ea9;background:#f5f8fc;font-variant-numeric:tabular-nums'; td.title = 'Particuliers + pro'; td.textContent = Math.round(valK(r, field)); return td }
+  if (estDerive(field)) {
+    const d = deriveDef(field), o = originalSnap[rowKey(r)], chg = o && num(o[field]) !== num(r[field])
+    td.style.cssText = 'padding:' + CELL_PAD + ';text-align:center;font-size:12px;background:#f4fbf9;color:' + (chg ? '#2a5ea9' : '#3c8f7d') + ';font-weight:' + (chg ? '700' : '500') + ';font-variant-numeric:tabular-nums;white-space:nowrap'
+    td.title = d.label + ' calculé : ' + (d.unite === '€' ? 'montant par commande' : 'taux') + ' de l’atelier ' + d.aide
+    td.setAttribute('data-derive', field)
+    td.textContent = fmtK(field, r[field]); return td
+  }
   if (!kpiApplicable(r, field)) { td.style.cssText = 'padding:' + CELL_PAD + ';text-align:center;color:#acc5e4;font-size:12px'; td.title = 'Sans objet chez Lexus'; td.textContent = '—'; return td }
   if (!canEdit) { td.style.cssText = 'padding:' + CELL_PAD + ';text-align:center'; const s = doc.createElement('span'); s.style.cssText = 'color:#4a6a8a;font-size:12px'; s.textContent = r[field] || 0; td.appendChild(s); return td }
-  td.style.cssText = 'padding:' + CELL_PAD + ';text-align:center;cursor:pointer'; let editing = false
+  td.style.cssText = 'padding:' + CELL_PAD + ';text-align:center;cursor:pointer'; td.className = 'obj-ed'; let editing = false, saut = false
   const dirty = function () { const o = originalSnap[rowKey(r)]; return o && num(o[field]) !== num(r[field]) }
   function span() { editing = false; td.innerHTML = ''; const s = doc.createElement('span'); s.style.cssText = 'font-size:12px;color:' + (dirty() ? '#2a5ea9' : '#4a6a8a') + ';font-weight:' + (dirty() ? '500' : '400'); s.textContent = r[field] || 0; td.appendChild(s); td.onmouseenter = function () { td.style.background = '#f5f8fc' }; td.onmouseleave = function () { td.style.background = '' } }
   function editor() {
     editing = true; td.onmouseenter = null; td.onmouseleave = null; td.innerHTML = ''; td.style.background = '#f0f6ff'; const i = doc.createElement('input'); i.type = 'text'; i.value = r[field] || 0; i.style.cssText = 'width:48px;text-align:center;border:none;border-bottom:1.5px solid #2a5ea9;background:transparent;font-size:12px;color:#2a5ea9;outline:none;padding:0'; td.appendChild(i); i.focus(); i.select()
-    function val() { r[field] = parseInt(i.value) || 0; state._saveMsg = null; renderObj() }
-    i.addEventListener('keydown', function (e) { if (e.key === 'Enter') val(); if (e.key === 'Escape') { td.style.background = ''; span() } })
-    i.addEventListener('blur', function () { td.style.background = ''; if (String(parseInt(i.value) || 0) !== String(r[field] || 0)) val(); else span() })
+    // Une commande, un Kinto ou un Arval qui change : les objectifs calculés de la ligne suivent.
+    function suivre() { if (BASES_DERIVES.indexOf(field) >= 0) appliquerDerives([r]) }
+    function val() { r[field] = parseInt(i.value) || 0; suivre(); state._saveMsg = null; renderObj() }
+    i.addEventListener('keydown', function (e) {
+      if (e.key === 'Tab') {
+        // Tabulation : la valeur est gardée, la cellule voisine s'ouvre ; le
+        // tableau n'est recalculé (totaux) qu'à la sortie de la saisie.
+        e.preventDefault(); saut = true
+        r[field] = parseInt(i.value) || 0; suivre(); state._saveMsg = null
+        majDerivesLigne(td, r)
+        const tbl = td.closest('table'); const cells = tbl ? Array.prototype.slice.call(tbl.querySelectorAll('td.obj-ed')) : []
+        const idx = cells.indexOf(td); const next = cells[idx + (e.shiftKey ? -1 : 1)]
+        td.style.background = ''; span(); saut = false
+        try { updateBalanceBar() } catch (er) { }
+        if (next) next.click(); else renderObj()
+        return
+      }
+      if (e.key === 'Enter') val(); if (e.key === 'Escape') { td.style.background = ''; span() } })
+    i.addEventListener('blur', function () { if (saut || !editing) return; td.style.background = ''; if (String(parseInt(i.value) || 0) !== String(r[field] || 0)) val(); else span() })
   }
   span(); td.addEventListener('click', function () { if (!editing) editor() }); return td
 }
 
 // --- arbre périmètre ---
 // Densité du tableau : resserrée sur le profil Team Colin (7 colonnes chiffrées).
-const CELL_PAD = IS_TC ? '3px 6px' : '6px 8px'
-const COL_W = IS_TC ? '74px' : '90px'
+const CELL_PAD = IS_TC ? '3px 3px' : '6px 8px'
+const COL_W = IS_TC ? '58px' : '90px'
+const COL_W_EUR = '74px'   // accessoires : montant en euros
+const COL0_W = IS_TC ? 190 : 230
+function colW(k) { return k === 'accessoires' ? COL_W_EUR : COL_W }
 function aggNew() { const a = { _n: 0, _lexN: 0 }; GKEYS.forEach(function (k) { a[k.k] = 0 }); return a }
-function aggAdd(a, r) { a._n++; if (estLexus(r)) a._lexN++; GKEYS.forEach(function (k) { a[k.k] += num(r[k.k]) }) }
+function aggAdd(a, r) { a._n++; if (estLexus(r)) a._lexN++; GKEYS.forEach(function (k) { a[k.k] += valK(r, k.k) }) }
 function aggLexus(a) { return KPI_TOYOTA_SEUL.length > 0 && a && a._n > 0 && a._lexN === a._n }
 function buildTree(rows) {
   const R = {}
@@ -604,14 +752,16 @@ function renderCards(rootEl, doc) {
       GKEYS.filter(function (k) { return kpiApplicable(r, k.k) }).forEach(function (k, gi) {
         const line = doc.createElement('div'); line.style.cssText = 'display:flex;align-items:center;justify-content:space-between;gap:10px;padding:5px 0' + (gi ? ';border-top:0.5px solid #f1f5fb' : '')
         const lab = doc.createElement('span'); lab.style.cssText = 'font-size:13px;color:#4a6a8a'; lab.textContent = k.label; line.appendChild(lab)
-        if (canEdit) {
+        if (k.calc) {
+          const val = doc.createElement('span'); val.className = k.derive ? ('obj-card-d obj-card-d-' + k.k) : 'obj-card-total'; val.style.cssText = 'font-size:16px;font-weight:700;color:' + (k.derive ? '#3c8f7d' : '#2a5ea9'); val.textContent = fmtK(k.k, valK(r, k.k)); line.appendChild(val)
+        } else if (canEdit) {
           const inp = doc.createElement('input'); inp.type = 'number'; inp.inputMode = 'numeric'; inp.min = '0'; inp.step = '1'; inp.value = (r[k.k] == null ? 0 : r[k.k])
           inp.style.cssText = 'width:74px;text-align:right;padding:6px 9px;border:0.5px solid #cfe0f2;border-radius:8px;font-size:15px;color:#2a5ea9;font-weight:600;outline:none;font-family:inherit'
           inp.addEventListener('focus', function () { inp.select() })
-          inp.addEventListener('input', function () { r[k.k] = parseInt(inp.value) || 0; state._saveMsg = null; try { updateBalanceBar() } catch (e) { } })
+          inp.addEventListener('input', function () { r[k.k] = parseInt(inp.value) || 0; if (BASES_DERIVES.indexOf(k.k) >= 0) appliquerDerives([r]); state._saveMsg = null; try { const t = card.querySelector('.obj-card-total'); if (t) t.textContent = Math.round(valK(r, 'cde_total')); DERIVES.forEach(function (d) { const e = card.querySelector('.obj-card-d-' + d.k); if (e) e.textContent = fmtK(d.k, r[d.k]) }); updateBalanceBar() } catch (e) { } })
           line.appendChild(inp)
         } else {
-          const val = doc.createElement('span'); val.style.cssText = 'font-size:16px;font-weight:600;color:#2a5ea9'; val.textContent = Math.round(num(r[k.k])); line.appendChild(val)
+          const val = doc.createElement('span'); val.style.cssText = 'font-size:16px;font-weight:600;color:#2a5ea9'; val.textContent = fmtK(k.k, valK(r, k.k)); line.appendChild(val)
         }
         body.appendChild(line)
       })
@@ -632,15 +782,27 @@ function renderTree(rootEl, doc) {
   const nbSites = tree.reduce(function (s, R) { return s + R.affaires.reduce(function (x, A) { return x + A.sitesArr.length }, 0) }, 0)
   const sitesDef = nbSites <= 3, oneR = tree.length === 1
   const table = doc.createElement('table'); table.className = 'obj-tree'; table.style.cssText = 'width:100%;border-collapse:collapse;font-size:12px;table-layout:fixed'
-  const cg = doc.createElement('colgroup');[IS_TC ? '210px' : '230px'].concat(COLS.map(function () { return COL_W })).forEach(function (w) { const c = doc.createElement('col'); c.style.width = w; cg.appendChild(c) }); table.appendChild(cg)
+  const cg = doc.createElement('colgroup');[COL0_W + 'px'].concat(COLS.map(function (k) { return colW(k.k) })).forEach(function (w) { const c = doc.createElement('col'); c.style.width = w; cg.appendChild(c) }); table.appendChild(cg)
   const th = doc.createElement('thead'), hr = doc.createElement('tr'); hr.style.cssText = 'background:#2a5ea9'
-    ;['Périmètre'].concat(COLS.map(function (k) { return k.label })).forEach(function (h, i, arr) { const e = doc.createElement('th'); e.style.cssText = 'color:#fff;font-weight:400;padding:7px 8px;text-align:' + (i === 0 ? 'left' : 'center') + ';font-size:10px'; if (i === 0) e.style.borderRadius = '5px 0 0 5px'; if (i === arr.length - 1) e.style.borderRadius = '0 5px 5px 0'; e.textContent = h; hr.appendChild(e) })
+  // Ligne de groupes (Team Colin) : Commandes · Mix · Calculés par taux.
+  if (COLS.some(function (k) { return k.grp })) {
+    const gr = doc.createElement('tr'); const g0 = doc.createElement('th'); g0.style.cssText = 'padding:0'; gr.appendChild(g0)
+    const grps = []; COLS.forEach(function (k) { const last = grps[grps.length - 1]; if (last && last.nom === k.grp) last.n++; else grps.push({ nom: k.grp || '', n: 1 }) })
+    grps.forEach(function (g) {
+      const e = doc.createElement('th'); e.colSpan = g.n
+      const der = g.nom === 'Calculés par taux'
+      e.style.cssText = 'padding:3px 2px 4px;font-size:10px;font-weight:600;text-align:center;letter-spacing:.3px;text-transform:uppercase;color:' + (der ? '#3c8f7d' : '#7a9cc4') + ';border-bottom:2px solid ' + (der ? '#53bda7' : '#acc5e4')
+      e.textContent = g.nom; gr.appendChild(e)
+    })
+    th.appendChild(gr)
+  }
+    ;['Périmètre'].concat(COLS.map(function (k) { return k.label })).forEach(function (h, i, arr) { const e = doc.createElement('th'); const kd = i > 0 && COLS[i - 1].derive; e.style.cssText = 'color:#fff;font-weight:' + (kd ? '600' : '400') + ';padding:6px ' + (IS_TC ? '3px' : '8px') + ';white-space:nowrap;background:' + (kd ? '#53bda7' : 'transparent') + ';text-align:' + (i === 0 ? 'left' : 'center') + ';font-size:10px'; if (i === 0) e.style.borderRadius = '5px 0 0 5px'; if (i === arr.length - 1) e.style.borderRadius = '0 5px 5px 0'; e.textContent = h; hr.appendChild(e) })
   th.appendChild(hr); table.appendChild(th)
   const tb = doc.createElement('tbody'); table.appendChild(tb)
   function caret(open, key) { const c = doc.createElement('span'); c.textContent = open ? '▾ ' : '▸ '; c.style.cssText = 'color:#7a9cc4;cursor:pointer'; c.addEventListener('click', function (e) { e.stopPropagation(); state.expanded[key] = !open; renderObj() }); return c }
-  function sumTd(v, col, wt) { const td = doc.createElement('td'); td.style.cssText = 'padding:' + CELL_PAD + ';text-align:center;font-size:12px;color:' + col + ';font-weight:' + wt + ';font-variant-numeric:tabular-nums'; td.textContent = Math.round(v); return td }
+  function sumTd(v, col, wt, k) { const td = doc.createElement('td'); td.style.cssText = 'padding:' + CELL_PAD + ';text-align:center;font-size:12px;color:' + col + ';font-weight:' + wt + ';font-variant-numeric:tabular-nums;white-space:nowrap' + (estDerive(k) ? ';background:#f4fbf9' : ''); td.textContent = fmtK(k, v); return td }
   // Cellule d'agrégat : « — » pour VU / Arval sur un nœud entièrement Lexus.
-  function aggTd(agg, k, col, wt) { if (KPI_TOYOTA_SEUL.indexOf(k) >= 0 && aggLexus(agg)) { const td = sumTd(0, '#acc5e4', 400); td.textContent = '—'; td.title = 'Sans objet chez Lexus'; return td } return sumTd(agg[k], col, wt) }
+  function aggTd(agg, k, col, wt) { if (KPI_TOYOTA_SEUL.indexOf(k) >= 0 && aggLexus(agg)) { const td = sumTd(0, '#acc5e4', 400); td.textContent = '—'; td.title = 'Sans objet chez Lexus'; return td } return sumTd(agg[k], col, wt, k) }
   function aggRow(label, key, agg, bg, pad, col, wt, open, selObj) {
     const tr = doc.createElement('tr'); tr.style.cssText = 'border-bottom:0.5px solid #eaf0f9;background:' + (selObj && selEquals(selObj.level, selObj) ? '#dde9f7' : bg) + ';cursor:pointer'
     const td0 = doc.createElement('td'); td0.style.cssText = 'padding:' + CELL_PAD + ';padding-left:' + pad + 'px;font-size:12px;color:' + col + ';font-weight:' + wt + ';white-space:nowrap;overflow:hidden;text-overflow:ellipsis'
@@ -709,7 +871,7 @@ function renderTree(rootEl, doc) {
   const td0 = doc.createElement('td'); td0.style.cssText = 'padding:7px 8px;color:#2a5ea9;font-weight:500;font-size:12px'; td0.textContent = 'Total — ' + (state.vnvo === 'VNVO' ? 'VN + VO' : state.vnvo); tr.appendChild(td0)
   COLS.forEach(function (k) { tr.appendChild(aggTd(tot, k.k, '#2a5ea9', 500)) }); ft.appendChild(tr); table.appendChild(ft)
   table.style.display = 'table'
-  table.style.minWidth = (parseInt(IS_TC ? '210' : '230') + COLS.length * parseInt(COL_W) + 20) + 'px'
+  table.style.minWidth = (COL0_W + COLS.reduce(function (a, k) { return a + parseInt(colW(k.k)) }, 0) + 20) + 'px'
   const objScroll = doc.createElement('div')
   objScroll.style.cssText = 'overflow-x:auto;-webkit-overflow-scrolling:touch;max-width:100%'
   objScroll.appendChild(table)
@@ -717,7 +879,7 @@ function renderTree(rootEl, doc) {
 }
 
 // --- vue vendeur ---
-function aggObjectif(f) { return visibleRows().reduce(function (a, r) { return a + num(r[f]) }, 0) }
+function aggObjectif(f) { return visibleRows().reduce(function (a, r) { return a + valK(r, f) }, 0) }
 function renderVendeur(rootEl, doc) {
   const rows = visibleRows()
   if (!rows.length) { const m = doc.createElement('div'); m.style.cssText = 'text-align:center;padding:30px;color:#7a9cc4;font-size:12px;font-style:italic'; m.textContent = 'Aucun objectif pour cette période.'; rootEl.appendChild(m); return }
@@ -730,14 +892,15 @@ function renderVendeur(rootEl, doc) {
   rootEl.appendChild(hero)
   const grid = doc.createElement('div'); grid.className = 'obj-cards'; grid.style.cssText = 'display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:12px'
   for (const kp of colonnesPour(KPIS_SUIVI, rows)) {
-    const obj = aggObjectif(kp.k), real = realOk ? realiseFor(realCur, myId, REAL_FIELDS[kp.k]) : 0, pct = obj > 0 ? Math.round(real / obj * 100) : 0, ps = paceStyle(real, obj, prorata), reste = Math.max(0, obj - real)
+    const obj = aggObjectif(kp.k), real = realOk ? (kp.k === 'cde_total' ? realiseFor(realCur, myId, REAL_FIELDS.commandes) + realiseFor(realCur, myId, REAL_FIELDS.pro) : realiseFor(realCur, myId, REAL_FIELDS[kp.k])) : 0, pct = obj > 0 ? Math.round(real / obj * 100) : 0, ps = paceStyle(real, obj, prorata), reste = Math.max(0, obj - real)
     let cad
     if (obj <= 0) cad = 'pas d\u2019objectif fixé'
     else if (reste <= 0) cad = 'objectif atteint'
-    else if (jr <= 0) cad = 'mois terminé · ' + reste + ' restant' + (reste > 1 ? 's' : '')
+    else if (jr <= 0) cad = 'mois terminé · ' + (kp.euro ? fmtEur(reste) : reste) + ' restant' + (reste > 1 && !kp.euro ? 's' : '')
+    else if (kp.euro) cad = 'reste ' + fmtEur(reste) + ' en ' + jr + ' j ouvrés'
     else cad = 'reste ' + reste + ' en ' + jr + ' j ouvrés ≈ 1 tous les ' + (Math.round(jr / reste * 10) / 10) + ' j'
     const card = doc.createElement('div'); card.className = 'obj-card'; card.style.cssText = 'background:#f5f8fc;border-radius:10px;padding:14px 16px'; const tick = Math.round(prorata * 100)
-    card.innerHTML = '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px"><span style="font-size:11px;color:#7a9cc4;text-transform:uppercase;letter-spacing:.4px">' + kp.label + '</span><span style="font-size:12px;font-weight:500;padding:3px 9px;border-radius:8px;background:' + ps.bg + ';color:' + ps.col + '">' + (realOk ? ps.txt : '—') + '</span></div><div style="display:flex;align-items:baseline;gap:6px;margin-bottom:10px"><span style="font-size:24px;font-weight:500;color:#2a5ea9">' + (realOk ? Math.round(real) : '—') + '</span><span style="font-size:14px;color:#7a9cc4">/ ' + Math.round(obj) + '</span></div><div style="position:relative;height:6px;background:#fff;border:0.5px solid #eaf0f9;border-radius:8px;overflow:hidden;margin-bottom:6px"><div style="height:100%;width:' + Math.min(100, pct) + '%;background:' + ps.bar + '"></div><div style="position:absolute;top:-2px;bottom:-2px;left:' + tick + '%;width:2px;background:#2a5ea9"></div></div><div style="font-size:11px;color:#4a6a8a">' + cad + '</div>'
+    card.innerHTML = '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px"><span style="font-size:11px;color:#7a9cc4;text-transform:uppercase;letter-spacing:.4px">' + kp.label + '</span><span style="font-size:12px;font-weight:500;padding:3px 9px;border-radius:8px;background:' + ps.bg + ';color:' + ps.col + '">' + (realOk ? ps.txt : '—') + '</span></div><div style="display:flex;align-items:baseline;gap:6px;margin-bottom:10px"><span style="font-size:24px;font-weight:500;color:#2a5ea9">' + (realOk ? fmtK(kp.k, real) : '—') + '</span><span style="font-size:14px;color:#7a9cc4">/ ' + fmtK(kp.k, obj) + '</span></div><div style="position:relative;height:6px;background:#fff;border:0.5px solid #eaf0f9;border-radius:8px;overflow:hidden;margin-bottom:6px"><div style="height:100%;width:' + Math.min(100, pct) + '%;background:' + ps.bar + '"></div><div style="position:absolute;top:-2px;bottom:-2px;left:' + tick + '%;width:2px;background:#2a5ea9"></div></div><div style="font-size:11px;color:#4a6a8a">' + cad + '</div>'
     grid.appendChild(card)
   }
   rootEl.appendChild(grid)
@@ -775,6 +938,16 @@ async function boot() {
     if (out[2]) realM1 = out[2].map || {}
     siteMeta = {}; userMeta = {}; const h = out[3]; if (h) { siteMeta = h.sites || {}; userMeta = h.users || {} }
     enrichRows(); snapshot(); state.cap = null
+    // Mois dont les objectifs calculés n'ont jamais été posés (tous à zéro alors
+    // que des commandes sont fixées) : on les calcule avec les taux pré-remplis
+    // et le bandeau invite à enregistrer. Rien n'est écrit sans le clic.
+    state._autoDerive = false
+    if (IS_TC && canEdit && DERIVES.length) {
+      const sc = scopeRows()
+      const aCdes = sc.some(function (r) { return baseTot(r) > 0 })
+      const vides = sc.every(function (r) { return DERIVES.every(function (d) { return num(r[d.k]) === 0 }) })
+      if (aCdes && vides) { appliquerDerives(sc); state._autoDerive = isDirty() }
+    }
   } catch (e) { console.error('Erreur boot objectifs:', e); data = []; realCur = {}; realM1 = {}; realOk = false; siteMeta = {}; userMeta = {}; originalSnap = {} }
   finally { loading = false; renderObj() }
 }
