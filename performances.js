@@ -1,5 +1,11 @@
 // ============================================================================
 //  PERFORMANCES ÉQUIPE — module One Data (OD.define)  v1
+//  v40 (24/11/2026) TEAM COLIN : objectifs Roole et Accessoires HT, posés
+//    dans la page Objectifs (taux × commandes du vendeur). Roole passe en KPI
+//    à objectif (volume / objectif, couleur au rythme, % des cdes conservé) ;
+//    Accessoires HT affiche « réalisé / objectif » en euros quand un objectif
+//    existe, et l'export Excel gagne sa colonne objectif. L'objectif FI vient
+//    désormais de la saisie (repli : moitié des cdes hors loueurs) via la vue.
 //  v39 (23/11/2026) : vue Process — filtre Univers VN + VO / VN / VO.
 //  v38 (23/11/2026) : vue Process — note d'exclusions mise à jour (appels
 //    entrants de sociétés, fiches de test, salariés du groupe).
@@ -455,7 +461,10 @@ OD.define('performances', {
     { r: 'financements_hors_loueur', o: 'objectif_financements', label: 'FI', mode: 'obj',
       pen: true, penDen: 'commandes_hors_loueur', derive: true, vue: 'pilotage' },
     { r: 'loa_realises', label: 'LOA / Easy', mode: 'taux', pen: true, vue: 'pilotage' },
-    { r: 'gravages_realises', label: 'Roole', mode: 'taux', pen: true, vue: 'pilotage' },
+    // Roole et accessoires : objectifs calculés dans la page Objectifs (taux ×
+    // commandes du vendeur, 24/11/2026). Sans objectif saisi, la cellule
+    // garde le volume et le % des commandes, comme avant.
+    { r: 'gravages_realises', o: 'objectif_roole', label: 'Roole', mode: 'obj', pen: true, vue: 'pilotage' },
     { r: 'phev_ev_realises', o: 'objectif_phev_ev', label: 'PHEV / EV', mode: 'obj', vue: 'pilotage' },
     { r: 'vu_realises', o: 'objectif_vu', label: 'VU', mode: 'obj', vue: 'pilotage' },
     { r: 'kinto_realises', o: 'objectif_kinto', label: 'Kinto', mode: 'obj', vue: 'pilotage' },
@@ -463,7 +472,7 @@ OD.define('performances', {
     { r: 'vdvk_realises', label: 'dont VD/VK', mode: 'taux', vue: 'mix' },
     { r: 'pack_premium_realises', label: 'Pack Premium', mode: 'taux', vue: 'mix' },
     { r: 'reprises_realises', label: 'Reprises', mode: 'taux', vue: 'mix' },
-    { r: 'accessoires_ht', label: 'Accessoires HT', mode: 'euro', vue: 'mix' },
+    { r: 'accessoires_ht', o: 'objectif_accessoires', label: 'Accessoires HT', mode: 'euro', vue: 'mix' },
     // Agrégés mais jamais affichés : ils servent de dénominateur au taux de
     // financement et au calcul de l'objectif.
     { r: 'commandes_hors_loueur', label: '', mode: 'interne', vue: 'aucune' },
@@ -599,6 +608,15 @@ OD.define('performances', {
   function kpiLibre(agg, k) {
     const v = volTotal(agg, k), cde = volTotal(agg, KPI_CDE), enc = num(agg[k.r + '_enc']);
     if (k.mode === 'euro') {
+      const oE = k.o ? num(agg[k.o]) : 0;
+      if (oE > 0) {
+        const pE = pct(v, oE);
+        return {
+          main: fmtEur(v), badge: pE + '%',
+          col: kpiColorPro(v, oE), fill: Math.min(pE, 100), score: pE,
+          enc: 'objectif ' + fmtEur(oE) + (enc > 0 ? ' · dont ' + fmtEur(enc) + ' encadrement' : '')
+        };
+      }
       return {
         main: fmtEur(v), badge: cde > 0 ? fmtEur(v / cde) + '/cde' : '—',
         col: v > 0 ? COL_NEUTRE : COL_VIDE, fill: v > 0 ? 100 : 0, score: v,
@@ -1106,8 +1124,16 @@ OD.define('performances', {
     const idsAttr = clic ? ' data-kpi-ids="' + esc(ids.join(',')) + '" data-kpi-label="' + esc(kpiLabel) + '" data-kpi-key="' + esc(k.r) + '"' : '';
     let corps, cls;
     if (k.mode === 'euro') {
-      corps = '<span class="v">' + esc(fmtEur(agg[k.r])) + '</span>';
-      cls = 'sans';
+      const oE = k.o ? num(agg[k.o]) : 0;
+      if (oE > 0) {
+        // Objectif d'accessoires fixé : même lecture que les KPI à objectif.
+        const cE = kpiColorPro(volTotal(agg, k), oE);
+        cls = cE.bar === '#53bda7' ? 'bien' : (cE.bar === '#fac055' ? 'alerte' : 'retard');
+        corps = '<span class="v">' + esc(fmtEur(volTotal(agg, k))) + '</span><span class="o"> / ' + esc(fmtEur(oE)) + '</span>';
+      } else {
+        corps = '<span class="v">' + esc(fmtEur(agg[k.r])) + '</span>';
+        cls = 'sans';
+      }
     } else if (k.mode === 'obj') {
       const reel = volTotal(agg, k), obj = num(agg[k.o]);
       const c = couleurKpi(agg, k, estVendeur);
@@ -1254,6 +1280,7 @@ OD.define('performances', {
           if (k.mode === 'euro') {
             o[k.label + ' (€)'] = Math.round(volTotal(x.agg, k) * 100) / 100;
             o[k.label + ' encadrement (€)'] = Math.round(num(x.agg[k.r + '_enc']) * 100) / 100;
+            if (k.o) o[k.label + ' objectif (€)'] = Math.round(num(x.agg[k.o]));
             continue;
           }
           if (k.mode === 'taux') {
