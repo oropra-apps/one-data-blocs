@@ -14,6 +14,13 @@
 //    le détail (vn_bacs_fiche), avec un lien direct vers le véhicule dans BACS.
 //  * Le stock reste celui du DMS (v_liste_vn) : c'est lui qui dit ce qui est
 //    en stock, à quel prix et depuis quand ; BACS décrit la voiture.
+//  v19 (24/11/2026) : retours CODIR Team Colin.
+//  * AMC lu dans BACS : l'étiquette porte le code et la date AMC de la fiche
+//    véhicule BACS (« AMC 17 · 12/11/2026 »), plus le code DBS.
+//  * Filtre « Statut BACS » (En stock, Livraison planifiée, En circulation,
+//    Livré, Revendu, Non lu dans BACS), posé sur « En stock » par défaut sur
+//    l'onglet En stock ; levé sur Commandes / Tous, remis au retour tant qu'on
+//    n'a pas choisi un autre statut. Inactif tant que BACS n'est pas chargé.
 //  v18 (23/11/2026) : photos rétablies et chargement allégé — fiches BACS en
 //    un appel (vn_bacs_resume_json, cache 10 min), stock + BACS d'abord, puis
 //    commandes ; au plus 3 requêtes en vol.
@@ -125,16 +132,17 @@ OD.define('vn-liste', {
   // N° de commande DBS (commande fournisseur) ; « 0 » = pas de commande.
   function numCommande(r) { var c = r && r.commande_fournisseur; c = c == null ? '' : String(c).trim(); return c && c !== '0' ? c : ''; }
   function bacsDe(r) { var c = numCommande(r); return c ? S.bacs[c] || null : null; }
-  // Date AMC : celle de DBS (chargeur) prime ; à défaut celle de la fiche BACS.
-  // AMC : quand le DMS fournit le code AMC (export Team Colin : « Code AMC
-  // véhicule/matériel », pas de date), c'est lui qui dit si le véhicule est
-  // déclaré ; sinon la fiche BACS. La date affichée vient de DBS, à défaut de BACS.
-  function amcActif(r) {
-    if (S.amcDbs) return notEmpty(r.code_amc) || !!r.date_amc;
-    var b = bacsDe(r); return !!(b && b.amc_date);
+  // v19 : AMC = code et date AMC de la fiche véhicule BACS (seule source).
+  function amcActif(r) { var b = bacsDe(r); return !!(b && (notEmpty(b.amc_code) || b.amc_date)); }
+  function amcDate(r) { var b = bacsDe(r); return b && b.amc_date || null; }
+  function amcCode(r) { var b = bacsDe(r); return b && notEmpty(b.amc_code) ? String(b.amc_code).trim() : null; }
+  function libAmc(r) {
+    if (!amcActif(r)) return '';
+    return ['AMC' + (amcCode(r) ? ' ' + amcCode(r) : ''), amcDate(r) ? dateFR(amcDate(r)) : null].filter(notEmpty).join(' · ');
   }
-  function amcDate(r) { if (!amcActif(r)) return null; if (r.date_amc) return r.date_amc; var b = bacsDe(r); return b && b.amc_date || null; }
-  function amcCode(r) { if (!amcActif(r)) return null; if (notEmpty(r.code_amc)) return r.code_amc; var b = bacsDe(r); return b && b.amc_code || null; }
+  // v19 : statut du parc BACS, « __aucun » = véhicule non lu dans BACS.
+  function parcDe(r) { var b = bacsDe(r); return b && notEmpty(b.statut_parc) ? b.statut_parc : '__aucun'; }
+  function bacsCharge() { for (var k in S.bacs) return true; return false; }
   // Photo : celle du véhicule (fiche BACS), à défaut celle d'un véhicule du
   // stock de même modèle et même teinte DMS (libellés identiques à la source).
   function cleTeinte(r) {
@@ -189,7 +197,7 @@ OD.define('vn-liste', {
     BEV: 'Électrique', EV: 'Électrique', FCEV: 'Hydrogène', GO: 'Diesel', DI: 'Diesel', ES: 'Essence', EH: 'Hybride' };
   // Statut du parc BACS (libellés anglais de BACS).
   var LIB_PARC = { 'Stock': 'En stock', 'Delivered': 'Livré', 'Delivery to plan': 'Livraison planifiée',
-    'On the road': 'En circulation', 'In transit': 'En transit', 'Sold': 'Vendu' };
+    'On the road': 'En circulation', 'In transit': 'En transit', 'Sold': 'Vendu', 'Resold': 'Revendu' };
   function libParc(s) { return s ? (LIB_PARC[s] || s) : ''; }
   // Véhicule livré dans BACS mais toujours en stock au DMS : à vérifier.
   function ecartParc(r, statut) { return !r.en_commande && /^deliver/i.test(String(statut || '')) && !/^delivery to plan/i.test(String(statut || '')); }
@@ -227,8 +235,9 @@ OD.define('vn-liste', {
     tri: 'jours_de_stock', sens: 'desc',
     showPA: false, fiche: null, ficheBacs: null, ficheOnglet: 'vehicule',
     f: { reseau: null, affaire: null, site: null, marque: null, modele: null,
-         energie: null, statut: 'DISPONIBLE', lieu: null, reserve: null, amc: null, type: null },
-    statutAuto: true   // « Disponible » posé d'office, pas par l'utilisateur
+         energie: null, statut: 'DISPONIBLE', lieu: null, reserve: null, amc: null, type: null, parc: 'Stock' },
+    statutAuto: true,  // « Disponible » posé d'office, pas par l'utilisateur
+    parcAuto: true     // v19 : « En stock » BACS posé d'office
   };
 
   // ───────────────────────────────────────────────────────────── donnees
@@ -368,6 +377,7 @@ OD.define('vn-liste', {
       if (f.lieu && r.lieu_stockage !== f.lieu) return false;
       if (f.reserve != null && !!r.reserve !== f.reserve) return false;
       if (f.type && String(r.carrosserie || '').toUpperCase() !== f.type) return false;
+      if (f.parc && bacsCharge() && parcDe(r) !== f.parc) return false;   // v19
       if (f.amc === 'oui' && !amcActif(r)) return false;
       if (f.amc === 'non' && amcActif(r)) return false;
       if (q) {
@@ -492,7 +502,7 @@ OD.define('vn-liste', {
       + '<input class="vn-rech" id="vn-q" placeholder="VIN, immatriculation, modèle, n° de commande…" value="' + esc(S.recherche) + '">'
       + sel('reseau', 'Réseau') + sel('affaire', 'Affaire') + sel('site', 'Site')
       + sel('marque', 'Marque') + selModele() + sel('energie', 'Énergie')
-      + selStatut() + sel('lieu', 'Lieu de stockage', 'lieu_stockage')
+      + selStatut() + selParc() + sel('lieu', 'Lieu de stockage', 'lieu_stockage')
       + '<button class="vn-raz" id="vn-raz">Tout effacer</button>'
       + '<button class="vn-xls" id="vn-xls" title="Exporter dans Excel les véhicules affichés (filtres en cours)">' + LOGO_XLS + '<span>Exporter</span></button>'
       + '</div>' + chips();
@@ -512,7 +522,7 @@ OD.define('vn-liste', {
     return '<div class="vn-chips">'
       + '<span class="vn-chip-lab">Type</span>' + chip('type', null, 'Tous') + chip('type', 'VP', 'VP') + chip('type', 'VU', 'VU')
       + '<span class="vn-chip-sep"></span>'
-      + '<button type="button" class="vn-chip amc' + (S.f.amc === 'oui' ? ' on' : '') + '" data-chip="amc" data-val="' + (S.f.amc === 'oui' ? '' : 'oui') + '" title="Véhicules déclarés livrés au constructeur (date AMC DBS)">AMC <i>' + ent(compte('amc', 'oui')) + '</i></button>'
+      + '<button type="button" class="vn-chip amc' + (S.f.amc === 'oui' ? ' on' : '') + '" data-chip="amc" data-val="' + (S.f.amc === 'oui' ? '' : 'oui') + '" title="Véhicules déclarés AMC dans BACS">AMC <i>' + ent(compte('amc', 'oui')) + '</i></button>'
       + '</div>';
   }
   function sel(cle, lbl, champ) {
@@ -533,7 +543,24 @@ OD.define('vn-liste', {
       + '<option value="non"' + (S.f.amc === 'non' ? ' selected' : '') + '>Non déclarés AMC</option></select>';
   }
   function etiquetteAmc(r) {
-    return amcActif(r) ? '<span class="vl-badge amc" title="Déclaré livré au constructeur (AMC)' + (amcDate(r) ? ' le ' + esc(dateFR(amcDate(r))) : '') + (amcCode(r) ? ' · code ' + esc(amcCode(r)) : '') + '">AMC</span>' : '';
+    return amcActif(r) ? '<span class="vl-badge amc" title="Déclaré AMC dans BACS (code et date AMC de la fiche véhicule)">' + esc(libAmc(r)) + '</span>' : '';
+  }
+  // v19 : filtre Statut BACS (statut du parc de la fiche véhicule BACS).
+  var ORDRE_PARC = ['Stock', 'Delivery to plan', 'On the road', 'In transit', 'Delivered', 'Sold', 'Resold'];
+  function selParc() {
+    if (!bacsCharge()) return '';
+    var vus = {};
+    S.raw.forEach(function (r) { vus[parcDe(r)] = 1; });
+    var vals = Object.keys(vus).sort(function (a, b) {
+      var ia = ORDRE_PARC.indexOf(a), ib = ORDRE_PARC.indexOf(b);
+      if (a === '__aucun') ia = 99; if (b === '__aucun') ib = 99;
+      return (ia < 0 ? 50 : ia) - (ib < 0 ? 50 : ib) || a.localeCompare(b);
+    });
+    if (S.f.parc && !vus[S.f.parc]) vals.unshift(S.f.parc);
+    return '<select class="vn-sel' + (S.f.parc ? ' on' : '') + '" data-f="parc" title="Statut du véhicule dans BACS"><option value="">Statut BACS : tous</option>'
+      + vals.map(function (v) {
+          return '<option value="' + esc(v) + '"' + (S.f.parc === v ? ' selected' : '') + '>' + esc(v === '__aucun' ? 'Non lu dans BACS' : 'BACS : ' + libParc(v)) + '</option>';
+        }).join('') + '</select>';
   }
   function selStatut() {
     var vals = valeursDe('statut');
@@ -874,11 +901,12 @@ OD.define('vn-liste', {
         // « Disponible » par défaut n'a de sens que sur le stock : levé sur
         // Commandes / Tous, remis au retour s'il n'a pas été changé à la main.
         if (S.statutAuto) S.f.statut = S.onglet === 'stock' ? 'DISPONIBLE' : null;
+        if (S.parcAuto) S.f.parc = S.onglet === 'stock' ? 'Stock' : null;   // v19
         rendre();
       };
     });
     el.querySelectorAll('[data-f]').forEach(function (s) {
-      s.onchange = function () { S.f[s.dataset.f] = s.value || null; if (s.dataset.f === 'statut') S.statutAuto = false; if (s.dataset.f === 'marque') S.f.modele = null; S.page = 1; rendre(); };
+      s.onchange = function () { S.f[s.dataset.f] = s.value || null; if (s.dataset.f === 'statut') S.statutAuto = false; if (s.dataset.f === 'parc') S.parcAuto = false; if (s.dataset.f === 'marque') S.f.modele = null; S.page = 1; rendre(); };
     });
     el.querySelectorAll('[data-chip]').forEach(function (b) {
       b.onclick = function () { S.f[b.dataset.chip] = b.dataset.val || null; S.page = 1; rendre(); };
@@ -919,8 +947,8 @@ OD.define('vn-liste', {
     var raz = el.querySelector('#vn-raz');
     if (raz) raz.onclick = function () {
       S.f = { reseau: null, affaire: null, site: null, marque: null, modele: null,
-              energie: null, statut: null, lieu: null, reserve: null, amc: null, type: null };
-      S.statutAuto = false;
+              energie: null, statut: null, lieu: null, reserve: null, amc: null, type: null, parc: null };
+      S.statutAuto = false; S.parcAuto = false;
       S.recherche = ''; S.page = 1; rendre();
     };
     var x = el.querySelector('#vn-close'); if (x) x.onclick = fermerFiche;
@@ -953,6 +981,7 @@ OD.define('vn-liste', {
     + '.vn-filtres{display:flex;flex-wrap:wrap;gap:7px;margin-bottom:4px;align-items:center}'
     + '.vn-rech{flex:1 1 260px;min-width:220px;border:1px solid #e2eaf5;border-radius:9px;padding:8px 12px;font:inherit;font-size:13.5px;background:#fff;color:#1F4A85}'
     + '.vn-sel{border:1px solid #e2eaf5;border-radius:9px;padding:8px 10px;font:inherit;font-size:13px;background:#fff;color:#1F4A85;max-width:180px}'
+    + '.vn-sel.on{border-color:#2a5ea9;background:#eef4fc;font-weight:700}'
     + '.vn-spin.mini{width:10px;height:10px;border-width:2px;margin:0;vertical-align:middle}'
     + '.vn-xls{display:inline-flex;align-items:center;gap:6px;border:1px solid #acc5e4;background:#fff;color:#1F4A85;border-radius:8px;font:inherit;font-size:13px;font-weight:700;cursor:pointer;padding:7px 12px}.vn-xls:hover{background:#eef4fc}.vn-xls:disabled{opacity:.6;cursor:wait}'
     + '.vn-raz{border:none;background:none;color:#2a5ea9;font:inherit;font-size:13px;font-weight:600;cursor:pointer;padding:8px 6px}'
