@@ -2,7 +2,8 @@
 //  LEAD MANAGEMENT — module One Data (OD.define 'lead-mgmt')
 //  VERSION TEAM COLIN (v129) — déploiement CIBLÉ (publish-targets :
 //  v129 (25/11/2026) : CAMPAGNES (vendeur) — une campagne à la fois.
-//    - Bandeau d'onglets, un par campagne (nom, clients à prendre, avancement) :
+//    - Bandeau d'onglets, un par campagne : nom + PASTILLE verte du reste à
+//      prendre (même pastille que l'onglet Campagnes), vos clients, % traités :
 //      on choisit la campagne, seule celle-ci s'affiche (fini l'empilement) ;
 //      le choix est gardé dans le navigateur (lmtc-camp).
 //    - PRISME by One Data : badge « PRISME · top N % » sur les clients classés
@@ -4351,9 +4352,11 @@
         var dispo = (S.campLibres || []).filter(function (t) { return t.campagne === nom; }).length;
         var miens = (S.mesSollis || []).filter(function (t) { return t.campagne === nom; }).length;
         var n = Number(tot.nb_sollicitations) || 0, tr = Number(tot.nb_traitees) || 0, pct = n ? Math.round(100 * tr / n) : 0;
-        var bits = [dispo ? dispo + ' à prendre' : 'tout est pris', miens ? miens + ' à vous' : '', n ? pct + ' % traités' : ''].filter(Boolean).join(' · ');
-        return '<button type="button" role="tab" aria-selected="' + (nom === sel) + '" class="cp-tab' + (nom === sel ? ' on' : '') + '" data-a="cp-camp" data-id="' + esc(nom) + '">'
-          + '<b>' + esc(nom) + '</b><small>' + esc(bits) + '</small></button>';
+        var bits = [dispo ? 'à prendre' : 'tout est pris', miens ? miens + ' à vous' : '', n ? pct + ' % traités' : ''].filter(Boolean).join(' · ');
+        // pastille = reste à prendre, même pastille verte que l'onglet Campagnes et la barre de navigation
+        return '<button type="button" role="tab" aria-selected="' + (nom === sel) + '" class="cp-tab' + (nom === sel ? ' on' : '') + '" data-a="cp-camp" data-id="' + esc(nom) + '"'
+          + ' title="' + esc(nom + ' : ' + (dispo ? plural(dispo, 'client') + ' à prendre' : 'tous les clients ont été pris')) + '">'
+          + '<span class="cp-tt"><b>' + esc(nom) + '</b>' + (dispo ? '<span class="cp-pa">' + dispo + '</span>' : '') + '</span><small>' + esc(bits) + '</small></button>';
       }).join('') + '</div>';
     }
     function vueCampagnesVendeur() {
@@ -6612,7 +6615,10 @@
 .lmtc .cp-l.cp-lp{box-shadow:inset 3px 0 0 var(--vert)}
 .lmtc .cp-tabs{display:flex;gap:8px;overflow-x:auto;padding:2px 0 10px;margin:2px 0 6px;scrollbar-width:thin}
 .lmtc .cp-tab{flex:0 0 auto;display:flex;flex-direction:column;align-items:flex-start;gap:2px;text-align:left;font:inherit;cursor:pointer;background:var(--card);border:1.5px solid var(--line-2);border-radius:12px;padding:9px 14px;min-width:170px;max-width:280px;color:var(--ink-2)}
-.lmtc .cp-tab b{font-size:13.5px;font-weight:800;color:var(--bleu-dk);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%}
+.lmtc .cp-tt{display:flex;align-items:center;gap:8px;max-width:100%}
+.lmtc .cp-tab b{font-size:13.5px;font-weight:800;color:var(--bleu-dk);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
+.lmtc .cp-pa{flex:none;min-width:18px;height:18px;padding:0 5px;border-radius:9px;background:#00997f;color:#fff;font-size:10px;font-weight:700;display:inline-flex;align-items:center;justify-content:center;line-height:1}
+.lmtc .cp-tab.on .cp-pa{box-shadow:0 0 0 2px #fff}
 .lmtc .cp-tab small{font-size:11.5px;color:var(--ink-3)}
 .lmtc .cp-tab:hover{border-color:var(--bleu-clair)}
 .lmtc .cp-tab.on{background:var(--bleu);border-color:var(--bleu)}
