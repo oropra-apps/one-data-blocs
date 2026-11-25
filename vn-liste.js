@@ -14,6 +14,10 @@
 //    le détail (vn_bacs_fiche), avec un lien direct vers le véhicule dans BACS.
 //  * Le stock reste celui du DMS (v_liste_vn) : c'est lui qui dit ce qui est
 //    en stock, à quel prix et depuis quand ; BACS décrit la voiture.
+//  v21 (25/11/2026) : retour J. Faugeras (Arcueil).
+//  * Filtre Modèle visible d'emblée : sans marque choisie, il propose les
+//    familles de toutes les marques ; une marque choisie le restreint.
+//  * Filtre « Code AMC » (codes AMC lus dans les fiches BACS du stock).
 //  v20 (24/11/2026) : véhicules INTROUVABLES dans BACS (cherchés par VIN puis
 //    n° de commande, sans résultat : autres marques, véhicules hors du périmètre
 //    du compte de récolte) distingués de ceux pas encore lus. Filtre Statut
@@ -244,7 +248,7 @@ OD.define('vn-liste', {
     tri: 'jours_de_stock', sens: 'desc',
     showPA: false, fiche: null, ficheBacs: null, ficheOnglet: 'vehicule',
     f: { reseau: null, affaire: null, site: null, marque: null, modele: null,
-         energie: null, statut: 'DISPONIBLE', lieu: null, reserve: null, amc: null, type: null, parc: 'Stock' },
+         energie: null, statut: 'DISPONIBLE', lieu: null, reserve: null, amc: null, amccode: null, type: null, parc: 'Stock' },
     statutAuto: true,  // « Disponible » posé d'office, pas par l'utilisateur
     parcAuto: true     // v19 : « En stock » BACS posé d'office
   };
@@ -394,6 +398,7 @@ OD.define('vn-liste', {
       if (f.parc && bacsCharge() && parcDe(r) !== f.parc) return false;   // v19
       if (f.amc === 'oui' && !amcActif(r)) return false;
       if (f.amc === 'non' && amcActif(r)) return false;
+      if (f.amccode && amcCode(r) !== f.amccode) return false;   // v21
       if (q) {
         var b = bacsDe(r) || {};
         var foin = [r.vin, r.immatriculation, r.marque, r.modele, r.version,
@@ -427,10 +432,10 @@ OD.define('vn-liste', {
 
   // v14 : famille commerciale du modèle (repli : libellé brut)
   function familleDe(r) { return notEmpty(r.modele_famille) ? r.modele_famille : (r.modele || null); }
+  // v21 : visible sans marque choisie (familles de toutes les marques).
   function selModele() {
-    if (!S.f.marque) return '';
     var vues = {};
-    S.raw.forEach(function (r) { if (r.marque === S.f.marque) { var m = familleDe(r); if (notEmpty(m)) vues[m] = 1; } });
+    S.raw.forEach(function (r) { if (!S.f.marque || r.marque === S.f.marque) { var m = familleDe(r); if (notEmpty(m)) vues[m] = 1; } });
     var vals = Object.keys(vues).sort(function (a, b) { return a.localeCompare(b, 'fr'); });
     if (!vals.length) return '';
     return '<select class="vn-sel" data-f="modele">'
@@ -516,7 +521,7 @@ OD.define('vn-liste', {
       + '<input class="vn-rech" id="vn-q" placeholder="VIN, immatriculation, modèle, n° de commande…" value="' + esc(S.recherche) + '">'
       + sel('reseau', 'Réseau') + sel('affaire', 'Affaire') + sel('site', 'Site')
       + sel('marque', 'Marque') + selModele() + sel('energie', 'Énergie')
-      + selStatut() + selParc() + sel('lieu', 'Lieu de stockage', 'lieu_stockage')
+      + selStatut() + selParc() + selAmcCode() + sel('lieu', 'Lieu de stockage', 'lieu_stockage')
       + '<button class="vn-raz" id="vn-raz">Tout effacer</button>'
       + '<button class="vn-xls" id="vn-xls" title="Exporter dans Excel les véhicules affichés (filtres en cours)">' + LOGO_XLS + '<span>Exporter</span></button>'
       + '</div>' + chips();
@@ -555,6 +560,18 @@ OD.define('vn-liste', {
     return '<select class="vn-sel" data-f="amc"><option value="">AMC</option>'
       + '<option value="oui"' + (S.f.amc === 'oui' ? ' selected' : '') + '>Déclarés AMC</option>'
       + '<option value="non"' + (S.f.amc === 'non' ? ' selected' : '') + '>Non déclarés AMC</option></select>';
+  }
+  // v21 : filtre par code AMC (fiche BACS), visible dès qu'un code est lu.
+  function selAmcCode() {
+    var vus = {};
+    S.raw.forEach(function (r) { var c = amcCode(r); if (c) vus[c] = 1; });
+    var vals = Object.keys(vus).sort(function (a, b) { return a.localeCompare(b, 'fr', { numeric: true }); });
+    if (S.f.amccode && !vus[S.f.amccode]) vals.unshift(S.f.amccode);
+    if (!vals.length) return '';
+    return '<select class="vn-sel" data-f="amccode" title="Code AMC de la fiche véhicule BACS"><option value="">Code AMC</option>'
+      + vals.map(function (v) {
+          return '<option value="' + esc(v) + '"' + (S.f.amccode === v ? ' selected' : '') + '>AMC ' + esc(v) + '</option>';
+        }).join('') + '</select>';
   }
   function etiquetteAmc(r) {
     return amcActif(r) ? '<span class="vl-badge amc" title="Déclaré AMC dans BACS (code et date AMC de la fiche véhicule)">' + esc(libAmc(r)) + '</span>' : '';
@@ -962,7 +979,7 @@ OD.define('vn-liste', {
     var raz = el.querySelector('#vn-raz');
     if (raz) raz.onclick = function () {
       S.f = { reseau: null, affaire: null, site: null, marque: null, modele: null,
-              energie: null, statut: null, lieu: null, reserve: null, amc: null, type: null, parc: null };
+              energie: null, statut: null, lieu: null, reserve: null, amc: null, amccode: null, type: null, parc: null };
       S.statutAuto = false; S.parcAuto = false;
       S.recherche = ''; S.page = 1; rendre();
     };
