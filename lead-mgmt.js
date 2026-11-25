@@ -1,6 +1,17 @@
 // ============================================================================
 //  LEAD MANAGEMENT — module One Data (OD.define 'lead-mgmt')
-//  VERSION TEAM COLIN (v128) — déploiement CIBLÉ (publish-targets :
+//  VERSION TEAM COLIN (v129) — déploiement CIBLÉ (publish-targets :
+//  v129 (25/11/2026) : CAMPAGNES (vendeur) — une campagne à la fois.
+//    - Bandeau d'onglets, un par campagne (nom, clients à prendre, avancement) :
+//      on choisit la campagne, seule celle-ci s'affiche (fini l'empilement) ;
+//      le choix est gardé dans le navigateur (lmtc-camp).
+//    - PRISME by One Data : badge « PRISME · top N % » sur les clients classés
+//      dans les 30 % du groupe les plus susceptibles d'acheter sous 6 mois, et
+//      ligne d'explication (profil, moment) sur la carte et dans le panneau.
+//      Filtre « PRISME : top 30 % ». Données : sollicitation_detail.infos
+//      (prisme_decile, prisme_profil, prisme_moment).
+//    - Filtre Modèle : la marque vient du véhicule (plus de « Lexus » en dur),
+//      et la liste ne propose que les modèles de la campagne affichée.
 //  v128 (24/11/2026) : « Injoignable » au plateau Vroom : la case « Envoyer
 //    l'e-mail au client » est masquée (l'e-mail BACS part avec l'adresse du
 //    compte VROOM TEAM dans BACS, une boîte personnelle). plateau_rappel force
@@ -4225,14 +4236,30 @@
       var dejaSimu = ((x && x.raisons) || []).some(function (r) { return /^Simulation/.test(r); });
       var faits = [inf.simulation_bacs && !dejaSimu ? 'Simulation BACS le ' + dt(inf.simulation_bacs) : '', inf.ca_atelier_6m ? nb(Math.round(Number(inf.ca_atelier_6m))) + ' € HT d\'atelier sur 6 mois' : '',
                    coord.length ? 'Joignable par ' + coord.join(', ') : 'Aucune coordonnée'].filter(Boolean).join(' · ');
-      return '<div class="lr cp-l"' + (cliquable ? ' data-a="' + (cliquable === true ? 'fiche' : cliquable) + '" data-id="' + esc(cliquable === true ? t.id_client : t.id_rapport) + '"' : '') + ' tabindex="0"><div>' + gauche + '</div>'
-        + '<div><span class="lr-n">' + esc(propre(t.client_nom)) + '</span>' + (inf.segment === 'pro' ? ' <span class="tag">PRO</span>' : '') + '<p class="lr-d">' + esc(lieu) + '</p>'
-        + vehs + (rais ? '<div class="cp-rs">' + rais + '</div>' : '') + (x ? '<p class="cp-f">' + esc(faits) + '</p>' : '') + '</div>'
+      return '<div class="lr cp-l' + (prismeTop(inf) ? ' cp-lp' : '') + '"' + (cliquable ? ' data-a="' + (cliquable === true ? 'fiche' : cliquable) + '" data-id="' + esc(cliquable === true ? t.id_client : t.id_rapport) + '"' : '') + ' tabindex="0"><div>' + gauche + '</div>'
+        + '<div><span class="lr-n">' + esc(propre(t.client_nom)) + '</span>' + (inf.segment === 'pro' ? ' <span class="tag">PRO</span>' : '') + prismeBadge(inf) + '<p class="lr-d">' + esc(lieu) + '</p>'
+        + vehs + prismeLigne(inf) + (rais ? '<div class="cp-rs">' + rais + '</div>' : '') + (x ? '<p class="cp-f">' + esc(faits) + '</p>' : '') + '</div>'
         + '<div class="lr-a">' + actions + '</div></div>';
     }
 
     function campInfo(t) { return (S.campInfos || {})[t.id_rapport] || null; }
-    function campModele(t) { var x = campInfo(t), v = x && x.vehicules && x.vehicules[0]; return v && v.modele ? 'Lexus ' + v.modele : ''; }
+    function campModele(t) {
+      var x = campInfo(t), v = x && x.vehicules && x.vehicules[0];
+      if (!v || !v.modele) return '';
+      var m = String(v.marque || '').toLowerCase();
+      return (m ? m.charAt(0).toUpperCase() + m.slice(1) + ' ' : '') + v.modele;
+    }
+    // v129 : PRISME by One Data (logo = le « O » de One Data)
+    function prismeSvg(t) {
+      return '<svg width="' + Math.round(t * 1.3) + '" height="' + t + '" viewBox="0 0 42 32" aria-hidden="true" style="flex:none"><path d="M1 16 L7.5 16" stroke="#7a9cc4" stroke-width="2" stroke-linecap="round"/><circle cx="16" cy="16" r="7.5" fill="none" stroke="#32AFA4" stroke-width="4.4"/><circle cx="16" cy="16" r="7.5" fill="none" stroke="#F8BA36" stroke-width="4.4" stroke-dasharray="11.78 35.34"/><path d="M25.5 13.2 L41 7" stroke="#2a5ea9" stroke-width="2" stroke-linecap="round"/><path d="M26 16 L41 16" stroke="#53bda7" stroke-width="2" stroke-linecap="round"/><path d="M25.5 18.8 L41 25" stroke="#fac055" stroke-width="2" stroke-linecap="round"/></svg>';
+    }
+    function prismeTop(inf) { var d = Number((inf || {}).prisme_decile); return d >= 1 && d <= 3 ? d * 10 : 0; }
+    function prismeBadge(inf) { var top = prismeTop(inf); return top ? ' <span class="cp-pr" title="Signalé par PRISME by One Data">' + prismeSvg(12) + 'PRISME · top ' + top + ' %</span>' : ''; }
+    function prismeLigne(inf) {
+      var top = prismeTop(inf); if (!top) return '';
+      return '<div class="cp-prl">' + prismeSvg(16) + '<div><b>PRISME by One Data</b> : parmi les ' + top + ' % de clients du groupe les plus susceptibles d\'acheter un véhicule dans les 6 mois'
+        + (inf.prisme_profil ? ' · profil « ' + esc(inf.prisme_profil) + ' »' : '') + (inf.prisme_moment ? ' · ' + esc(inf.prisme_moment) : '') + '.</div></div>';
+    }
     function campPasse(t) {
       var f = S.cf || {}, x = campInfo(t), inf = (x && x.infos) || {}, rs = (x && x.raisons) || [], vs = (x && x.vehicules) || [];
       if (f.mod && campModele(t) !== f.mod) return false;
@@ -4251,6 +4278,7 @@
         case 'atelier': return !!inf.dernier_passage && (Date.now() - new Date(inf.dernier_passage)) / 86400000 <= 90;
         case 'mobile': return !!inf.a_mobile;
         case 'sans': return !a(/^Commande|achat récent/);
+        case 'prisme': return !!prismeTop(inf);
       }
       return true;
     }
@@ -4260,7 +4288,8 @@
       libres.forEach(function (t) { if (noms.indexOf(t.campagne) < 0) noms.push(t.campagne); });
       if (!noms.length) return '<div class="empty">Aucune campagne en cours sur votre site ces 90 derniers jours.</div>';
       var prio = function (t) { var x = campInfo(t); return x && x.priorite != null ? Number(x.priorite) : -1; };
-      noms.forEach(function (nom) {
+      var sel = campChoisie(noms);
+      noms.filter(function (nom) { return nom === sel; }).forEach(function (nom) {
         var c = S.campagnes.find(function (x) { return x.campagne === nom; }) || {};
         var tot = (S.campTot || []).find(function (x) { return x.campagne === nom; }) || {};
         var toutesMiennes = (S.mesSollis || []).filter(function (t) { return t.campagne === nom; });
@@ -4268,7 +4297,7 @@
         var n = Number(tot.nb_sollicitations) || (toutesDispo.length + (Number(c.nb_sollicitations) || 0));
         var tr = Number(tot.nb_traitees) || 0, pris = Math.max(0, n - toutesDispo.length), pct = n ? Math.round(100 * tr / n) : 0;
         var k = function (val, lib, cls) { return '<div class="cp-k' + (cls ? ' ' + cls : '') + '"><b>' + val + '</b><small>' + lib + '</small></div>'; };
-        h += '<div class="sub"><h3>' + esc(nom) + '</h3>'
+        h += '<div class="sub">'
           + '<div class="cp-kpis">' + k(toutesDispo.length, 'à prendre', toutesDispo.length ? 'alerte' : '') + k(pris, 'pris par l\'équipe') + k(tr, 'traités')
           + k(Number(tot.nb_propales) || 0, 'propositions') + k((Number(tot.nb_bdc) || 0), 'commandes', Number(tot.nb_bdc) ? 'ok' : '')
           + k((Number(c.nb_sollicitations) || 0) + (Number(c.nb_traitees) ? ' · ' + c.nb_traitees + ' traités' : ''), 'mes clients') + '</div>'
@@ -4295,18 +4324,54 @@
       return h;
     }
     function campMajListe() { var z = root.querySelector('#cp-zone'); if (z) z.innerHTML = campBlocs(); }
+    // v129 : une campagne à la fois — liste des campagnes et campagne choisie
+    function campNoms() {
+      var noms = [];
+      (S.campagnes || []).forEach(function (c) { if (noms.indexOf(c.campagne) < 0) noms.push(c.campagne); });
+      (S.campLibres || []).forEach(function (t) { if (noms.indexOf(t.campagne) < 0) noms.push(t.campagne); });
+      return noms;
+    }
+    function campChoisie(noms) {
+      noms = noms || campNoms();
+      if (!S.campSel) { try { S.campSel = FW.localStorage.getItem('lmtc-camp') || null; } catch (e) { S.campSel = null; } }
+      if (S.campSel && noms.indexOf(S.campSel) >= 0) return S.campSel;
+      // par défaut : la campagne qui a le plus de clients à prendre, sinon la plus récente (en tête de liste)
+      var best = noms[0], n = -1;
+      noms.forEach(function (nom) {
+        var d = (S.campLibres || []).filter(function (t) { return t.campagne === nom; }).length
+              + (S.mesSollis || []).filter(function (t) { return t.campagne === nom; }).length;
+        if (d > n) { n = d; best = nom; }
+      });
+      return best;
+    }
+    function campOnglets(noms) {
+      var sel = campChoisie(noms);
+      return '<div class="cp-tabs" role="tablist">' + noms.map(function (nom) {
+        var tot = (S.campTot || []).find(function (x) { return x.campagne === nom; }) || {};
+        var dispo = (S.campLibres || []).filter(function (t) { return t.campagne === nom; }).length;
+        var miens = (S.mesSollis || []).filter(function (t) { return t.campagne === nom; }).length;
+        var n = Number(tot.nb_sollicitations) || 0, tr = Number(tot.nb_traitees) || 0, pct = n ? Math.round(100 * tr / n) : 0;
+        var bits = [dispo ? dispo + ' à prendre' : 'tout est pris', miens ? miens + ' à vous' : '', n ? pct + ' % traités' : ''].filter(Boolean).join(' · ');
+        return '<button type="button" role="tab" aria-selected="' + (nom === sel) + '" class="cp-tab' + (nom === sel ? ' on' : '') + '" data-a="cp-camp" data-id="' + esc(nom) + '">'
+          + '<b>' + esc(nom) + '</b><small>' + esc(bits) + '</small></button>';
+      }).join('') + '</div>';
+    }
     function vueCampagnesVendeur() {
       var h = '<div class="ph"><div><h2>Mes campagnes</h2><p>Libre-service, comme le Pool : prenez un client à relancer, il passe à votre nom. Ouvrez ensuite sa fiche pour l\'appeler et faire votre compte rendu : la relance est alors comptée comme traitée. S\'il ne vous concerne pas, rendez-le.</p></div></div>';
       if (!S.campagnes) return h + '<div class="empty">Chargement des campagnes…</div>';
-      var tous = (S.campLibres || []).concat(S.mesSollis || []), mods = [];
+      var noms = campNoms(), sel = noms.length ? campChoisie(noms) : null;
+      if (noms.length) h += campOnglets(noms);
+      var tous = (S.campLibres || []).concat(S.mesSollis || []).filter(function (t) { return t.campagne === sel; }), mods = [];
       tous.forEach(function (t) { var m = campModele(t); if (m && mods.indexOf(m) < 0) mods.push(m); });
+      var avecPrisme = tous.some(function (t) { return !!prismeTop((campInfo(t) || {}).infos); });
       mods.sort();
       var f = S.cf, opt = function (v, l, cur) { return '<option value="' + esc(v) + '"' + (v === cur ? ' selected' : '') + '>' + esc(l) + '</option>'; };
       if (tous.length) {
         h += '<div class="cp-flt"><input type="search" data-x="cp-q" placeholder="Nom, ville, immatriculation…" value="' + esc(f.q) + '" autocomplete="off">'
           + '<select data-x="cp-mod">' + opt('', 'Tous les modèles', f.mod) + mods.map(function (m) { return opt(m, m, f.mod); }).join('') + '</select>'
           + '<select data-x="cp-flt">' + opt('', 'Tous les clients', f.flt) + opt('simu', 'Simulation BACS sans commande', f.flt) + opt('affaire', 'Affaire ouverte dans BACS', f.flt) + opt('reno', 'Fenêtre de renouvellement', f.flt)
-          + opt('km', '100 000 km et plus', f.flt) + opt('atelier', 'Passé à l\'atelier depuis 90 jours', f.flt) + opt('mobile', 'Joignable sur mobile', f.flt) + opt('sans', 'Sans commande ni achat récent', f.flt) + '</select>'
+          + opt('km', '100 000 km et plus', f.flt) + opt('atelier', 'Passé à l\'atelier depuis 90 jours', f.flt) + opt('mobile', 'Joignable sur mobile', f.flt) + opt('sans', 'Sans commande ni achat récent', f.flt)
+          + (avecPrisme || f.flt === 'prisme' ? opt('prisme', 'PRISME : top 30 %', f.flt) : '') + '</select>'
           + ((f.q || f.mod || f.flt) ? '<button type="button" class="btn ghost sm" data-a="cp-raz">Effacer les filtres</button>' : '') + '</div>';
       }
       return h + '<div id="cp-zone">' + campBlocs() + '</div>';
@@ -4346,7 +4411,7 @@
       var X = '<button type="button" class="x" data-a="close" aria-label="Fermer"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg></button>';
       var sc = x.priorite != null ? Number(x.priorite) : null;
       var h = '<header class="dr-h"><div class="cd-hd">' + (sc != null ? '<div class="cp-prio ' + (sc >= 45 ? 'haut' : sc >= 25 ? 'moy' : 'bas') + '">' + sc + '<small>PRIO</small></div>' : '')
-        + '<div><h2>' + esc(propre(t.client_nom)) + '</h2><p class="cd-sous">' + esc(t.campagne) + ' · ' + esc(siteNom(t.nom_site)) + (inf.segment === 'pro' ? ' · PRO' : '') + '</p></div></div>' + X + '</header><div class="dr-b">';
+        + '<div><h2>' + esc(propre(t.client_nom)) + prismeBadge(inf) + '</h2><p class="cd-sous">' + esc(t.campagne) + ' · ' + esc(siteNom(t.nom_site)) + (inf.segment === 'pro' ? ' · PRO' : '') + '</p></div></div>' + X + '</header><div class="dr-b">';
       // Joindre
       h += '<section><h3>Joindre le client</h3>';
       if (!D.ct) h += '<p class="cd-mut">Chargement des coordonnées…</p>';
@@ -4370,7 +4435,8 @@
         var cls = /^Commande|achat récent/.test(r) ? ' vigil' : /^Simulation|^Affaire ouverte|renouvellement/.test(r) ? ' fort' : '';
         return '<span class="cp-r' + cls + '">' + esc(r) + '</span>';
       }).join('');
-      if (vehs || rais) h += '<section><h3>Pourquoi l\'appeler</h3>' + vehs + (rais ? '<div class="cp-rs">' + rais + '</div>' : '')
+      var prl = prismeLigne(inf);
+      if (vehs || rais || prl) h += '<section><h3>Pourquoi l\'appeler</h3>' + vehs + prl + (rais ? '<div class="cp-rs">' + rais + '</div>' : '')
         + ((x.raisons || []).some(function (r) { return /^Simulation BACS .* par /.test(r); }) ? '<p class="cd-mut">Une simulation faite par un collègue apparaît sans détail dans P.Commerciales, rubrique « Chez vos collègues ».</p>' : '')
         + ((x.raisons || []).some(function (r) { return /^Affaire ouverte/.test(r); }) ? '<p class="cd-mut">L\'affaire existe dans BACS mais sans simulation ni commande : elle n\'apparaît pas dans P.Commerciales.</p>' : '') + '</section>';
       // Résultat
@@ -6060,6 +6126,10 @@
         case 'camp-prendre': return campagneGeste('campagne_prendre', id, 'Client pris : il est dans vos relances de campagne.');
         case 'camp-rendre': return campagneGeste('campagne_rendre', id, 'Client rendu : il est de nouveau à prendre.');
         case 'cp-raz': S.cf = { q: '', mod: '', flt: '' }; render(); return;
+        case 'cp-camp':
+          S.campSel = id; S.cf = { q: '', mod: '', flt: '' };
+          try { FW.localStorage.setItem('lmtc-camp', id); } catch (e) {}
+          render(); return;
         case 'camp-traiter': return campOuvrir(id);
         case 'cd-appel': return campAppeler(id);
         case 'cd-res': if (S.cdr) { cdLire(); S.cdr.mode = S.cdr.mode === id ? null : id; renderCampDrawer(); } return;
@@ -6535,6 +6605,19 @@
 .lmtc .cp-r.fort{border-color:var(--bleu);color:var(--bleu-dk);font-weight:700}
 .lmtc .cp-r.vigil{border-color:var(--rouge);color:var(--m-rouge);font-weight:700}
 .lmtc .cp-f{margin-top:6px;font-size:12px;color:var(--ink-3)}
+.lmtc .cp-pr{display:inline-flex;align-items:center;gap:5px;font-size:11px;font-weight:800;background:#fff;color:var(--bleu-dk);border:1.5px solid var(--vert);padding:1px 8px 1px 5px;border-radius:20px;margin-left:6px;vertical-align:2px;white-space:nowrap}
+.lmtc h2 .cp-pr{font-size:11px}
+.lmtc .cp-prl{margin-top:7px;display:flex;gap:8px;align-items:flex-start;font-size:12.5px;line-height:1.45;color:var(--bleu-dk);background:#eaf6f3;border-radius:8px;padding:6px 10px}
+.lmtc .cp-prl b{font-weight:800}
+.lmtc .cp-l.cp-lp{box-shadow:inset 3px 0 0 var(--vert)}
+.lmtc .cp-tabs{display:flex;gap:8px;overflow-x:auto;padding:2px 0 10px;margin:2px 0 6px;scrollbar-width:thin}
+.lmtc .cp-tab{flex:0 0 auto;display:flex;flex-direction:column;align-items:flex-start;gap:2px;text-align:left;font:inherit;cursor:pointer;background:var(--card);border:1.5px solid var(--line-2);border-radius:12px;padding:9px 14px;min-width:170px;max-width:280px;color:var(--ink-2)}
+.lmtc .cp-tab b{font-size:13.5px;font-weight:800;color:var(--bleu-dk);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%}
+.lmtc .cp-tab small{font-size:11.5px;color:var(--ink-3)}
+.lmtc .cp-tab:hover{border-color:var(--bleu-clair)}
+.lmtc .cp-tab.on{background:var(--bleu);border-color:var(--bleu)}
+.lmtc .cp-tab.on b,.lmtc .cp-tab.on small{color:#fff}
+.lmtc .cp-tab:focus-visible{outline:2px solid var(--vert);outline-offset:2px}
 .lmtc-ov .cd-hd{display:flex;gap:12px;align-items:center}
 .lmtc-ov .cd-hd .cp-prio{margin:0;width:48px;height:48px;font-size:18px}
 .lmtc-ov .cd-sous{font-size:12.5px;color:var(--ink-2);margin-top:2px}
