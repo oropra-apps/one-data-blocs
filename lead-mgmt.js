@@ -1,6 +1,12 @@
 // ============================================================================
 //  LEAD MANAGEMENT — module One Data (OD.define 'lead-mgmt')
-//  VERSION TEAM COLIN (v130) — déploiement CIBLÉ (publish-targets :
+//  VERSION TEAM COLIN (v131) — déploiement CIBLÉ (publish-targets :
+//  v131 (25/11/2026) : APERÇU VENDEUR (chef « voir l'écran de… ») — l'onglet
+//    Campagnes y apparaît : campagnes du ou des sites du vendeur, ses clients
+//    pris, la liste à prendre, en lecture seule (Je prends / Traiter refusés
+//    comme les autres gestes de l'aperçu ; changer d'onglet de campagne et
+//    filtrer restent possibles). Les données de campagne sont relues à l'entrée
+//    et à la sortie de l'aperçu.
 //  v130 (25/11/2026) : CAMPAGNES — retour de Julien Faugeras (chef, Arcueil) :
 //    - l'onglet Campagnes RECHARGE les campagnes à chaque ouverture (avant, la
 //      liste lue au premier passage restait en mémoire jusqu'au rechargement de
@@ -3187,7 +3193,7 @@
     function bandeauComme() {
       if (!S.comme) return '';
       var u = S.comme.vnvo === 'VNVO' ? 'VN et VO' : S.comme.vnvo ? S.comme.vnvo : 'VN et VO';
-      return '<div class="comme-b" role="status"><span>Vous voyez l\'écran de <b>' + esc(propre(S.comme.nom)) + '</b> (vendeur ' + esc(u) + ') : son Pool, ses leads à rappeler et ses relances. Aperçu en lecture seule.</span>'
+      return '<div class="comme-b" role="status"><span>Vous voyez l\'écran de <b>' + esc(propre(S.comme.nom)) + '</b> (vendeur ' + esc(u) + ') : son Pool, ses leads à rappeler, ses relances et ses campagnes. Aperçu en lecture seule.</span>'
         + '<button type="button" class="btn sm" data-a="comme-off">Revenir à ma vue</button></div>';
     }
     function entrerComme(id) {
@@ -3199,15 +3205,18 @@
       S.comme = { id: Number(id), nom: v.nom, vnvo: v.vn_vo || '', sites: sites, site: sid };
       POSTE = 'vendeur'; MOI = Number(id); S.tab = 'pool'; S.cell = null;
       if (S.dr || !$drawer.hidden) fermerTout();
+      S.campagnes = null; S.campLibres = null; S.mesSollis = null; S.campMes = null; S.campInfos = {};   // v131
       S.leads = filtrerUniv(S.tous); render();
+      chargerCampagnes().then(render);
       try { FW.scrollTo(0, 0); } catch (e) {}
     }
     function sortirComme() {
       if (!S.comme) return;
       POSTE = S.poste0 || POSTE; S.comme = null; S.poste0 = null; MOI = S.stats ? S.stats.moi : MOI;
+      S.campagnes = null; S.campLibres = null; S.mesSollis = null; S.campMes = null; S.campInfos = {};   // v131
       S.tab = 'pool'; S.cell = null; S.leads = filtrerUniv(S.tous); render(); chargerAide();
     }
-    var ACTIONS_APERCU = ['rappels', 'hist-open', 'tab', 'comme-off', 'comme', 'comme-menu', 'univ', 'cli', 'dates', 'dem-plus', 'open', 'close', 'retour-liste', 'ack', 'reessayer', 'cell', 'fermer'];
+    var ACTIONS_APERCU = ['cp-camp', 'cp-raz', 'rappels', 'hist-open', 'tab', 'comme-off', 'comme', 'comme-menu', 'univ', 'cli', 'dates', 'dem-plus', 'open', 'close', 'retour-liste', 'ack', 'reessayer', 'cell', 'fermer'];
     function fermerDates() { fermerCalendrier(doc); }
     function appliquerDates(du, au) {
       fermerDates();
@@ -3527,7 +3536,7 @@
       try {
         if (POSTE === 'vendeur') {
           // v125 : vendeur multisite — les campagnes suivent le site choisi en haut à droite, comme le Pool.
-          var sitesV = poolVendeurSite() != null ? [Number(poolVendeurSite())] : null;
+          var sitesV = poolVendeurSite() != null ? [Number(poolVendeurSite())] : (S.comme && S.comme.sites && S.comme.sites.length ? S.comme.sites.map(Number) : null);
           var r = await Promise.all([
             rpc('get_campagnes_sollicitation', { p_viewer_id_user: Number(MOI), p_date_from: de, p_date_to: a, p_site_ids: sitesV, p_id_user: Number(MOI) }),
             rpc('get_campagne_detail', { p_viewer_id_user: Number(MOI), p_date_from: de, p_date_to: a, p_campagne: null, p_filtre: 'a_traiter', p_site_ids: sitesV, p_id_user: Number(MOI), p_limit: 300 })
@@ -3855,7 +3864,7 @@
                 ['relances', 'Relances', aRelancer().length, aRelancer().some(rappelDu), 'b'],
                 ['campagnes', 'Campagnes', S.mesSollis ? S.mesSollis.length + (S.campLibres || []).length : null, false, 'b'],
                 ['suivis', 'Suivis', null, false, 'b'],
-                ['historique', 'Historique', null, false, 'b']].filter(function (o) { return !(S.comme && (o[0] === 'campagnes' || o[0] === 'historique')); });
+                ['historique', 'Historique', null, false, 'b']].filter(function (o) { return !(S.comme && o[0] === 'historique'); });   // v131 : Campagnes visible en aperçu
       }
       var sid = sitePoste(), pool = libres(sid);
       var t = [['pool', sid == null ? 'Pool' : poolNom(sid), pool.length, pool.some(function (l) { return niveau(l) === 'crit'; }), 'v']];
