@@ -55,6 +55,11 @@
 //   - taux pré-remplis d'après les objectifs déjà enregistrés, sinon M-1.
 //   - tableau resserré (colonnes de 58 px) et coiffé de trois groupes :
 //     Commandes · Mix · Calculés par taux.
+//  objectifs-v14 (25/11/2026, Team Colin) — RETOUR DE LA DIRECTION :
+//   - Financement et Roole retirés de la page (le FI de Performances retombe
+//     sur la moitié des commandes hors loueurs ; Roole n'a plus d'objectif).
+//   - Accessoires : saisis par vendeur en euros HT (colonne « Access. € »),
+//     plus de taux par commande dans l'atelier.
 //  Rendu dans __anchor ; SUPABASE_URL/KEY -> ctx.tenant ; getUserJwt() ->
 //  session du client runtime ; doc -> __anchor.ownerDocument. User = oropraUser.
 //  Périmètre 100% v_mon_perimetre (VAR_SITES retirée). 0 vestige.
@@ -133,7 +138,7 @@ const OBJ_VIEW = IS_TC ? 'v_objectifs_tc' : 'v_objectifs'
 // a quitté la saisie : son objectif vaut la moitié des commandes réalisées
 // hors loueurs et se calcule dans v_performances_tc.
 const OBJ_TABLE_FIELDS = IS_TC ? ['commandes'] : ['commandes', 'gravage', 'financements', 'contrat_service', 'waxoyl', 'contacts_jour']
-const KPI_TABLE_FIELDS = IS_TC ? ['pro', 'phev_ev', 'vu', 'kinto', 'arval', 'fi', 'roole', 'accessoires'] : []
+const KPI_TABLE_FIELDS = IS_TC ? ['pro', 'phev_ev', 'vu', 'kinto', 'arval', 'accessoires'] : []
 const REAL_FIELDS = IS_TC
   ? { commandes: 'part_realises', pro: 'pro_realises', phev_ev: 'phev_ev_realises', vu: 'vu_realises', kinto: 'kinto_realises', arval: 'arval_realises',
       fi: 'financements_hors_loueur', roole: 'gravages_realises', accessoires: 'accessoires_ht', cmd_hl: 'commandes_hors_loueur' }
@@ -147,11 +152,12 @@ const SECONDARY = IS_TC
 // Valeur d'un vendeur = taux × SES commandes. base 'hl' : commandes hors
 // loueurs (total − Kinto − Arval), comme le FI de Performances. base 'tot' :
 // commandes totales. unite '€' : le taux est un montant par commande.
-const DERIVES = IS_TC
-  ? [{ k: 'fi', label: 'Financement', court: 'FI', unite: '%', base: 'hl', aide: 'sur les commandes hors loueurs' },
-     { k: 'roole', label: 'Roole', court: 'Roole', unite: '%', base: 'tot', aide: 'sur les commandes totales' },
-     { k: 'accessoires', label: 'Accessoires HT', court: 'Access.', unite: '€', base: 'tot', aide: 'par commande' }]
-  : []
+// v14 (25/11/2026) : plus aucun objectif calculé. Financement et Roole sont
+// retirés (direction commerciale : le FI se suit sur les fichiers Toyota TFS,
+// Roole sur les livraisons) et l'objectif accessoires se saisit vendeur par
+// vendeur, en euros HT, comme dans le fichier OBJECTIFS des chefs des ventes.
+// La mécanique reste en place, inerte, si un objectif calculé revient.
+const DERIVES = []
 const DERIVE_KEYS = DERIVES.map(function (d) { return d.k })
 function estDerive(k) { return DERIVE_KEYS.indexOf(k) >= 0 }
 function deriveDef(k) { return DERIVES.find(function (d) { return d.k === k }) }
@@ -211,11 +217,11 @@ const MOIS_NOMS = ['Janvier', 'Février', 'Mars', 'Avril', 'Mai', 'Juin', 'Juill
 const GKEYS = IS_TC
   ? [{ k: 'cde_total', label: 'Total', calc: true, grp: 'Commandes' }, { k: 'commandes', label: 'Part.', grp: 'Commandes' }, { k: 'pro', label: 'Pro', grp: 'Commandes' },
      { k: 'phev_ev', label: 'PHEV/EV', grp: 'Mix' }, { k: 'vu', label: 'VU', grp: 'Mix' }, { k: 'kinto', label: 'Kinto', grp: 'Mix' }, { k: 'arval', label: 'Arval', grp: 'Mix' },
-     { k: 'fi', label: 'FI', calc: true, derive: true, grp: 'Calculés par taux' }, { k: 'roole', label: 'Roole', calc: true, derive: true, grp: 'Calculés par taux' }, { k: 'accessoires', label: 'Access.', calc: true, derive: true, grp: 'Calculés par taux' }]
+     { k: 'accessoires', label: 'Access. €', grp: 'Accessoires HT' }]
   : [{ k: 'commandes', label: 'Commandes' }, { k: 'gravage', label: 'Gravages' }, { k: 'financements', label: 'Financements' }, { k: 'contrat_service', label: 'CS' }, { k: 'waxoyl', label: 'Waxoyl' }, { k: 'contacts_jour', label: 'Contacts/j' }]
 const KPIS_SUIVI = IS_TC
   ? [{ k: 'cde_total', label: 'Commandes total', calc: true }, { k: 'commandes', label: 'Commandes particuliers' }, { k: 'pro', label: 'Commandes pro' }, { k: 'phev_ev', label: 'PHEV / EV' }, { k: 'vu', label: 'VU' }, { k: 'kinto', label: 'Kinto' }, { k: 'arval', label: 'Arval' },
-     { k: 'fi', label: 'Financement (hors loueurs)' }, { k: 'roole', label: 'Roole' }, { k: 'accessoires', label: 'Accessoires HT', euro: true }]
+     { k: 'accessoires', label: 'Accessoires HT', euro: true }]
   : [{ k: 'commandes', label: 'Commandes' }, { k: 'financements', label: 'Financements' }, { k: 'contrat_service', label: 'Contrat de service' }, { k: 'waxoyl', label: 'Waxoyl' }, { k: 'gravage', label: 'Gravage' }]
 
 // --- nombres / dates ---
