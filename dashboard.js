@@ -1,5 +1,8 @@
 // ============================================================================
-//  DASHBOARD — module One Data (OD.define)   v63 — PROFIL TEAM COLIN
+//  DASHBOARD — module One Data (OD.define)   v64 — PROFIL TEAM COLIN
+//
+//  v64 (25/11/2026) : sous un site, seuls les vendeurs qui ont une activité
+//    dans l'univers affiché (VN, VO ou les deux) sont listés.
 //
 //  v63 (25/11/2026) : le périmètre se déplie jusqu'aux VENDEURS de chaque
 //    site (mêmes colonnes ; stock « — », il n'appartient pas à un vendeur).
@@ -1094,9 +1097,16 @@ OD.define('dashboard', {
       };
       (j.vendeurs || []).forEach(prendre);
       (j.etat || []).forEach(l => {
-        if (num(l.livr_attente) + num(l.livr_retard) + num(l.appro_n) + num(l.livr_a_cloturer) > 0) prendre(l);
+        if (num(l.livr_attente) + num(l.livr_retard) + num(l.appro_n) > 0) prendre(l);
       });
-      return Array.from(m.values());
+      // v64 : un vendeur ne figure que s'il a quelque chose DANS L'UNIVERS
+      // AFFICHÉ (commandes, objectif, à livrer, à approuver, retard). En VN, les
+      // vendeurs VO et les comptes sans aucune activité n'apparaissent plus.
+      const pr = prorataMois();
+      return Array.from(m.values()).filter(v => {
+        const st = statsVendeur(v.site, v.user, pr);
+        return st.cdes + st.obj + st.attente + st.appro + st.livr_retard > 0;
+      });
     }
     function statsVendeur(site, user, pr, univ) {
       const j = state.j || {};
