@@ -1,5 +1,21 @@
 // ============================================================================
-//  DASHBOARD — module One Data (OD.define)   v59 — PROFIL TEAM COLIN
+//  DASHBOARD — module One Data (OD.define)   v60 — PROFIL TEAM COLIN
+//
+//  v60 (25/11/2026) :
+//    · « Carnet » renommé « Commandes à livrer » (signées et transmises,
+//      voiture pas encore livrée).
+//    · Sélecteur VN / VO / Tout (chef et direction). Il filtre en mémoire les
+//      lignes de dash2_lire, qui portent chacune leur univers (règle de la
+//      page Performances : VD/VK en VO si le vendeur est VO, sinon VN).
+//      Leads, pipe et rendez-vous n'ont pas d'univers : ils ne bougent pas.
+//    · Lecture sur dash2_lire / dash2_liste (teamcolin_dash2_vnvo_carnet.sql).
+//    · Carnet recalculé sur la même base que les commandes (équipe visible,
+//      grands comptes exclus), sans les commandes déjà facturées au DMS ni
+//      celles de plus de 180 jours : 1 437 au lieu de 4 612 le 25/11/2026.
+//      Le reste est compté à part, « à clôturer dans BACS ». La famille
+//      « Carnet de commandes » rejoint « Livraisons ».
+//    · « À approuver » sur la même base, sans les variantes d'une affaire dont
+//      une commande a déjà été transmise (même VIN, ou sans VIN).
 //
 //  v59 (25/11/2026) : grands chiffres en unités, jamais en euros (carnet =
 //    nombre de commandes, stock = véhicules de plus de 90 j) ; les montants
@@ -354,7 +370,8 @@ OD.define('dashboard', {
 #dash-root .dfam > h2::before{height:16px;width:4px;border-radius:2px}
 #dash-root .drail{position:relative}
 #dash-root .dperim-w{position:relative;margin-left:auto}
-#dash-root .dperim-w + .dmois{margin-left:0}
+#dash-root .dperim-w ~ .dmois,#dash-root .dmois + .dmois{margin-left:0}
+#dash-root .duniv button{text-transform:none}
 #dash-root .dperim-btn{display:inline-flex;align-items:center;gap:8px;background:#fff;border:1px solid var(--bleu-clair);
   border-radius:6px;padding:6px 11px;font:inherit;font-size:12.5px;color:var(--bleu-fonce);cursor:pointer;min-height:30px;max-width:420px}
 #dash-root .dperim-btn:hover,#dash-root .dperim-w.ouvert .dperim-btn{border-color:var(--bleu);background:#f5f8fc}
@@ -458,7 +475,7 @@ OD.define('dashboard', {
       ouvert: null, plis: {}, busSiteVu: null, chargement: false,
       sel: { level: 'all', key: null, label: 'Tout mon périmètre' },
       erreur: null, listes: {}, avisRepli: null,
-      perimOuvert: false, triEnt: 'ecart'
+      perimOuvert: false, triEnt: 'ecart', vnvo: 'tout'
     };
 
     function estMoisEnCours() {
@@ -581,7 +598,7 @@ OD.define('dashboard', {
       const p = (async () => {
         const jwt = await getUserJwt();
         if (!jwt) throw new Error('session absente');
-        const res = await fetch(SUPABASE_URL + '/rest/v1/rpc/dash_lire', {
+        const res = await fetch(SUPABASE_URL + '/rest/v1/rpc/dash2_lire', {
           method: 'POST',
           headers: { 'apikey': SUPABASE_KEY, 'Authorization': 'Bearer ' + jwt,
                      'Content-Type': 'application/json' },
@@ -614,13 +631,14 @@ OD.define('dashboard', {
     const CH_ETAT = ['livr_attente','livr_montant','livr_retard','livr_semaine','livr_mois30',
       'livr_plus_tard','livr_a_cloturer','pipe_affaires','pipe_fraiches','pipe_a_relancer',
       'pipe_froides','pv_dossiers','pv_montant','pv_recents','leads_attribues','leads_jamais',
-      'leads_jamais_48h','rdv_a_venir','rdv_tenus','rdv_soldes','rapports','cdes_jour','devis_jour'];
+      'leads_jamais_48h','rdv_a_venir','rdv_tenus','rdv_soldes','rapports','cdes_jour','devis_jour',
+      'appro_n','appro_m','appro_vieux_n'];
     const CH_V = CH_PROD.concat(CH_ETAT);
     const CH_S = ['vn_n','vn_valeur','vn_90','vn_180','vn_age_somme','vn_age_n','vn_dormant',
       'vn_reserve','vo_n','vo_valeur','vo_90','vo_180','vo_age_somme','vo_age_n','vo_dormant',
       'ent_prep_n','ent_prep_m','ent_appro_n','ent_appro_m','ent_trans_n','ent_trans_m',
       'ent_refus_n','ent_refus_m',
-      'ent_appro_30_n','ent_appro_30_m','ent_appro_90_n','ent_appro_90_m','ent_trans_365_n','ent_trans_365_m',
+      'ent_appro_30_n','ent_appro_30_m','ent_appro_90_n','ent_appro_90_m','ent_trans_365_n','ent_trans_365_m','ent_cloturer_n','ent_cloturer_m',
       'leads_recus_30j','leads_non_attribues','leads_jamais',
       'leads_perdus','leads_resolus','leads_contactes','leads_total',
       'd_15min','d_30min','d_60min','d_4h','d_24h','d_plus','delai_n'];
@@ -630,7 +648,11 @@ OD.define('dashboard', {
 
     function agreger(j, ids) {
       const dans = ids ? new Set(ids.map(Number)) : null;
-      const okSite = s => !dans || dans.has(Number(s));
+      // v60 : univers VN / VO. Une ligne '*' (leads, pipe, rendez-vous) reste
+      // toujours ; une ligne typée ne reste que si elle est de l'univers choisi.
+      const uv = state.vnvo === 'VN' || state.vnvo === 'VO' ? state.vnvo : null;
+      const okSite = (s, l) => (!dans || dans.has(Number(s)))
+        && (!uv || !l || !l.vn_vo || l.vn_vo === '*' || l.vn_vo === uv);
 
       const A = { prod: vide(CH_V), stock: vide(CH_S), vendeurs: [], sites: [], serie: [],
                   lignes: [], etats: [], sources: {}, perimetre: (j.perimetre || []),
@@ -647,13 +669,13 @@ OD.define('dashboard', {
         return v;
       };
       (j.vendeurs || []).forEach(l => {           // production du mois choisi
-        if (!okSite(l.id_site)) return;
+        if (!okSite(l.id_site, l)) return;
         A.lignes.push(l);
         ajouter(A.prod, l, CH_PROD);
         ajouter(prendreUser(l), l, CH_PROD);
       });
       (j.etat || []).forEach(l => {               // état du jour
-        if (!okSite(l.id_site)) return;
+        if (!okSite(l.id_site, l)) return;
         A.etats.push(l);
         ajouter(A.prod, l, CH_ETAT);
         const v = prendreUser(l);
@@ -666,7 +688,7 @@ OD.define('dashboard', {
       const nomSite = {};
       (j.perimetre || []).forEach(p => nomSite[String(p.id_site)] = p);
       (j.sites || []).forEach(l => {
-        if (!okSite(l.id_site)) return;
+        if (!okSite(l.id_site, l)) return;
         ajouter(A.stock, l, CH_S);
         const p = nomSite[String(l.id_site)] || {};
         const s = Object.assign({}, l);
@@ -683,7 +705,7 @@ OD.define('dashboard', {
       // --- série 12 mois
       const parMois = new Map();
       (j.serie || []).forEach(l => {
-        if (!okSite(l.id_site)) return;
+        if (!okSite(l.id_site, l)) return;
         let m = parMois.get(l.mois);
         if (!m) { m = { mois: l.mois, cdes: 0, hors_loueurs: 0, fi: 0, loa: 0, roole: 0,
                         reprise: 0, phev: 0, vu: 0, acc: 0, obj_cdes: 0, obj_fi: 0 };
@@ -705,18 +727,11 @@ OD.define('dashboard', {
       A.vo_age = s.vo_age_n > 0 ? Math.round(s.vo_age_somme / s.vo_age_n) : null;
       A.engage = s.ent_trans_m;
       A.nb_sites = (ids ? ids.length : (j.perimetre || []).length);
-      // v58 : l'ancienneté des dossiers vient de colonnes ajoutées par
-      // teamcolin_dash_carnet_anciennete.sql. Absentes, on montre les totaux
-      // bruts — et on le dit en console, une fois, pour ne pas masquer l'oubli.
-      A.carnetOk = (j.sites || []).length === 0
-        || (j.sites || []).some(x => x && x.ent_appro_30_n !== undefined);
-      if (!A.carnetOk && !window.__dashTcAvisCarnet) {
-        window.__dashTcAvisCarnet = true;
-        try { console.warn('[dashboard v58] colonnes ent_appro_30_* absentes de dash_site_mois : '
-          + 'appliquer teamcolin_dash_carnet_anciennete.sql. Totaux bruts affichés.'); } catch (e) { }
-      }
-      A.appro_n = A.carnetOk ? s.ent_appro_30_n : s.ent_appro_n;
-      A.appro_m = A.carnetOk ? s.ent_appro_30_m : s.ent_appro_m;
+      // v60 : « à approuver » vient de l'état du vendeur (même base que les
+      // commandes), plus des sites.
+      A.carnetOk = true;
+      A.appro_n = p.appro_n;
+      A.appro_m = p.appro_m;
       return A;
     }
 
@@ -905,7 +920,7 @@ OD.define('dashboard', {
         e.taux_fi = pct(e.fi, e.hors_loueurs);
         e.dormant = num(e.vn_dormant) + num(e.vo_dormant);
         e.dormant_n = num(e.vn_90) + num(e.vo_90);
-        e.appro = A.carnetOk ? num(e.ent_appro_30_n) : num(e.ent_appro_n);
+        e.appro = num(e.appro_n);
         return e;
       }).filter(e => e.niv === 'affaire' || e.cle != null);
     }
@@ -925,9 +940,10 @@ OD.define('dashboard', {
       const cdes = num(p.cdes), obj = num(p.obj_cdes);
       const sel = state.sel || { level: 'all' };
       const qui = sel.level === 'all' ? 'le groupe' : (sel.label || 'ce périmètre');
+      const uvs = state.vnvo !== 'tout' ? ' · ' + state.vnvo : '';
       let g;
       if (!obj) {
-        g = '<div class="q">' + (enCours ? 'Où ' + esc(qui) + ' va atterrir' : 'Le mois de ' + esc(MOIS_LONG[state.mois - 1])) + '</div>'
+        g = '<div class="q">' + (enCours ? 'Où ' + esc(qui) + ' va atterrir' : 'Le mois de ' + esc(MOIS_LONG[state.mois - 1])) + uvs + '</div>'
           + '<div class="big"><span class="n">' + fmt(cdes) + '</span><span class="o">commandes</span>'
           + '<span class="badge">objectifs du mois non saisis</span></div>'
           + (enCours ? '<div class="leg"><span>Au rythme actuel : <b>' + fmt(pr > 0 ? Math.round(cdes / pr) : cdes)
@@ -938,7 +954,7 @@ OD.define('dashboard', {
         const land = pr > 0 ? Math.round(cdes / pr) : cdes;
         const taux = pct(cdes, obj);
         const cls = ec < 0 ? 'retard' : 'ok';
-        g = '<div class="q">' + (enCours ? 'Où ' + esc(qui) + ' va atterrir' : 'Comment ' + esc(MOIS_LONG[state.mois - 1]) + ' s’est terminé') + '</div>'
+        g = '<div class="q">' + (enCours ? 'Où ' + esc(qui) + ' va atterrir' : 'Comment ' + esc(MOIS_LONG[state.mois - 1]) + ' s’est terminé') + uvs + '</div>'
           + '<div class="big"><span class="n">' + fmt(cdes) + '</span><span class="o">/ ' + fmt(obj) + ' commandes</span>'
           + '<span class="badge ' + cls + '">' + taux + ' % de l’objectif'
           + (enCours ? ' · rythme attendu ' + Math.round(pr * 100) + ' %' : '') + '</span></div>'
@@ -998,7 +1014,7 @@ OD.define('dashboard', {
         + '<div class="dscroll" style="max-height:none"><table class="dentt"><thead><tr>'
         + '<th>' + (niv === 'site' ? 'Site' : 'Affaire') + '</th><th class="g">Commandes / objectif</th>'
         + '<th>Écart au rythme</th><th>Livraisons en retard</th><th>À approuver</th>'
-        + '<th>Carnet</th><th>Stock &gt; 90 j</th><th>Financement</th></tr></thead><tbody>';
+        + '<th>À livrer</th><th>Stock &gt; 90 j</th><th>Financement</th></tr></thead><tbody>';
       l.forEach(e => {
         const sub = e.niv === 'affaire'
           ? esc(e.marques.join(', ')) + ' · ' + e.n_sites + (e.n_sites > 1 ? ' sites' : ' site')
@@ -1011,17 +1027,18 @@ OD.define('dashboard', {
           + '<td class="' + (ec == null ? 'pale' : ec < 0 ? 'mauvais' : 'bon') + '">'
           + (ec == null ? '—' : (ec > 0 ? '+' : ec < 0 ? '−' : '') + fmt(Math.abs(ec))) + '</td>'
           + '<td class="' + (num(e.livr_retard) > 0 ? 'mauvais' : 'pale') + '">' + fmt(e.livr_retard) + '</td>'
-          + '<td>' + fmt(e.appro) + (A.carnetOk && num(e.ent_appro_30_m) > 0 ? ' <span class="pale">· ' + fmtEur(e.ent_appro_30_m) + '</span>' : '') + '</td>'
-          + '<td>' + fmt(e.ent_trans_n) + (num(e.ent_trans_m) > 0 ? ' <span class="pale">· ' + fmtEur(e.ent_trans_m) + '</span>' : '') + '</td>'
+          + '<td>' + fmt(e.appro) + (num(e.appro_m) > 0 ? ' <span class="pale">· ' + fmtEur(e.appro_m) + '</span>' : '') + '</td>'
+          + '<td>' + fmt(e.livr_attente) + (num(e.livr_montant) > 0 ? ' <span class="pale">· ' + fmtEur(e.livr_montant) + '</span>' : '') + '</td>'
           + '<td>' + fmt(e.dormant_n) + (e.dormant > 0 ? ' <span class="pale">· ' + fmtEur(e.dormant) + '</span>' : '') + '</td>'
           + '<td class="' + (e.taux_fi != null && e.taux_fi < 30 ? 'mauvais' : '') + '">' + pcts(e.taux_fi) + '</td></tr>';
       });
       h += '</tbody></table></div>'
         + '<p class="dnote" style="margin:0">Écart au rythme : commandes du mois moins celles attendues à date ('
         + (pr < 1 ? Math.round(pr * 100) + ' % de l’objectif, jours ouvrés lun-sam' : 'objectif complet, mois terminé') + ').'
+        + (state.vnvo !== 'tout' ? ' Univers : ' + state.vnvo + '.' : '')
         + ' À approuver : commandes BACS en attente d’approbation créées depuis 30 jours'
-        + (A.carnetOk ? '' : ' (indisponible : total brut affiché)') + '.'
-        + ' Carnet : commandes transmises ou validées, pas encore clôturées dans BACS.'
+        + ', hors variantes d’une affaire déjà transmise.'
+        + ' À livrer : commandes signées et transmises, voiture pas encore livrée (hors commandes déjà facturées au DMS et de plus de 180 jours).'
         + ' Stock &gt; 90 j : véhicules VN et VO en parc depuis plus de trois mois.</p></section>';
       return h;
     }
@@ -1211,7 +1228,7 @@ OD.define('dashboard', {
         ctx: A => 'Commandes transmises ou validées dont la date limite est passée, et celles de la semaine.',
         liste: 'livr_retard',
         trouve: A => num(A.prod.livr_a_cloturer) > 0
-          ? '<b>' + fmt(A.prod.livr_a_cloturer) + '</b> dossiers ont plus de trois mois de retard : ils sont probablement à clôturer.'
+          ? '<b>' + fmt(A.prod.livr_a_cloturer) + '</b> dossiers sont à clôturer dans BACS : déjà facturés au DMS, créés il y a plus de six mois ou en retard de plus de trois mois.'
           : 'Rien d’anormal dans vos livraisons.' },
       { id: 'v_sansfi', fam: 'Mes leviers', lab: 'Sans financement',
         val: A => fmt(A.prod.hors_loueurs - A.prod.fi),
@@ -1306,10 +1323,10 @@ OD.define('dashboard', {
         sub: A => fmt(A.prod.livr_attente) + ' en attente · ' + fmtEur(A.prod.livr_montant),
         ton: A => A.prod.livr_retard > 0 ? 'baisse' : 'hausse',
         titre: 'Les livraisons en retard',
-        ctx: A => 'Commandes transmises ou validées dont la date limite est passée. Au-delà de trois mois, le dossier est à clôturer.',
+        ctx: A => 'Commandes à livrer dont la date limite est passée. Les commandes déjà facturées au DMS ne sont plus comptées : elles sont à clôturer dans BACS.',
         liste: 'livr_retard',
         trouve: A => num(A.prod.livr_a_cloturer) > 0
-          ? '<b>' + fmt(A.prod.livr_a_cloturer) + '</b> dossiers traînent depuis plus de trois mois : ils faussent vos chiffres d’en-cours.'
+          ? '<b>' + fmt(A.prod.livr_a_cloturer) + '</b> dossiers sont à clôturer dans BACS : déjà facturés au DMS, créés il y a plus de six mois ou en retard de plus de trois mois.'
           : 'Rien d’anormal.' },
       { id: 'c_stock', fam: 'Stock', lab: 'Dort depuis 90 j',
         val: A => fmt(A.stock_90),
@@ -1379,76 +1396,65 @@ OD.define('dashboard', {
         } },
       { id: 'd_appro', fam: 'Production', lab: 'À approuver',
         val: A => fmt(A.appro_n),
-        sub: A => A.carnetOk
-          ? (fmtEur(A.appro_m) + ' · créées depuis 30 j')
-          : (fmtEur(A.appro_m) + ' en attente'),
+        sub: A => fmtEur(A.appro_m) + ' · créées depuis 30 j',
         ton: A => A.appro_n > 0 ? 'baisse' : null,
         titre: 'Les commandes qui attendent une approbation',
-        ctx: A => 'Commandes BACS en attente d’approbation, donc pas encore transmises : c’est de la production du mois qui peut encore tomber. '
-          + (A.carnetOk ? 'Seules celles créées depuis 30 jours sont comptées en tête ; au-delà de 90 jours, le dossier est mort et doit être archivé dans BACS.' : ''),
-        vue: A => A.carnetOk
-          ? tableau([
-              { t: 'Site', v: l => esc(l.nom) },
-              { t: '≤ 30 j', v: l => fmt(l.ent_appro_30_n), cl: l => num(l.ent_appro_30_n) > 0 ? 'mauvais' : '' },
-              { t: 'Montant', v: l => fmtEur(l.ent_appro_30_m) },
-              { t: '31-90 j', v: l => fmt(num(l.ent_appro_n) - num(l.ent_appro_30_n) - num(l.ent_appro_90_n)) },
-              { t: '> 90 j, à archiver', v: l => fmt(l.ent_appro_90_n) }
-            ], A.sites.filter(x => num(x.ent_appro_n) > 0)
-                 .sort((a, b) => num(b.ent_appro_30_n) - num(a.ent_appro_30_n) || num(b.ent_appro_n) - num(a.ent_appro_n)))
-          : tableau([
-              { t: 'Site', v: l => esc(l.nom) },
-              { t: 'En approbation', v: l => fmt(l.ent_appro_n), cl: l => l.ent_appro_n > 0 ? 'mauvais' : '' },
-              { t: 'Montant', v: l => fmtEur(l.ent_appro_m) }
-            ], A.sites.slice().sort((a, b) => num(b.ent_appro_n) - num(a.ent_appro_n))),
+        ctx: A => 'Commandes BACS en attente d’approbation, donc pas encore transmises : c’est de la production qui peut encore tomber. '
+          + 'Seules celles créées depuis 30 jours sont comptées, hors variantes d’une affaire dont une commande est déjà transmise. '
+          + 'Au-delà de 90 jours, le dossier est mort et doit être archivé dans BACS.',
+        vue: A => tableau([
+            { t: niveauEntites() === 'site' ? 'Site' : 'Affaire', v: l => esc(l.nom) },
+            { t: '≤ 30 j', v: l => fmt(l.appro_n), cl: l => num(l.appro_n) > 0 ? 'mauvais' : '' },
+            { t: 'Montant', v: l => fmtEur(l.appro_m) },
+            { t: '> 90 j, à archiver', v: l => fmt(l.appro_vieux_n) }
+          ], parEntite(A, niveauEntites()).filter(x => num(x.appro_n) + num(x.appro_vieux_n) > 0)
+               .sort((a, b) => num(b.appro_n) - num(a.appro_n) || num(b.appro_vieux_n) - num(a.appro_vieux_n))),
         trouve: A => {
-          if (!A.carnetOk) return num(A.stock.ent_appro_n) > 0
-            ? '<b>' + fmtEur(A.stock.ent_appro_m) + '</b> attendent une approbation, tous âges confondus.'
-            : 'Rien en attente d’approbation.';
-          const s = A.stock;
-          let t = num(s.ent_appro_30_n) > 0
-            ? '<b>' + fmt(s.ent_appro_30_n) + '</b> commande' + (s.ent_appro_30_n > 1 ? 's' : '') + ' (' + fmtEur(s.ent_appro_30_m)
-              + ') attend' + (s.ent_appro_30_n > 1 ? 'ent' : '') + ' une signature. Les approuver, c’est les transmettre : c’est la production la plus proche.'
+          const p = A.prod;
+          let t = num(p.appro_n) > 0
+            ? '<b>' + fmt(p.appro_n) + '</b> commande' + (p.appro_n > 1 ? 's' : '') + ' (' + fmtEur(p.appro_m)
+              + ') attend' + (p.appro_n > 1 ? 'ent' : '') + ' une signature. Les approuver, c’est les transmettre : c’est la production la plus proche.'
             : 'Aucune commande récente n’attend d’approbation.';
-          if (num(s.ent_appro_90_n) > 0)
-            t += ' <b>' + fmt(s.ent_appro_90_n) + '</b> dossiers de plus de 90 jours (' + fmtEur(s.ent_appro_90_m)
-              + ') sont à archiver dans BACS : ils ne sont plus des commandes.';
+          if (num(p.appro_vieux_n) > 0)
+            t += ' <b>' + fmt(p.appro_vieux_n) + '</b> dossiers de plus de 90 jours sont à archiver dans BACS : ils ne sont plus des commandes.';
+          return t;
+        } },
+      { id: 'd_engage', fam: 'Livraisons', lab: 'Commandes à livrer',
+        val: A => fmt(A.prod.livr_attente),
+        sub: A => 'signées et transmises, voiture pas encore livrée · ' + fmtEur(A.prod.livr_montant),
+        ton: A => num(A.prod.livr_a_cloturer) > 0 ? 'baisse' : null,
+        titre: 'Les commandes à livrer',
+        ctx: A => 'Commandes signées et transmises à Toyota (statuts BACS Transmitted to TFR ou Validated), voiture pas encore livrée : ni facturées au DMS, ni créées il y a plus de six mois, ni en retard de plus de trois mois. Même base que les commandes : vendeurs de l’équipe, grands comptes exclus.',
+        vue: A => tableau([
+            { t: niveauEntites() === 'site' ? 'Site' : 'Affaire', v: l => esc(l.nom) },
+            { t: 'À livrer', v: l => fmt(l.livr_attente) },
+            { t: 'Cette semaine', v: l => fmt(l.livr_semaine) },
+            { t: 'Sous 30 j', v: l => fmt(l.livr_mois30) },
+            { t: 'En retard', v: l => fmt(l.livr_retard), cl: l => num(l.livr_retard) > 0 ? 'mauvais' : '' },
+            { t: 'À clôturer', v: l => fmt(l.livr_a_cloturer) },
+            { t: 'Montant', v: l => fmtEur(l.livr_montant) }
+          ], parEntite(A, niveauEntites()).filter(x => num(x.livr_attente) + num(x.livr_a_cloturer) > 0)
+               .sort((a, b) => num(b.livr_attente) - num(a.livr_attente)))
+          + '<p class="dnote" style="margin:14px 0 4px">Toutes les commandes vivantes des sites, tous vendeurs confondus, par étape BACS :</p>'
+          + entonnoirHtml(A.stock),
+        trouve: A => {
+          const p = A.prod;
+          let t = '<b>' + fmt(p.livr_attente) + '</b> commandes à livrer, dont ' + fmt(p.livr_semaine)
+            + ' cette semaine et ' + fmt(p.livr_retard) + ' en retard.';
+          if (num(p.livr_a_cloturer) > 0)
+            t += ' <b>' + fmt(p.livr_a_cloturer) + '</b> dossiers sont encore ouverts dans BACS alors que la voiture est déjà facturée au DMS, ou que la commande a plus de six mois ou plus de trois mois de retard : ils sont à clôturer dans BACS (statut Closed). Ils ne sont pas comptés ici.';
           return t;
         } },
       { id: 'd_livr', fam: 'Livraisons', lab: 'En retard',
         val: A => fmt(A.prod.livr_retard),
-        sub: A => fmt(A.prod.livr_attente) + ' en attente · ' + fmtEur(A.prod.livr_montant),
+        sub: A => 'sur ' + fmt(A.prod.livr_attente) + ' à livrer',
         ton: A => A.prod.livr_retard > 0 ? 'baisse' : 'hausse',
-        titre: 'Les livraisons en retard, par affaire',
-        ctx: A => 'Commandes transmises ou validées dont la date limite est passée. Au-delà de trois mois le dossier est à clôturer.',
-        vue: A => tableau([
-            { t: 'Affaire', v: l => esc(l.nom) },
-            { t: 'En attente', v: l => fmt(l.livr_attente) },
-            { t: 'En retard', v: l => fmt(l.livr_retard), cl: l => l.livr_retard > 0 ? 'mauvais' : '' },
-            { t: 'À clôturer', v: l => fmt(l.livr_a_cloturer) },
-            { t: 'Montant', v: l => fmtEur(l.livr_montant) }
-          ], parEntite(A, 'affaire').sort((a, b) => num(b.livr_retard) - num(a.livr_retard))),
-        trouve: A => num(A.prod.livr_a_cloturer) > 0
-          ? '<b>' + fmt(A.prod.livr_a_cloturer) + '</b> dossiers ont plus de trois mois de retard : ils gonflent l’en-cours sans raison.'
-          : 'Aucun dossier anormalement ancien.' },
-      { id: 'd_engage', fam: 'Carnet de commandes', lab: 'Transmises, non clôturées',
-        val: A => fmt(A.stock.ent_trans_n),
-        sub: A => fmtEur(A.stock.ent_trans_m)
-          + (A.carnetOk && num(A.stock.ent_trans_365_n) > 0 ? ' · dont ' + fmt(A.stock.ent_trans_365_n) + ' de plus d’un an' : ''),
-        ton: A => A.carnetOk && num(A.stock.ent_trans_365_n) > 0 ? 'baisse' : null,
-        titre: 'Le carnet de commandes',
-        ctx: A => 'Toutes les commandes vivantes du périmètre, par étape BACS, tous mois confondus. Le carnet, ce sont les commandes transmises (TFR) ou validées qui ne sont pas encore clôturées : en général, pas encore livrées. Montants TTC.',
-        vue: A => entonnoirHtml(A.stock),
-        trouve: A => {
-          const s = A.stock;
-          let t = '';
-          if (A.carnetOk && num(s.ent_trans_365_n) > 0)
-            t += '<b>' + fmt(s.ent_trans_365_n) + '</b> commandes du carnet (' + fmtEur(s.ent_trans_365_m)
-              + ') ont plus d’un an : elles sont très probablement livrées mais jamais clôturées dans BACS, et gonflent le carnet. ';
-          t += num(s.ent_refus_n) > 0
-            ? '<b>' + fmt(s.ent_refus_n) + '</b> commandes refusées, soit ' + fmtEur(s.ent_refus_m) + ' perdus en bout de chaîne.'
-            : 'Aucun refus enregistré sur ce périmètre.';
-          return t;
-        } },
+        titre: 'Les livraisons en retard',
+        ctx: A => 'Commandes à livrer dont la date limite est passée. Les commandes déjà facturées au DMS ne sont plus comptées : elles sont à clôturer dans BACS.',
+        liste: 'livr_retard',
+        trouve: A => num(A.prod.livr_retard) > 0
+          ? '<b>' + fmt(A.prod.livr_retard) + '</b> clients attendent une voiture promise à une date dépassée : à appeler avant qu’ils ne le fassent.'
+          : 'Aucune livraison en retard.' },
       { id: 'd_stock', fam: 'Stock', lab: 'Dort depuis 90 j',
         val: A => fmt(A.stock_90),
         sub: A => 'véhicules sur ' + fmt(A.stock_n) + ' · ' + fmtEur(A.stock_dormant),
@@ -1689,11 +1695,23 @@ OD.define('dashboard', {
         + '</div>';
     }
 
+    // v60 : VN / VO / Tout, pour le chef et la direction.
+    function selecteurUnivers() {
+      const f = state.j ? famille() : null;
+      if (f !== 'chef' && f !== 'direction') return '';
+      return '<div class="dmois duniv" role="group" aria-label="Univers">'
+        + [['tout', 'VN + VO'], ['VN', 'VN'], ['VO', 'VO']].map(u =>
+            '<button type="button" data-univ="' + u[0] + '" aria-pressed="' + (state.vnvo === u[0]) + '">'
+            + u[1] + '</button>').join('')
+        + '</div>';
+    }
+
     function enTete(titre, roleLab) {
       return '<div class="drail"><h1>' + esc(titre) + '</h1>'
         + '<span class="dt">' + esc(dateLongue()) + '</span>'
         + (roleLab ? '<span class="drole">' + esc(roleLab) + '</span>' : '')
         + boutonPerimetre()
+        + selecteurUnivers()
         + selecteurMois() + '</div>';
     }
 
@@ -1845,7 +1863,7 @@ OD.define('dashboard', {
       try {
         const jwt = await getUserJwt();
         if (!jwt) throw new Error('session absente');
-        const res = await fetch(SUPABASE_URL + '/rest/v1/rpc/dashboard_tc_liste', {
+        const res = await fetch(SUPABASE_URL + '/rest/v1/rpc/dash2_liste', {
           method: 'POST',
           headers: { 'apikey': SUPABASE_KEY, 'Authorization': 'Bearer ' + jwt,
                      'Content-Type': 'application/json' },
@@ -1977,7 +1995,14 @@ OD.define('dashboard', {
         basculer(tu.getAttribute('data-id')); return;
       }
 
-      const bm = ev.target.closest('.dmois button');
+      const bu = ev.target.closest('.duniv button[data-univ]');
+      if (bu && r.contains(bu)) {
+        const u = bu.getAttribute('data-univ');
+        if (u && u !== state.vnvo) { state.vnvo = u; state.listes = {}; rendre(); }
+        return;
+      }
+
+      const bm = ev.target.closest('.dmois:not(.duniv) button');
       if (bm && r.contains(bm)) {
         const a = Number(bm.getAttribute('data-a')), m = Number(bm.getAttribute('data-m'));
         if (a === state.annee && m === state.mois) return;
