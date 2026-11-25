@@ -1,4 +1,9 @@
 // ============================================================================
+//  v57 (25/11/2026) : la pastille d'attente BACS disait « BACS », ce qui se
+//    lit « ce RDV est dans BACS » alors qu'elle signifie exactement
+//    l'inverse : pas encore ecrit. Constate sur un RDV du 26/11 reste en
+//    file depuis le 23 et lu comme synchronise. Elle dit desormais
+//    « → BACS », et l'infobulle commence par PAS ENCORE dans BACS.
 //  v56 (18/11/2026) : COULEURS PLEINES dans « Livraisons du site » (préparateur)
 //    et dans « Agenda du site » (secrétaire commerciale, chefs) : les teintes
 //    pâles (10-16 %) donnaient un agenda quasi blanc. Livraisons, préparations,
@@ -2391,8 +2396,8 @@ OD.define('agenda', {
             const tt = info.el.querySelector('.fc-event-title') || info.el.querySelector('.fc-list-event-title');
             if (tt && !tt.querySelector('.ag-bacs-att')) {
               const pb = document.createElement('span');
-              pb.className = 'ag-bacs-att'; pb.textContent = 'BACS';
-              pb.title = 'En attente d\u2019envoi vers BACS : il partira dès que BACS sera ouvert sur le poste de son propriétaire.';
+              pb.className = 'ag-bacs-att'; pb.textContent = '\u2192 BACS';
+              pb.title = 'PAS ENCORE dans BACS. Le RDV existe dans One Data et partira vers BACS dès que son propriétaire aura BACS ouvert sur son poste.';
               tt.insertBefore(pb, tt.firstChild);
             }
           }
