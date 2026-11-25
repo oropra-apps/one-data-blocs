@@ -1,5 +1,9 @@
 // ============================================================================
-//  DASHBOARD — module One Data (OD.define)   v58 — PROFIL TEAM COLIN
+//  DASHBOARD — module One Data (OD.define)   v59 — PROFIL TEAM COLIN
+//
+//  v59 (25/11/2026) : grands chiffres en unités, jamais en euros (carnet =
+//    nombre de commandes, stock = véhicules de plus de 90 j) ; les montants
+//    passent en sous-titre et en gris dans le tableau des entités.
 //
 //  v58 (25/11/2026) : refonte du haut de page, demandée par Antoine.
 //    · Le périmètre quitte la colonne de droite (elle laissait un grand vide
@@ -25,6 +29,8 @@
 //      Prérequis SQL : teamcolin_dash_carnet_anciennete.sql (colonnes
 //      ent_appro_30_*, ent_appro_90_*, ent_trans_365_* de dash_site_mois).
 //      Sans elles, la page affiche les totaux bruts et le dit en console.
+//    · Grands chiffres en unités, jamais en euros : les montants passent en
+//      sous-titre (carnet, stock dormant, tableau des entités).
 //    · Seules les concessions comptent : sites sans réseau (Wissous) et sites
 //      atelier / logistique (Sceaux CTT, APV…) sont écartés dès la lecture, de
 //      l'arbre du périmètre comme de tous les chiffres (25/11/2026).
@@ -898,6 +904,7 @@ OD.define('dashboard', {
         e.ecart_r = obj > 0 ? cdes - e.attendu : null;
         e.taux_fi = pct(e.fi, e.hors_loueurs);
         e.dormant = num(e.vn_dormant) + num(e.vo_dormant);
+        e.dormant_n = num(e.vn_90) + num(e.vo_90);
         e.appro = A.carnetOk ? num(e.ent_appro_30_n) : num(e.ent_appro_n);
         return e;
       }).filter(e => e.niv === 'affaire' || e.cle != null);
@@ -969,7 +976,7 @@ OD.define('dashboard', {
       { k: 'ecart', lab: 'Retard au rythme', f: (a, b) => (a.ecart_r == null ? 1e9 : a.ecart_r) - (b.ecart_r == null ? 1e9 : b.ecart_r) },
       { k: 'livr',  lab: 'Livraisons en retard', f: (a, b) => num(b.livr_retard) - num(a.livr_retard) },
       { k: 'appro', lab: 'À approuver', f: (a, b) => b.appro - a.appro },
-      { k: 'stock', lab: 'Stock dormant', f: (a, b) => b.dormant - a.dormant },
+      { k: 'stock', lab: 'Stock dormant', f: (a, b) => b.dormant_n - a.dormant_n },
       { k: 'fi',    lab: 'Financement', f: (a, b) => (a.taux_fi == null ? 999 : a.taux_fi) - (b.taux_fi == null ? 999 : b.taux_fi) }
     ];
     function tableauEntites(A) {
@@ -991,7 +998,7 @@ OD.define('dashboard', {
         + '<div class="dscroll" style="max-height:none"><table class="dentt"><thead><tr>'
         + '<th>' + (niv === 'site' ? 'Site' : 'Affaire') + '</th><th class="g">Commandes / objectif</th>'
         + '<th>Écart au rythme</th><th>Livraisons en retard</th><th>À approuver</th>'
-        + '<th>Carnet</th><th>Stock dormant</th><th>Financement</th></tr></thead><tbody>';
+        + '<th>Carnet</th><th>Stock &gt; 90 j</th><th>Financement</th></tr></thead><tbody>';
       l.forEach(e => {
         const sub = e.niv === 'affaire'
           ? esc(e.marques.join(', ')) + ' · ' + e.n_sites + (e.n_sites > 1 ? ' sites' : ' site')
@@ -1005,8 +1012,8 @@ OD.define('dashboard', {
           + (ec == null ? '—' : (ec > 0 ? '+' : ec < 0 ? '−' : '') + fmt(Math.abs(ec))) + '</td>'
           + '<td class="' + (num(e.livr_retard) > 0 ? 'mauvais' : 'pale') + '">' + fmt(e.livr_retard) + '</td>'
           + '<td>' + fmt(e.appro) + (A.carnetOk && num(e.ent_appro_30_m) > 0 ? ' <span class="pale">· ' + fmtEur(e.ent_appro_30_m) + '</span>' : '') + '</td>'
-          + '<td>' + fmtEur(e.ent_trans_m) + '</td>'
-          + '<td>' + fmtEur(e.dormant) + '</td>'
+          + '<td>' + fmt(e.ent_trans_n) + (num(e.ent_trans_m) > 0 ? ' <span class="pale">· ' + fmtEur(e.ent_trans_m) + '</span>' : '') + '</td>'
+          + '<td>' + fmt(e.dormant_n) + (e.dormant > 0 ? ' <span class="pale">· ' + fmtEur(e.dormant) + '</span>' : '') + '</td>'
           + '<td class="' + (e.taux_fi != null && e.taux_fi < 30 ? 'mauvais' : '') + '">' + pcts(e.taux_fi) + '</td></tr>';
       });
       h += '</tbody></table></div>'
@@ -1014,7 +1021,8 @@ OD.define('dashboard', {
         + (pr < 1 ? Math.round(pr * 100) + ' % de l’objectif, jours ouvrés lun-sam' : 'objectif complet, mois terminé') + ').'
         + ' À approuver : commandes BACS en attente d’approbation créées depuis 30 jours'
         + (A.carnetOk ? '' : ' (indisponible : total brut affiché)') + '.'
-        + ' Carnet : commandes transmises ou validées, pas encore clôturées dans BACS.</p></section>';
+        + ' Carnet : commandes transmises ou validées, pas encore clôturées dans BACS.'
+        + ' Stock &gt; 90 j : véhicules VN et VO en parc depuis plus de trois mois.</p></section>';
       return h;
     }
 
@@ -1423,8 +1431,8 @@ OD.define('dashboard', {
           ? '<b>' + fmt(A.prod.livr_a_cloturer) + '</b> dossiers ont plus de trois mois de retard : ils gonflent l’en-cours sans raison.'
           : 'Aucun dossier anormalement ancien.' },
       { id: 'd_engage', fam: 'Carnet de commandes', lab: 'Transmises, non clôturées',
-        val: A => fmtEur(A.stock.ent_trans_m),
-        sub: A => fmt(A.stock.ent_trans_n) + ' commandes'
+        val: A => fmt(A.stock.ent_trans_n),
+        sub: A => fmtEur(A.stock.ent_trans_m)
           + (A.carnetOk && num(A.stock.ent_trans_365_n) > 0 ? ' · dont ' + fmt(A.stock.ent_trans_365_n) + ' de plus d’un an' : ''),
         ton: A => A.carnetOk && num(A.stock.ent_trans_365_n) > 0 ? 'baisse' : null,
         titre: 'Le carnet de commandes',
@@ -1442,8 +1450,8 @@ OD.define('dashboard', {
           return t;
         } },
       { id: 'd_stock', fam: 'Stock', lab: 'Dort depuis 90 j',
-        val: A => fmtEur(A.stock_dormant),
-        sub: A => fmt(A.stock_90) + ' véhicules sur ' + fmt(A.stock_n),
+        val: A => fmt(A.stock_90),
+        sub: A => 'véhicules sur ' + fmt(A.stock_n) + ' · ' + fmtEur(A.stock_dormant),
         ton: A => A.stock_dormant > 0 ? 'baisse' : null,
         titre: 'Le stock immobilisé',
         ctx: A => 'Par affaire : ce qui est en parc, et ce qui y est depuis plus de trois mois. L’âge du VO se compte depuis l’achat.',
