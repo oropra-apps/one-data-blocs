@@ -1,6 +1,14 @@
 // ============================================================================
 //  LEAD MANAGEMENT — module One Data (OD.define 'lead-mgmt')
-//  VERSION TEAM COLIN (v129) — déploiement CIBLÉ (publish-targets :
+//  VERSION TEAM COLIN (v130) — déploiement CIBLÉ (publish-targets :
+//  v130 (25/11/2026) : CAMPAGNES — retour de Julien Faugeras (chef, Arcueil) :
+//    - l'onglet Campagnes RECHARGE les campagnes à chaque ouverture (avant, la
+//      liste lue au premier passage restait en mémoire jusqu'au rechargement de
+//      la page : une campagne lancée depuis restait invisible) ;
+//    - chef des ventes sur un site : sous le tableau d'avancement, la même vue
+//      que le vendeur (un onglet par campagne, pastille du reste à prendre,
+//      PRISME, filtres, « Je prends », traitement) : un chef qui vend prend
+//      lui-même ses clients de campagne. RPC inchangées.
 //  v129 (25/11/2026) : CAMPAGNES (vendeur) — une campagne à la fois.
 //    - Bandeau d'onglets, un par campagne : nom + PASTILLE verte du reste à
 //      prendre (même pastille que l'onglet Campagnes), vos clients, % traités :
@@ -3541,6 +3549,21 @@
             rpc('get_campagnes_par_vendeur', { p_viewer_id_user: Number(MOI), p_date_from: de, p_date_to: a, p_campagne: null, p_site_ids: sites })
           ]);
           S.campagnes = r2[0] || []; S.campVend = r2[1] || [];
+          // v130 : chef des ventes sur un site — clients de campagne à prendre et les siens
+          if (POSTE === 'chef' && sites) {
+            var r3 = await Promise.all([
+              rpc('get_campagnes_sollicitation', { p_viewer_id_user: Number(MOI), p_date_from: de, p_date_to: a, p_site_ids: sites, p_id_user: Number(MOI) }).catch(function () { return []; }),
+              rpc('get_campagne_detail', { p_viewer_id_user: Number(MOI), p_date_from: de, p_date_to: a, p_campagne: null, p_filtre: 'a_traiter', p_site_ids: sites, p_id_user: Number(MOI), p_limit: 300 }).catch(function () { return []; }),
+              rpc('campagne_libres', { p_viewer_id_user: Number(MOI), p_site_ids: sites }).catch(function () { return []; })
+            ]);
+            S.campMes = r3[0] || []; S.mesSollis = r3[1] || []; S.campLibres = r3[2] || []; S.campTot = S.campagnes;
+            var ids3 = S.campLibres.concat(S.mesSollis).map(function (t) { return Number(t.id_rapport); }).filter(Boolean);
+            S.campInfos = {};
+            if (ids3.length) {
+              try { (await rpc('campagne_infos', { p_ids: ids3 }) || []).forEach(function (x) { S.campInfos[x.id_rapport] = x; }); }
+              catch (e5) { S.campInfos = {}; }
+            }
+          } else { S.campMes = null; S.campLibres = null; S.mesSollis = null; }
         }
       } catch (e) { S.campagnes = S.campagnes || []; toast(messageErreur(e), true); }
     }
@@ -4284,14 +4307,14 @@
       return true;
     }
     function campBlocs() {
-      var libres = S.campLibres || [], noms = [], h = '';
-      S.campagnes.forEach(function (c) { if (noms.indexOf(c.campagne) < 0) noms.push(c.campagne); });
+      var libres = S.campLibres || [], noms = [], h = '', mesStats = S.campMes || S.campagnes || [];
+      mesStats.forEach(function (c) { if (noms.indexOf(c.campagne) < 0) noms.push(c.campagne); });
       libres.forEach(function (t) { if (noms.indexOf(t.campagne) < 0) noms.push(t.campagne); });
       if (!noms.length) return '<div class="empty">Aucune campagne en cours sur votre site ces 90 derniers jours.</div>';
       var prio = function (t) { var x = campInfo(t); return x && x.priorite != null ? Number(x.priorite) : -1; };
       var sel = campChoisie(noms);
       noms.filter(function (nom) { return nom === sel; }).forEach(function (nom) {
-        var c = S.campagnes.find(function (x) { return x.campagne === nom; }) || {};
+        var c = mesStats.find(function (x) { return x.campagne === nom; }) || {};
         var tot = (S.campTot || []).find(function (x) { return x.campagne === nom; }) || {};
         var toutesMiennes = (S.mesSollis || []).filter(function (t) { return t.campagne === nom; });
         var toutesDispo = libres.filter(function (t) { return t.campagne === nom; });
@@ -4328,7 +4351,7 @@
     // v129 : une campagne à la fois — liste des campagnes et campagne choisie
     function campNoms() {
       var noms = [];
-      (S.campagnes || []).forEach(function (c) { if (noms.indexOf(c.campagne) < 0) noms.push(c.campagne); });
+      (S.campMes || S.campagnes || []).forEach(function (c) { if (noms.indexOf(c.campagne) < 0) noms.push(c.campagne); });
       (S.campLibres || []).forEach(function (t) { if (noms.indexOf(t.campagne) < 0) noms.push(t.campagne); });
       return noms;
     }
@@ -4362,6 +4385,10 @@
     function vueCampagnesVendeur() {
       var h = '<div class="ph"><div><h2>Mes campagnes</h2><p>Libre-service, comme le Pool : prenez un client à relancer, il passe à votre nom. Ouvrez ensuite sa fiche pour l\'appeler et faire votre compte rendu : la relance est alors comptée comme traitée. S\'il ne vous concerne pas, rendez-le.</p></div></div>';
       if (!S.campagnes) return h + '<div class="empty">Chargement des campagnes…</div>';
+      return h + campCorps();
+    }
+    function campCorps() {
+      var h = '';
       var noms = campNoms(), sel = noms.length ? campChoisie(noms) : null;
       if (noms.length) h += campOnglets(noms);
       var tous = (S.campLibres || []).concat(S.mesSollis || []).filter(function (t) { return t.campagne === sel; }), mods = [];
@@ -4723,7 +4750,12 @@
           });
         }
       });
-      return h + '</tbody></table></div><p class="foot">Campagnes internes des 90 derniers jours. Une cible est « traitée » quand le vendeur a fait son compte rendu sur la fiche du client.</p>';
+      h += '</tbody></table></div><p class="foot">Campagnes internes des 90 derniers jours. Une cible est « traitée » quand le vendeur a fait son compte rendu sur la fiche du client.</p>';
+      // v130 : chef sur un site — clients de campagne en libre-service, comme le vendeur
+      if (S.campLibres && ((S.campLibres.length) || (S.mesSollis || []).length)) {
+        h += '<div class="ph" style="margin-top:18px"><div><h2>Clients à prendre</h2><p>Libre-service : prenez un client, il passe à votre nom ; rendez-le s\'il ne vous concerne pas.</p></div></div>' + campCorps();
+      }
+      return h;
     }
 
     function renderPanel() {
@@ -6059,7 +6091,7 @@
         case 'bacs-signaler': signalerRefus(S.refus, toast); return;   // v109
         case 'tab':
           S.tab = id; S.cell = null; render();
-          if (id === 'campagnes' && !S.campagnes) { await chargerCampagnes(); render(); }
+          if (id === 'campagnes') { await chargerCampagnes(); render(); }   // v130 : toujours relu
           if (id === 'historique') chargerHistorique();
           if (id === 'suivis') chargerSuivis();
           if (id === 'relais' && !S.relais) { try { S.relais = await rpc('poste_relais', { p_jours: 30 }) || []; } catch (e) { S.relais = []; toast(messageErreur(e), true); } render(); }
