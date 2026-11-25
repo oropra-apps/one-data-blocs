@@ -1,5 +1,12 @@
 // ============================================================================
-//  DASHBOARD — module One Data (OD.define)   v60 — PROFIL TEAM COLIN
+//  DASHBOARD — module One Data (OD.define)   v61 — PROFIL TEAM COLIN
+//
+//  v61 (25/11/2026) : le tableau des entités devient le PÉRIMÈTRE DÉPLIABLE,
+//    pour tous les rôles : total du périmètre de l'utilisateur, puis marques,
+//    affaires, sites, avec les mêmes colonnes (barre commandes / objectif,
+//    écart au rythme, retards, à approuver, à livrer, stock, financement).
+//    Une affaire se sélectionne désormais DANS sa marque (niveau 'ra') : TEAM
+//    TOY 92 Toyota et TEAM TOY 92 Lexus ne sont plus confondues.
 //
 //  v60 (25/11/2026) :
 //    · « Carnet » renommé « Commandes à livrer » (signées et transmises,
@@ -429,6 +436,17 @@ OD.define('dashboard', {
 #dash-root table.dentt .bon{color:var(--m-vert);font-weight:800}
 #dash-root table.dentt .pale{color:var(--ink-3)}
 #dash-root .dcb{display:flex;align-items:center;gap:10px;min-width:220px}
+#dash-root .dnoeud{display:flex;align-items:center;gap:6px}
+#dash-root .dchev{flex:0 0 auto;width:24px;height:24px;border:0;border-radius:5px;background:#eaf0f9;color:var(--bleu);
+  font:inherit;font-size:12px;line-height:24px;text-align:center;cursor:pointer;padding:0}
+#dash-root .dchev:hover{background:var(--bleu-clair)}
+#dash-root .dchev.vide{background:none;cursor:default}
+#dash-root table.dentt tr.pr0 td{background:#f5f8fc}
+#dash-root table.dentt tr.pr0 .nm{font-size:14px}
+#dash-root table.dentt tr.pr2 .nm,#dash-root table.dentt tr.pr3 .nm{font-weight:700}
+#dash-root table.dentt tr.pr3 .nm{color:var(--bleu)}
+#dash-root table.dentt tr.actif td:first-child{box-shadow:inset 3px 0 0 var(--bleu-fonce)}
+#dash-root table.dentt tr.actif .nm{text-decoration:underline;text-underline-offset:3px}
 #dash-root .dcb .dbar{flex:1;height:8px}
 #dash-root .dcb .dbar .ryt{top:-3px;bottom:-3px;width:2px}
 #dash-root .dcb span{font-weight:700;color:var(--bleu-fonce)}
@@ -475,7 +493,7 @@ OD.define('dashboard', {
       ouvert: null, plis: {}, busSiteVu: null, chargement: false,
       sel: { level: 'all', key: null, label: 'Tout mon périmètre' },
       erreur: null, listes: {}, avisRepli: null,
-      perimOuvert: false, triEnt: 'ecart', vnvo: 'tout'
+      perimOuvert: false, triEnt: 'ecart', vnvo: 'tout', depli: {}
     };
 
     function estMoisEnCours() {
@@ -490,6 +508,9 @@ OD.define('dashboard', {
       if (!s || s.level === 'all') return null;
       if (s.level === 'reseau')
         return per.filter(x => (x.reseau || '__sans') === s.key).map(x => Number(x.id_site));
+      if (s.level === 'ra')       // v61 : une affaire DANS une marque
+        return per.filter(x => (x.reseau || '__sans') + '|' + (x.affaire || '__sans') === s.key)
+                  .map(x => Number(x.id_site));
       if (s.level === 'affaire')
         return per.filter(x => (x.affaire || '__sans') === s.key).map(x => Number(x.id_site));
       if (s.level === 'site') return [Number(s.key)];
@@ -668,9 +689,11 @@ OD.define('dashboard', {
         if (!v.nom && l.nom) v.nom = l.nom;
         return v;
       };
+      A.objU = { VN: 0, VO: 0 };
       (j.vendeurs || []).forEach(l => {           // production du mois choisi
         if (!okSite(l.id_site, l)) return;
         A.lignes.push(l);
+        A.objU[l.vn_vo === 'VO' ? 'VO' : 'VN'] += num(l.obj_cdes);
         ajouter(A.prod, l, CH_PROD);
         ajouter(prendreUser(l), l, CH_PROD);
       });
@@ -820,8 +843,8 @@ OD.define('dashboard', {
           const rendreA = compact ? (plusieursAff && a.sites.length > 1) : true;
           let d2 = d;
           if (rendreA) {
-            const ak = 'affaire:' + a.k, aouv = state.plis[ak] === true;
-            h += ligne('affaire', a.k, a.lab, d, true, aouv, nb(a.sites.length));
+            const ak = 'ra:' + m.k + '|' + a.k, aouv = state.plis[ak] === true;
+            h += ligne('ra', m.k + '|' + a.k, a.lab, d, true, aouv, nb(a.sites.length));
             if (!aouv) return;
             d2 = d + 1;
           }
@@ -870,6 +893,14 @@ OD.define('dashboard', {
 
     // --- prorata du mois : jours ouvrés lundi → samedi, dimanche exclu, comme
     // la page Performances. Un mois passé vaut 1.
+    // v61 : commandes attendues à date. Arrondies PAR UNIVERS puis additionnées,
+    // pour que l'écart au rythme « VN + VO » soit exactement la somme des
+    // écarts VN et VO (un seul arrondi global donnait un point d'écart).
+    function attenduDe(objU, obj, pr) {
+      if (objU && (num(objU.VN) + num(objU.VO)) > 0)
+        return Math.round(num(objU.VN) * pr) + Math.round(num(objU.VO) * pr);
+      return Math.round(num(obj) * pr);
+    }
     function prorataMois() {
       if (!estMoisEnCours()) return 1;
       const d = new Date(), a = d.getFullYear(), m = d.getMonth();
@@ -898,7 +929,7 @@ OD.define('dashboard', {
     // affaires ; une affaire ou un site → les sites.
     function niveauEntites() {
       const lv = (state.sel || {}).level;
-      return (lv === 'affaire' || lv === 'site') ? 'site' : 'affaire';
+      return (lv === 'affaire' || lv === 'ra' || lv === 'site') ? 'site' : 'affaire';
     }
     function entites(A) {
       const niv = niveauEntites();
@@ -915,7 +946,7 @@ OD.define('dashboard', {
         e.cle = niv === 'site' ? (sitesE[0] ? Number(sitesE[0].id_site) : null) : e.nom;
         e.n_sites = sitesE.length;
         e.marques = Array.from(new Set(sitesE.map(s => s.reseau || 'Sans réseau')));
-        e.attendu = obj > 0 ? Math.round(obj * pr) : null;
+        e.attendu = obj > 0 ? attenduDe(e.objU, obj, pr) : null;
         e.ecart_r = obj > 0 ? cdes - e.attendu : null;
         e.taux_fi = pct(e.fi, e.hors_loueurs);
         e.dormant = num(e.vn_dormant) + num(e.vo_dormant);
@@ -949,7 +980,7 @@ OD.define('dashboard', {
           + (enCours ? '<div class="leg"><span>Au rythme actuel : <b>' + fmt(pr > 0 ? Math.round(cdes / pr) : cdes)
             + '</b> commandes en fin de mois</span><span>' + esc(joursOuvresLib()) + '</span></div>' : '');
       } else {
-        const attendu = Math.round(obj * pr);
+        const attendu = attenduDe(A.objU, obj, pr);
         const ec = cdes - attendu;
         const land = pr > 0 ? Math.round(cdes / pr) : cdes;
         const taux = pct(cdes, obj);
@@ -995,6 +1026,131 @@ OD.define('dashboard', {
       { k: 'stock', lab: 'Stock dormant', f: (a, b) => b.dormant_n - a.dormant_n },
       { k: 'fi',    lab: 'Financement', f: (a, b) => (a.taux_fi == null ? 999 : a.taux_fi) - (b.taux_fi == null ? 999 : b.taux_fi) }
     ];
+    // =========================================================================
+    //  v61 — LE PÉRIMÈTRE DÉPLIABLE
+    //
+    //  Un seul tableau pour tous les rôles. La première ligne est le total du
+    //  périmètre de l'utilisateur ; elle se déplie en marques, les marques en
+    //  affaires, les affaires en sites. Chaque ligne porte les mêmes colonnes :
+    //  commandes contre objectif (barre + rythme attendu), écart au rythme,
+    //  livraisons en retard, à approuver, à livrer, stock > 90 j, financement.
+    //  Les chiffres d'une ligne sont ceux de ses sites, agrégés par la même
+    //  fonction que le reste de la page : ils ne peuvent pas diverger.
+    //  Le chevron déplie ; un clic sur le reste de la ligne recentre la page.
+    //  Un échelon sans choix (une seule marque, une affaire d'un seul site) est
+    //  sauté, comme dans le menu du périmètre.
+    // =========================================================================
+    function arbreNoeuds() {
+      const per = ((state.j || {}).perimetre || []);
+      const nb = n => n + (n > 1 ? ' sites' : ' site');
+      const feuille = st => ({ lv: 'site', key: Number(st.id_site), lab: st.nom || ('Site ' + st.id_site),
+        sub: st.affaire || '', ids: [Number(st.id_site)], enfants: [] });
+      const affNoeud = (m, a) => {
+        if (a.sites.length === 1) {
+          const f = feuille(a.sites[0]);
+          f.sub = a.lab + (m.lab ? ' · ' + m.lab : '');
+          return f;
+        }
+        return { lv: 'ra', key: m.k + '|' + a.k, lab: a.lab, sub: m.lab + ' · ' + nb(a.sites.length),
+          ids: a.sites.map(x => Number(x.id_site)), enfants: a.sites.map(feuille) };
+      };
+      const marques = arbrePerimetre().map(m => ({
+        lv: 'reseau', key: m.k, lab: m.lab,
+        sub: m.aff.length + (m.aff.length > 1 ? ' affaires · ' : ' affaire · ')
+          + nb(m.aff.reduce((x, a) => x + a.sites.length, 0)),
+        ids: [].concat.apply([], m.aff.map(a => a.sites.map(x => Number(x.id_site)))),
+        enfants: m.aff.map(a => affNoeud(m, a))
+      }));
+      let enfants = marques;
+      if (marques.length === 1) enfants = marques[0].enfants;   // une seule marque : on la saute
+      // un échelon qui n'offre qu'un seul choix n'apporte rien : on descend
+      while (enfants.length === 1 && enfants[0].enfants.length > 0) enfants = enfants[0].enfants;
+      if (per.length === 1) return feuille(per[0]);
+      return { lv: 'all', key: '', lab: 'Tout mon périmètre',
+        sub: (marques.length > 1 ? marques.map(m => m.lab).join(', ') + ' · ' : '') + nb(per.length),
+        ids: null, enfants: enfants };
+    }
+    function statsNoeud(ids, pr) {
+      const A = agreger(state.j, ids);
+      const p = A.prod, obj = num(p.obj_cdes), cdes = num(p.cdes);
+      // Sans objectif mais avec des commandes, l'attendu vaut 0 : l'écart est
+      // positif, affiché en gris. C'est ce qui garde VN + VO = VN plus VO.
+      const att = obj > 0 ? attenduDe(A.objU, obj, pr) : 0;
+      return { cdes: cdes, obj: obj, ecart_r: (obj > 0 || cdes > 0) ? cdes - att : null,
+        livr_retard: num(p.livr_retard), appro: num(p.appro_n), appro_m: num(p.appro_m),
+        attente: num(p.livr_attente), attente_m: num(p.livr_montant),
+        dormant_n: num(A.stock_90), dormant: num(A.stock_dormant), taux_fi: A.taux_fi };
+    }
+    const TRIS_ARBRE = {
+      ecart: (a, b) => (a.st.ecart_r == null ? 1e9 : a.st.ecart_r) - (b.st.ecart_r == null ? 1e9 : b.st.ecart_r),
+      livr:  (a, b) => b.st.livr_retard - a.st.livr_retard,
+      appro: (a, b) => b.st.appro - a.st.appro,
+      stock: (a, b) => b.st.dormant_n - a.st.dormant_n,
+      fi:    (a, b) => (a.st.taux_fi == null ? 999 : a.st.taux_fi) - (b.st.taux_fi == null ? 999 : b.st.taux_fi)
+    };
+    function cleDepli(n) { return n.lv === 'all' ? 'all' : n.lv + ':' + n.key; }
+    function estDeplie(n) {
+      const k = cleDepli(n);
+      return n.lv === 'all' ? state.depli[k] !== false : state.depli[k] === true;
+    }
+    function tableauPerimetre() {
+      const racine = arbreNoeuds();
+      if (!racine) return '';
+      const pr = prorataMois();
+      const tri = TRIS_ARBRE[state.triEnt] || TRIS_ARBRE.ecart;
+      const sel = state.sel || { level: 'all', key: null };
+      const estSel = n => (n.lv === 'all' && sel.level === 'all')
+        || (n.lv === sel.level && String(n.key) === String(sel.key));
+      let h = '';
+      const ligne = (n, prof) => {
+        n.st = statsNoeud(n.ids, pr);
+        const pliable = n.enfants.length > 0;
+        const ouv = pliable && estDeplie(n);
+        const st = n.st, ec = st.ecart_r;
+        const lab = n.lv === 'ra' ? n.sub.split(' · ')[0] + ' · ' + n.lab : n.lab;
+        h += '<tr class="pr' + Math.min(prof, 3) + (estSel(n) ? ' actif' : '') + '"'
+          + ' data-ent-lv="' + n.lv + '" data-ent-k="' + esc(n.key) + '" data-ent-lab="' + esc(n.lv === 'all' ? 'Tout mon périmètre' : lab) + '">'
+          + '<td><div class="dnoeud" style="padding-left:' + (prof * 20) + 'px">'
+          + (pliable
+              ? '<button type="button" class="dchev" data-depli="' + esc(cleDepli(n)) + '" aria-expanded="' + ouv + '" aria-label="' + (ouv ? 'Replier ' : 'Déplier ') + esc(n.lab) + '">' + (ouv ? '▾' : '▸') + '</button>'
+              : '<span class="dchev vide" aria-hidden="true"></span>')
+          + '<span><span class="nm">' + esc(n.lab) + '</span><span class="sub">' + esc(n.sub) + '</span></span></div></td>'
+          + '<td><div class="dcb">' + (st.obj > 0 ? barreCdes(st.cdes, st.obj, pr, null) : '<div class="dbar"></div>')
+          + '<span>' + fmt(st.cdes) + ' <i>/ ' + (st.obj > 0 ? fmt(st.obj) : '—') + '</i></span></div></td>'
+          + '<td class="' + (ec == null || !(st.obj > 0) ? 'pale' : ec < 0 ? 'mauvais' : 'bon') + '"'
+          + (!(st.obj > 0) && ec != null ? ' title="Pas d’objectif sur ce périmètre : commandes en plus"' : '') + '>'
+          + (ec == null ? '—' : (ec > 0 ? '+' : ec < 0 ? '−' : '') + fmt(Math.abs(ec))) + '</td>'
+          + '<td class="' + (st.livr_retard > 0 ? 'mauvais' : 'pale') + '">' + fmt(st.livr_retard) + '</td>'
+          + '<td>' + fmt(st.appro) + (st.appro_m > 0 ? ' <span class="pale">· ' + fmtEur(st.appro_m) + '</span>' : '') + '</td>'
+          + '<td>' + fmt(st.attente) + (st.attente_m > 0 ? ' <span class="pale">· ' + fmtEur(st.attente_m) + '</span>' : '') + '</td>'
+          + '<td>' + fmt(st.dormant_n) + (st.dormant > 0 ? ' <span class="pale">· ' + fmtEur(st.dormant) + '</span>' : '') + '</td>'
+          + '<td class="' + (st.taux_fi != null && st.taux_fi < 30 ? 'mauvais' : '') + '">' + pcts(st.taux_fi) + '</td></tr>';
+        if (ouv) {
+          n.enfants.forEach(e => { e.st = statsNoeud(e.ids, pr); });
+          n.enfants.slice().sort(tri).forEach(e => ligne(e, prof + 1));
+        }
+      };
+      ligne(racine, 0);
+      const tt = Object.keys(TRIS_ARBRE);
+      const labs = { ecart: 'Retard au rythme', livr: 'Livraisons en retard', appro: 'À approuver', stock: 'Stock > 90 j', fi: 'Financement' };
+      return '<section class="dents"><div class="dents-h"><div><h2>Mon périmètre'
+        + (state.vnvo !== 'tout' ? ' · ' + state.vnvo : '') + '</h2>'
+        + '<div class="s">Le chevron déplie marques, affaires et sites ; un clic sur une ligne recentre toute la page.</div>'
+        + '</div><div class="dtri" role="group" aria-label="Trier par">'
+        + tt.map(k => '<button type="button" data-tri="' + k + '" aria-pressed="' + (k === (TRIS_ARBRE[state.triEnt] ? state.triEnt : 'ecart')) + '">' + labs[k] + '</button>').join('')
+        + '</div></div>'
+        + '<div class="dscroll" style="max-height:none"><table class="dentt"><thead><tr>'
+        + '<th>Périmètre</th><th class="g">Commandes / objectif</th>'
+        + '<th>Écart au rythme</th><th>Livraisons en retard</th><th>À approuver</th>'
+        + '<th>À livrer</th><th>Stock &gt; 90 j</th><th>Financement</th></tr></thead><tbody>'
+        + h + '</tbody></table></div>'
+        + '<p class="dnote" style="margin:0">Écart au rythme : commandes du mois moins celles attendues à date ('
+        + (pr < 1 ? Math.round(pr * 100) + ' % de l’objectif, jours ouvrés lun-sam' : 'objectif complet, mois terminé') + ').'
+        + ' À approuver : commandes en attente d’approbation créées depuis 30 jours.'
+        + ' À livrer : commandes signées et transmises, voiture pas encore livrée.'
+        + ' Les tris s’appliquent à chaque niveau.</p></section>';
+    }
+
     function tableauEntites(A) {
       const pr = prorataMois();
       const niv = niveauEntites();
@@ -1082,10 +1238,14 @@ OD.define('dashboard', {
       const m = new Map();
       const prendre = k => {
         let o = m.get(k);
-        if (!o) { o = Object.assign({ nom: k }, vide(CH_V), vide(CH_S)); m.set(k, o); }
+        if (!o) { o = Object.assign({ nom: k, objU: { VN: 0, VO: 0 } }, vide(CH_V), vide(CH_S)); m.set(k, o); }
         return o;
       };
-      A.lignes.forEach(l => ajouter(prendre(cle(info[String(l.id_site)] || {})), l, CH_PROD));
+      A.lignes.forEach(l => {
+        const o = prendre(cle(info[String(l.id_site)] || {}));
+        ajouter(o, l, CH_PROD);
+        o.objU[l.vn_vo === 'VO' ? 'VO' : 'VN'] += num(l.obj_cdes);
+      });
       A.etats.forEach(l => ajouter(prendre(cle(info[String(l.id_site)] || {})), l, CH_ETAT));
       A.sites.forEach(s => ajouter(prendre(cle(s)), s, CH_S));
       return Array.from(m.values());
@@ -1791,7 +1951,7 @@ OD.define('dashboard', {
             : '')
         + bandeau(A)
         + '<div class="dcorps"><div>' + grilleTuiles(A)
-        + (famille() === 'direction' ? tableauEntites(A) : '') + '</div></div>'
+        + tableauPerimetre() + '</div></div>'
         + pied(A) + '</div>';
       getRoot().innerHTML = h;
       if (state.ouvert) ouvrir(state.ouvert, true);
@@ -1954,6 +2114,16 @@ OD.define('dashboard', {
       // v58 : le bouton du périmètre ouvre / ferme le menu déroulant.
       const bp = ev.target.closest('[data-role="perim"]');
       if (bp && r.contains(bp)) { basculerPerimetre(); return; }
+
+      // v61 : chevron du périmètre dépliable.
+      const dc = ev.target.closest('.dchev[data-depli]');
+      if (dc && r.contains(dc)) {
+        const k = dc.getAttribute('data-depli');
+        const ouvert = k === 'all' ? state.depli[k] !== false : state.depli[k] === true;
+        state.depli[k] = !ouvert;
+        rendre();
+        return;
+      }
 
       // v58 : tri du tableau des entités.
       const bt = ev.target.closest('.dtri button[data-tri]');
