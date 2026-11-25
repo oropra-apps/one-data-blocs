@@ -1,12 +1,16 @@
 // ============================================================================
-//  DASHBOARD — module One Data (OD.define)   v61 — PROFIL TEAM COLIN
+//  DASHBOARD — module One Data (OD.define)   v62 — PROFIL TEAM COLIN
+//
+//  v62 (25/11/2026) : ordre des lignes du périmètre identique en VN, VO et
+//    VN + VO (tri calculé sur VN + VO, égalités départagées par le nom).
 //
 //  v61 (25/11/2026) : le tableau des entités devient le PÉRIMÈTRE DÉPLIABLE,
 //    pour tous les rôles : total du périmètre de l'utilisateur, puis marques,
 //    affaires, sites, avec les mêmes colonnes (barre commandes / objectif,
 //    écart au rythme, retards, à approuver, à livrer, stock, financement).
 //    Une affaire se sélectionne désormais DANS sa marque (niveau 'ra') : TEAM
-//    TOY 92 Toyota et TEAM TOY 92 Lexus ne sont plus confondues.
+//    TOY 92 Toyota et TEAM TOY 92 Lexus ne sont plus confondues. L'ordre des
+//    lignes se calcule sur VN + VO quel que soit l'univers affiché (stable).
 //
 //  v60 (25/11/2026) :
 //    · « Carnet » renommé « Commandes à livrer » (signées et transmises,
@@ -1081,13 +1085,24 @@ OD.define('dashboard', {
         attente: num(p.livr_attente), attente_m: num(p.livr_montant),
         dormant_n: num(A.stock_90), dormant: num(A.stock_dormant), taux_fi: A.taux_fi };
     }
+    // v61 : l'ordre des lignes se calcule TOUJOURS sur les chiffres VN + VO
+    // (a.tri), jamais sur l'univers affiché : une affaire garde sa place quand
+    // on passe de VN à VO. À égalité, l'ordre alphabétique départage, pour
+    // qu'un rafraîchissement ne fasse jamais permuter deux lignes.
+    const parNom = (a, b) => String(a.lab).localeCompare(String(b.lab), 'fr');
     const TRIS_ARBRE = {
-      ecart: (a, b) => (a.st.ecart_r == null ? 1e9 : a.st.ecart_r) - (b.st.ecart_r == null ? 1e9 : b.st.ecart_r),
-      livr:  (a, b) => b.st.livr_retard - a.st.livr_retard,
-      appro: (a, b) => b.st.appro - a.st.appro,
-      stock: (a, b) => b.st.dormant_n - a.st.dormant_n,
-      fi:    (a, b) => (a.st.taux_fi == null ? 999 : a.st.taux_fi) - (b.st.taux_fi == null ? 999 : b.st.taux_fi)
+      ecart: (a, b) => ((a.tri.ecart_r == null ? 1e9 : a.tri.ecart_r) - (b.tri.ecart_r == null ? 1e9 : b.tri.ecart_r)) || parNom(a, b),
+      livr:  (a, b) => (b.tri.livr_retard - a.tri.livr_retard) || parNom(a, b),
+      appro: (a, b) => (b.tri.appro - a.tri.appro) || parNom(a, b),
+      stock: (a, b) => (b.tri.dormant_n - a.tri.dormant_n) || parNom(a, b),
+      fi:    (a, b) => ((a.tri.taux_fi == null ? 999 : a.tri.taux_fi) - (b.tri.taux_fi == null ? 999 : b.tri.taux_fi)) || parNom(a, b)
     };
+    function statsTout(ids, pr) {
+      const u = state.vnvo;
+      if (u === 'tout') return statsNoeud(ids, pr);
+      state.vnvo = 'tout';
+      try { return statsNoeud(ids, pr); } finally { state.vnvo = u; }
+    }
     function cleDepli(n) { return n.lv === 'all' ? 'all' : n.lv + ':' + n.key; }
     function estDeplie(n) {
       const k = cleDepli(n);
@@ -1126,7 +1141,7 @@ OD.define('dashboard', {
           + '<td>' + fmt(st.dormant_n) + (st.dormant > 0 ? ' <span class="pale">· ' + fmtEur(st.dormant) + '</span>' : '') + '</td>'
           + '<td class="' + (st.taux_fi != null && st.taux_fi < 30 ? 'mauvais' : '') + '">' + pcts(st.taux_fi) + '</td></tr>';
         if (ouv) {
-          n.enfants.forEach(e => { e.st = statsNoeud(e.ids, pr); });
+          n.enfants.forEach(e => { e.tri = statsTout(e.ids, pr); });
           n.enfants.slice().sort(tri).forEach(e => ligne(e, prof + 1));
         }
       };
@@ -1148,7 +1163,7 @@ OD.define('dashboard', {
         + (pr < 1 ? Math.round(pr * 100) + ' % de l’objectif, jours ouvrés lun-sam' : 'objectif complet, mois terminé') + ').'
         + ' À approuver : commandes en attente d’approbation créées depuis 30 jours.'
         + ' À livrer : commandes signées et transmises, voiture pas encore livrée.'
-        + ' Les tris s’appliquent à chaque niveau.</p></section>';
+        + ' Les tris s’appliquent à chaque niveau et se calculent toujours sur VN + VO : l’ordre ne change pas d’un univers à l’autre.</p></section>';
     }
 
     function tableauEntites(A) {
