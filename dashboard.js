@@ -1,5 +1,33 @@
 // ============================================================================
-//  DASHBOARD — module One Data (OD.define)   v57 — PROFIL TEAM COLIN
+//  DASHBOARD — module One Data (OD.define)   v58 — PROFIL TEAM COLIN
+//
+//  v58 (25/11/2026) : refonte du haut de page, demandée par Antoine.
+//    · Le périmètre quitte la colonne de droite (elle laissait un grand vide
+//      sous les tuiles) : un bouton dans l'en-tête ouvre l'arbre marque ›
+//      affaire › site en menu déroulant. Valable pour tous les rôles.
+//    · Les titres de famille sont lisibles (13 px, gras, bleu foncé).
+//    · Direction : le bandeau ne répète plus les chiffres des tuiles. Il dit
+//      où le périmètre va atterrir — réalisé sur objectif, rythme attendu à
+//      date (jours ouvrés lun-sam, comme Performances), atterrissage prévu —
+//      et nomme l'entité la plus en retard sur le rythme.
+//    · Direction : nouveau tableau des entités (affaires, ou sites quand une
+//      affaire est choisie), triable, une ligne = commandes contre objectif,
+//      écart au rythme, livraisons en retard, à approuver, carnet, stock
+//      dormant, financement. Un clic recentre la page sur l'entité.
+//    · Libellés : « Argent engagé / Transmis, non soldé » devient « Carnet de
+//      commandes / Transmises, non clôturées » (BACS Transmitted to TFR +
+//      Validated, pas encore Closed). « Bloqués en approbation » devient
+//      « À approuver », rangé dans Production : c'est de la production pas
+//      encore transmise. Seuls les dossiers créés depuis 30 jours y comptent ;
+//      ceux de plus de 90 jours sont des dossiers morts à archiver dans BACS
+//      (337 sur 471 le 25/11/2026). Le carnet signale de même les commandes de
+//      plus d'un an, probablement livrées mais jamais clôturées (782).
+//      Prérequis SQL : teamcolin_dash_carnet_anciennete.sql (colonnes
+//      ent_appro_30_*, ent_appro_90_*, ent_trans_365_* de dash_site_mois).
+//      Sans elles, la page affiche les totaux bruts et le dit en console.
+//    · Seules les concessions comptent : sites sans réseau (Wissous) et sites
+//      atelier / logistique (Sceaux CTT, APV…) sont écartés dès la lecture, de
+//      l'arbre du périmètre comme de tous les chiffres (25/11/2026).
 //
 //  v57 (04/11/2026) : dans les listes dépliées, le téléphone appelle par le
 //    3CX du vendeur (comme le bouton « Appeler » de la fiche) ; le lien tel:
@@ -313,9 +341,79 @@ OD.define('dashboard', {
 #dash-root .dtrouve,#dash-root .davis{background:#f5f8fc;border-radius:8px;box-shadow:inset 3px 0 0 var(--bleu-clair);color:var(--bleu-fonce)}
 #dash-root table.dmini td{color:var(--bleu)}
 #dash-root table.dmini th{font-weight:600}
+/* v58 : haut de page */
+#dash-root .dcorps{grid-template-columns:minmax(0,1fr)}
+#dash-root .dfams{gap:22px 12px}
+#dash-root .dfam > h2{font-size:13px;font-weight:800;letter-spacing:.04em;text-transform:uppercase;color:var(--bleu-fonce);height:auto;min-height:18px}
+#dash-root .dfam > h2::before{height:16px;width:4px;border-radius:2px}
+#dash-root .drail{position:relative}
+#dash-root .dperim-w{position:relative;margin-left:auto}
+#dash-root .dperim-w + .dmois{margin-left:0}
+#dash-root .dperim-btn{display:inline-flex;align-items:center;gap:8px;background:#fff;border:1px solid var(--bleu-clair);
+  border-radius:6px;padding:6px 11px;font:inherit;font-size:12.5px;color:var(--bleu-fonce);cursor:pointer;min-height:30px;max-width:420px}
+#dash-root .dperim-btn:hover,#dash-root .dperim-w.ouvert .dperim-btn{border-color:var(--bleu);background:#f5f8fc}
+#dash-root .dperim-btn b{font-weight:800;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+#dash-root .dperim-btn .cn{color:var(--ink-3);font-weight:600;white-space:nowrap}
+#dash-root .dperim-btn svg{flex:0 0 auto}
+#dash-root .dperim-pop{display:none;position:absolute;right:0;top:calc(100% + 6px);z-index:40;width:330px;max-width:calc(100vw - 40px);
+  background:#fff;border:1px solid var(--line-2);border-radius:10px;box-shadow:0 10px 30px rgba(31,74,133,.16);overflow:hidden}
+#dash-root .dperim-w.ouvert .dperim-pop{display:block}
+#dash-root .dperim-pop .dperim{position:static;border:0;border-radius:0}
+#dash-root .dperim-pop .dperim .dscroll{max-height:60vh}
+#dash-root .dhero{background:#fff;border:1px solid var(--line);border-radius:10px;padding:18px 20px;display:flex;flex-wrap:wrap;gap:18px 28px;align-items:stretch}
+#dash-root .dhero .g{flex:999 1 480px;min-width:0;display:flex;flex-direction:column;gap:10px}
+#dash-root .dhero .q{font-size:11px;font-weight:800;letter-spacing:.08em;text-transform:uppercase;color:var(--bleu)}
+#dash-root .dhero .big{display:flex;align-items:baseline;flex-wrap:wrap;gap:6px 12px}
+#dash-root .dhero .big .n{font-size:38px;font-weight:800;line-height:1;color:var(--bleu-fonce)}
+#dash-root .dhero .big .o{font-size:19px;font-weight:700;color:var(--ink-3)}
+#dash-root .dhero .badge{font-size:12px;font-weight:800;border-radius:12px;padding:3px 10px;background:#eaf0f9;color:var(--bleu-fonce)}
+#dash-root .dhero .badge.retard{background:#fdf1dc;color:#8a5a06}
+#dash-root .dhero .badge.ok{background:var(--ok-bg);color:var(--m-vert)}
+#dash-root .dbar{position:relative;height:12px;border-radius:6px;background:var(--calme-bg)}
+#dash-root .dbar .f{position:absolute;left:0;top:0;bottom:0;border-radius:6px;background:var(--bleu)}
+#dash-root .dbar .land{position:absolute;top:0;bottom:0;width:2px;background:var(--ink-3)}
+#dash-root .dbar .ryt{position:absolute;top:-4px;bottom:-4px;width:3px;border-radius:2px;background:var(--m-orange)}
+#dash-root .dhero .leg{display:flex;flex-wrap:wrap;gap:4px 22px;font-size:12.5px;color:var(--ink-2)}
+#dash-root .dhero .leg b{color:var(--bleu-fonce);font-weight:800}
+#dash-root .dhero .leg .or{color:#8a5a06}
+#dash-root .dhero .pire{flex:1 1 280px;background:#f5f8fc;border-radius:8px;padding:14px 16px;display:flex;flex-direction:column;gap:6px;box-shadow:inset 3px 0 0 var(--m-orange)}
+#dash-root .dhero .pire.ok{box-shadow:inset 3px 0 0 var(--vert)}
+#dash-root .dhero .pire .t{font-size:11px;font-weight:800;letter-spacing:.08em;text-transform:uppercase;color:#8a5a06}
+#dash-root .dhero .pire.ok .t{color:var(--m-vert)}
+#dash-root .dhero .pire .nm{font-size:17px;font-weight:800;color:var(--bleu-fonce)}
+#dash-root .dhero .pire .nm em{font-style:normal;font-size:12px;font-weight:600;color:var(--ink-3)}
+#dash-root .dhero .pire p{margin:0;font-size:13px;line-height:1.45;color:var(--ink-2)}
+#dash-root .dlien{align-self:flex-start;background:none;border:0;padding:0;font:inherit;font-size:13px;font-weight:800;color:var(--bleu);cursor:pointer}
+#dash-root .dlien:hover{color:var(--bleu-fonce);text-decoration:underline;text-underline-offset:3px}
+#dash-root .dents{background:#fff;border:1px solid var(--line);border-radius:10px;padding:16px 18px;display:flex;flex-direction:column;gap:12px;margin-top:18px}
+#dash-root .dents-h{display:flex;flex-wrap:wrap;align-items:flex-end;gap:10px 16px}
+#dash-root .dents-h h2{margin:0;font-size:15px;font-weight:800;color:var(--bleu-fonce)}
+#dash-root .dents-h .s{font-size:12px;color:var(--ink-3);margin-top:2px}
+#dash-root .dtri{display:flex;flex-wrap:wrap;gap:6px;margin-left:auto}
+#dash-root .dtri button{font:inherit;font-size:12px;font-weight:700;border:1px solid var(--bleu-clair);background:#fff;color:var(--bleu-fonce);border-radius:16px;padding:5px 12px;cursor:pointer}
+#dash-root .dtri button[aria-pressed="true"]{background:var(--bleu);border-color:var(--bleu);color:#fff}
+#dash-root table.dentt{width:100%;border-collapse:collapse;font-size:13px;min-width:900px}
+#dash-root table.dentt th{font-size:10px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:var(--ink-3);text-align:right;padding:0 8px 8px;white-space:nowrap}
+#dash-root table.dentt th:first-child,#dash-root table.dentt th.g{text-align:left}
+#dash-root table.dentt td{border-top:1px solid var(--line);padding:9px 8px;text-align:right;color:var(--bleu);white-space:nowrap;font-variant-numeric:tabular-nums}
+#dash-root table.dentt td:first-child{text-align:left;white-space:normal}
+#dash-root table.dentt tbody tr{cursor:pointer}
+#dash-root table.dentt tbody tr:hover td{background:#f5f8fc}
+#dash-root table.dentt tbody tr:hover td:first-child{box-shadow:inset 3px 0 0 var(--bleu)}
+#dash-root table.dentt .nm{font-weight:800;color:var(--bleu-fonce)}
+#dash-root table.dentt .sub{display:block;font-size:11px;color:var(--ink-3);font-weight:600}
+#dash-root table.dentt .mauvais{color:#8a5a06;font-weight:800}
+#dash-root table.dentt .bon{color:var(--m-vert);font-weight:800}
+#dash-root table.dentt .pale{color:var(--ink-3)}
+#dash-root .dcb{display:flex;align-items:center;gap:10px;min-width:220px}
+#dash-root .dcb .dbar{flex:1;height:8px}
+#dash-root .dcb .dbar .ryt{top:-3px;bottom:-3px;width:2px}
+#dash-root .dcb span{font-weight:700;color:var(--bleu-fonce)}
+#dash-root .dcb span i{font-style:normal;font-weight:600;color:var(--ink-3)}
 @media (prefers-reduced-motion:reduce){#dash-root *{transition:none!important}}
 `;
-    if (!doc.getElementById('dash-tc-css')) {
+    {
+      const old = doc.getElementById('dash-tc-css'); if (old) old.remove();
       const st = doc.createElement('style'); st.id = 'dash-tc-css'; st.textContent = CSS;
       doc.head.appendChild(st);
     }
@@ -353,7 +451,8 @@ OD.define('dashboard', {
       A: null,          // l'agrégat du périmètre courant
       ouvert: null, plis: {}, busSiteVu: null, chargement: false,
       sel: { level: 'all', key: null, label: 'Tout mon périmètre' },
-      erreur: null, listes: {}, avisRepli: null
+      erreur: null, listes: {}, avisRepli: null,
+      perimOuvert: false, triEnt: 'ecart'
     };
 
     function estMoisEnCours() {
@@ -449,6 +548,26 @@ OD.define('dashboard', {
     const CACHE = {};
     let EN_VOL = { cle: null, p: null };
 
+    // v58 (demande d'Antoine, 25/11/2026) : le dashboard ne connaît que les
+    // CONCESSIONS. Les sites sans réseau (Wissous, plateforme technique) et les
+    // sites atelier ou logistique (Sceaux CTT, Paris XII APV, Vincennes APV,
+    // Victor Hugo…) sortent du périmètre, de l'arbre, des compteurs et de toutes
+    // les sommes : leurs lignes de production, d'état et de stock sont écartées
+    // ici, une fois, à la lecture.
+    function estConcession(p) {
+      const t = String((p && p.type_site) || 'vente').toLowerCase();
+      return !!(p && p.reseau) && t !== 'atelier' && t !== 'logistique';
+    }
+    function normaliser(j) {
+      if (!j || !Array.isArray(j.perimetre)) return j;
+      j.perimetre = j.perimetre.filter(estConcession);
+      const ok = new Set(j.perimetre.map(p => String(p.id_site)));
+      ['vendeurs', 'etat', 'sites', 'serie'].forEach(k => {
+        if (Array.isArray(j[k])) j[k] = j[k].filter(l => ok.has(String(l.id_site)));
+      });
+      return j;
+    }
+
     async function lireBase() {
       const cle = state.annee + '|' + state.mois;
       if (CACHE[cle]) return CACHE[cle];
@@ -463,7 +582,7 @@ OD.define('dashboard', {
           body: JSON.stringify({ p_annee: state.annee, p_mois: state.mois })
         });
         if (!res.ok) throw new Error('HTTP ' + res.status);
-        const j = await res.json();
+        const j = normaliser(await res.json());
         CACHE[cle] = j;
         return j;
       })();
@@ -494,7 +613,9 @@ OD.define('dashboard', {
     const CH_S = ['vn_n','vn_valeur','vn_90','vn_180','vn_age_somme','vn_age_n','vn_dormant',
       'vn_reserve','vo_n','vo_valeur','vo_90','vo_180','vo_age_somme','vo_age_n','vo_dormant',
       'ent_prep_n','ent_prep_m','ent_appro_n','ent_appro_m','ent_trans_n','ent_trans_m',
-      'ent_refus_n','ent_refus_m','leads_recus_30j','leads_non_attribues','leads_jamais',
+      'ent_refus_n','ent_refus_m',
+      'ent_appro_30_n','ent_appro_30_m','ent_appro_90_n','ent_appro_90_m','ent_trans_365_n','ent_trans_365_m',
+      'leads_recus_30j','leads_non_attribues','leads_jamais',
       'leads_perdus','leads_resolus','leads_contactes','leads_total',
       'd_15min','d_30min','d_60min','d_4h','d_24h','d_plus','delai_n'];
 
@@ -578,6 +699,18 @@ OD.define('dashboard', {
       A.vo_age = s.vo_age_n > 0 ? Math.round(s.vo_age_somme / s.vo_age_n) : null;
       A.engage = s.ent_trans_m;
       A.nb_sites = (ids ? ids.length : (j.perimetre || []).length);
+      // v58 : l'ancienneté des dossiers vient de colonnes ajoutées par
+      // teamcolin_dash_carnet_anciennete.sql. Absentes, on montre les totaux
+      // bruts — et on le dit en console, une fois, pour ne pas masquer l'oubli.
+      A.carnetOk = (j.sites || []).length === 0
+        || (j.sites || []).some(x => x && x.ent_appro_30_n !== undefined);
+      if (!A.carnetOk && !window.__dashTcAvisCarnet) {
+        window.__dashTcAvisCarnet = true;
+        try { console.warn('[dashboard v58] colonnes ent_appro_30_* absentes de dash_site_mois : '
+          + 'appliquer teamcolin_dash_carnet_anciennete.sql. Totaux bruts affichés.'); } catch (e) { }
+      }
+      A.appro_n = A.carnetOk ? s.ent_appro_30_n : s.ent_appro_n;
+      A.appro_m = A.carnetOk ? s.ent_appro_30_m : s.ent_appro_m;
       return A;
     }
 
@@ -683,6 +816,206 @@ OD.define('dashboard', {
         + '</span></div>'
         + '<div class="dscroll"><table class="dmini dperimt"><tbody>' + h
         + '</tbody></table></div></section>';
+    }
+
+    // v58 : le périmètre est un menu déroulant de l'en-tête, plus une colonne.
+    function boutonPerimetre() {
+      const per = ((state.j || {}).perimetre || []);
+      if (per.length < 2) return '';
+      const sel = state.sel || { level: 'all', label: 'Tout mon périmètre' };
+      const ids = sitesSelection();
+      const n = ids ? ids.length : per.length;
+      const marques = Array.from(new Set(per.filter(x => !ids || ids.includes(Number(x.id_site)))
+        .map(x => x.reseau || 'Sans réseau')));
+      const detail = (sel.level === 'site' ? '' : (marques.length <= 3 ? marques.join(', ') + ' · ' : ''))
+        + n + (n > 1 ? ' sites' : ' site');
+      return '<div class="dperim-w' + (state.perimOuvert ? ' ouvert' : '') + '">'
+        + '<button type="button" class="dperim-btn" data-role="perim" aria-haspopup="true" aria-expanded="'
+        + (state.perimOuvert ? 'true' : 'false') + '">'
+        + '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M3 21h18M5 21V8l7-5 7 5v13M9 21v-6h6v6"/></svg>'
+        + '<b>' + esc(sel.label || 'Tout mon périmètre') + '</b>'
+        + '<span class="cn">· ' + esc(detail) + '</span>'
+        + '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg>'
+        + '</button><div class="dperim-pop">' + selecteurPerimetre() + '</div></div>';
+    }
+    function basculerPerimetre(ouvrir) {
+      state.perimOuvert = ouvrir == null ? !state.perimOuvert : !!ouvrir;
+      const w = getRoot().querySelector('.dperim-w');
+      if (!w) return;
+      w.classList.toggle('ouvert', state.perimOuvert);
+      const b = w.querySelector('.dperim-btn');
+      if (b) b.setAttribute('aria-expanded', state.perimOuvert ? 'true' : 'false');
+    }
+
+    // --- prorata du mois : jours ouvrés lundi → samedi, dimanche exclu, comme
+    // la page Performances. Un mois passé vaut 1.
+    function prorataMois() {
+      if (!estMoisEnCours()) return 1;
+      const d = new Date(), a = d.getFullYear(), m = d.getMonth();
+      const fin = new Date(a, m + 1, 0).getDate();
+      let tot = 0, eco = 0;
+      for (let j = 1; j <= fin; j++) {
+        if (new Date(a, m, j).getDay() === 0) continue;
+        tot++; if (j <= d.getDate()) eco++;
+      }
+      return tot > 0 ? Math.min(1, eco / tot) : 1;
+    }
+    function joursOuvresLib() {
+      if (!estMoisEnCours()) return '';
+      const d = new Date(), a = d.getFullYear(), m = d.getMonth();
+      const fin = new Date(a, m + 1, 0).getDate();
+      let tot = 0, eco = 0;
+      for (let j = 1; j <= fin; j++) {
+        if (new Date(a, m, j).getDay() === 0) continue;
+        tot++; if (j <= d.getDate()) eco++;
+      }
+      return eco + ' jours ouvrés sur ' + tot;
+    }
+
+    // --- entités de la direction ---------------------------------------------
+    // Le niveau suit la sélection : tout le périmètre ou une marque → les
+    // affaires ; une affaire ou un site → les sites.
+    function niveauEntites() {
+      const lv = (state.sel || {}).level;
+      return (lv === 'affaire' || lv === 'site') ? 'site' : 'affaire';
+    }
+    function entites(A) {
+      const niv = niveauEntites();
+      const pr = prorataMois();
+      const per = A.perimetre || [];
+      const ids = sitesSelection();
+      const dans = s => !ids || ids.includes(Number(s.id_site));
+      return parEntite(A, niv).map(e => {
+        const sitesE = per.filter(s => dans(s) && (niv === 'site'
+          ? (s.nom || ('Site ' + s.id_site)) === e.nom
+          : (s.affaire || 'Sans affaire') === e.nom));
+        const obj = num(e.obj_cdes), cdes = num(e.cdes);
+        e.niv = niv;
+        e.cle = niv === 'site' ? (sitesE[0] ? Number(sitesE[0].id_site) : null) : e.nom;
+        e.n_sites = sitesE.length;
+        e.marques = Array.from(new Set(sitesE.map(s => s.reseau || 'Sans réseau')));
+        e.attendu = obj > 0 ? Math.round(obj * pr) : null;
+        e.ecart_r = obj > 0 ? cdes - e.attendu : null;
+        e.taux_fi = pct(e.fi, e.hors_loueurs);
+        e.dormant = num(e.vn_dormant) + num(e.vo_dormant);
+        e.appro = A.carnetOk ? num(e.ent_appro_30_n) : num(e.ent_appro_n);
+        return e;
+      }).filter(e => e.niv === 'affaire' || e.cle != null);
+    }
+    function barreCdes(cdes, obj, pr, land) {
+      if (!(num(obj) > 0)) return '';
+      const w = Math.min(100, Math.round(num(cdes) / num(obj) * 100));
+      return '<div class="dbar"><div class="f" style="width:' + w + '%"></div>'
+        + (land != null ? '<div class="land" style="left:' + Math.min(99.5, Math.round(land / num(obj) * 1000) / 10) + '%"></div>' : '')
+        + (pr < 1 ? '<div class="ryt" style="left:' + Math.round(pr * 1000) / 10 + '%"></div>' : '')
+        + '</div>';
+    }
+
+    // Le haut de la page direction : où le périmètre va atterrir, et qui
+    // décroche. Il ne répète aucun chiffre des tuiles.
+    function heroDirection(A) {
+      const p = A.prod, pr = prorataMois(), enCours = estMoisEnCours();
+      const cdes = num(p.cdes), obj = num(p.obj_cdes);
+      const sel = state.sel || { level: 'all' };
+      const qui = sel.level === 'all' ? 'le groupe' : (sel.label || 'ce périmètre');
+      let g;
+      if (!obj) {
+        g = '<div class="q">' + (enCours ? 'Où ' + esc(qui) + ' va atterrir' : 'Le mois de ' + esc(MOIS_LONG[state.mois - 1])) + '</div>'
+          + '<div class="big"><span class="n">' + fmt(cdes) + '</span><span class="o">commandes</span>'
+          + '<span class="badge">objectifs du mois non saisis</span></div>'
+          + (enCours ? '<div class="leg"><span>Au rythme actuel : <b>' + fmt(pr > 0 ? Math.round(cdes / pr) : cdes)
+            + '</b> commandes en fin de mois</span><span>' + esc(joursOuvresLib()) + '</span></div>' : '');
+      } else {
+        const attendu = Math.round(obj * pr);
+        const ec = cdes - attendu;
+        const land = pr > 0 ? Math.round(cdes / pr) : cdes;
+        const taux = pct(cdes, obj);
+        const cls = ec < 0 ? 'retard' : 'ok';
+        g = '<div class="q">' + (enCours ? 'Où ' + esc(qui) + ' va atterrir' : 'Comment ' + esc(MOIS_LONG[state.mois - 1]) + ' s’est terminé') + '</div>'
+          + '<div class="big"><span class="n">' + fmt(cdes) + '</span><span class="o">/ ' + fmt(obj) + ' commandes</span>'
+          + '<span class="badge ' + cls + '">' + taux + ' % de l’objectif'
+          + (enCours ? ' · rythme attendu ' + Math.round(pr * 100) + ' %' : '') + '</span></div>'
+          + barreCdes(cdes, obj, pr, enCours ? land : null)
+          + '<div class="leg">'
+          + (enCours
+              ? '<span>Atterrissage prévu : <b>' + fmt(land) + '</b> (trait gris)</span>'
+                + '<span class="or">Il en faudrait <b class="or">' + fmt(attendu) + '</b> aujourd’hui pour tenir le rythme (trait orange)</span>'
+                + '<span>Écart au rythme : <b class="' + (ec < 0 ? 'or' : '') + '">' + (ec > 0 ? '+' : ec < 0 ? '−' : '') + fmt(Math.abs(ec)) + '</b></span>'
+                + '<span>' + esc(joursOuvresLib()) + '</span>'
+              : '<span>Écart à l’objectif : <b class="' + (cdes < obj ? 'or' : '') + '">' + (cdes - obj > 0 ? '+' : cdes < obj ? '−' : '') + fmt(Math.abs(cdes - obj)) + '</b></span>')
+          + '</div>';
+      }
+      // L'entité la plus en retard sur le rythme
+      const r = entites(A).filter(e => e.ecart_r != null).sort((a, b) => a.ecart_r - b.ecart_r);
+      let d = '';
+      if (r.length && r[0].ecart_r < 0) {
+        const e = r[0];
+        const lib = e.niv === 'site' ? 'Site' : 'Affaire';
+        d = '<div class="pire"><div class="t">Plus gros retard sur le rythme</div>'
+          + '<div class="nm">' + esc(e.nom) + ' <em>· ' + lib.toLowerCase()
+          + (e.niv === 'affaire' ? ' · ' + esc(e.marques.join(', ')) + ' · ' + e.n_sites + (e.n_sites > 1 ? ' sites' : ' site') : '') + '</em></div>'
+          + '<p><b>' + fmt(e.cdes) + '</b> commandes sur ' + fmt(e.obj_cdes) + ' : il en manque <b>' + fmt(-e.ecart_r)
+          + '</b> pour être dans le rythme'
+          + (num(e.livr_retard) > 0 ? ', et ' + fmt(e.livr_retard) + ' livraison' + (e.livr_retard > 1 ? 's sont' : ' est') + ' en retard.' : '.') + '</p>'
+          + '<button type="button" class="dlien" data-ent-lv="' + e.niv + '" data-ent-k="' + esc(e.cle) + '" data-ent-lab="' + esc(e.nom) + '">Recentrer la page sur ' + (e.niv === 'site' ? 'ce site' : 'cette affaire') + ' →</button></div>';
+      } else if (r.length) {
+        d = '<div class="pire ok"><div class="t">Dans le rythme</div>'
+          + '<p>Toutes les ' + (niveauEntites() === 'site' ? 'sites' : 'affaires') + ' qui ont un objectif sont au rythme attendu ou au-dessus.</p></div>';
+      }
+      return '<section class="dhero"><div class="g">' + g + '</div>' + d + '</section>';
+    }
+
+    const TRIS_ENT = [
+      { k: 'ecart', lab: 'Retard au rythme', f: (a, b) => (a.ecart_r == null ? 1e9 : a.ecart_r) - (b.ecart_r == null ? 1e9 : b.ecart_r) },
+      { k: 'livr',  lab: 'Livraisons en retard', f: (a, b) => num(b.livr_retard) - num(a.livr_retard) },
+      { k: 'appro', lab: 'À approuver', f: (a, b) => b.appro - a.appro },
+      { k: 'stock', lab: 'Stock dormant', f: (a, b) => b.dormant - a.dormant },
+      { k: 'fi',    lab: 'Financement', f: (a, b) => (a.taux_fi == null ? 999 : a.taux_fi) - (b.taux_fi == null ? 999 : b.taux_fi) }
+    ];
+    function tableauEntites(A) {
+      const pr = prorataMois();
+      const niv = niveauEntites();
+      const tri = TRIS_ENT.find(t => t.k === state.triEnt) || TRIS_ENT[0];
+      const l = entites(A).sort(tri.f);
+      if (l.length < 2 && niv === 'affaire') return '';
+      const sel = state.sel || { level: 'all' };
+      const titre = niv === 'site'
+        ? 'Les sites de ' + (sel.label || 'la sélection')
+        : 'Les affaires' + (sel.level === 'reseau' ? ' ' + (sel.label || '') : '') + ', de la plus en retard à la plus en avance';
+      let h = '<section class="dents"><div class="dents-h"><div><h2>' + esc(titre) + '</h2>'
+        + '<div class="s">Un clic sur une ligne recentre toute la page sur ' + (niv === 'site' ? 'le site' : 'l’affaire') + '.'
+        + (sel.level !== 'all' ? ' <button type="button" class="dlien" data-ent-lv="all" data-ent-k="" data-ent-lab="Tout mon périmètre">Revenir à tout mon périmètre</button>' : '')
+        + '</div></div><div class="dtri" role="group" aria-label="Trier par">'
+        + TRIS_ENT.map(t => '<button type="button" data-tri="' + t.k + '" aria-pressed="' + (t.k === tri.k) + '">' + esc(t.lab) + '</button>').join('')
+        + '</div></div>'
+        + '<div class="dscroll" style="max-height:none"><table class="dentt"><thead><tr>'
+        + '<th>' + (niv === 'site' ? 'Site' : 'Affaire') + '</th><th class="g">Commandes / objectif</th>'
+        + '<th>Écart au rythme</th><th>Livraisons en retard</th><th>À approuver</th>'
+        + '<th>Carnet</th><th>Stock dormant</th><th>Financement</th></tr></thead><tbody>';
+      l.forEach(e => {
+        const sub = e.niv === 'affaire'
+          ? esc(e.marques.join(', ')) + ' · ' + e.n_sites + (e.n_sites > 1 ? ' sites' : ' site')
+          : esc(e.marques.join(', '));
+        const ec = e.ecart_r;
+        h += '<tr data-ent-lv="' + e.niv + '" data-ent-k="' + esc(e.cle) + '" data-ent-lab="' + esc(e.nom) + '">'
+          + '<td><span class="nm">' + esc(e.nom) + '</span><span class="sub">' + sub + '</span></td>'
+          + '<td><div class="dcb">' + (num(e.obj_cdes) > 0 ? barreCdes(e.cdes, e.obj_cdes, pr, null) : '<div class="dbar"></div>')
+          + '<span>' + fmt(e.cdes) + ' <i>/ ' + (num(e.obj_cdes) > 0 ? fmt(e.obj_cdes) : '—') + '</i></span></div></td>'
+          + '<td class="' + (ec == null ? 'pale' : ec < 0 ? 'mauvais' : 'bon') + '">'
+          + (ec == null ? '—' : (ec > 0 ? '+' : ec < 0 ? '−' : '') + fmt(Math.abs(ec))) + '</td>'
+          + '<td class="' + (num(e.livr_retard) > 0 ? 'mauvais' : 'pale') + '">' + fmt(e.livr_retard) + '</td>'
+          + '<td>' + fmt(e.appro) + (A.carnetOk && num(e.ent_appro_30_m) > 0 ? ' <span class="pale">· ' + fmtEur(e.ent_appro_30_m) + '</span>' : '') + '</td>'
+          + '<td>' + fmtEur(e.ent_trans_m) + '</td>'
+          + '<td>' + fmtEur(e.dormant) + '</td>'
+          + '<td class="' + (e.taux_fi != null && e.taux_fi < 30 ? 'mauvais' : '') + '">' + pcts(e.taux_fi) + '</td></tr>';
+      });
+      h += '</tbody></table></div>'
+        + '<p class="dnote" style="margin:0">Écart au rythme : commandes du mois moins celles attendues à date ('
+        + (pr < 1 ? Math.round(pr * 100) + ' % de l’objectif, jours ouvrés lun-sam' : 'objectif complet, mois terminé') + ').'
+        + ' À approuver : commandes BACS en attente d’approbation créées depuis 30 jours'
+        + (A.carnetOk ? '' : ' (indisponible : total brut affiché)') + '.'
+        + ' Carnet : commandes transmises ou validées, pas encore clôturées dans BACS.</p></section>';
+      return h;
     }
 
     // =========================================================================
@@ -797,10 +1130,10 @@ OD.define('dashboard', {
     // --- l'entonnoir des commandes -------------------------------------------
     function entonnoirHtml(s) {
       const et = [
-        { lab: 'En préparation', n: s.ent_prep_n,  m: s.ent_prep_m,  c: 'var(--m-bleu)' },
-        { lab: 'En approbation',   n: s.ent_appro_n, m: s.ent_appro_m, c: 'var(--m-orange)' },
-        { lab: 'Transmis, validés', n: s.ent_trans_n, m: s.ent_trans_m, c: 'var(--m-vert)' },
-        { lab: 'Refusés',          n: s.ent_refus_n, m: s.ent_refus_m, c: 'var(--m-rouge)' }
+        { lab: 'En préparation (brouillons, imprimées)', n: s.ent_prep_n,  m: s.ent_prep_m,  c: 'var(--m-bleu)' },
+        { lab: 'En attente d’approbation',  n: s.ent_appro_n, m: s.ent_appro_m, c: 'var(--m-orange)' },
+        { lab: 'Transmises ou validées, non clôturées', n: s.ent_trans_n, m: s.ent_trans_m, c: 'var(--m-vert)' },
+        { lab: 'Refusées',          n: s.ent_refus_n, m: s.ent_refus_m, c: 'var(--m-rouge)' }
       ];
       const max = Math.max.apply(null, et.map(x => num(x.n)).concat([1]));
       return '<div class="dent">' + et.map(x =>
@@ -1036,31 +1369,78 @@ OD.define('dashboard', {
           return '<b>' + esc(r[0].nom) + '</b> accuse le plus gros retard : ' + fmt(r[0].cdes)
             + ' commandes pour ' + fmt(r[0].obj_cdes) + ' attendues.';
         } },
-      { id: 'd_engage', fam: 'Argent engagé', lab: 'Transmis, non soldé',
-        val: A => fmtEur(A.stock.ent_trans_m),
-        sub: A => fmt(A.stock.ent_trans_n) + ' dossiers',
-        titre: 'L’entonnoir des commandes',
-        ctx: A => 'Toutes les commandes vivantes du périmètre, par étape. Le montant est l’engagement TTC.',
-        vue: A => entonnoirHtml(A.stock),
-        trouve: A => num(A.stock.ent_refus_n) > 0
-          ? '<b>' + fmt(A.stock.ent_refus_n) + '</b> commandes refusées, soit ' + fmtEur(A.stock.ent_refus_m)
-            + ' perdus en bout de chaîne.'
-          : 'Aucun refus enregistré sur ce périmètre.' },
-      { id: 'd_appro', fam: 'Argent engagé', lab: 'Bloqués en approbation',
-        val: A => fmt(A.stock.ent_appro_n),
-        sub: A => fmtEur(A.stock.ent_appro_m) + ' en attente',
-        ton: A => A.stock.ent_appro_n > 0 ? 'baisse' : null,
-        titre: 'Ce qui attend une signature',
-        ctx: A => 'Commandes en attente d’approbation, par site. Chaque jour passé ici est un jour où le client peut changer d’avis.',
+      { id: 'd_appro', fam: 'Production', lab: 'À approuver',
+        val: A => fmt(A.appro_n),
+        sub: A => A.carnetOk
+          ? (fmtEur(A.appro_m) + ' · créées depuis 30 j')
+          : (fmtEur(A.appro_m) + ' en attente'),
+        ton: A => A.appro_n > 0 ? 'baisse' : null,
+        titre: 'Les commandes qui attendent une approbation',
+        ctx: A => 'Commandes BACS en attente d’approbation, donc pas encore transmises : c’est de la production du mois qui peut encore tomber. '
+          + (A.carnetOk ? 'Seules celles créées depuis 30 jours sont comptées en tête ; au-delà de 90 jours, le dossier est mort et doit être archivé dans BACS.' : ''),
+        vue: A => A.carnetOk
+          ? tableau([
+              { t: 'Site', v: l => esc(l.nom) },
+              { t: '≤ 30 j', v: l => fmt(l.ent_appro_30_n), cl: l => num(l.ent_appro_30_n) > 0 ? 'mauvais' : '' },
+              { t: 'Montant', v: l => fmtEur(l.ent_appro_30_m) },
+              { t: '31-90 j', v: l => fmt(num(l.ent_appro_n) - num(l.ent_appro_30_n) - num(l.ent_appro_90_n)) },
+              { t: '> 90 j, à archiver', v: l => fmt(l.ent_appro_90_n) }
+            ], A.sites.filter(x => num(x.ent_appro_n) > 0)
+                 .sort((a, b) => num(b.ent_appro_30_n) - num(a.ent_appro_30_n) || num(b.ent_appro_n) - num(a.ent_appro_n)))
+          : tableau([
+              { t: 'Site', v: l => esc(l.nom) },
+              { t: 'En approbation', v: l => fmt(l.ent_appro_n), cl: l => l.ent_appro_n > 0 ? 'mauvais' : '' },
+              { t: 'Montant', v: l => fmtEur(l.ent_appro_m) }
+            ], A.sites.slice().sort((a, b) => num(b.ent_appro_n) - num(a.ent_appro_n))),
+        trouve: A => {
+          if (!A.carnetOk) return num(A.stock.ent_appro_n) > 0
+            ? '<b>' + fmtEur(A.stock.ent_appro_m) + '</b> attendent une approbation, tous âges confondus.'
+            : 'Rien en attente d’approbation.';
+          const s = A.stock;
+          let t = num(s.ent_appro_30_n) > 0
+            ? '<b>' + fmt(s.ent_appro_30_n) + '</b> commande' + (s.ent_appro_30_n > 1 ? 's' : '') + ' (' + fmtEur(s.ent_appro_30_m)
+              + ') attend' + (s.ent_appro_30_n > 1 ? 'ent' : '') + ' une signature. Les approuver, c’est les transmettre : c’est la production la plus proche.'
+            : 'Aucune commande récente n’attend d’approbation.';
+          if (num(s.ent_appro_90_n) > 0)
+            t += ' <b>' + fmt(s.ent_appro_90_n) + '</b> dossiers de plus de 90 jours (' + fmtEur(s.ent_appro_90_m)
+              + ') sont à archiver dans BACS : ils ne sont plus des commandes.';
+          return t;
+        } },
+      { id: 'd_livr', fam: 'Livraisons', lab: 'En retard',
+        val: A => fmt(A.prod.livr_retard),
+        sub: A => fmt(A.prod.livr_attente) + ' en attente · ' + fmtEur(A.prod.livr_montant),
+        ton: A => A.prod.livr_retard > 0 ? 'baisse' : 'hausse',
+        titre: 'Les livraisons en retard, par affaire',
+        ctx: A => 'Commandes transmises ou validées dont la date limite est passée. Au-delà de trois mois le dossier est à clôturer.',
         vue: A => tableau([
-            { t: 'Site', v: l => esc(l.nom) },
-            { t: 'En approbation', v: l => fmt(l.ent_appro_n), cl: l => l.ent_appro_n > 0 ? 'mauvais' : '' },
-            { t: 'Montant', v: l => fmtEur(l.ent_appro_m) },
-            { t: 'En préparation', v: l => fmt(l.ent_prep_n) }
-          ], A.sites.slice().sort((a, b) => num(b.ent_appro_n) - num(a.ent_appro_n))),
-        trouve: A => num(A.stock.ent_appro_n) > 0
-          ? '<b>' + fmtEur(A.stock.ent_appro_m) + '</b> attendent une approbation. C’est le poste le plus simple à débloquer.'
-          : 'Rien en attente d’approbation.' },
+            { t: 'Affaire', v: l => esc(l.nom) },
+            { t: 'En attente', v: l => fmt(l.livr_attente) },
+            { t: 'En retard', v: l => fmt(l.livr_retard), cl: l => l.livr_retard > 0 ? 'mauvais' : '' },
+            { t: 'À clôturer', v: l => fmt(l.livr_a_cloturer) },
+            { t: 'Montant', v: l => fmtEur(l.livr_montant) }
+          ], parEntite(A, 'affaire').sort((a, b) => num(b.livr_retard) - num(a.livr_retard))),
+        trouve: A => num(A.prod.livr_a_cloturer) > 0
+          ? '<b>' + fmt(A.prod.livr_a_cloturer) + '</b> dossiers ont plus de trois mois de retard : ils gonflent l’en-cours sans raison.'
+          : 'Aucun dossier anormalement ancien.' },
+      { id: 'd_engage', fam: 'Carnet de commandes', lab: 'Transmises, non clôturées',
+        val: A => fmtEur(A.stock.ent_trans_m),
+        sub: A => fmt(A.stock.ent_trans_n) + ' commandes'
+          + (A.carnetOk && num(A.stock.ent_trans_365_n) > 0 ? ' · dont ' + fmt(A.stock.ent_trans_365_n) + ' de plus d’un an' : ''),
+        ton: A => A.carnetOk && num(A.stock.ent_trans_365_n) > 0 ? 'baisse' : null,
+        titre: 'Le carnet de commandes',
+        ctx: A => 'Toutes les commandes vivantes du périmètre, par étape BACS, tous mois confondus. Le carnet, ce sont les commandes transmises (TFR) ou validées qui ne sont pas encore clôturées : en général, pas encore livrées. Montants TTC.',
+        vue: A => entonnoirHtml(A.stock),
+        trouve: A => {
+          const s = A.stock;
+          let t = '';
+          if (A.carnetOk && num(s.ent_trans_365_n) > 0)
+            t += '<b>' + fmt(s.ent_trans_365_n) + '</b> commandes du carnet (' + fmtEur(s.ent_trans_365_m)
+              + ') ont plus d’un an : elles sont très probablement livrées mais jamais clôturées dans BACS, et gonflent le carnet. ';
+          t += num(s.ent_refus_n) > 0
+            ? '<b>' + fmt(s.ent_refus_n) + '</b> commandes refusées, soit ' + fmtEur(s.ent_refus_m) + ' perdus en bout de chaîne.'
+            : 'Aucun refus enregistré sur ce périmètre.';
+          return t;
+        } },
       { id: 'd_stock', fam: 'Stock', lab: 'Dort depuis 90 j',
         val: A => fmtEur(A.stock_dormant),
         sub: A => fmt(A.stock_90) + ' véhicules sur ' + fmt(A.stock_n),
@@ -1112,23 +1492,8 @@ OD.define('dashboard', {
           return '<b>' + esc(bas.nom) + '</b> finance ' + pb + ' % quand <b>' + esc(haut.nom)
             + '</b> finance ' + ph + ' %. Au niveau de la meilleure, ce serait '
             + fmt(manque) + ' financements de plus ce mois-ci.';
-        } },
-      { id: 'd_livr', fam: 'Livraisons', lab: 'En retard',
-        val: A => fmt(A.prod.livr_retard),
-        sub: A => fmt(A.prod.livr_attente) + ' en attente · ' + fmtEur(A.prod.livr_montant),
-        ton: A => A.prod.livr_retard > 0 ? 'baisse' : 'hausse',
-        titre: 'Les livraisons en retard, par affaire',
-        ctx: A => 'Commandes transmises ou validées dont la date limite est passée. Au-delà de trois mois le dossier est à clôturer.',
-        vue: A => tableau([
-            { t: 'Affaire', v: l => esc(l.nom) },
-            { t: 'En attente', v: l => fmt(l.livr_attente) },
-            { t: 'En retard', v: l => fmt(l.livr_retard), cl: l => l.livr_retard > 0 ? 'mauvais' : '' },
-            { t: 'À clôturer', v: l => fmt(l.livr_a_cloturer) },
-            { t: 'Montant', v: l => fmtEur(l.livr_montant) }
-          ], parEntite(A, 'affaire').sort((a, b) => num(b.livr_retard) - num(a.livr_retard))),
-        trouve: A => num(A.prod.livr_a_cloturer) > 0
-          ? '<b>' + fmt(A.prod.livr_a_cloturer) + '</b> dossiers ont plus de trois mois de retard : ils gonflent l’en-cours sans raison.'
-          : 'Aucun dossier anormalement ancien.' }
+        } }
+
     ];
 
     // -------------------------------------------------------------- MARKETING
@@ -1235,6 +1600,7 @@ OD.define('dashboard', {
     // =========================================================================
     function bandeau(A) {
       const f = famille(), p = A.prod, s = A.stock;
+      if (f === 'direction') return heroDirection(A);
       let q, txt, pouls;
       if (f === 'vendeur') {
         q = 'Qui appeler aujourd’hui';
@@ -1319,6 +1685,7 @@ OD.define('dashboard', {
       return '<div class="drail"><h1>' + esc(titre) + '</h1>'
         + '<span class="dt">' + esc(dateLongue()) + '</span>'
         + (roleLab ? '<span class="drole">' + esc(roleLab) + '</span>' : '')
+        + boutonPerimetre()
         + selecteurMois() + '</div>';
     }
 
@@ -1363,7 +1730,7 @@ OD.define('dashboard', {
         + '<div class="dgrille">'
         + jeu.map(() => '<div class="dtuile sq"><span class="lab">&nbsp;</span>'
             + '<span class="v">&nbsp;</span></div>').join('')
-        + '</div></section></div></div><aside></aside></div></div>';
+        + '</div></section></div></div></div></div>';
       getRoot().innerHTML = h;
     }
 
@@ -1397,8 +1764,8 @@ OD.define('dashboard', {
               + 'leads et le stock restent, eux, ceux d’aujourd’hui.</div>'
             : '')
         + bandeau(A)
-        + '<div class="dcorps"><div>' + grilleTuiles(A) + '</div>'
-        + '<aside>' + selecteurPerimetre() + '</aside></div>'
+        + '<div class="dcorps"><div>' + grilleTuiles(A)
+        + (famille() === 'direction' ? tableauEntites(A) : '') + '</div></div>'
         + pied(A) + '</div>';
       getRoot().innerHTML = h;
       if (state.ouvert) ouvrir(state.ouvert, true);
@@ -1558,6 +1925,32 @@ OD.define('dashboard', {
       const fer = ev.target.closest('[data-role="fermer"]');
       if (fer && r.contains(fer)) { fermer(); return; }
 
+      // v58 : le bouton du périmètre ouvre / ferme le menu déroulant.
+      const bp = ev.target.closest('[data-role="perim"]');
+      if (bp && r.contains(bp)) { basculerPerimetre(); return; }
+
+      // v58 : tri du tableau des entités.
+      const bt = ev.target.closest('.dtri button[data-tri]');
+      if (bt && r.contains(bt)) {
+        const k = bt.getAttribute('data-tri');
+        if (k && k !== state.triEnt) { state.triEnt = k; rendre(); }
+        return;
+      }
+
+      // v58 : une entité (ligne du tableau, lien du bandeau) recentre la page.
+      const en = ev.target.closest('[data-ent-lv]');
+      if (en && r.contains(en)) {
+        const lv = en.getAttribute('data-ent-lv'), k = en.getAttribute('data-ent-k'),
+              lab = en.getAttribute('data-ent-lab');
+        if (lv === 'all') state.sel = { level: 'all', key: null, label: 'Tout mon périmètre' };
+        else state.sel = { level: lv, key: lv === 'site' ? Number(k) : k, label: lab };
+        if (lv === 'site') pousserAuBus(Number(k));
+        state.perimOuvert = false;
+        rendre();
+        try { r.scrollIntoView({ behavior: 'smooth', block: 'start' }); } catch (e) { }
+        return;
+      }
+
       // « Ouvrir » un lead : la page Lead management l'ouvre à son arrivée.
       const tl = ev.target.closest('a.dtel');
       if (tl && r.contains(tl)) {
@@ -1613,10 +2006,30 @@ OD.define('dashboard', {
         state.sel = { level: lv, key: lv === 'site' ? Number(k) : k, label: lab };
         // La barre du haut ne sait porter qu'un site : on ne lui pousse que ça.
         if (lv === 'site') pousserAuBus(Number(k));
+        state.perimOuvert = false;
         rendre();
         return;
       }
     });
+
+    // v58 : un clic hors du menu du périmètre le referme, Échap aussi. Un seul
+    // écouteur pour la page, qui appelle la fermeture du dernier montage.
+    window.__dashTcFermerPerim = function (cible) {
+      if (!state.perimOuvert) return;
+      const w = getRoot().querySelector('.dperim-w');
+      if (w && cible && w.contains(cible)) return;
+      basculerPerimetre(false);
+    };
+    if (!window.__dashTcDocPerim) {
+      window.__dashTcDocPerim = true;
+      doc.addEventListener('click', ev => {
+        try { if (window.__dashTcFermerPerim) window.__dashTcFermerPerim(ev.target); } catch (e) { }
+      }, true);
+      doc.addEventListener('keydown', ev => {
+        if (ev.key !== 'Escape') return;
+        try { if (window.__dashTcFermerPerim) window.__dashTcFermerPerim(null); } catch (e) { }
+      });
+    }
 
     // =========================================================================
     //  LE TABLEAU DU PLATEAU VROOM (rôle 10)
