@@ -14,6 +14,9 @@
 //    le détail (vn_bacs_fiche), avec un lien direct vers le véhicule dans BACS.
 //  * Le stock reste celui du DMS (v_liste_vn) : c'est lui qui dit ce qui est
 //    en stock, à quel prix et depuis quand ; BACS décrit la voiture.
+//  v21 (25/11/2026) : un véhicule « Disponible » au DMS mais en « Livraison
+//    planifiée » dans BACS (vendu à un client) est signalé comme écart, comme
+//    les véhicules livrés (retour Arcueil, ticket 29).
 //  v20 (24/11/2026) : véhicules INTROUVABLES dans BACS (cherchés par VIN puis
 //    n° de commande, sans résultat : autres marques, véhicules hors du périmètre
 //    du compte de récolte) distingués de ceux pas encore lus. Filtre Statut
@@ -209,7 +212,16 @@ OD.define('vn-liste', {
     'On the road': 'En circulation', 'In transit': 'En transit', 'Sold': 'Vendu', 'Resold': 'Revendu' };
   function libParc(s) { return s ? (LIB_PARC[s] || s) : ''; }
   // Véhicule livré dans BACS mais toujours en stock au DMS : à vérifier.
-  function ecartParc(r, statut) { return !r.en_commande && /^deliver/i.test(String(statut || '')) && !/^delivery to plan/i.test(String(statut || '')); }
+  // v21 : « Livraison planifiée » (vendu à un client dans BACS) alors que le
+  // DMS dit encore Disponible : signalé aussi.
+  function ecartParc(r, statut) {
+    var s = String(statut || '');
+    if (r.en_commande || !/^deliver/i.test(s)) return false;
+    return !/^delivery to plan/i.test(s) || r.statut === 'DISPONIBLE';
+  }
+  function libEcart(r, statut) {
+    return /^delivery to plan/i.test(String(statut || '')) ? 'Vendu dans BACS, encore disponible au DMS' : 'Livré dans BACS, encore au stock DMS';
+  }
   function libEnergie(e) { if (!notEmpty(e)) return ''; var k = String(e).trim().toUpperCase(); return LIB_ENERGIE[k] || propre(e); }
 
   // Pastille de teinte à partir du libellé (BACS sinon DMS).
@@ -660,7 +672,7 @@ OD.define('vn-liste', {
     var bacsBloc = b
       ? '<div class="vl-lbl">Véhicule BACS</div>'
         + '<div class="vl-lieu"><i class="vn-bdot' + (ecartParc(r, b.statut_parc) ? ' warn' : '') + '"></i>' + esc(libParc(b.statut_parc) || 'Parc') + '</div>'
-        + (ecartParc(r, b.statut_parc) ? '<div class="vl-m vl-warn">Livré dans BACS, encore au stock DMS</div>' : '')
+        + (ecartParc(r, b.statut_parc) ? '<div class="vl-m vl-warn">' + esc(libEcart(r, b.statut_parc)) + '</div>' : '')
         + (b.point_de_vente ? '<div class="vl-m">' + esc(propre(b.point_de_vente.replace(/^\d+\s+/, ''))) + '</div>' : '')
         + (b.facture_le ? '<div class="vl-m">Facturé le ' + esc(dateFR(b.facture_le)) + '</div>' : '')
       : '<div class="vl-lbl">Véhicule BACS</div><div class="vl-m vl-muet">' + (!cmd ? 'Sans n° de commande' : S.absents[cmd] ? 'Introuvable dans BACS' : 'Pas encore lu') + '</div>';
@@ -776,7 +788,7 @@ OD.define('vn-liste', {
       + ligneF('Katashiki', bv(c, 'Katashiki__c') ? '<span class="vn-mono">' + esc(bv(c, 'Katashiki__c')) + '</span>' : null)
       + ligneF('Famille', e(bv(c, 'Family__c'))));
     var suivi = section('Suivi BACS',
-        ligneF('Statut du parc', parc && parc.statut ? esc(libParc(parc.statut)) + (ecartParc(r, parc.statut) ? ' <span class="vn-warn">encore au stock DMS</span>' : '') : null)
+        ligneF('Statut du parc', parc && parc.statut ? esc(libParc(parc.statut)) + (ecartParc(r, parc.statut) ? ' <span class="vn-warn">' + (/^delivery to plan/i.test(String(parc.statut)) ? 'encore disponible au DMS' : 'encore au stock DMS') + '</span>' : '') : null)
       + ligneF('Point de vente', e(parc && parc.site ? propre(String(parc.site).replace(/^\d+\s+/, '')) : null))
       + ligneF('Type de parc', e(parc && parc.type))
       + ligneF('Client', e(parc && parc.client))
