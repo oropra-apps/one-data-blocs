@@ -1,5 +1,10 @@
 // ============================================================================
-//  DASHBOARD — module One Data (OD.define)   v62 — PROFIL TEAM COLIN
+//  DASHBOARD — module One Data (OD.define)   v63 — PROFIL TEAM COLIN
+//
+//  v63 (25/11/2026) : le périmètre se déplie jusqu'aux VENDEURS de chaque
+//    site (mêmes colonnes ; stock « — », il n'appartient pas à un vendeur).
+//    Commandes attendues arrondies au grain vendeur × site × univers puis
+//    additionnées : chaque niveau est la somme exacte de ses enfants.
 //
 //  v62 (25/11/2026) : ordre des lignes du périmètre identique en VN, VO et
 //    VN + VO (tri calculé sur VN + VO, égalités départagées par le nom).
@@ -450,6 +455,10 @@ OD.define('dashboard', {
 #dash-root table.dentt tr.pr2 .nm,#dash-root table.dentt tr.pr3 .nm{font-weight:700}
 #dash-root table.dentt tr.pr3 .nm{color:var(--bleu)}
 #dash-root table.dentt tr.actif td:first-child{box-shadow:inset 3px 0 0 var(--bleu-fonce)}
+#dash-root table.dentt tbody tr.vend{cursor:default}
+#dash-root table.dentt tbody tr.vend:hover td{background:none}
+#dash-root table.dentt tbody tr.vend:hover td:first-child{box-shadow:none}
+#dash-root table.dentt tr.vend .nm{font-weight:600;color:var(--bleu)}
 #dash-root table.dentt tr.actif .nm{text-decoration:underline;text-underline-offset:3px}
 #dash-root .dcb .dbar{flex:1;height:8px}
 #dash-root .dcb .dbar .ryt{top:-3px;bottom:-3px;width:2px}
@@ -693,11 +702,16 @@ OD.define('dashboard', {
         if (!v.nom && l.nom) v.nom = l.nom;
         return v;
       };
-      A.objU = { VN: 0, VO: 0 };
+      // v63 : commandes attendues à date, arrondies au grain le plus fin
+      // (vendeur × site × univers) puis additionnées : l'écart au rythme d'un
+      // site est ainsi exactement la somme de ceux de ses vendeurs, celui d'une
+      // affaire la somme de ses sites, et VN + VO la somme de VN et de VO.
+      const PR = prorataMois();
+      A.attenduSum = 0;
       (j.vendeurs || []).forEach(l => {           // production du mois choisi
         if (!okSite(l.id_site, l)) return;
         A.lignes.push(l);
-        A.objU[l.vn_vo === 'VO' ? 'VO' : 'VN'] += num(l.obj_cdes);
+        A.attenduSum += Math.round(num(l.obj_cdes) * PR);
         ajouter(A.prod, l, CH_PROD);
         ajouter(prendreUser(l), l, CH_PROD);
       });
@@ -897,14 +911,6 @@ OD.define('dashboard', {
 
     // --- prorata du mois : jours ouvrés lundi → samedi, dimanche exclu, comme
     // la page Performances. Un mois passé vaut 1.
-    // v61 : commandes attendues à date. Arrondies PAR UNIVERS puis additionnées,
-    // pour que l'écart au rythme « VN + VO » soit exactement la somme des
-    // écarts VN et VO (un seul arrondi global donnait un point d'écart).
-    function attenduDe(objU, obj, pr) {
-      if (objU && (num(objU.VN) + num(objU.VO)) > 0)
-        return Math.round(num(objU.VN) * pr) + Math.round(num(objU.VO) * pr);
-      return Math.round(num(obj) * pr);
-    }
     function prorataMois() {
       if (!estMoisEnCours()) return 1;
       const d = new Date(), a = d.getFullYear(), m = d.getMonth();
@@ -950,7 +956,7 @@ OD.define('dashboard', {
         e.cle = niv === 'site' ? (sitesE[0] ? Number(sitesE[0].id_site) : null) : e.nom;
         e.n_sites = sitesE.length;
         e.marques = Array.from(new Set(sitesE.map(s => s.reseau || 'Sans réseau')));
-        e.attendu = obj > 0 ? attenduDe(e.objU, obj, pr) : null;
+        e.attendu = obj > 0 ? e.attenduSum : null;
         e.ecart_r = obj > 0 ? cdes - e.attendu : null;
         e.taux_fi = pct(e.fi, e.hors_loueurs);
         e.dormant = num(e.vn_dormant) + num(e.vo_dormant);
@@ -984,7 +990,7 @@ OD.define('dashboard', {
           + (enCours ? '<div class="leg"><span>Au rythme actuel : <b>' + fmt(pr > 0 ? Math.round(cdes / pr) : cdes)
             + '</b> commandes en fin de mois</span><span>' + esc(joursOuvresLib()) + '</span></div>' : '');
       } else {
-        const attendu = attenduDe(A.objU, obj, pr);
+        const attendu = A.attenduSum;
         const ec = cdes - attendu;
         const land = pr > 0 ? Math.round(cdes / pr) : cdes;
         const taux = pct(cdes, obj);
@@ -1048,7 +1054,7 @@ OD.define('dashboard', {
       const per = ((state.j || {}).perimetre || []);
       const nb = n => n + (n > 1 ? ' sites' : ' site');
       const feuille = st => ({ lv: 'site', key: Number(st.id_site), lab: st.nom || ('Site ' + st.id_site),
-        sub: st.affaire || '', ids: [Number(st.id_site)], enfants: [] });
+        sub: st.affaire || '', ids: [Number(st.id_site)], enfants: vendeursDuSite(Number(st.id_site)) });
       const affNoeud = (m, a) => {
         if (a.sites.length === 1) {
           const f = feuille(a.sites[0]);
@@ -1074,12 +1080,49 @@ OD.define('dashboard', {
         sub: (marques.length > 1 ? marques.map(m => m.lab).join(', ') + ' · ' : '') + nb(per.length),
         ids: null, enfants: enfants };
     }
+    // v63 : dernier niveau du périmètre, les vendeurs d'un site. Ce sont ceux
+    // que dash2_lire rend déjà (équipe visible, grands comptes exclus) : un
+    // vendeur figure s'il a une ligne de production ou un dossier en cours.
+    function vendeursDuSite(idSite) {
+      const j = state.j || {};
+      const m = new Map();
+      const prendre = l => {
+        if (String(l.id_site) !== String(idSite)) return;
+        const k = String(l.id_user);
+        if (!m.has(k)) m.set(k, { lv: 'vendeur', key: idSite + '|' + k, site: idSite, user: k,
+          lab: l.nom || ('Vendeur ' + k), sub: '', ids: [idSite], enfants: [] });
+      };
+      (j.vendeurs || []).forEach(prendre);
+      (j.etat || []).forEach(l => {
+        if (num(l.livr_attente) + num(l.livr_retard) + num(l.appro_n) + num(l.livr_a_cloturer) > 0) prendre(l);
+      });
+      return Array.from(m.values());
+    }
+    function statsVendeur(site, user, pr, univ) {
+      const j = state.j || {};
+      const uv = univ || state.vnvo;
+      const ok = l => String(l.id_site) === String(site) && String(l.id_user) === String(user)
+        && (uv === 'tout' || !l.vn_vo || l.vn_vo === '*' || l.vn_vo === uv);
+      const o = { cdes: 0, obj: 0, fi: 0, hl: 0, att: 0, r: 0, ap: 0, apm: 0, li: 0, lim: 0 };
+      (j.vendeurs || []).filter(ok).forEach(l => {
+        o.cdes += num(l.cdes); o.obj += num(l.obj_cdes); o.fi += num(l.fi); o.hl += num(l.hors_loueurs);
+        o.att += Math.round(num(l.obj_cdes) * pr);
+      });
+      (j.etat || []).filter(ok).forEach(l => {
+        o.r += num(l.livr_retard); o.ap += num(l.appro_n); o.apm += num(l.appro_m);
+        o.li += num(l.livr_attente); o.lim += num(l.livr_montant);
+      });
+      const att = o.obj > 0 ? o.att : 0;
+      return { cdes: o.cdes, obj: o.obj, ecart_r: (o.obj > 0 || o.cdes > 0) ? o.cdes - att : null,
+        livr_retard: o.r, appro: o.ap, appro_m: o.apm, attente: o.li, attente_m: o.lim,
+        dormant_n: null, dormant: 0, taux_fi: pct(o.fi, o.hl) };
+    }
     function statsNoeud(ids, pr) {
       const A = agreger(state.j, ids);
       const p = A.prod, obj = num(p.obj_cdes), cdes = num(p.cdes);
       // Sans objectif mais avec des commandes, l'attendu vaut 0 : l'écart est
       // positif, affiché en gris. C'est ce qui garde VN + VO = VN plus VO.
-      const att = obj > 0 ? attenduDe(A.objU, obj, pr) : 0;
+      const att = obj > 0 ? A.attenduSum : 0;
       return { cdes: cdes, obj: obj, ecart_r: (obj > 0 || cdes > 0) ? cdes - att : null,
         livr_retard: num(p.livr_retard), appro: num(p.appro_n), appro_m: num(p.appro_m),
         attente: num(p.livr_attente), attente_m: num(p.livr_montant),
@@ -1099,6 +1142,7 @@ OD.define('dashboard', {
     };
     function statsTout(ids, pr) {
       const u = state.vnvo;
+      if (ids && ids.vendeur) return statsVendeur(ids.site, ids.user, pr, 'tout');
       if (u === 'tout') return statsNoeud(ids, pr);
       state.vnvo = 'tout';
       try { return statsNoeud(ids, pr); } finally { state.vnvo = u; }
@@ -1118,13 +1162,14 @@ OD.define('dashboard', {
         || (n.lv === sel.level && String(n.key) === String(sel.key));
       let h = '';
       const ligne = (n, prof) => {
-        n.st = statsNoeud(n.ids, pr);
+        const estV = n.lv === 'vendeur';
+        n.st = estV ? statsVendeur(n.site, n.user, pr) : statsNoeud(n.ids, pr);
         const pliable = n.enfants.length > 0;
         const ouv = pliable && estDeplie(n);
         const st = n.st, ec = st.ecart_r;
         const lab = n.lv === 'ra' ? n.sub.split(' · ')[0] + ' · ' + n.lab : n.lab;
-        h += '<tr class="pr' + Math.min(prof, 3) + (estSel(n) ? ' actif' : '') + '"'
-          + ' data-ent-lv="' + n.lv + '" data-ent-k="' + esc(n.key) + '" data-ent-lab="' + esc(n.lv === 'all' ? 'Tout mon périmètre' : lab) + '">'
+        h += '<tr class="pr' + Math.min(prof, 3) + (estV ? ' vend' : '') + (!estV && estSel(n) ? ' actif' : '') + '"'
+          + (estV ? '' : ' data-ent-lv="' + n.lv + '" data-ent-k="' + esc(n.key) + '" data-ent-lab="' + esc(n.lv === 'all' ? 'Tout mon périmètre' : lab) + '"') + '>'
           + '<td><div class="dnoeud" style="padding-left:' + (prof * 20) + 'px">'
           + (pliable
               ? '<button type="button" class="dchev" data-depli="' + esc(cleDepli(n)) + '" aria-expanded="' + ouv + '" aria-label="' + (ouv ? 'Replier ' : 'Déplier ') + esc(n.lab) + '">' + (ouv ? '▾' : '▸') + '</button>'
@@ -1138,10 +1183,13 @@ OD.define('dashboard', {
           + '<td class="' + (st.livr_retard > 0 ? 'mauvais' : 'pale') + '">' + fmt(st.livr_retard) + '</td>'
           + '<td>' + fmt(st.appro) + (st.appro_m > 0 ? ' <span class="pale">· ' + fmtEur(st.appro_m) + '</span>' : '') + '</td>'
           + '<td>' + fmt(st.attente) + (st.attente_m > 0 ? ' <span class="pale">· ' + fmtEur(st.attente_m) + '</span>' : '') + '</td>'
-          + '<td>' + fmt(st.dormant_n) + (st.dormant > 0 ? ' <span class="pale">· ' + fmtEur(st.dormant) + '</span>' : '') + '</td>'
+          + (st.dormant_n == null ? '<td class="pale">—</td>'
+              : '<td>' + fmt(st.dormant_n) + (st.dormant > 0 ? ' <span class="pale">· ' + fmtEur(st.dormant) + '</span>' : '') + '</td>')
           + '<td class="' + (st.taux_fi != null && st.taux_fi < 30 ? 'mauvais' : '') + '">' + pcts(st.taux_fi) + '</td></tr>';
         if (ouv) {
-          n.enfants.forEach(e => { e.tri = statsTout(e.ids, pr); });
+          n.enfants.forEach(e => {
+            e.tri = e.lv === 'vendeur' ? statsVendeur(e.site, e.user, pr, 'tout') : statsTout(e.ids, pr);
+          });
           n.enfants.slice().sort(tri).forEach(e => ligne(e, prof + 1));
         }
       };
@@ -1150,7 +1198,7 @@ OD.define('dashboard', {
       const labs = { ecart: 'Retard au rythme', livr: 'Livraisons en retard', appro: 'À approuver', stock: 'Stock > 90 j', fi: 'Financement' };
       return '<section class="dents"><div class="dents-h"><div><h2>Mon périmètre'
         + (state.vnvo !== 'tout' ? ' · ' + state.vnvo : '') + '</h2>'
-        + '<div class="s">Le chevron déplie marques, affaires et sites ; un clic sur une ligne recentre toute la page.</div>'
+        + '<div class="s">Le chevron déplie marques, affaires, sites puis vendeurs ; un clic sur une ligne recentre toute la page.</div>'
         + '</div><div class="dtri" role="group" aria-label="Trier par">'
         + tt.map(k => '<button type="button" data-tri="' + k + '" aria-pressed="' + (k === (TRIS_ARBRE[state.triEnt] ? state.triEnt : 'ecart')) + '">' + labs[k] + '</button>').join('')
         + '</div></div>'
@@ -1253,13 +1301,14 @@ OD.define('dashboard', {
       const m = new Map();
       const prendre = k => {
         let o = m.get(k);
-        if (!o) { o = Object.assign({ nom: k, objU: { VN: 0, VO: 0 } }, vide(CH_V), vide(CH_S)); m.set(k, o); }
+        if (!o) { o = Object.assign({ nom: k, attenduSum: 0 }, vide(CH_V), vide(CH_S)); m.set(k, o); }
         return o;
       };
+      const PR = prorataMois();
       A.lignes.forEach(l => {
         const o = prendre(cle(info[String(l.id_site)] || {}));
         ajouter(o, l, CH_PROD);
-        o.objU[l.vn_vo === 'VO' ? 'VO' : 'VN'] += num(l.obj_cdes);
+        o.attenduSum += Math.round(num(l.obj_cdes) * PR);
       });
       A.etats.forEach(l => ajouter(prendre(cle(info[String(l.id_site)] || {})), l, CH_ETAT));
       A.sites.forEach(s => ajouter(prendre(cle(s)), s, CH_S));
