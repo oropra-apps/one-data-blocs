@@ -1,6 +1,13 @@
 // ============================================================================
 //  LEAD MANAGEMENT — module One Data (OD.define 'lead-mgmt')
-//  VERSION TEAM COLIN (v131) — déploiement CIBLÉ (publish-targets :
+//  VERSION TEAM COLIN (v132) — déploiement CIBLÉ (publish-targets :
+//  v132 (25/11/2026) : CAMPAGNES — délai de traitement d'UNE HEURE (règle
+//    d'Antoine) : un client pris en libre-service et non traité dans l'heure
+//    est rendu automatiquement (base : campagne_prise + cron
+//    campagne_retour_auto toutes les 5 min). À l'écran : échéance sur chaque
+//    client « À relancer par vous » (« à traiter avant 18:32 », orange sous
+//    15 min) et dans le panneau ; message à la prise ; règle rappelée en tête.
+//    RPC campagne_echeances (les clients répartis par un chef n'ont pas de délai).
 //  v131 (25/11/2026) : APERÇU VENDEUR (chef « voir l'écran de… ») — l'onglet
 //    Campagnes y apparaît : campagnes du ou des sites du vendeur, ses clients
 //    pris, la liste à prendre, en lecture seule (Je prends / Traiter refusés
@@ -3530,6 +3537,20 @@
       if (S.dr && S.dr.id && !S.dr.demo) { var l = S.leads.find(function (x) { return Number(x.id_lead) === Number(S.dr.id); }); if (l) { S.dr.l = l; renderDrawerPreserve(); } }
       else if (S.cell && !$drawer.hidden) renderVolet();
     }
+    // v132 : échéance d'une heure des clients pris en libre-service (lecture seule en aperçu)
+    async function chargerEcheances() {
+      S.campEch = {};
+      var ids = (S.mesSollis || []).map(function (t) { return Number(t.id_rapport); }).filter(Boolean);
+      if (!ids.length || S.comme) return;
+      try { (await rpc('campagne_echeances', { p_ids: ids }) || []).forEach(function (x) { S.campEch[x.id_rapport] = x.rendu_le; }); }
+      catch (e) { S.campEch = {}; }
+    }
+    function echeanceTxt(id) {
+      var r = (S.campEch || {})[id]; if (!r) return null;
+      var d = new Date(r), reste = Math.round((d - Date.now()) / 60000);
+      var hh = String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0');
+      return { txt: reste > 0 ? 'à traiter avant ' + hh + ' (reste ' + (reste >= 60 ? '1 h' : reste + ' min') + ')' : 'délai dépassé : rendu à l\'équipe sous 5 min', urgent: reste < 15 };
+    }
     async function chargerCampagnes() {
       var de = new Date(Date.now() - 90 * 86400000).toISOString().slice(0, 10), a = new Date().toISOString().slice(0, 10);
       var sites = POSTE === 'direction' && !S.vueSite ? null : (sitePoste() != null ? [Number(sitePoste())] : null);
@@ -3552,6 +3573,7 @@
             try { (await rpc('campagne_infos', { p_ids: idsInfos }) || []).forEach(function (x) { S.campInfos[x.id_rapport] = x; }); }
             catch (e3) { S.campInfos = {}; }
           }
+          await chargerEcheances();
         } else {
           var r2 = await Promise.all([
             rpc('get_campagnes_sollicitation', { p_viewer_id_user: Number(MOI), p_date_from: de, p_date_to: a, p_site_ids: sites, p_id_user: null }),
@@ -3572,6 +3594,7 @@
               try { (await rpc('campagne_infos', { p_ids: ids3 }) || []).forEach(function (x) { S.campInfos[x.id_rapport] = x; }); }
               catch (e5) { S.campInfos = {}; }
             }
+            await chargerEcheances();
           } else { S.campMes = null; S.campLibres = null; S.mesSollis = null; }
         }
       } catch (e) { S.campagnes = S.campagnes || []; toast(messageErreur(e), true); }
@@ -4342,7 +4365,9 @@
           h += '<h4 class="camp-st">À relancer par vous' + (filtre ? ' · ' + cibles.length + ' sur ' + toutesMiennes.length : '') + '</h4><div class="list">';
           if (!cibles.length) h += '<div class="empty">Aucun de vos clients ne correspond aux filtres.</div>';
           cibles.slice(0, 80).forEach(function (t) {
-            h += ligneCamp(t, '<button type="button" class="btn pri" data-a="camp-traiter" data-id="' + esc(t.id_rapport) + '">Traiter</button>', 'camp-traiter');
+            var ech = echeanceTxt(t.id_rapport);
+            h += ligneCamp(t, (ech ? '<span class="cp-ech' + (ech.urgent ? ' urg' : '') + '">' + esc(ech.txt) + '</span>' : '')
+              + '<button type="button" class="btn pri" data-a="camp-traiter" data-id="' + esc(t.id_rapport) + '">Traiter</button>', 'camp-traiter');
           });
           h += '</div>';
         }
@@ -4392,7 +4417,7 @@
       }).join('') + '</div>';
     }
     function vueCampagnesVendeur() {
-      var h = '<div class="ph"><div><h2>Mes campagnes</h2><p>Libre-service, comme le Pool : prenez un client à relancer, il passe à votre nom. Ouvrez ensuite sa fiche pour l\'appeler et faire votre compte rendu : la relance est alors comptée comme traitée. S\'il ne vous concerne pas, rendez-le.</p></div></div>';
+      var h = '<div class="ph"><div><h2>Mes campagnes</h2><p>Libre-service, comme le Pool : prenez un client à relancer, il passe à votre nom. Appelez-le et enregistrez le résultat : la relance est alors comptée comme traitée. S\'il ne vous concerne pas, rendez-le.<br><b>Un client pris et non traité dans l\'heure revient automatiquement à l\'équipe.</b></p></div></div>';
       if (!S.campagnes) return h + '<div class="empty">Chargement des campagnes…</div>';
       return h + campCorps();
     }
@@ -4450,7 +4475,7 @@
       var X = '<button type="button" class="x" data-a="close" aria-label="Fermer"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg></button>';
       var sc = x.priorite != null ? Number(x.priorite) : null;
       var h = '<header class="dr-h"><div class="cd-hd">' + (sc != null ? '<div class="cp-prio ' + (sc >= 45 ? 'haut' : sc >= 25 ? 'moy' : 'bas') + '">' + sc + '<small>PRIO</small></div>' : '')
-        + '<div><h2>' + esc(propre(t.client_nom)) + prismeBadge(inf) + '</h2><p class="cd-sous">' + esc(t.campagne) + ' · ' + esc(siteNom(t.nom_site)) + (inf.segment === 'pro' ? ' · PRO' : '') + '</p></div></div>' + X + '</header><div class="dr-b">';
+        + '<div><h2>' + esc(propre(t.client_nom)) + prismeBadge(inf) + '</h2>' + (function () { var e = echeanceTxt(D.id); return e ? '<p class="cp-ech' + (e.urgent ? ' urg' : '') + '">' + esc(e.txt.charAt(0).toUpperCase() + e.txt.slice(1)) + '</p>' : ''; })() + '<p class="cd-sous">' + esc(t.campagne) + ' · ' + esc(siteNom(t.nom_site)) + (inf.segment === 'pro' ? ' · PRO' : '') + '</p></div></div>' + X + '</header><div class="dr-b">';
       // Joindre
       h += '<section><h3>Joindre le client</h3>';
       if (!D.ct) h += '<p class="cd-mut">Chargement des coordonnées…</p>';
@@ -4762,7 +4787,7 @@
       h += '</tbody></table></div><p class="foot">Campagnes internes des 90 derniers jours. Une cible est « traitée » quand le vendeur a fait son compte rendu sur la fiche du client.</p>';
       // v130 : chef sur un site — clients de campagne en libre-service, comme le vendeur
       if (S.campLibres && ((S.campLibres.length) || (S.mesSollis || []).length)) {
-        h += '<div class="ph" style="margin-top:18px"><div><h2>Clients à prendre</h2><p>Libre-service : prenez un client, il passe à votre nom ; rendez-le s\'il ne vous concerne pas.</p></div></div>' + campCorps();
+        h += '<div class="ph" style="margin-top:18px"><div><h2>Clients à prendre</h2><p>Libre-service : prenez un client, il passe à votre nom ; rendez-le s\'il ne vous concerne pas.<br><b>Un client pris et non traité dans l\'heure revient automatiquement à l\'équipe.</b></p></div></div>' + campCorps();
       }
       return h;
     }
@@ -6167,7 +6192,7 @@
         case 'renvoyer': return renvoyer(id);
         case 'clore-inj': if (S.dr) fermerDrawer(); await ouvrir(id); if (S.dr) { S.dr.mode = 'clore'; renderDrawer(); var mm = $drawer.querySelector('#clore-motif'); if (mm) mm.value = 'injoignable'; } return;
         case 'fiche': return ficheClient(id);
-        case 'camp-prendre': return campagneGeste('campagne_prendre', id, 'Client pris : il est dans vos relances de campagne.');
+        case 'camp-prendre': return campagneGeste('campagne_prendre', id, 'Client pris : vous avez 1 heure pour le traiter, sinon il revient à l\'équipe.');
         case 'camp-rendre': return campagneGeste('campagne_rendre', id, 'Client rendu : il est de nouveau à prendre.');
         case 'cp-raz': S.cf = { q: '', mod: '', flt: '' }; render(); return;
         case 'cp-camp':
@@ -6656,6 +6681,9 @@
 .lmtc .cp-l.cp-lp{box-shadow:inset 3px 0 0 var(--vert)}
 .lmtc .cp-tabs{display:flex;gap:8px;overflow-x:auto;padding:2px 0 10px;margin:2px 0 6px;scrollbar-width:thin}
 .lmtc .cp-tab{flex:0 0 auto;display:flex;flex-direction:column;align-items:flex-start;gap:2px;text-align:left;font:inherit;cursor:pointer;background:var(--card);border:1.5px solid var(--line-2);border-radius:12px;padding:9px 14px;min-width:170px;max-width:280px;color:var(--ink-2)}
+.lmtc .cp-ech{display:inline-block;font-size:11.5px;font-weight:700;color:var(--bleu-dk);background:var(--calme-bg);border-radius:8px;padding:3px 8px;margin:0 8px 6px 0;white-space:nowrap}
+.lmtc .cp-ech.urg{background:var(--alerte-bg);color:var(--m-rouge)}
+.lmtc .dr-h .cp-ech{margin:4px 0 2px}
 .lmtc .cp-tt{display:flex;align-items:center;gap:8px;max-width:100%}
 .lmtc .cp-tab b{font-size:13.5px;font-weight:800;color:var(--bleu-dk);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
 .lmtc .cp-pa{flex:none;min-width:18px;height:18px;padding:0 5px;border-radius:9px;background:#00997f;color:#fff;font-size:10px;font-weight:700;display:inline-flex;align-items:center;justify-content:center;line-height:1}
