@@ -1,6 +1,10 @@
 // ============================================================================
 //  LEAD MANAGEMENT — module One Data (OD.define 'lead-mgmt')
-//  VERSION TEAM COLIN (v132) — déploiement CIBLÉ (publish-targets :
+//  VERSION TEAM COLIN (v133) — déploiement CIBLÉ (publish-targets :
+//  v133 (25/11/2026) : CAMPAGNES — plus de liseré vert à gauche des clients
+//    PRISME : dans One Data, le liseré gauche dit l'univers (vert = VN, jaune
+//    = VO) ; sur une campagne VO il se lisait « VN ». PRISME reste signalé par
+//    son badge et sa ligne d'explication.
 //  v132 (25/11/2026) : CAMPAGNES — délai de traitement d'UNE HEURE (règle
 //    d'Antoine) : un client pris en libre-service et non traité dans l'heure
 //    est rendu automatiquement (base : campagne_prise + cron
@@ -4292,7 +4296,7 @@
       var dejaSimu = ((x && x.raisons) || []).some(function (r) { return /^Simulation/.test(r); });
       var faits = [inf.simulation_bacs && !dejaSimu ? 'Simulation BACS le ' + dt(inf.simulation_bacs) : '', inf.ca_atelier_6m ? nb(Math.round(Number(inf.ca_atelier_6m))) + ' € HT d\'atelier sur 6 mois' : '',
                    coord.length ? 'Joignable par ' + coord.join(', ') : 'Aucune coordonnée'].filter(Boolean).join(' · ');
-      return '<div class="lr cp-l' + (prismeTop(inf) ? ' cp-lp' : '') + '"' + (cliquable ? ' data-a="' + (cliquable === true ? 'fiche' : cliquable) + '" data-id="' + esc(cliquable === true ? t.id_client : t.id_rapport) + '"' : '') + ' tabindex="0"><div>' + gauche + '</div>'
+      return '<div class="lr cp-l"' + (cliquable ? ' data-a="' + (cliquable === true ? 'fiche' : cliquable) + '" data-id="' + esc(cliquable === true ? t.id_client : t.id_rapport) + '"' : '') + ' tabindex="0"><div>' + gauche + '</div>'
         + '<div><span class="lr-n">' + esc(propre(t.client_nom)) + '</span>' + (inf.segment === 'pro' ? ' <span class="tag">PRO</span>' : '') + prismeBadge(inf) + '<p class="lr-d">' + esc(lieu) + '</p>'
         + vehs + prismeLigne(inf) + (rais ? '<div class="cp-rs">' + rais + '</div>' : '') + (x ? '<p class="cp-f">' + esc(faits) + '</p>' : '') + '</div>'
         + '<div class="lr-a">' + actions + '</div></div>';
@@ -6678,7 +6682,6 @@
 .lmtc h2 .cp-pr{font-size:11px}
 .lmtc .cp-prl{margin-top:7px;display:flex;gap:8px;align-items:flex-start;font-size:12.5px;line-height:1.45;color:var(--bleu-dk);background:#eaf6f3;border-radius:8px;padding:6px 10px}
 .lmtc .cp-prl b{font-weight:800}
-.lmtc .cp-l.cp-lp{box-shadow:inset 3px 0 0 var(--vert)}
 .lmtc .cp-tabs{display:flex;gap:8px;overflow-x:auto;padding:2px 0 10px;margin:2px 0 6px;scrollbar-width:thin}
 .lmtc .cp-tab{flex:0 0 auto;display:flex;flex-direction:column;align-items:flex-start;gap:2px;text-align:left;font:inherit;cursor:pointer;background:var(--card);border:1.5px solid var(--line-2);border-radius:12px;padding:9px 14px;min-width:170px;max-width:280px;color:var(--ink-2)}
 .lmtc .cp-ech{display:inline-block;font-size:11.5px;font-weight:700;color:var(--bleu-dk);background:var(--calme-bg);border-radius:8px;padding:3px 8px;margin:0 8px 6px 0;white-space:nowrap}
