@@ -1,5 +1,11 @@
 // ============================================================================
-//  FICHE CLIENT — SHELL — module One Data (OD.define)  v17
+//  FICHE CLIENT — SHELL — module One Data (OD.define)  v19
+//  v19 (26/11/2026) : bouton « Passer la main » (vendeurs et chefs des ventes) :
+//  inviter un collègue du site sur ce client avec une note, et lui confier le
+//  suivi (ses leads ouverts sur ce client passent dans la file du collègue).
+//  Demande de J. Faugeras (Team Colin). RPC passer_main_contexte / passer_main.
+//  v18 (18/11/2026) : « Appeler » compose le fixe quand le client n'a pas de
+//  mobile ; sans aucun numéro, un message le dit (le clic ne faisait rien).
 //  v17 (04/11/2026) : onglet « Entourage » (module entourage v1) sur la fiche
 //  d'un particulier : conjoint, enfants, parents, parrain… comme la rubrique
 //  Entourage de BACS. Absent sur une société.
@@ -108,7 +114,7 @@ OD.define('fiche-shell', {
     if (idvu == null) { state.client = null; return; }
     try {
       const { data, error } = await sb.from('CLIENT')
-        .select('IDVu, CIVILITE, NOM, PRENOM, EMAIL, TEl_MOB, idmultivu, code_postal, ville')
+        .select('IDVu, CIVILITE, NOM, PRENOM, EMAIL, TEl_MOB, TEL_FIXE, idmultivu, code_postal, ville')
         .eq('IDVu', idvu).single();
       if (error) throw error;
       state.client = data; state.idvu = idvu;
@@ -216,8 +222,10 @@ OD.define('fiche-shell', {
   function callClient() {
     if (!peutAppeler()) return;
     const c = state.client; if (!c) return;
-    const to = normPhone(c.TEl_MOB);
-    if (!to) return;
+    // v18 : mobile, sinon fixe ; sans aucun numéro, on le dit au lieu de ne rien faire.
+    const brut = (c.TEl_MOB && String(c.TEl_MOB).trim()) ? c.TEl_MOB : c.TEL_FIXE;
+    const to = normPhone(brut);
+    if (!to) { try { alert('Aucun numéro de téléphone n\'est renseigné sur cette fiche : ajoutez un mobile ou un fixe pour pouvoir appeler ce client.'); } catch (e) {} return; }
 
     // 1) Tenant equipe 3CX : le PBX fait sonner le poste du vendeur, puis le client.
     const cx = pick3cx();
@@ -237,7 +245,7 @@ OD.define('fiche-shell', {
         const call = await device.connect({ params: { To: to } });
         globalThis.__ONE_DATA__ = globalThis.__ONE_DATA__ || {}; globalThis.__ONE_DATA__.call = call;
         try { window._twilioCall = call; window.parent._twilioCall = call; window.top._twilioCall = call; } catch (e) {}
-        if (UI) UI.incall({ name: clientName(c), number: c.TEl_MOB, idvu: c.IDVu, client: c });
+        if (UI) UI.incall({ name: clientName(c), number: brut, idvu: c.IDVu, client: c });
         call.on('accept', () => { if (UI) { UI.answer(); UI.minimize(true); } });
         call.on('disconnect', () => { if (UI) UI.close(); try { window._twilioCall = null; window.parent._twilioCall = null; window.top._twilioCall = null; } catch (e) {} if (globalThis.__ONE_DATA__) globalThis.__ONE_DATA__.call = null; });
       } catch (e) { console.error('[fiche-shell] VoIP', e); }
@@ -323,6 +331,9 @@ OD.define('fiche-shell', {
 .fs-btn.mail{color:var(--dk);border-color:#d7dfe9}.fs-btn.mail:hover{background:#f2f5f9}
 .fs-btn.sms{color:var(--am);border-color:#f0dca6}.fs-btn.sms:hover{background:#fdf7e8}
 .fs-btn.rpv{color:var(--rd);border-color:#f2c4c4}.fs-btn.rpv:hover{background:#fdf1f1}
+.fs-btn.passer{color:#5A72A0;border-color:#DCE4F0;border-style:dashed}.fs-btn.passer:hover{background:#F5F8FC}
+.fs-toast{position:fixed;left:50%;bottom:24px;transform:translate(-50%,20px);background:#14305A;color:#fff;padding:11px 18px;border-radius:10px;font-size:14px;font-weight:700;opacity:0;transition:.25s;z-index:100001;max-width:calc(100vw - 32px);box-shadow:0 10px 30px rgba(20,48,90,.3)}
+.fs-toast.on{opacity:1;transform:translate(-50%,0)}
 .fs-btn.lead{background:var(--md);border-color:var(--md);color:#fff}.fs-btn.lead:hover{background:var(--dk);border-color:var(--dk)}
 .fs-btn.bacs{color:var(--dk);border-color:#c9d9ee}.fs-btn.bacs:hover{background:#eef4fc}
 .fs-btn .fs-b{display:inline-flex;align-items:center;justify-content:center;width:20px;height:20px;border-radius:6px;background:var(--dk);color:#fff;font-weight:900;font-size:12px;line-height:1}
@@ -354,6 +365,140 @@ OD.define('fiche-shell', {
     const head = doc.head || doc.getElementsByTagName('head')[0] || doc.documentElement;
     const st = doc.createElement('style'); st.id = 'fs-css'; st.textContent = CSS; head.appendChild(st);
   }
+  // ── Passer la main (26/11/2026, demande de J. Faugeras) ───────────────────
+  // Panneau commun à la fiche client et à la fiche d'un lead : le vendeur choisit
+  // un collègue du site, un motif et écrit une note de contexte. Le collègue est
+  // notifié ; avec « Lui confier le suivi », les leads ouverts du vendeur sur ce
+  // client passent dans sa file (RPC passer_main_contexte / passer_main).
+  var PM_MOTIFS = [['projet_vn', 'Projet VN'], ['projet_vo', 'Projet VO'], ['deja_suivi', 'Client déjà suivi par ce collègue'], ['absence', 'Absence'], ['autre', 'Autre']];
+  var PM_CSS = ''
+    + '.pm-ov{position:fixed;inset:0;z-index:100000;background:rgba(20,48,90,.38);display:flex;align-items:center;justify-content:center;padding:16px;font-family:inherit}'
+    + '.pm{background:#fff;border-radius:14px;width:100%;max-width:520px;max-height:92vh;overflow:auto;box-shadow:0 18px 50px rgba(20,48,90,.28);color:#14305A}'
+    + '.pm-h{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;padding:18px 20px 10px;border-bottom:1px solid #E8EEF7}'
+    + '.pm-h h3{margin:0;font-size:17px;font-weight:800}.pm-h p{margin:3px 0 0;font-size:13px;color:#5A72A0}'
+    + '.pm-x{border:0;background:none;font-size:24px;line-height:1;color:#5A72A0;cursor:pointer;padding:2px 6px}'
+    + '.pm-b{padding:14px 20px 4px;display:flex;flex-direction:column;gap:14px}'
+    + '.pm-l{font-size:12.5px;font-weight:800;color:#5A72A0;margin:0 0 6px;display:block}'
+    + '.pm select,.pm textarea{width:100%;box-sizing:border-box;border:1.5px solid #DCE4F0;border-radius:9px;padding:9px 11px;font:inherit;font-size:14px;color:#14305A;background:#fff}'
+    + '.pm select:focus,.pm textarea:focus{outline:none;border-color:#1F4A85}'
+    + '.pm textarea{min-height:92px;resize:vertical;line-height:1.45}'
+    + '.pm-chips{display:flex;flex-wrap:wrap;gap:6px}'
+    + '.pm-chips button{border:1.5px solid #DCE4F0;background:#fff;border-radius:999px;padding:6px 12px;font:inherit;font-size:13px;font-weight:700;color:#5A72A0;cursor:pointer}'
+    + '.pm-chips button[aria-pressed="true"]{border-color:#1F4A85;background:#E8EEF7;color:#1F4A85}'
+    + '.pm-conf{display:flex;gap:10px;align-items:flex-start;background:#F5F8FC;border:1px solid #DCE4F0;border-radius:10px;padding:11px 12px;font-size:13.5px;line-height:1.45;cursor:pointer}'
+    + '.pm-conf input{margin-top:3px;width:17px;height:17px;accent-color:#1F4A85}'
+    + '.pm-conf b{display:block;color:#14305A}.pm-conf small{display:block;color:#5A72A0;margin-top:2px}'
+    + '.pm-conf.off{opacity:.6;cursor:default}'
+    + '.pm-hint{margin:0;font-size:12.5px;color:#5A72A0;line-height:1.45}'
+    + '.pm-err{margin:0;padding:8px 11px;border-radius:8px;background:#FDECEA;color:#B42318;font-size:13px}'
+    + '.pm-f{display:flex;justify-content:flex-end;gap:8px;padding:14px 20px 18px}'
+    + '.pm-f button{border-radius:9px;padding:9px 16px;font:inherit;font-size:14px;font-weight:800;cursor:pointer}'
+    + '.pm-annuler{border:1.5px solid #DCE4F0;background:#fff;color:#14305A}'
+    + '.pm-ok{border:0;background:#1F4A85;color:#fff}.pm-ok[disabled]{opacity:.55;cursor:default}'
+    + '@media (max-width:560px){.pm-ov{align-items:flex-end;padding:0}.pm{max-width:none;border-radius:14px 14px 0 0;max-height:94vh}.pm-f button{flex:1}}';
+  var PM_ICONE = '<path d="M7 7h11l-3-3M17 17H6l3 3"/><circle cx="4.5" cy="7" r="1.5"/><circle cx="19.5" cy="17" r="1.5"/>';
+
+  // o : { doc, rpc(nom, args) → Promise, idClient, idLead, nomClient, toast(msg, err), apres(resultat) }
+  function pmOuvrir(o) {
+    var d = o.doc || document;
+    var echap = function (s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); };
+    var ancien = d.getElementById('od-pm'); if (ancien) ancien.remove();
+    if (!d.getElementById('od-pm-css')) { var st = d.createElement('style'); st.id = 'od-pm-css'; st.textContent = PM_CSS; (d.head || d.body).appendChild(st); }
+    var ov = d.createElement('div'); ov.id = 'od-pm'; ov.className = 'pm-ov';
+    ov.innerHTML = '<div class="pm" role="dialog" aria-modal="true" aria-labelledby="pm-t"><div class="pm-h"><div><h3 id="pm-t">Passer la main</h3><p>' + echap(o.nomClient || '') + '</p></div>'
+      + '<button type="button" class="pm-x" data-pm="fermer" aria-label="Fermer">×</button></div><div class="pm-b"><p class="pm-hint">Chargement des collègues…</p></div></div>';
+    d.body.appendChild(ov);
+    var etat = { ctx: null, vers: null, motif: null, confier: true, envoi: false, erreur: null, note: '' };
+    var fermer = function () { ov.remove(); d.removeEventListener('keydown', clavier); };
+    var clavier = function (e) { if (e.key === 'Escape') fermer(); };
+    d.addEventListener('keydown', clavier);
+    var collegue = function () { var cs = (etat.ctx && etat.ctx.collegues) || []; for (var i = 0; i < cs.length; i++) if (String(cs[i].id_user) === String(etat.vers)) return cs[i]; return null; };
+    var peutConfier = function () { var c = collegue(); return !!(etat.ctx && etat.ctx.leads.length && c && c.role !== 'Chef des ventes'); };
+
+    function dessiner() {
+      var ctx = etat.ctx, b = ov.querySelector('.pm-b');
+      var f = ov.querySelector('.pm-f'); if (f) f.remove();
+      if (!ctx.collegues.length) { b.innerHTML = '<p class="pm-hint">Aucun collègue vendeur sur vos sites.</p>'; return; }
+      var suivent = ctx.collegues.filter(function (c) { return c.suit; }), autres = ctx.collegues.filter(function (c) { return !c.suit; });
+      var opt = function (c) {
+        return '<option value="' + c.id_user + '"' + (String(c.id_user) === String(etat.vers) ? ' selected' : '') + '>' + echap([c.nom, c.vn_vo, c.role === 'Chef des ventes' ? 'chef des ventes' : null, c.sites_noms].filter(Boolean).join(' · ')) + '</option>';
+      };
+      var n = ctx.leads.length, c = collegue(), ok = peutConfier();
+      var h = '<div><label class="pm-l" for="pm-vers">Collègue</label><select id="pm-vers">'
+        + (etat.vers == null ? '<option value="" selected disabled>Choisir un collègue</option>' : '')
+        + (suivent.length ? '<optgroup label="Suit déjà ce client">' + suivent.map(opt).join('') + '</optgroup><optgroup label="Autres collègues">' + autres.map(opt).join('') + '</optgroup>' : autres.map(opt).join(''))
+        + '</select></div>'
+        + '<div><span class="pm-l">Motif</span><div class="pm-chips" role="group" aria-label="Motif">' + PM_MOTIFS.map(function (m) {
+            return '<button type="button" data-pm="motif" data-v="' + m[0] + '" aria-pressed="' + (etat.motif === m[0]) + '">' + m[1] + '</button>'; }).join('') + '</div></div>'
+        + '<div><label class="pm-l" for="pm-note">Note pour votre collègue</label><textarea id="pm-note" maxlength="600" placeholder="Ce qu\'il doit savoir : le besoin, le véhicule, ce qui a été dit, la prochaine étape…">' + echap(etat.note) + '</textarea></div>';
+      if (n) {
+        var liste = ctx.leads.slice(0, 3).map(function (l) { return [l.vehicule, l.source].filter(Boolean).join(' · ') || 'lead'; }).join(' ; ');
+        h += '<label class="pm-conf' + (ok || !c ? '' : ' off') + '"><input type="checkbox" id="pm-confier"' + (ok && etat.confier ? ' checked' : '') + (ok || !c ? '' : ' disabled') + '>'
+          + '<span><b>Lui confier le suivi</b><small>' + (c && !ok ? 'Un chef des ventes peut être invité, mais le lead ne peut être confié qu\'à un vendeur.'
+            : (n > 1 ? 'Vos ' + n + ' leads ouverts sur ce client passent dans sa file' : 'Votre lead passe dans sa file') + ' (' + echap(liste) + '). Vous n\'en serez plus responsable, ni crédité de la vente.') + '</small></span></label>';
+      } else {
+        h += '<p class="pm-hint">Aucun lead ouvert à votre nom sur ce client : votre collègue est invité sur la fiche, le suivi ne change pas.</p>';
+      }
+      if (etat.erreur) h += '<p class="pm-err">' + echap(etat.erreur) + '</p>';
+      b.innerHTML = h;
+      var confie = n && ok && etat.confier;
+      var lib = !c ? 'Passer la main' : (confie ? 'Confier à ' : 'Prévenir ') + c.nom.split(' ')[0];
+      b.insertAdjacentHTML('afterend', '<div class="pm-f"><button type="button" class="pm-annuler" data-pm="fermer">Annuler</button><button type="button" class="pm-ok" data-pm="valider"' + (etat.envoi ? ' disabled' : '') + '>' + echap(etat.envoi ? 'Envoi…' : lib) + '</button></div>');
+      var sel = ov.querySelector('#pm-vers');
+      sel.addEventListener('change', function () { etat.vers = sel.value; var cc = collegue(); if (cc && cc.suit && !etat.motif) etat.motif = 'deja_suivi'; lireNote(); dessiner(); });
+      var cb = ov.querySelector('#pm-confier'); if (cb) cb.addEventListener('change', function () { etat.confier = cb.checked; lireNote(); dessiner(); });
+    }
+    function lireNote() { var t = ov.querySelector('#pm-note'); if (t) etat.note = t.value; }
+
+    ov.addEventListener('click', function (e) {
+      if (e.target === ov) return fermer();
+      var x = e.target.closest('[data-pm]'); if (!x) return;
+      var a = x.getAttribute('data-pm');
+      if (a === 'fermer') return fermer();
+      if (a === 'motif') { lireNote(); etat.motif = x.getAttribute('data-v'); return dessiner(); }
+      if (a === 'valider') {
+        lireNote(); etat.erreur = null;
+        if (!collegue()) etat.erreur = 'Choisissez le collègue à prévenir.';
+        else if (!etat.motif) etat.erreur = 'Choisissez un motif.';
+        else if (etat.note.trim().length < 5) etat.erreur = 'Écrivez une note de contexte : votre collègue ne doit pas avoir à rappeler le client pour reposer les mêmes questions.';
+        if (etat.erreur) return dessiner();
+        var confier = !!(etat.ctx.leads.length && peutConfier() && etat.confier);
+        etat.envoi = true; dessiner();
+        o.rpc('passer_main', { p_id_vers: Number(etat.vers), p_id_client: etat.ctx.client != null ? Number(etat.ctx.client) : (o.idClient != null ? Number(o.idClient) : null),
+          p_id_leads: confier ? etat.ctx.leads.map(function (l) { return Number(l.id_lead); }) : null, p_confier: confier, p_motif: etat.motif, p_note: etat.note.trim() })
+          .then(function (r) {
+            if (!r || !r.ok) { etat.envoi = false; etat.erreur = (r && r.motif) || 'Échec, réessayez.'; return dessiner(); }
+            fermer();
+            if (o.toast) o.toast(r.confies ? 'Confié à ' + r.vers_nom + ' : ' + (r.confies > 1 ? r.confies + ' leads sont' : 'le lead est') + ' dans sa file.' : r.vers_nom + ' est prévenu.');
+            if (o.apres) try { o.apres(r); } catch (e2) {}
+          })
+          .catch(function (e3) { etat.envoi = false; etat.erreur = String((e3 && e3.message) || e3).replace(/^\[lead\]\s*/, ''); dessiner(); });
+      }
+    });
+
+    o.rpc('passer_main_contexte', { p_id_client: o.idClient != null ? Number(o.idClient) : null, p_id_lead: o.idLead != null ? Number(o.idLead) : null })
+      .then(function (ctx) {
+        etat.ctx = ctx || { leads: [], collegues: [] };
+        etat.ctx.leads = etat.ctx.leads || []; etat.ctx.collegues = etat.ctx.collegues || [];
+        var premier = etat.ctx.collegues.filter(function (c) { return c.suit; })[0];
+        if (premier) { etat.vers = premier.id_user; etat.motif = 'deja_suivi'; }
+        dessiner();
+        var s = ov.querySelector('#pm-vers'); if (s) try { s.focus(); } catch (e) {}
+      })
+      .catch(function (e) { ov.querySelector('.pm-b').innerHTML = '<p class="pm-err">' + echap(String((e && e.message) || e)) + '</p>'; });
+  }
+
+  // Seuls les vendeurs et les chefs des ventes passent la main (pas le plateau ni l'accueil).
+  function peutPasser() { const r = roleCourant(); return r === 3 || r === 4; }
+  function fsToast(msg) {
+    const t = doc.createElement('div'); t.className = 'fs-toast'; t.setAttribute('role', 'status'); t.textContent = msg;
+    doc.body.appendChild(t); setTimeout(() => t.classList.add('on'), 10); setTimeout(() => { t.classList.remove('on'); setTimeout(() => t.remove(), 300); }, 3800);
+  }
+  function passerMain() {
+    const c = state.client; if (!c) return;
+    pmOuvrir({ doc, idClient: c.IDVu, nomClient: clientName(c), toast: fsToast,
+      rpc: (n, a) => sb.rpc(n, a).then(r => { if (r.error) throw new Error(r.error.message); return r.data; }) });
+  }
   function headerHtml() {
     const c = state.client;
     if (!c) return '<div class="fs-card fs-head"><div class="fs-name">Aucun client sélectionné</div></div>';
@@ -374,6 +519,7 @@ OD.define('fiche-shell', {
         '<button class="fs-btn mail" data-btn="mail">' + svg(IC.mail) + 'Email</button>' +
         '<button class="fs-btn sms" data-btn="sms">' + svg(IC.sms) + 'SMS</button>' +
         '<button class="fs-btn rpv" data-btn="rpv">' + svg(IC.rpv) + 'RPV</button>' +
+        (peutPasser() ? '<button class="fs-btn passer" data-btn="passer" title="Inviter un collègue sur ce client, ou lui confier le suivi">' + svg(PM_ICONE) + 'Passer la main</button>' : '') +
         (state.bacs && state.bacs.url && !appelsEntrants() ? '<button class="fs-btn bacs" data-btn="bacs" title="Ouvrir le compte client dans BACS"><span class="fs-b">B</span>BACS</button>' : '') +
       '</div></div>';
   }
@@ -424,7 +570,7 @@ OD.define('fiche-shell', {
   function bindHeader(root) {
     root.querySelectorAll('[data-btn]').forEach(b => b.addEventListener('click', () => {
       const k = b.getAttribute('data-btn');
-      if (k === 'lead') ouvrirLeadAppel(); else if (k === 'bacs') ouvrirBacs(); else if (k === 'call') callClient(); else if (k === 'rpv') openRpv(); else if (k === 'sms') openSms(); else if (k === 'wa') openWa(); else if (k === 'mail') openMail(); else todo(k);
+      if (k === 'lead') ouvrirLeadAppel(); else if (k === 'passer') passerMain(); else if (k === 'bacs') ouvrirBacs(); else if (k === 'call') callClient(); else if (k === 'rpv') openRpv(); else if (k === 'sms') openSms(); else if (k === 'wa') openWa(); else if (k === 'mail') openMail(); else todo(k);
     }));
   }
 
