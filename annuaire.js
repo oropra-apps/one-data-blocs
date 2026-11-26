@@ -1,5 +1,10 @@
 // ============================================================================
-//  ANNUAIRE DU GROUPE — module One Data (OD.define)  v5
+//  ANNUAIRE DU GROUPE — module One Data (OD.define)  v6
+//  v6 (26/11/2026) : COMPTES TECHNIQUES RETIRÉS de toutes les vues
+//    (organigramme compris) : comptes hors listes (recette, préparateurs…),
+//    rôles partagés « Préparateur » (12) et « Appels entrants » (13), comptes
+//    Oropra (@oropra.com), comptes génériques du plateau « Vroom Team n » et
+//    « historique BACS ». Seules des personnes restent dans l'annuaire.
 //  v5 (04/11/2026) : postes et lignes directes du standard 3CX (RPC
 //    annuaire_telephonie). Numéro affiché : celui que la personne a saisi
 //    dans « Mon compte », à défaut sa ligne directe ; poste en pastille.
@@ -305,10 +310,22 @@ OD.define('annuaire', {
     reset: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v5h5"/><path d="M3.05 13A9 9 0 1 0 6 5.3L3 8"/></svg>'
   };
 
+  // v6 : comptes qui ne sont pas des personnes de l'entreprise -> hors annuaire
+  function compteTechnique(x) {
+    if (x.hors_listes === true) return true;
+    const role = Number(x.ID_Role);
+    if (role === 12 || role === 13) return true;
+    const mail = String(x.email || '').toLowerCase();
+    if (/@oropra\.com$/.test(mail)) return true;
+    const nm = String(x.nomComplet || [x.prenom, x.nom].filter(Boolean).join(' ')).trim();
+    if (/^vroom team\b/i.test(nm) || /historique bacs/i.test(nm) || /^zz/i.test(nm)) return true;
+    return false;
+  }
+
   // ---------------------------------------------------------------- data load
   async function load() {
     const [u, us, s, r] = await Promise.all([
-      sb.from('USER').select('ID_User,prenom,nom,nomComplet,email,N_de_telephone,voip_number,ID_Role,status,VN_VO,FONCTION,ID_SITE,multiSite,idSuperieur,RESEAU'),
+      sb.from('USER').select('ID_User,prenom,nom,nomComplet,email,N_de_telephone,voip_number,ID_Role,status,VN_VO,FONCTION,ID_SITE,multiSite,idSuperieur,RESEAU,hors_listes'),
       sb.from('USER_SITE').select('ID_User,ID_SITE,ID_Role,Manager_User_ID'),
       sb.from('SITE').select('ID_SITE,SITE,VILLE,RESEAU,AFFAIRE'),
       sb.from('ROLE').select('id,name')
@@ -323,7 +340,7 @@ OD.define('annuaire', {
     } catch (e) {}
     const siteMap = {};
     (s.data || []).forEach(x => { siteMap[x.ID_SITE] = x; });
-    const users = (u.data || []);
+    const users = (u.data || []).filter(x => !compteTechnique(x));
     const byId = {}; users.forEach(x => { byId[x.ID_User] = x; });
 
     // manager par user : priorité au site principal, sinon 1re affectation, sinon idSuperieur

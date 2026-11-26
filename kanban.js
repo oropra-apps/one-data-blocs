@@ -1,4 +1,7 @@
 // ============================================================================
+//  v83 (26/11/2026) : FICHE VO — « Ancien propriétaire » et « Repreneur »
+//    (Planet VO²) dans « Stock · Achat », lus par public.vo_pvo_personnes(vin),
+//    comme dans la liste VO (vo-liste v44).
 //  v82 (16/11/2026) : après un déplacement par glisser-déposer, la carte
 //    restait dans sa colonne d'origine jusqu'au clic suivant. Cause : les
 //    écouteurs de glisser-déposer, posés une fois par fenêtre, appelaient
@@ -1704,9 +1707,29 @@ OD.define('kanban', {
     ficheState.photos = window.__kanPhotoCache[vin] || null;
     ficheState.apv = null;
     ficheState.photosLoading = !ficheState.photos; ficheState.apvLoading = false;
+    ficheState.pers = undefined;
     renderFichePopup();
+    loadPersonnesPvo(vin);
     console.log('[kanFiche] renderFichePopup called, overlay:', !!doc.getElementById('vo-fiche-overlay'));
     if (!ficheState.photos) loadPhotos(vin);
+  }
+
+  // v83 : ancien propriétaire et repreneur Planet VO²
+  async function loadPersonnesPvo(vin) {
+    var c = sb(); if (!c || !vin) return;
+    try {
+      var r = await c.rpc('vo_pvo_personnes', { p_vin: vin });
+      if (ficheState.vin !== vin) return;
+      ficheState.pers = (r && !r.error && r.data) ? r.data : null;
+    } catch (e) { if (ficheState.vin === vin) ficheState.pers = null; }
+    if (ficheState.vin === vin && ficheState.tab === 'fiche' && doc.getElementById('vo-fiche-overlay')) renderFichePopup();
+  }
+  function persPvoRows() {
+    var p = ficheState.pers;
+    var att = '<span style="color:#9bb3d1">\u2026</span>';
+    var ap = p === undefined ? att : (p && p.ancien_proprietaire ? esc(p.ancien_proprietaire) : '-');
+    var rp = p === undefined ? att : (p && p.repreneur ? esc(p.repreneur) : '-');
+    return vfRow('Ancien propriétaire', ap) + vfRow('Repreneur', rp);
   }
 
   function closeFichePopup() {
@@ -2902,6 +2925,7 @@ OD.define('kanban', {
       vfRow('Garantie', esc(garantieTxt(row))) +
       vfRow('1ère MEC', esc(fmtDateFR(row.D_1MEC))) +
       vfRow('Date achat', esc(fmtDateFR(row.D_ACHAT))) +
+      persPvoRows() +
       // Prix d'achat : la base ne le rend qu'aux chefs des ventes et à leur hiérarchie (od_voit_prix_achat).
       (row.PA_HT_TTC != null && row.PA_HT_TTC !== '' ? vfRow('Prix d\'achat', '<b style="color:#1F4A85">' + esc(eur(row.PA_HT_TTC)) + '</b>') : '') +
       (row.MT_FREVO_R != null && row.MT_FREVO_R !== '' && Number(row.MT_FREVO_R) !== 0 ? vfRow('Frais de remise en état', esc(eur(row.MT_FREVO_R))) : '') +
