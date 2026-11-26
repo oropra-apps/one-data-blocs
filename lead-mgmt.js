@@ -6173,6 +6173,7 @@
       + '.pm-conf.off{opacity:.6;cursor:default}'
       + '.pm-hint{margin:0;font-size:12.5px;color:#5A72A0;line-height:1.45}'
       + '.pm-err{margin:0;padding:8px 11px;border-radius:8px;background:#FDECEA;color:#B42318;font-size:13px}'
+      + '.pm-err.pm-sec{animation:pmSec .35s}@keyframes pmSec{25%{transform:translateX(-5px)}75%{transform:translateX(5px)}}'
       + '.pm-f{display:flex;justify-content:flex-end;gap:8px;padding:14px 20px 18px}'
       + '.pm-f button{border-radius:9px;padding:9px 16px;font:inherit;font-size:14px;font-weight:800;cursor:pointer}'
       + '.pm-annuler{border:1.5px solid #DCE4F0;background:#fff;color:#14305A}'
@@ -6339,7 +6340,7 @@
         h += '</div>'
           + '<div><span class="pm-l">Motif</span><div class="pm-chips" role="group" aria-label="Motif">' + PM_MOTIFS.map(function (m) {
               return '<button type="button" data-pm="motif" data-v="' + m[0] + '" aria-pressed="' + (etat.motif === m[0]) + '">' + m[1] + '</button>'; }).join('') + '</div></div>'
-          + '<div><label class="pm-l" for="pm-note">Note pour votre collègue</label><textarea id="pm-note" maxlength="600" placeholder="Ce qu\'il doit savoir : le besoin, le véhicule, ce qui a été dit, la prochaine étape…">' + echap(etat.note) + '</textarea></div>';
+          + '<div><label class="pm-l" for="pm-note">Note pour votre collègue (obligatoire)</label><textarea id="pm-note" maxlength="600" placeholder="Ce qu\'il doit savoir : le besoin, le véhicule, ce qui a été dit, la prochaine étape…">' + echap(etat.note) + '</textarea></div>';
         if (n) {
           var ls = c ? leadsConfiables(c) : ctx.leads, rs = c ? relancesConfiables(c) : ctx.relances;
           var cible = c && ls.length ? siteCible(c) : null;
@@ -6368,6 +6369,13 @@
         var cb = ov.querySelector('#pm-confier'); if (cb) cb.addEventListener('change', function () { etat.confier = cb.checked; lireNote(); dessiner(); });
       }
       function lireNote() { var t = ov.querySelector('#pm-note'); if (t) etat.note = t.value; }
+      // Refus au clic sur OK : le message est rendu visible (secoué, amené à l'écran) et le champ
+      // de la note reçoit le curseur, sinon le bouton semble ne pas réagir.
+      function signalerErreur() {
+        var er = ov.querySelector('.pm-err'); if (!er) return;
+        er.classList.add('pm-sec'); try { er.scrollIntoView({ block: 'nearest' }); } catch (e) {}
+        var t = ov.querySelector('#pm-note'); if (t && /note/i.test(etat.erreur || '')) try { t.focus(); } catch (e) {}
+      }
 
       // Filtres : la recherche ne redessine que la liste (le champ garde le focus) ; les listes
       // déroulantes redessinent tout pour la cascade marque → affaire → site.
@@ -6397,7 +6405,7 @@
           if (!collegue()) etat.erreur = 'Choisissez le collègue à prévenir.';
           else if (!etat.motif) etat.erreur = 'Choisissez un motif.';
           else if (etat.note.trim().length < 5) etat.erreur = 'Écrivez une note de contexte : votre collègue ne doit pas avoir à rappeler le client pour reposer les mêmes questions.';
-          if (etat.erreur) return dessiner();
+          if (etat.erreur) { dessiner(); return signalerErreur(); }
           var confier = !!(aConfier() && peutConfier() && etat.confier), cv = collegue();
           etat.envoi = true; dessiner();
           o.rpc('passer_main', { p_id_vers: Number(etat.vers), p_id_client: etat.ctx.client != null ? Number(etat.ctx.client) : (o.idClient != null ? Number(o.idClient) : null),
@@ -6405,12 +6413,12 @@
             p_id_rapports: confier ? relancesConfiables(cv).map(function (r) { return Number(r.id_rapport); }) : null,
             p_confier: confier, p_motif: etat.motif, p_note: etat.note.trim() })
             .then(function (r) {
-              if (!r || !r.ok) { etat.envoi = false; etat.erreur = (r && r.motif) || 'Échec, réessayez.'; return dessiner(); }
+              if (!r || !r.ok) { etat.envoi = false; etat.erreur = (r && r.motif) || 'Échec, réessayez.'; dessiner(); return signalerErreur(); }
               fermer();
               if (o.toast) o.toast(r.confies ? 'Confié à ' + r.vers_nom + (r.site_change ? ' (' + r.site_change + ')' : '') + '.' : r.vers_nom + ' est prévenu.');
               if (o.apres) try { o.apres(r); } catch (e2) {}
             })
-            .catch(function (e3) { etat.envoi = false; etat.erreur = String((e3 && e3.message) || e3).replace(/^\[lead\]\s*/, ''); dessiner(); });
+            .catch(function (e3) { etat.envoi = false; etat.erreur = String((e3 && e3.message) || e3).replace(/^\[lead\]\s*/, ''); dessiner(); signalerErreur(); });
         }
       });
 
