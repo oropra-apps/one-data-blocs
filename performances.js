@@ -1,5 +1,12 @@
 // ============================================================================
 //  PERFORMANCES ÉQUIPE — module One Data (OD.define)  v1
+//  v42 (26/11/2026) TEAM COLIN : vue « Contrôle de gestion » (demande de Nadia
+//    Atlas), réservée aux administrateurs et directeurs de groupe. Deux
+//    contrôles BACS ↔ DBS : commandes transmises TFR / validées / clôturées
+//    dont le véhicule est encore disponible dans DBS, et qualité de la saisie
+//    des financements DBS (produit, organisme, montant) face à la commande
+//    BACS. Suivi par site, export Excel, notification des vendeurs, chefs des
+//    ventes et secrétaires commerciales. #controle ouvre la vue.
 //  v41 (24/11/2026) : « Qui est en avance, qui est en retard » suit le niveau
 //    du périmètre, comme « Atteinte par… » : tout le groupe → par marque
 //    (réseau), une marque → par affaire, une affaire → par site, un site →
@@ -150,16 +157,17 @@ OD.define('performances', {
   // v27 : deux vues, « Ventes » (le module historique) et « Leads ».
   const __estTC = window.__OD_PERF_PROFILE__ === 'teamcolin'
     || String((ctx.tenant || {}).supabase_url || '').indexOf('ieztupavcdnubmpbjvuq') !== -1;
-  let __leadsHote = null, __bascule = null, __ventesHote = null, __processHote = null;
+  let __leadsHote = null, __bascule = null, __ventesHote = null, __processHote = null, __controleHote = null;
   if (__estTC) {
     const d0 = __anchor.ownerDocument || document;
     __anchor.innerHTML = '';
     __bascule = d0.createElement('div'); __bascule.className = 'pl-bascule'; __bascule.setAttribute('role', 'tablist');
-    __bascule.innerHTML = '<button type="button" role="tab" data-vue="ventes">Ventes</button><button type="button" role="tab" data-vue="leads">Leads</button><button type="button" role="tab" data-vue="process">Process</button>';
+    __bascule.innerHTML = '<button type="button" role="tab" data-vue="ventes">Ventes</button><button type="button" role="tab" data-vue="leads">Leads</button><button type="button" role="tab" data-vue="process">Process</button><button type="button" role="tab" data-vue="controle" hidden>Contrôle de gestion</button>';
     __ventesHote = d0.createElement('div');
     __leadsHote = d0.createElement('div'); __leadsHote.className = 'pl-root';
     __processHote = d0.createElement('div'); __processHote.className = 'pl-root';
-    __anchor.appendChild(__bascule); __anchor.appendChild(__ventesHote); __anchor.appendChild(__leadsHote); __anchor.appendChild(__processHote);
+    __controleHote = d0.createElement('div'); __controleHote.className = 'pl-root';
+    __anchor.appendChild(__bascule); __anchor.appendChild(__ventesHote); __anchor.appendChild(__leadsHote); __anchor.appendChild(__processHote); __anchor.appendChild(__controleHote);
     __anchor = __ventesHote;
   }
   __anchor.id = 'perf-root';
@@ -188,7 +196,7 @@ OD.define('performances', {
 
   const doc = __anchor.ownerDocument || document;
   function getRoot() { return __anchor; }
-  try { window.__perfVer = 'v4.11-teamcolin'; } catch (e) { }
+  try { window.__perfVer = 'v42-teamcolin'; } catch (e) { }
 
   // --- PROFIL TENANT -----------------------------------------------------------
   // Team Colin est reconnu par la ref de son projet Supabase (source sûre), ou
@@ -3191,26 +3199,596 @@ OD.define('performances', {
     return { charger, rendre };
   }
 
+  // ==========================================================================
+  //  v42 (26/11/2026) — VUE « CONTRÔLE DE GESTION » (Team Colin)
+  //  Demande de Nadia Atlas (responsable du contrôle de gestion), réservée aux
+  //  administrateurs (rôle 1) et directeurs de groupe (rôle 8). Deux contrôles
+  //  BACS ↔ DBS recalculés chaque jour par cg_calculer() :
+  //   · « Non saisies dans DBS » : commande BACS transmise TFR, validée ou
+  //     clôturée, dont le véhicule est toujours disponible (ou en commande
+  //     stock) dans DBS et n'y a pas été facturé ;
+  //   · « Financements » : le financement saisi dans DBS (facture, sinon fiche
+  //     stock réservée) doit refléter la commande BACS — produit, organisme,
+  //     montant.
+  //  Suivi, export Excel, notification des vendeurs / chefs des ventes /
+  //  secrétaires commerciales (alerte One Data). SQL : cg_lire, cg_notifier,
+  //  cg_destinataires, cg_recalculer — propres au tenant.
+  // ==========================================================================
+  function montageControle(host, DPL) {
+    const G = window.__OD_PERF_CG__ = window.__OD_PERF_CG__ || {
+      ctl: 'stock_dbs', preset: '12m', du: null, au: null, etat: 'ouvertes', age: 0,
+      univers: '', site: null, siteLabel: '', q: '', code: '', tri: { k: 'age_j', dir: -1 }, page: 200
+    };
+    G.sel = G.sel instanceof Set ? G.sel : new Set();
+    let data = null, charge = false, erreur = null, jeton = 0, toast = '';
+    const compteurs = { stock_dbs: null, financement: null };
+    injecterCssControle();
+
+    const e = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+    const propre = s => { s = String(s || '').trim(); if (!s || s !== s.toUpperCase()) return s; return s.toLowerCase().replace(/(^|[\s\-'’])([a-zà-ÿ])/g, (m, a, b) => a + b.toUpperCase()).replace(/\b([IVXLC]{2,})\b/gi, m => /^[ivxlc]+$/i.test(m) && !/^(lil|cv|civ|vil)$/i.test(m) ? m.toUpperCase() : m); };
+    const ymdC = d => d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+    const dateFr = s => { if (!s) return ''; const d = new Date(String(s).length <= 10 ? s + 'T12:00:00' : s); return isNaN(d) ? '' : d.toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit', year: '2-digit' }); };
+    const eur = v => (v == null || v === '' || isNaN(Number(v))) ? '' : Math.round(Number(v)).toLocaleString('fr-FR') + ' €';
+    const pctTxt = (a, b) => b ? Math.round(100 * a / b) + ' %' : '—';
+
+    const PRESETS = [['30j', '30 jours'], ['90j', '90 jours'], ['12m', '12 mois'], ['annee', 'Cette année'], ['tout', 'Depuis 2023']];
+    function bornes(p) {
+      const n = new Date(); n.setHours(12, 0, 0, 0);
+      const moinsJ = k => { const d = new Date(n); d.setDate(d.getDate() - k); return d; };
+      if (p === '30j') return [ymdC(moinsJ(29)), ymdC(n)];
+      if (p === '90j') return [ymdC(moinsJ(89)), ymdC(n)];
+      if (p === 'annee') return [n.getFullYear() + '-01-01', ymdC(n)];
+      if (p === 'tout') return ['2023-01-01', ymdC(n)];
+      const d = new Date(n); d.setFullYear(d.getFullYear() - 1); d.setDate(d.getDate() + 1);
+      return [ymdC(d), ymdC(n)];
+    }
+    const periode = () => (G.du && G.au) ? [G.du, G.au] : bornes(G.preset);
+
+    const LIB_BACS = { 'Transmitted to TFR': 'Transmise TFR', 'Validated': 'Validée', 'Closed': 'Clôturée' };
+    const LIB_DBS = { DISPONIBLE: 'Disponible', COMMANDE_STOCK: 'Commande stock', RESERVE: 'Réservé', COMMANDE_CLIENT: 'Commande client' };
+    const LIB_CODE = {
+      stock_disponible: 'Disponible dans DBS',
+      stock_commande_stock: 'Commande stock dans DBS',
+      fin_absent_dbs: 'Financement absent de DBS',
+      fin_absent_bacs: 'Comptant dans BACS, financé dans DBS',
+      fin_produit: 'Produit différent',
+      fin_organisme: 'Organisme différent',
+      fin_montant: 'Montant différent'
+    };
+    const CODES_FIN = ['fin_absent_dbs', 'fin_absent_bacs', 'fin_produit', 'fin_organisme', 'fin_montant'];
+    const LIB_FAM = { COMPTANT: 'Comptant', EASY: 'Easy', LOA: 'LOA', CREDIT: 'Crédit', LLD: 'LLD', SERVICE: 'Service seul', AUTRE: 'Autre', INCONNU: 'Produit non précisé' };
+
+    async function charger(silencieux) {
+      const t = ++jeton; if (!silencieux) { charge = false; erreur = null; rendre(); }
+      const [d, f] = periode();
+      try {
+        const r = await sb.rpc('cg_lire', { p_controle: G.ctl, p_deb: d, p_fin: f, p_sites: null, p_etat: G.etat });
+        if (t !== jeton) return;
+        if (r.error) throw r.error;
+        data = r.data || {}; charge = true;
+        compteurs[G.ctl] = (data.synthese || {}).anomalies;
+        const autre = G.ctl === 'stock_dbs' ? 'financement' : 'stock_dbs';
+        if (compteurs[autre] == null) {
+          sb.rpc('cg_lire', { p_controle: autre, p_deb: d, p_fin: f, p_sites: null, p_etat: 'ouvertes' })
+            .then(x => { if (!x.error && x.data) { compteurs[autre] = (x.data.synthese || {}).anomalies; rendre(); } }).catch(() => {});
+        }
+        const ids = new Set((data.lignes || []).map(l => String(l.id)));
+        [...G.sel].forEach(k => { if (!ids.has(k)) G.sel.delete(k); });
+      } catch (x) { if (t !== jeton) return; erreur = (x && x.message) || String(x); charge = true; }
+      rendre();
+    }
+
+    // ---- filtres locaux (sans aller-retour) --------------------------------
+    function univ(l) { const v = String(l.vn_vo || '').toUpperCase(); return v.indexOf('VD') >= 0 ? 'VD/VK' : (v === 'VO' ? 'VO' : 'VN'); }
+    function filtrees() {
+      const q = String(G.q || '').trim().toLowerCase();
+      return (data && data.lignes || []).filter(l => {
+        if (G.site != null && String(l.id_site) !== String(G.site)) return false;
+        if (G.univers && univ(l) !== G.univers) return false;
+        if (G.ctl === 'stock_dbs' && G.age && !(Number(l.age_j) > G.age)) return false;
+        if (G.ctl === 'financement' && G.code && !(l.codes || []).includes(G.code)) return false;
+        if (q) {
+          const d = l.detail || {};
+          const hay = [l.client, l.vin, l.vendeur, l.site, d.label, d.num_cde, l.vehicule, d.facture_dbs].join(' ').toLowerCase();
+          if (hay.indexOf(q) < 0) return false;
+        }
+        return true;
+      });
+    }
+    function cleTri(l, k) {
+      const d = l.detail || {};
+      switch (k) {
+        case 'commande': return d.label || '';
+        case 'client': return (l.client || '').toLowerCase();
+        case 'site': return (l.site || '').toLowerCase();
+        case 'vendeur': return (l.vendeur || '').toLowerCase();
+        case 'statut_bacs': return d.statut_bacs || '';
+        case 'jour_ref': return l.jour_ref || '';
+        case 'statut_dbs': return d.statut_dbs || '';
+        case 'ecarts': return (l.codes || []).length;
+        case 'notif': return l.notif_der || '';
+        default: return Number(l.age_j || 0);
+      }
+    }
+    function triees(rows) {
+      const { k, dir } = G.tri;
+      return rows.slice().sort((a, b) => { const x = cleTri(a, k), y = cleTri(b, k); return (x < y ? -1 : x > y ? 1 : 0) * dir || (Number(b.age_j) - Number(a.age_j)); });
+    }
+
+    // ---- rendu -------------------------------------------------------------
+    function tuile(t, v, s, niv) { return '<div class="pl-tile ' + (niv || '') + '"><span class="pl-tile-t">' + t + '</span><b class="pl-tile-v">' + v + '</b>' + (s ? '<span class="pl-tile-s">' + s + '</span>' : '') + '</div>'; }
+    function carte(t, s, corps, extra) { return '<section class="pl-card large"><header class="cg-hd"><div><h3>' + t + '</h3>' + (s ? '<p>' + s + '</p>' : '') + '</div>' + (extra || '') + '</header>' + corps + '</section>'; }
+    function age(l) {
+      const a = Number(l.age_j || 0), niv = l.conforme ? 'n' : (a > 7 ? 'crit' : a > 3 ? 'warn' : 'ok');
+      return '<span class="pl-pill ' + niv + '">' + a + ' j</span>';
+    }
+    function pillCodes(l) {
+      if (l.conforme) return '<span class="cg-ok">Corrigé' + (l.motif_resolution ? ' · ' + e(l.motif_resolution) : '') + (l.resolue_le ? ' le ' + dateFr(l.resolue_le) : '') + '</span>';
+      return (l.codes || []).map(c => '<span class="cg-code ' + (c === 'fin_absent_dbs' || c.indexOf('stock_') === 0 ? 'fort' : '') + '">' + e(LIB_CODE[c] || c) + '</span>').join('');
+    }
+    function notifCell(l) {
+      if (!l.notif_nb) return '<span class="pl-na">—</span>';
+      return '<span class="cg-notif" title="' + e(l.notif_cibles || '') + '">' + dateFr(l.notif_der) + (l.notif_nb > 1 ? ' <small>×' + l.notif_nb + '</small>' : '') + '</span>';
+    }
+    function cmdCell(l) {
+      const d = l.detail || {};
+      return '<b>' + e(d.label || ('#' + l.id)) + '</b>' + (d.num_cde ? '<small>Cde ' + e(d.num_cde) + '</small>' : '');
+    }
+    function clientCell(l) {
+      return (l.id_client ? '<button type="button" class="cg-lien" data-cg-fiche="' + e(l.id_client) + '">' + e(propre(l.client) || 'Client') + '</button>' : e(propre(l.client) || '—'))
+        + '<small>' + e(l.vehicule || '') + '</small><small class="cg-vin">' + e(l.vin || '') + '</small>';
+    }
+    function finBloc(prod, org, mt, fam) {
+      if (!prod && !org) return '<span class="cg-cpt">Comptant</span>';
+      return '<b>' + e(prod || LIB_FAM[fam] || '—') + '</b>' + (org ? '<small>' + e(propre(org)) + '</small>' : '') + (mt ? '<small>' + eur(mt) + '</small>' : '');
+    }
+    function th(k, lib, cls) {
+      const on = G.tri.k === k;
+      return '<th class="' + (cls || '') + (on ? ' on' : '') + '" data-cg-tri="' + k + '">' + lib + (on ? (G.tri.dir > 0 ? ' ▲' : ' ▼') : '') + '</th>';
+    }
+
+    function tableLignes(rows) {
+      if (!rows.length) return '<div class="pl-vide">' + (G.etat === 'ouvertes' ? 'Aucune anomalie à traiter avec ces filtres.' : 'Aucune ligne avec ces filtres.') + '</div>';
+      const vis = rows.slice(0, G.page);
+      const tousCoches = vis.length && vis.every(l => G.sel.has(String(l.id)));
+      let h = '<div class="pl-tw cg-tw"><table class="pl-t cg-t"><thead><tr><th class="cg-ck"><input type="checkbox" data-cg-tous' + (tousCoches ? ' checked' : '') + ' aria-label="Tout sélectionner"></th>'
+        + th('commande', 'Commande', 'l') + th('client', 'Client · véhicule', 'l') + th('site', 'Site', 'l') + th('vendeur', 'Vendeur', 'l');
+      if (G.ctl === 'stock_dbs') h += th('statut_bacs', 'BACS') + th('jour_ref', 'Transmise / validée') + th('statut_dbs', 'DBS');
+      else h += '<th class="l">BACS</th><th class="l">DBS</th>' + th('ecarts', 'Écarts', 'l');
+      h += th('age_j', 'Ancienneté') + th('notif', 'Notifié') + '<th></th></tr></thead><tbody>';
+      vis.forEach(l => {
+        const d = l.detail || {}, k = String(l.id);
+        h += '<tr class="' + (G.sel.has(k) ? 'sel' : '') + (l.conforme ? ' ok' : '') + '"><td class="cg-ck"><input type="checkbox" data-cg-ck="' + e(k) + '"' + (G.sel.has(k) ? ' checked' : '') + '></td>'
+          + '<td class="l">' + cmdCell(l) + '</td><td class="l">' + clientCell(l) + '</td>'
+          + '<td class="l">' + e(propre(l.site) || '—') + '<small>' + e(propre(l.affaire) || '') + '</small></td>'
+          + '<td class="l">' + e(propre(l.vendeur) || '—') + '</td>';
+        if (G.ctl === 'stock_dbs') {
+          const siteDiff = l.site_dbs && l.site && String(l.site_dbs).toUpperCase() !== String(l.site).toUpperCase();
+          h += '<td><span class="cg-st">' + e(LIB_BACS[d.statut_bacs] || d.statut_bacs || '') + '</span></td>'
+            + '<td>' + dateFr(l.jour_ref) + '</td>'
+            + '<td><span class="cg-st dbs">' + e(LIB_DBS[d.statut_dbs] || d.statut_dbs || '') + '</span>'
+            + (siteDiff ? '<small>en stock à ' + e(propre(l.site_dbs)) + '</small>' : '')
+            + (d.entree_stock_dbs ? '<small>entré le ' + dateFr(d.entree_stock_dbs) + '</small>' : '') + '</td>';
+        } else {
+          h += '<td class="l cg-fin">' + finBloc(d.bacs_produit, d.bacs_organisme, d.bacs_montant, d.bacs_famille) + (d.bacs_via_epos ? '<small class="cg-src">simulation EPOS</small>' : '') + '</td>'
+            + '<td class="l cg-fin">' + finBloc(d.dbs_produit, d.dbs_organisme, d.dbs_montant, d.dbs_famille)
+            + '<small class="cg-src">' + (d.source_dbs === 'facture' ? 'facture ' + e(d.facture_dbs || '') + (d.facture_le ? ' du ' + dateFr(d.facture_le) : '') : 'fiche stock ' + e((LIB_DBS[d.statut_dbs] || d.statut_dbs || '').toLowerCase())) + '</small></td>'
+            + '<td class="l">' + pillCodes(l) + '</td>';
+        }
+        h += '<td>' + (l.conforme && G.ctl === 'stock_dbs' ? pillCodes(l) : age(l)) + '</td><td>' + notifCell(l) + '</td>'
+          + '<td class="cg-act">' + (d.bacs_sf_id ? '<button type="button" class="cg-b" data-cg-bacs="' + e(d.bacs_sf_id) + '" title="Ouvrir la commande dans BACS">B</button>' : '') + '</td></tr>';
+      });
+      h += '</tbody></table></div>';
+      if (rows.length > vis.length) h += '<div class="cg-plus"><button type="button" data-cg-plus>Afficher ' + Math.min(200, rows.length - vis.length) + ' lignes de plus</button><span>' + vis.length + ' sur ' + rows.length + '</span></div>';
+      return h;
+    }
+
+    function tableSites() {
+      const sites = (data.sites || []).slice();
+      if (!sites.length) return '<div class="pl-vide">Aucune commande sur la période.</div>';
+      const fin = G.ctl === 'financement';
+      let h = '<div class="pl-tw"><table class="pl-t cg-sites"><thead><tr><th>Site</th>'
+        + (fin ? '<th>Commandes contrôlées</th><th>Conformes</th><th>Écarts</th><th>Taux de conformité</th>'
+               : '<th>À saisir dans DBS</th><th>Depuis plus de 7 jours</th><th>Corrigées</th>')
+        + '</tr></thead><tbody>';
+      sites.sort((a, b) => (b.anomalies - a.anomalies) || String(a.site).localeCompare(String(b.site), 'fr')).forEach(s => {
+        const on = G.site != null && String(G.site) === String(s.id_site);
+        const tx = s.controlees ? Math.round(100 * (s.controlees - s.anomalies) / s.controlees) : null;
+        h += '<tr class="cg-row' + (on ? ' on' : '') + '" data-cg-site="' + e(s.id_site) + '" data-cg-sitelib="' + e(propre(s.site)) + '"><td class="l">' + e(propre(s.site) || ('Site ' + s.id_site)) + ' <small>' + e(propre(s.affaire) || '') + '</small></td>';
+        if (fin) h += '<td>' + s.controlees + '</td><td>' + (s.controlees - s.anomalies) + '</td><td>' + (s.anomalies ? '<b class="cg-rouge">' + s.anomalies + '</b>' : '<span class="pl-na">0</span>') + '</td>'
+          + '<td><span class="pl-pill ' + (tx == null ? 'n' : tx >= 90 ? 'ok' : tx >= 75 ? 'warn' : 'crit') + '">' + (tx == null ? '—' : tx + ' %') + '</span></td>';
+        else h += '<td>' + (s.anomalies ? '<b class="cg-rouge">' + s.anomalies + '</b>' : '<span class="pl-na">0</span>') + '</td><td>' + (s.plus_7j || '<span class="pl-na">0</span>') + '</td><td>' + (s.corrigees || '<span class="pl-na">0</span>') + '</td>';
+        h += '</tr>';
+      });
+      return h + '</tbody></table></div>';
+    }
+
+    function rendre() {
+      if (!host.isConnected) return;
+      injecterCssControle();
+      const nS = compteurs.stock_dbs, nF = compteurs.financement;
+      let h = '<div class="cg-ctl" role="tablist">'
+        + '<button type="button" class="' + (G.ctl === 'stock_dbs' ? 'on' : '') + '" data-cg-ctl="stock_dbs"><b>Commandes non saisies dans DBS</b><span>' + (nS == null ? '…' : nS) + '</span></button>'
+        + '<button type="button" class="' + (G.ctl === 'financement' ? 'on' : '') + '" data-cg-ctl="financement"><b>Qualité des financements DBS</b><span>' + (nF == null ? '…' : nF) + '</span></button></div>';
+      const [d, f] = periode();
+      h += '<div class="pl-bar"><span class="pl-lbl">Commandes du</span><div class="pl-seg">'
+        + PRESETS.map(p => '<button type="button" class="' + (!G.du && G.preset === p[0] ? 'on' : '') + '" data-cg-preset="' + p[0] + '">' + p[1] + '</button>').join('') + '</div>'
+        + (DPL ? DPL.bouton(d, f, 'data-cg-dp="1"', 'Choisir les dates') : '')
+        + '<span class="pl-lbl">État</span><div class="pl-seg">'
+        + [['ouvertes', 'À traiter'], ['resolues', 'Corrigées'], ['toutes', 'Tout']].map(x => '<button type="button" class="' + (G.etat === x[0] ? 'on' : '') + '" data-cg-etat="' + x[0] + '">' + x[1] + '</button>').join('') + '</div>'
+        + '<span class="pl-lbl">Univers</span><div class="pl-seg">'
+        + [['', 'Tous'], ['VN', 'VN'], ['VO', 'VO'], ['VD/VK', 'VD/VK']].map(x => '<button type="button" class="' + (G.univers === x[0] ? 'on' : '') + '" data-cg-univ="' + x[0] + '">' + x[1] + '</button>').join('') + '</div>';
+      if (G.ctl === 'stock_dbs') h += '<span class="pl-lbl">Ancienneté</span><div class="pl-seg">'
+        + [[0, 'Toutes'], [3, '> 3 j'], [7, '> 7 j'], [15, '> 15 j']].map(x => '<button type="button" class="' + (Number(G.age) === x[0] ? 'on' : '') + '" data-cg-age="' + x[0] + '">' + x[1] + '</button>').join('') + '</div>';
+      else h += '<span class="pl-lbl">Écart</span><select class="pl-sel" data-cg-code><option value="">Tous les écarts</option>'
+        + CODES_FIN.map(c => '<option value="' + c + '"' + (G.code === c ? ' selected' : '') + '>' + e(LIB_CODE[c]) + '</option>').join('') + '</select>';
+      h += '<input type="search" class="cg-q" data-cg-q placeholder="Client, VIN, n° de commande, vendeur…" value="' + e(G.q) + '">'
+        + '<span class="cg-outils"><button type="button" class="cg-btn" data-cg-recalc title="Relancer le contrôle sur les données du moment">↻ Recalculer</button>'
+        + '<button type="button" class="cg-btn" data-cg-xls>⇩ Excel</button></span></div>';
+
+      h += '<div class="pp-regles cg-regle">' + (G.ctl === 'stock_dbs'
+        ? '<b>La règle :</b> une commande BACS <b>transmise à TFR, validée ou clôturée</b> doit être saisie dans DBS. Elle est signalée tant que son véhicule (même VIN) reste <b>disponible</b> ou en <b>commande stock</b> dans DBS, sans facture de vente DBS depuis la date de la commande.'
+        : '<b>La règle :</b> le financement saisi dans DBS doit être le reflet fidèle de la commande BACS — même produit (Easy, LOA, crédit, LLD ou comptant), même organisme, même montant financé. DBS est lu sur la <b>facture</b> si le véhicule est facturé, sinon sur la <b>fiche stock réservée</b> au client.')
+        + '</div>';
+      if (toast) h += '<div class="cg-toast">' + toast + '</div>';
+
+      if (!charge) { host.innerHTML = h + '<div class="pl-vide">Chargement du contrôle…</div>'; lier(); return; }
+      if (erreur) { host.innerHTML = h + '<div class="pl-vide err">Le contrôle n\'a pas pu être chargé : ' + e(erreur) + '</div>'; lier(); return; }
+
+      const S = data.synthese || {}, C = data.codes || {};
+      if (G.ctl === 'stock_dbs') {
+        h += '<div class="pl-tiles">'
+          + tuile('À saisir dans DBS', S.anomalies || 0, 'commandes BACS non reportées', S.anomalies ? 'warn' : 'ok')
+          + tuile('Depuis plus de 7 jours', S.plus_7j || 0, (S.plus_15j || 0) + ' depuis plus de 15 jours', S.plus_7j ? 'crit' : '')
+          + tuile('Ancienneté moyenne', (S.age_moyen == null ? '—' : S.age_moyen + ' j'), 'depuis la transmission ou la validation', '')
+          + tuile('Déjà notifiées', S.notifiees || 0, 'sur ' + (S.anomalies || 0) + ' à traiter', '')
+          + tuile('Corrigées', S.corrigees || 0, (S.corrigees_30j || 0) + ' ces 30 derniers jours', 'ok')
+          + '</div>';
+      } else {
+        const tx = S.controlees ? Math.round(100 * (S.conformes || 0) / S.controlees) : null;
+        h += '<div class="pl-tiles">'
+          + tuile('Commandes contrôlées', S.controlees || 0, 'transmises, validées ou clôturées, présentes dans DBS', '')
+          + tuile('Taux de conformité', tx == null ? '—' : tx + ' %', (S.conformes || 0) + ' commandes conformes', tx == null ? '' : tx >= 90 ? 'ok' : 'warn')
+          + tuile('Écarts à corriger', S.anomalies || 0, (S.notifiees || 0) + ' déjà notifiés', S.anomalies ? 'warn' : 'ok')
+          + tuile('Corrigés', S.corrigees || 0, (S.corrigees_30j || 0) + ' ces 30 derniers jours', 'ok')
+          + '</div>'
+          + '<div class="cg-codes">' + CODES_FIN.map(c => '<button type="button" class="cg-codebtn' + (G.code === c ? ' on' : '') + '" data-cg-codebtn="' + c + '"><b>' + (C[c] || 0) + '</b><span>' + e(LIB_CODE[c]) + '</span></button>').join('') + '</div>';
+      }
+
+      h += carte('Par site', 'Cliquez un site pour filtrer la liste, recliquez-le pour revenir à tout le groupe.', tableSites());
+
+      const rows = triees(filtrees());
+      const nSel = [...G.sel].length;
+      const titre = G.ctl === 'stock_dbs' ? 'Commandes à saisir dans DBS' : 'Écarts de financement';
+      const extra = '<div class="cg-selbar">' + (G.site != null ? '<span class="cg-chip">' + e(G.siteLabel || 'Site') + ' <button type="button" data-cg-sitex aria-label="Retirer le filtre">×</button></span>' : '')
+        + '<span class="cg-nsel">' + (nSel ? nSel + ' sélectionnée' + (nSel > 1 ? 's' : '') : rows.length + ' ligne' + (rows.length > 1 ? 's' : '')) + '</span>'
+        + (rows.length ? '<button type="button" class="cg-btn" data-cg-toutsel>' + (nSel && rows.every(l => G.sel.has(String(l.id))) ? 'Tout désélectionner' : 'Sélectionner les ' + rows.length) + '</button>' : '')
+        + '<button type="button" class="cg-btn prim" data-cg-notifier' + (nSel ? '' : ' disabled') + '>✉ Notifier…</button></div>';
+      h += carte(titre, (data.total_lignes > (data.lignes || []).length ? 'Les ' + data.limite + ' premières lignes sur ' + data.total_lignes + ' — resserrez la période. ' : '')
+        + 'B : ouvrir la commande dans BACS · clic sur le client : sa fiche One Data.', tableLignes(rows), extra);
+
+      h += '<p class="pl-note pied">Contrôle recalculé chaque jour vers 7 h 40 et 13 h 40, après la mise à jour DBS de la nuit'
+        + (data.maj ? ' — dernier calcul le ' + new Date(data.maj).toLocaleString('fr-FR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) : '') + '. '
+        + 'Périmètre : commandes BACS depuis le 1er janvier 2023 (DBS n\'est pas fiable avant). Une commande « corrigée » est sortie du contrôle : véhicule réservé ou facturé dans DBS, saisie de financement rectifiée, ou commande abandonnée dans BACS. '
+        + (G.ctl === 'financement' ? 'Sur la facture DBS, Easy et LOA sont tous deux saisis « LOA » : ils sont comparés ensemble à ce niveau. Kinto et Toyota France Financement comptent comme le même organisme. Écart de montant : plus de 100 € et plus de 1 %. Quand la commande BACS n\'a pas de financement renseigné, la simulation EPOS sert de référence.' : '')
+        + '</p>';
+      host.innerHTML = h;
+      lier();
+    }
+
+    // ---- interactions ------------------------------------------------------
+    function lier() {
+      const on = (sel, ev, fn) => host.querySelectorAll(sel).forEach(x => x.addEventListener(ev, fn));
+      on('[data-cg-ctl]', 'click', ev => { const v = ev.currentTarget.getAttribute('data-cg-ctl'); if (v !== G.ctl) { G.ctl = v; G.sel.clear(); G.code = ''; G.tri = { k: 'age_j', dir: -1 }; G.page = 200; charger(); } });
+      on('[data-cg-preset]', 'click', ev => { G.preset = ev.currentTarget.getAttribute('data-cg-preset'); G.du = G.au = null; compteurs.stock_dbs = compteurs.financement = null; charger(); });
+      const bdp = host.querySelector('[data-cg-dp]');
+      if (bdp && DPL) bdp.addEventListener('click', () => { const [d0] = periode(); DPL.ouvrir(bdp, d0, (a, z) => { G.du = a; G.au = z; compteurs.stock_dbs = compteurs.financement = null; charger(); }); });
+      on('[data-cg-etat]', 'click', ev => { G.etat = ev.currentTarget.getAttribute('data-cg-etat'); G.sel.clear(); charger(); });
+      on('[data-cg-univ]', 'click', ev => { G.univers = ev.currentTarget.getAttribute('data-cg-univ'); G.page = 200; rendre(); });
+      on('[data-cg-age]', 'click', ev => { G.age = Number(ev.currentTarget.getAttribute('data-cg-age')); G.page = 200; rendre(); });
+      on('[data-cg-code]', 'change', ev => { G.code = ev.currentTarget.value; G.page = 200; rendre(); });
+      on('[data-cg-codebtn]', 'click', ev => { const c = ev.currentTarget.getAttribute('data-cg-codebtn'); G.code = G.code === c ? '' : c; G.page = 200; rendre(); });
+      const q = host.querySelector('[data-cg-q]');
+      if (q) {
+        let tq = null;
+        q.addEventListener('input', () => { clearTimeout(tq); tq = setTimeout(() => { G.q = q.value; G.page = 200; rendre(); const q2 = host.querySelector('[data-cg-q]'); if (q2) { q2.focus(); q2.setSelectionRange(q2.value.length, q2.value.length); } }, 250); });
+      }
+      on('tr[data-cg-site]', 'click', ev => {
+        const id = ev.currentTarget.getAttribute('data-cg-site');
+        if (G.site != null && String(G.site) === id) { G.site = null; G.siteLabel = ''; }
+        else { G.site = id; G.siteLabel = ev.currentTarget.getAttribute('data-cg-sitelib'); }
+        G.page = 200; rendre();
+      });
+      on('[data-cg-sitex]', 'click', () => { G.site = null; G.siteLabel = ''; rendre(); });
+      on('[data-cg-tri]', 'click', ev => { const k = ev.currentTarget.getAttribute('data-cg-tri'); G.tri = G.tri.k === k ? { k, dir: -G.tri.dir } : { k, dir: k === 'age_j' || k === 'ecarts' || k === 'notif' ? -1 : 1 }; rendre(); });
+      on('[data-cg-ck]', 'change', ev => { const k = ev.currentTarget.getAttribute('data-cg-ck'); if (ev.currentTarget.checked) G.sel.add(k); else G.sel.delete(k); rendre(); });
+      on('[data-cg-tous]', 'change', ev => { const vis = triees(filtrees()).slice(0, G.page); vis.forEach(l => { if (ev.currentTarget.checked) G.sel.add(String(l.id)); else G.sel.delete(String(l.id)); }); rendre(); });
+      on('[data-cg-toutsel]', 'click', () => { const rows = filtrees(); const tous = rows.every(l => G.sel.has(String(l.id))); rows.forEach(l => { if (tous) G.sel.delete(String(l.id)); else G.sel.add(String(l.id)); }); rendre(); });
+      on('[data-cg-plus]', 'click', () => { G.page += 200; rendre(); });
+      on('[data-cg-fiche]', 'click', ev => { ev.stopPropagation(); ouvrirFicheClient(ev.currentTarget.getAttribute('data-cg-fiche')); });
+      on('[data-cg-bacs]', 'click', ev => {
+        ev.stopPropagation();
+        const rid = ev.currentTarget.getAttribute('data-cg-bacs');
+        try { ((wwLib.getFrontWindow && wwLib.getFrontWindow()) || window).open(BACS_BASE + 'order/' + rid, '_blank', 'noopener'); } catch (x) { window.open(BACS_BASE + 'order/' + rid, '_blank', 'noopener'); }
+      });
+      on('[data-cg-xls]', 'click', ev => exporter(ev.currentTarget));
+      on('[data-cg-notifier]', 'click', () => ouvrirNotifier());
+      on('[data-cg-recalc]', 'click', async ev => {
+        // Le calcul (~15 s) tourne côté base : on pose une demande, traitée
+        // par pg_cron dans la minute, puis on guette sa fin.
+        const b = ev.currentTarget; b.disabled = true; b.textContent = '↻ Calcul demandé…';
+        try {
+          const r = await sb.rpc('cg_recalculer');
+          if (r.error) throw r.error;
+          const id = r.data && r.data.id;
+          toast = 'Recalcul lancé : les chiffres se mettent à jour d\'ici une à deux minutes.'; rendre();
+          let n = 0;
+          const guetter = async () => {
+            n++;
+            const s = await sb.rpc('cg_etat_demande', { p_id: id });
+            if (!s.error && s.data && s.data.traitee) {
+              toast = 'Contrôle recalculé.'; compteurs.stock_dbs = compteurs.financement = null;
+              setTimeout(() => { toast = ''; rendre(); }, 5000);
+              charger(true); return;
+            }
+            if (n < 24) setTimeout(guetter, 10000);
+            else { toast = ''; rendre(); }
+          };
+          if (id) setTimeout(guetter, 15000);
+        } catch (x) { toast = 'Le recalcul n\'a pas pu être lancé : ' + e((x && x.message) || x); rendre(); setTimeout(() => { toast = ''; rendre(); }, 6000); }
+      });
+    }
+
+    // ---- export Excel (edge function export-xslx, comme la vue Ventes) -----
+    function lignesExport() {
+      return triees(filtrees()).map(l => {
+        const d = l.detail || {};
+        const o = {
+          'Réseau': propre(l.reseau || ''), 'Affaire': propre(l.affaire || ''), 'Site': propre(l.site || ''),
+          'Commande BACS': d.label || '', 'N° commande constructeur': d.num_cde || '', 'Statut BACS': LIB_BACS[d.statut_bacs] || d.statut_bacs || '',
+          'Date commande': l.jour_cde || '', 'Transmise / validée le': l.jour_ref || '',
+          'Client': propre(l.client || ''), 'Véhicule': l.vehicule || '', 'VIN': l.vin || '', 'Univers': univ(l), 'Vendeur': propre(l.vendeur || '')
+        };
+        if (G.ctl === 'stock_dbs') {
+          o['Statut DBS'] = LIB_DBS[d.statut_dbs] || d.statut_dbs || '';
+          o['Site du stock DBS'] = propre(l.site_dbs || '');
+          o['Entrée en stock DBS'] = d.entree_stock_dbs || '';
+        } else {
+          o['BACS produit'] = d.bacs_produit || (d.bacs_famille === 'COMPTANT' ? 'Comptant' : '');
+          o['BACS organisme'] = d.bacs_organisme || '';
+          o['BACS montant financé'] = d.bacs_montant != null ? Number(d.bacs_montant) : null;
+          o['DBS source'] = d.source_dbs === 'facture' ? 'Facture ' + (d.facture_dbs || '') : 'Fiche stock';
+          o['DBS produit'] = d.dbs_produit || (d.dbs_famille === 'COMPTANT' ? 'Comptant' : '');
+          o['DBS organisme'] = d.dbs_organisme || '';
+          o['DBS montant financé'] = d.dbs_montant != null ? Number(d.dbs_montant) : null;
+          o['Écarts'] = (l.codes || []).map(c => LIB_CODE[c] || c).join(' ; ');
+        }
+        o['Ancienneté (jours)'] = Number(l.age_j || 0);
+        o['État'] = l.conforme ? 'Corrigé' + (l.motif_resolution ? ' — ' + l.motif_resolution : '') : 'À traiter';
+        o['Corrigé le'] = l.resolue_le ? String(l.resolue_le).slice(0, 10) : '';
+        o['Dernière notification'] = l.notif_der ? String(l.notif_der).slice(0, 10) : '';
+        o['Notifiés'] = l.notif_cibles || '';
+        return o;
+      });
+    }
+    async function exporter(btn) {
+      const rows = lignesExport();
+      if (!rows.length) { toast = 'Rien à exporter avec ces filtres.'; rendre(); setTimeout(() => { toast = ''; rendre(); }, 4000); return; }
+      btn.disabled = true; const lib = btn.textContent; btn.textContent = '⇩ Export…';
+      try {
+        if (!SUPABASE_KEY) SUPABASE_KEY = getSupabaseKey();
+        const jwt = await getUserJwt();
+        const [d, f] = periode();
+        const nom = (G.ctl === 'stock_dbs' ? 'controle_cdes_non_saisies_DBS_' : 'controle_financements_DBS_') + (G.site != null ? String(G.siteLabel || G.site).normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^a-zA-Z0-9]+/g, '_') + '_' : '') + d + '_' + f + '.xlsx';
+        const res = await fetch(SUPABASE_URL + '/functions/v1/export-xslx', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'apikey': SUPABASE_KEY, 'Authorization': 'Bearer ' + (jwt || SUPABASE_KEY) },
+          body: JSON.stringify({ rows, fileName: nom, sheetName: G.ctl === 'stock_dbs' ? 'Non saisies DBS' : 'Financements', expiresIn: 300 })
+        });
+        const j = await res.json();
+        if (!res.ok || !j.url) throw new Error(j.error || ('HTTP ' + res.status));
+        const a = doc.createElement('a'); a.href = j.url; a.target = '_blank'; a.rel = 'noopener';
+        doc.body.appendChild(a); a.click(); a.remove();
+      } catch (x) {
+        console.error('[perf] export contrôle', x);
+        toast = 'L\'export Excel a échoué : ' + e((x && x.message) || x);
+        rendre(); setTimeout(() => { toast = ''; rendre(); }, 6000); return;
+      }
+      btn.disabled = false; btn.textContent = lib;
+    }
+
+    // ---- notification ------------------------------------------------------
+    function fermerNotifier() { const x = doc.getElementById('cg-modal'); if (x) x.remove(); }
+    function ouvrirNotifier() {
+      const ids = [...G.sel].map(Number).filter(n => !isNaN(n));
+      if (!ids.length) return;
+      fermerNotifier();
+      const defaut = G.ctl === 'stock_dbs'
+        ? 'Contrôle de gestion : ces commandes BACS sont transmises ou validées, mais le véhicule est toujours en stock disponible dans DBS. Merci de saisir la commande dans DBS.'
+        : 'Contrôle de gestion : le financement saisi dans DBS ne correspond pas à la commande BACS. Merci de corriger la saisie.';
+      const cibles = new Set(window.__OD_PERF_CG_CIBLES__ || ['vendeur', 'secretaire']);
+      const w = doc.createElement('div'); w.id = 'cg-modal';
+      w.innerHTML = '<div class="cg-voile"></div><div class="cg-dlg" role="dialog" aria-modal="true" aria-label="Notifier">'
+        + '<header><h3>Notifier ' + ids.length + ' commande' + (ids.length > 1 ? 's' : '') + '</h3><button type="button" class="cg-x" aria-label="Fermer">&times;</button></header>'
+        + '<div class="cg-dlg-c"><p class="cg-aide">Chaque destinataire reçoit une alerte dans ses notifications One Data, avec la liste de SES commandes concernées.</p>'
+        + '<div class="cg-cibles">'
+        + [['vendeur', 'Le vendeur de la commande'], ['chef', 'Le chef des ventes du site'], ['secretaire', 'Les secrétaires commerciales du site']]
+          .map(c => '<label><input type="checkbox" data-cg-cible="' + c[0] + '"' + (cibles.has(c[0]) ? ' checked' : '') + '> ' + c[1] + '</label>').join('')
+        + '</div><label class="cg-lbl">Message</label><textarea data-cg-msg rows="4">' + e(defaut) + '</textarea>'
+        + '<div class="cg-dest"><span class="cg-lbl">Destinataires</span><div data-cg-dest>Calcul…</div></div></div>'
+        + '<footer><span data-cg-etatnotif></span><button type="button" class="cg-btn" data-cg-annuler>Annuler</button><button type="button" class="cg-btn prim" data-cg-envoyer>Envoyer</button></footer></div>';
+      doc.body.appendChild(w);
+      const lesCibles = () => [...w.querySelectorAll('[data-cg-cible]')].filter(x => x.checked).map(x => x.getAttribute('data-cg-cible'));
+      let tok = 0;
+      async function apercu() {
+        const t = ++tok, cs = lesCibles(), box = w.querySelector('[data-cg-dest]');
+        window.__OD_PERF_CG_CIBLES__ = cs;
+        if (!cs.length) { box.innerHTML = '<span class="pl-na">Choisissez au moins un type de destinataire.</span>'; return; }
+        box.textContent = 'Calcul…';
+        const r = await sb.rpc('cg_destinataires', { p_controle: G.ctl, p_ids: ids, p_cibles: cs });
+        if (t !== tok) return;
+        if (r.error) { box.textContent = 'Erreur : ' + r.error.message; return; }
+        const L = r.data || [];
+        const lib = { vendeur: 'vendeur', chef: 'chef des ventes', secretaire: 'secrétaire' };
+        box.innerHTML = L.length ? '<ul>' + L.map(x => '<li><b>' + e(propre(x.nom)) + '</b> <small>' + (x.roles || []).map(r0 => lib[r0] || r0).join(', ') + ' · ' + x.lignes + ' commande' + (x.lignes > 1 ? 's' : '') + '</small></li>').join('') + '</ul>'
+          : '<span class="pl-na">Aucun utilisateur One Data actif pour ces commandes.</span>';
+      }
+      w.querySelectorAll('[data-cg-cible]').forEach(x => x.addEventListener('change', apercu));
+      w.querySelector('.cg-voile').addEventListener('click', fermerNotifier);
+      w.querySelector('.cg-x').addEventListener('click', fermerNotifier);
+      w.querySelector('[data-cg-annuler]').addEventListener('click', fermerNotifier);
+      w.querySelector('[data-cg-envoyer]').addEventListener('click', async ev => {
+        const b = ev.currentTarget, et = w.querySelector('[data-cg-etatnotif]');
+        const cs = lesCibles(); if (!cs.length) { et.textContent = 'Choisissez au moins un destinataire.'; return; }
+        b.disabled = true; et.textContent = 'Envoi…';
+        try {
+          const msg = w.querySelector('[data-cg-msg]').value;
+          const r = await sb.rpc('cg_notifier', { p_controle: G.ctl, p_ids: ids, p_cibles: cs, p_message: msg === defaut ? null : msg });
+          if (r.error) throw r.error;
+          if (!r.data || !r.data.ok) { et.textContent = (r.data && r.data.motif) || 'Aucune notification envoyée.'; b.disabled = false; return; }
+          fermerNotifier();
+          G.sel.clear();
+          toast = 'Notification envoyée à ' + r.data.destinataires + ' personne' + (r.data.destinataires > 1 ? 's' : '') + '.';
+          setTimeout(() => { toast = ''; rendre(); }, 6000);
+          charger(true);
+        } catch (x) { et.textContent = 'Échec : ' + ((x && x.message) || x); b.disabled = false; }
+      });
+      apercu();
+    }
+
+    function injecterCssControle() {
+      if (doc.getElementById('cg-css')) return;
+      const st = doc.createElement('style'); st.id = 'cg-css';
+      st.textContent = `
+.cg-ctl{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;margin:0 0 12px}
+.cg-ctl button{display:flex;align-items:center;justify-content:space-between;gap:10px;border:1px solid #e3e9f3;background:#fff;border-radius:12px;padding:12px 16px;font:inherit;cursor:pointer;text-align:left}
+.cg-ctl button b{font-size:13.5px;font-weight:800;color:#5a6b86}
+.cg-ctl button span{font-size:20px;font-weight:800;color:#2a5ea9;font-variant-numeric:tabular-nums}
+.cg-ctl button.on{border-color:#2a5ea9;box-shadow:inset 3px 0 0 #2a5ea9;background:#f5f8fc}
+.cg-ctl button.on b{color:#1F4A85}
+@media (max-width:700px){.cg-ctl{grid-template-columns:minmax(0,1fr)}}
+.cg-q{border:1px solid #acc5e4;border-radius:8px;padding:6px 10px;font:inherit;font-size:12px;color:#1F4A85;min-width:220px;flex:1 1 220px;background:#fff}
+.cg-q:focus{outline:2px solid #acc5e4;outline-offset:0}
+.cg-outils{display:flex;gap:6px;margin-left:auto}
+.cg-btn{border:1px solid #acc5e4;background:#fff;color:#2a5ea9;border-radius:8px;padding:6px 12px;font:inherit;font-size:12px;font-weight:800;cursor:pointer;white-space:nowrap}
+.cg-btn:hover{background:#eef4fc}
+.cg-btn:disabled{opacity:.5;cursor:default}
+.cg-btn.prim{background:#2a5ea9;border-color:#2a5ea9;color:#fff}
+.cg-btn.prim:hover{background:#1F4A85}
+.cg-btn.prim:disabled{background:#acc5e4;border-color:#acc5e4}
+.cg-regle{margin-bottom:12px}
+.cg-toast{background:#e4f4f0;color:#00997f;border-radius:8px;padding:9px 14px;margin:0 0 12px;font-weight:700;font-size:12.5px}
+.cg-codes{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:8px;margin:-4px 0 14px}
+.cg-codebtn{border:1px solid #e3e9f3;background:#fff;border-radius:8px;padding:8px 12px;text-align:left;cursor:pointer;font:inherit;display:grid;gap:1px}
+.cg-codebtn b{font-size:18px;color:#2a5ea9;font-variant-numeric:tabular-nums}
+.cg-codebtn span{font-size:11.5px;color:#5a6b86;font-weight:700}
+.cg-codebtn:hover{border-color:#acc5e4}
+.cg-codebtn.on{border-color:#2a5ea9;background:#eef4fc}
+.cg-hd{display:flex;flex-wrap:wrap;align-items:flex-start;justify-content:space-between;gap:8px}
+.cg-selbar{display:flex;flex-wrap:wrap;align-items:center;gap:8px}
+.cg-nsel{font-size:12px;font-weight:700;color:#5a6b86}
+.cg-chip{background:#2a5ea9;color:#fff;border-radius:999px;padding:3px 6px 3px 12px;font-size:12px;font-weight:700;display:inline-flex;align-items:center;gap:4px}
+.cg-chip button{border:0;background:rgba(255,255,255,.2);color:#fff;border-radius:999px;width:18px;height:18px;line-height:16px;cursor:pointer;font-size:13px;padding:0}
+.cg-sites tbody tr.cg-row{cursor:pointer}
+.cg-sites tbody tr.cg-row:hover td{background:#f5f8fc}
+.cg-sites tbody tr.on td{background:#e6effa !important}
+.cg-rouge{color:#c0524f}
+.cg-tw{max-height:70vh;overflow:auto}
+.cg-t{min-width:1080px}
+.cg-t thead th{position:sticky;top:0;z-index:1;cursor:pointer;user-select:none;white-space:nowrap}
+.cg-t thead th.on{color:#2a5ea9}
+.cg-t thead th.cg-ck{cursor:default}
+.cg-t th.l,.cg-t td.l{text-align:left}
+.cg-t td{vertical-align:top;font-size:12.5px}
+.cg-t td.l{min-width:0;font-weight:600;color:#1c2b45}
+.cg-t td b{color:#1F4A85;font-weight:800}
+.cg-t td small{display:block;color:#8b99b0;font-weight:600;font-size:11px;margin-top:1px}
+.cg-t td small.cg-vin{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:10.5px;color:#7a98c5}
+.cg-t td small.cg-src{color:#7a98c5;font-style:italic}
+.cg-t tr.sel td{background:#eef4fc}
+.cg-t tr.ok td{opacity:.75}
+.cg-ck{width:30px;text-align:center !important}
+.cg-ck input{width:15px;height:15px;accent-color:#2a5ea9;cursor:pointer}
+.cg-lien{border:0;background:none;padding:0;font:inherit;font-weight:800;color:#2a5ea9;cursor:pointer;text-align:left}
+.cg-lien:hover{text-decoration:underline}
+.cg-st{display:inline-block;border-radius:999px;padding:2px 9px;font-size:11px;font-weight:800;background:#eef4fc;color:#2a5ea9;white-space:nowrap}
+.cg-st.dbs{background:#fdf3de;color:#d2941f}
+.cg-code{display:inline-block;border-radius:999px;padding:2px 8px;margin:0 4px 3px 0;font-size:10.5px;font-weight:800;background:#fdf3de;color:#d2941f;white-space:nowrap}
+.cg-code.fort{background:#fbeceb;color:#c0524f}
+.cg-ok{display:inline-block;border-radius:999px;padding:2px 8px;font-size:10.5px;font-weight:800;background:#e4f4f0;color:#00997f}
+.cg-cpt{color:#5a6b86;font-weight:700}
+.cg-fin{min-width:150px}
+.cg-notif{font-size:11.5px;font-weight:700;color:#2a5ea9;white-space:nowrap}
+.cg-notif small{display:inline !important}
+.cg-act{white-space:nowrap}
+.cg-b{width:26px;height:26px;border-radius:7px;border:1px solid #acc5e4;background:#fff;color:#2a5ea9;font-weight:800;font-size:12px;cursor:pointer}
+.cg-b:hover{background:#eef4fc}
+.cg-plus{display:flex;align-items:center;gap:12px;justify-content:center;margin-top:12px;font-size:12px;color:#8b99b0;font-weight:700}
+.cg-plus button{border:1px solid #acc5e4;background:#fff;color:#2a5ea9;border-radius:8px;padding:6px 14px;font:inherit;font-weight:800;cursor:pointer}
+#cg-modal{position:fixed;inset:0;z-index:10060;font-family:inherit}
+#cg-modal .cg-voile{position:absolute;inset:0;background:rgba(28,43,69,.32)}
+#cg-modal .cg-dlg{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);width:min(560px,94vw);max-height:90vh;background:#fff;border-radius:14px;box-shadow:0 12px 40px rgba(28,43,69,.22);display:flex;flex-direction:column;color:#1c2b45;font-size:13px}
+#cg-modal header{display:flex;align-items:center;justify-content:space-between;padding:16px 20px 10px;border-bottom:1px solid #e3e9f3}
+#cg-modal h3{margin:0;font-size:15px;font-weight:800;color:#1F4A85}
+#cg-modal .cg-x{border:0;background:none;font-size:24px;line-height:1;color:#7a98c5;cursor:pointer}
+#cg-modal .cg-dlg-c{padding:14px 20px;overflow-y:auto;display:grid;gap:10px}
+#cg-modal .cg-aide{margin:0;color:#5a6b86;font-size:12px;font-weight:600}
+#cg-modal .cg-cibles{display:grid;gap:6px}
+#cg-modal .cg-cibles label{display:flex;align-items:center;gap:8px;font-weight:700;color:#1F4A85;cursor:pointer}
+#cg-modal .cg-cibles input{accent-color:#2a5ea9;width:15px;height:15px}
+#cg-modal .cg-lbl{font-size:10.5px;font-weight:800;letter-spacing:.06em;text-transform:uppercase;color:#8b99b0}
+#cg-modal textarea{width:100%;border:1px solid #acc5e4;border-radius:8px;padding:8px 10px;font:inherit;font-size:12.5px;color:#1c2b45;resize:vertical}
+#cg-modal .cg-dest ul{list-style:none;margin:6px 0 0;padding:0;display:grid;gap:4px;max-height:180px;overflow:auto}
+#cg-modal .cg-dest li{background:#f5f8fc;border-radius:7px;padding:6px 10px}
+#cg-modal .cg-dest li small{color:#7a98c5;font-weight:700}
+#cg-modal footer{display:flex;align-items:center;gap:8px;justify-content:flex-end;padding:12px 20px 16px;border-top:1px solid #e3e9f3}
+#cg-modal footer span{margin-right:auto;font-size:12px;color:#c0524f;font-weight:700}
+`;
+      (doc.head || doc.documentElement).appendChild(st);
+    }
+    return { charger, rendre };
+  }
+
   if (__estTC) {
     const ctlLeads = montageLeads(__leadsHote);
     const ctlProcess = montageProcess(__processHote, ctlLeads.DPL);
-    let leadsCharge = false, processCharge = false;
+    const ctlControle = montageControle(__controleHote, ctlLeads.DPL);
+    let leadsCharge = false, processCharge = false, controleCharge = false;
+    // v42 : l'onglet Contrôle de gestion n'existe que pour les administrateurs
+    // (1) et directeurs de groupe (8) — le SQL refuse les autres de toute façon.
+    const controleAutorise = () => [1, 8].includes(monRole());
     const vue = (v) => {
-      if (['ventes', 'leads', 'process'].indexOf(v) < 0) v = 'ventes';
+      if (['ventes', 'leads', 'process', 'controle'].indexOf(v) < 0) v = 'ventes';
+      if (v === 'controle' && !controleAutorise()) v = 'ventes';
       window.__OD_PERF_VUE__ = v;
       __bascule.querySelectorAll('[data-vue]').forEach(b => { const on = b.getAttribute('data-vue') === v; b.classList.toggle('on', on); b.setAttribute('aria-selected', on); });
       __ventesHote.style.display = v === 'ventes' ? '' : 'none';
       __leadsHote.style.display = v === 'leads' ? '' : 'none';
       __processHote.style.display = v === 'process' ? '' : 'none';
+      __controleHote.style.display = v === 'controle' ? '' : 'none';
       if (v === 'leads' && !leadsCharge) { leadsCharge = true; ctlLeads.charger(); }
       if (v === 'process' && !processCharge) { processCharge = true; ctlProcess.charger(); }
+      if (v === 'controle' && !controleCharge) { controleCharge = true; ctlControle.charger(); }
     };
+    // Le profil (oropraUser) peut arriver après le montage : on révèle l'onglet
+    // dès que le rôle est connu, et on honore #controle demandé au départ.
+    (function revelerControle(n) {
+      const b = __bascule.querySelector('[data-vue="controle"]');
+      if (!b) return;
+      if (controleAutorise()) {
+        b.hidden = false;
+        if (window.__OD_PERF_CG_ATTENTE__) { window.__OD_PERF_CG_ATTENTE__ = false; vue('controle'); }
+        return;
+      }
+      if (n < 40) setTimeout(() => revelerControle(n + 1), 250);
+    })(0);
     __bascule.addEventListener('click', (ev) => { const b = ev.target.closest('[data-vue]'); if (b) vue(b.getAttribute('data-vue')); });
     // La barre du haut (topnav v35) bascule la vue sans recharger la page.
     try { window.__odPerfVue = vue; const W2 = (wwLib.getFrontWindow && wwLib.getFrontWindow()) || window; W2.__odPerfVue = vue; } catch (e) { window.__odPerfVue = vue; }
     let depart = window.__OD_PERF_VUE__ || 'ventes';
     try { const W3 = (wwLib.getFrontWindow && wwLib.getFrontWindow()) || window; if (W3.__OD_PERF_VUE__) depart = W3.__OD_PERF_VUE__; } catch (e) {}
-    try { const W = (wwLib.getFrontWindow && wwLib.getFrontWindow()) || window; const hs = W.location.hash || ''; if (/leads/i.test(hs)) depart = 'leads'; else if (/process/i.test(hs)) depart = 'process'; } catch (e) { if (/leads/i.test(location.hash || '')) depart = 'leads'; else if (/process/i.test(location.hash || '')) depart = 'process'; }
+    try { const W = (wwLib.getFrontWindow && wwLib.getFrontWindow()) || window; const hs = W.location.hash || ''; if (/leads/i.test(hs)) depart = 'leads'; else if (/process/i.test(hs)) depart = 'process'; else if (/controle/i.test(hs)) depart = 'controle'; } catch (e) { if (/leads/i.test(location.hash || '')) depart = 'leads'; else if (/process/i.test(location.hash || '')) depart = 'process'; else if (/controle/i.test(location.hash || '')) depart = 'controle'; }
+    if (depart === 'controle' && !controleAutorise()) window.__OD_PERF_CG_ATTENTE__ = true;
     vue(depart);
   }
 
