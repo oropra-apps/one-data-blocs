@@ -1,6 +1,13 @@
 // ============================================================================
 //  LEAD MANAGEMENT — module One Data (OD.define 'lead-mgmt')
-//  VERSION TEAM COLIN (v134) — déploiement CIBLÉ (publish-targets :
+//  VERSION TEAM COLIN (v135) — déploiement CIBLÉ (publish-targets :
+//  v135 (26/11/2026) : CAMPAGNES — indicateurs d'avancement ALIGNÉS sur ceux
+//    de l'avancement des outils de relance (URL) : à prendre, pris sans
+//    résultat noté, traités (%), RDV pris, à rappeler, messagerie, sans suite,
+//    commandes après relance, relances effectuées, mes clients. Calcul côté
+//    base : RPC campagne_avancement (même lecture des comptes rendus que le
+//    suivi de l'outil URL). Barre et onglets : % de la campagne traitée.
+//    (Bâtie sur la v134 « Passer la main », branche agent/passer-la-main @13dc8cd.)
 //  v134 (26/11/2026) : « Passer la main » dans la fiche d'un lead (vendeur
 //    propriétaire) : inviter un collègue du site avec une note, et lui confier
 //    le suivi (le lead passe dans sa file, propriétaire BACS mis à jour). Le
@@ -3553,6 +3560,15 @@
       try { (await rpc('campagne_echeances', { p_ids: ids }) || []).forEach(function (x) { S.campEch[x.id_rapport] = x.rendu_le; }); }
       catch (e) { S.campEch = {}; }
     }
+    // v134 : avancement de chaque campagne, mêmes indicateurs que l'outil de relance (URL)
+    async function chargerAvancements(sites) {
+      S.campAv = {};
+      var noms = campNoms();
+      await Promise.all(noms.map(function (nom) {
+        return rpc('campagne_avancement', { p_campagne: nom, p_site_ids: sites || null, p_viewer_id_user: Number(MOI) })
+          .then(function (r) { if (r) S.campAv[nom] = r; }).catch(function () {});
+      }));
+    }
     function echeanceTxt(id) {
       var r = (S.campEch || {})[id]; if (!r) return null;
       var d = new Date(r), reste = Math.round((d - Date.now()) / 60000);
@@ -3582,6 +3598,7 @@
             catch (e3) { S.campInfos = {}; }
           }
           await chargerEcheances();
+          await chargerAvancements(sitesV);
         } else {
           var r2 = await Promise.all([
             rpc('get_campagnes_sollicitation', { p_viewer_id_user: Number(MOI), p_date_from: de, p_date_to: a, p_site_ids: sites, p_id_user: null }),
@@ -3603,6 +3620,7 @@
               catch (e5) { S.campInfos = {}; }
             }
             await chargerEcheances();
+            await chargerAvancements(sites);
           } else { S.campMes = null; S.campLibres = null; S.mesSollis = null; }
         }
       } catch (e) { S.campagnes = S.campagnes || []; toast(messageErreur(e), true); }
@@ -4361,10 +4379,29 @@
         var n = Number(tot.nb_sollicitations) || (toutesDispo.length + (Number(c.nb_sollicitations) || 0));
         var tr = Number(tot.nb_traitees) || 0, pris = Math.max(0, n - toutesDispo.length), pct = n ? Math.round(100 * tr / n) : 0;
         var k = function (val, lib, cls) { return '<div class="cp-k' + (cls ? ' ' + cls : '') + '"><b>' + val + '</b><small>' + lib + '</small></div>'; };
+        var av = (S.campAv || {})[nom];
+        var kpis;
+        if (av) {
+          // v134 : mêmes indicateurs que l'avancement de l'outil de relance (URL)
+          n = Number(av.clients) || n; tr = Number(av.traites) || 0; pct = n ? Math.round(100 * tr / n) : 0;
+          var mes = S.comme ? (Number(c.nb_sollicitations) || 0) : Number(av.mes_clients) || 0;
+          kpis = k(toutesDispo.length, 'à prendre', toutesDispo.length ? 'alerte' : '')
+            + k(Number(av.sans_resultat) || 0, 'pris, sans résultat noté', Number(av.sans_resultat) ? 'alerte' : '')
+            + k(tr + ' <span class="cp-kp">' + pct + ' %</span>', 'traités')
+            + k(Number(av.rdv) || 0, 'RDV pris', Number(av.rdv) ? 'ok' : '')
+            + k(Number(av.rappeler) || 0, 'à rappeler')
+            + k(Number(av.messagerie) || 0, 'messagerie')
+            + k(Number(av.sans_suite) || 0, 'sans suite')
+            + k(Number(av.commandes) || 0, 'commandes après relance', Number(av.commandes) ? 'ok' : '')
+            + k(Number(av.relances) || 0, 'relances effectuées')
+            + k(mes, 'mes clients');
+        } else {
+          kpis = k(toutesDispo.length, 'à prendre', toutesDispo.length ? 'alerte' : '') + k(pris, 'pris par l\'équipe') + k(tr, 'traités')
+            + k(Number(tot.nb_propales) || 0, 'propositions') + k((Number(tot.nb_bdc) || 0), 'commandes', Number(tot.nb_bdc) ? 'ok' : '')
+            + k((Number(c.nb_sollicitations) || 0) + (Number(c.nb_traitees) ? ' · ' + c.nb_traitees + ' traités' : ''), 'mes clients');
+        }
         h += '<div class="sub">'
-          + '<div class="cp-kpis">' + k(toutesDispo.length, 'à prendre', toutesDispo.length ? 'alerte' : '') + k(pris, 'pris par l\'équipe') + k(tr, 'traités')
-          + k(Number(tot.nb_propales) || 0, 'propositions') + k((Number(tot.nb_bdc) || 0), 'commandes', Number(tot.nb_bdc) ? 'ok' : '')
-          + k((Number(c.nb_sollicitations) || 0) + (Number(c.nb_traitees) ? ' · ' + c.nb_traitees + ' traités' : ''), 'mes clients') + '</div>'
+          + '<div class="cp-kpis">' + kpis + '</div>'
           + '<div class="cp-av"><span class="bar' + (pct < 40 ? ' low' : '') + '"><i style="width:' + pct + '%"></i></span><span>' + pct + ' % de la campagne traitée · ' + plural(n, 'client') + ' au total</span></div>';
         var cibles = toutesMiennes.filter(campPasse).sort(function (a, b) { return prio(b) - prio(a); });
         var dispo = toutesDispo.filter(campPasse).sort(function (a, b) { return prio(b) - prio(a) || Number(a.id_rapport) - Number(b.id_rapport); });
@@ -4416,7 +4453,8 @@
         var tot = (S.campTot || []).find(function (x) { return x.campagne === nom; }) || {};
         var dispo = (S.campLibres || []).filter(function (t) { return t.campagne === nom; }).length;
         var miens = (S.mesSollis || []).filter(function (t) { return t.campagne === nom; }).length;
-        var n = Number(tot.nb_sollicitations) || 0, tr = Number(tot.nb_traitees) || 0, pct = n ? Math.round(100 * tr / n) : 0;
+        var av = (S.campAv || {})[nom];
+        var n = av ? Number(av.clients) || 0 : Number(tot.nb_sollicitations) || 0, tr = av ? Number(av.traites) || 0 : Number(tot.nb_traitees) || 0, pct = n ? Math.round(100 * tr / n) : 0;
         var bits = [dispo ? 'à prendre' : 'tout est pris', miens ? miens + ' à vous' : '', n ? pct + ' % traités' : ''].filter(Boolean).join(' · ');
         // pastille = reste à prendre, même pastille verte que l'onglet Campagnes et la barre de navigation
         return '<button type="button" role="tab" aria-selected="' + (nom === sel) + '" class="cp-tab' + (nom === sel ? ' on' : '') + '" data-a="cp-camp" data-id="' + esc(nom) + '"'
@@ -7086,6 +7124,7 @@
 .lmtc .cp-k{background:var(--calme-bg);border-radius:10px;padding:9px 12px;display:flex;flex-direction:column}
 .lmtc .cp-k b{font-size:20px;font-weight:800;color:var(--bleu-dk);line-height:1.1}
 .lmtc .cp-k small{font-size:11.5px;color:var(--ink-2);margin-top:2px}
+.lmtc .cp-k .cp-kp{font-size:12px;font-weight:700;color:var(--ink-3)}
 .lmtc .cp-k.alerte{background:var(--alerte-bg)}
 .lmtc .cp-k.ok{background:var(--ok-bg)}.lmtc .cp-k.ok b{color:var(--m-vert)}
 .lmtc .cp-av{display:flex;align-items:center;gap:10px;font-size:12px;color:var(--ink-2);margin-bottom:6px}

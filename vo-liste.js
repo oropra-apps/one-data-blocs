@@ -1,4 +1,8 @@
 // ============================================================================
+//  v44 (26/11/2026) : FICHE VO — deux champs Planet VO² dans « Stock · Achat » :
+//    « Ancien propriétaire » (vendeur du véhicule à la concession) et
+//    « Repreneur » (utilisateur PVO² qui a repris le véhicule). Lus à
+//    l'ouverture de la fiche par public.vo_pvo_personnes(vin).
 //  v43 (06/11/2026) : module partagé oropra-bacs-client v7 — la création d'un
 //    client ne propose plus d'envoyer la demande de consentement par SMS (les
 //    vendeurs la recueillent à la commande). Aucun autre changement.
@@ -451,10 +455,30 @@ OD.define('vo-liste', {
     ficheState.apv = null;
     ficheState.photosLoading = !ficheState.photos; ficheState.apvLoading = false;
     ficheState.av = undefined; ficheState.avLoading = false; ficheState.avMsg = null; ficheState.avEdit = false;
+    ficheState.pers = undefined;
     if (ficheState.tab === 'autoviza') loadAutoviza(vin);
+    loadPersonnesPvo(vin);
     renderFichePopup();
     // Charge les photos seulement si pas en cache
     if (!ficheState.photos) loadPhotos(vin);
+  }
+
+  // ── v44 : ancien propriétaire et repreneur Planet VO² ────────────────────
+  async function loadPersonnesPvo(vin) {
+    var c = sb(); if (!c || !vin) return;
+    try {
+      var r = await c.rpc('vo_pvo_personnes', { p_vin: vin });
+      if (ficheState.vin !== vin) return;
+      ficheState.pers = (r && !r.error && r.data) ? r.data : null;
+    } catch (e) { if (ficheState.vin === vin) ficheState.pers = null; }
+    if (ficheState.vin === vin && ficheState.tab === 'fiche' && doc.getElementById('vo-fiche-overlay')) renderFichePopup();
+  }
+  function persPvoRows() {
+    var p = ficheState.pers;
+    var att = '<span style="color:#9bb3d1">\u2026</span>';
+    var ap = p === undefined ? att : (p && p.ancien_proprietaire ? esc(p.ancien_proprietaire) : '-');
+    var rp = p === undefined ? att : (p && p.repreneur ? esc(p.repreneur) : '-');
+    return vfRow('Ancien propriétaire', ap) + vfRow('Repreneur', rp);
   }
 
   // ─────────────────────────────────────────── onglet Historique Autoviza (v28)
@@ -1766,6 +1790,7 @@ OD.define('vo-liste', {
       vfRow('Garantie', esc(garantieTxt(row))) +
       vfRow('1ère MEC', esc(fmtDateFR(row.D_1MEC))) +
       vfRow('Date achat', esc(fmtDateFR(row.D_ACHAT))) +
+      persPvoRows() +
       // Prix d'achat : la base ne le rend qu'aux chefs des ventes et à leur hiérarchie (od_voit_prix_achat).
       (row.PA_HT_TTC != null && row.PA_HT_TTC !== '' ? vfRow('Prix d\'achat', '<b style="color:#1F4A85">' + esc(eur(row.PA_HT_TTC)) + '</b>') : '') +
       (row.MT_FREVO_R != null && row.MT_FREVO_R !== '' && Number(row.MT_FREVO_R) !== 0 ? vfRow('Frais de remise en état', esc(eur(row.MT_FREVO_R))) : '') +
@@ -3164,6 +3189,7 @@ OD.define('vo-liste', {
       vfRow('Garantie', esc(garantieTxt(row))) +
       vfRow('1ère MEC', esc(fmtDateFR(row.D_1MEC))) +
       vfRow('Date achat', esc(fmtDateFR(row.D_ACHAT))) +
+      persPvoRows() +
       // Prix d'achat : la base ne le rend qu'aux chefs des ventes et à leur hiérarchie (od_voit_prix_achat).
       (row.PA_HT_TTC != null && row.PA_HT_TTC !== '' ? vfRow('Prix d\'achat', '<b style="color:#1F4A85">' + esc(eur(row.PA_HT_TTC)) + '</b>') : '') +
       (row.MT_FREVO_R != null && row.MT_FREVO_R !== '' && Number(row.MT_FREVO_R) !== 0 ? vfRow('Frais de remise en état', esc(eur(row.MT_FREVO_R))) : '') +
