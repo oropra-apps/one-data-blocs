@@ -1805,6 +1805,8 @@ OD.define('notifications', {
     function crDegres() {
       return CR_ECH.filter(e => crs.famille !== 'appel' || e.appel);
     }
+    // Repris de l'agenda (agToday n'existe pas dans ce module) : date du jour AAAA-MM-JJ.
+    function agToday() { const d = new Date(); return d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0'); }
     function crJour(iso) {
       if (!iso) return '';
       const d = new Date(String(iso).replace(' ', 'T'));
