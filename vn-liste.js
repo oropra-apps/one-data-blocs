@@ -14,6 +14,14 @@
 //    le détail (vn_bacs_fiche), avec un lien direct vers le véhicule dans BACS.
 //  * Le stock reste celui du DMS (v_liste_vn) : c'est lui qui dit ce qui est
 //    en stock, à quel prix et depuis quand ; BACS décrit la voiture.
+//  v24 (26/11/2026) : retour d'Antoine sur la v21.
+//  * Marque lue dans BACS (TOYOTA, LEXUS…) et non plus dans le DMS, qui en
+//    donnait trois (TOYOTA, TOYOTA VN, LEXUS) ; véhicule absent de BACS : marque
+//    du DMS sans le suffixe VN / VO / VD.
+//  * Marque posée par défaut sur celle du site choisi dans la barre du haut.
+//  * Filtre Modèle de nouveau après la marque (comme en v14) : il n'apparaît
+//    qu'une marque choisie et ne propose que ses familles.
+//  * Filtre « Lieu de stockage » retiré (libellés DMS pleins de faux doublons).
 //  v23 (26/11/2026) : réunit les deux correctifs du 25/11, déployés chacun à
 //    partir de la v20 (la v22 avait effacé les filtres de la v21).
 //  v22 (25/11/2026) : un véhicule « Disponible » au DMS mais en « Livraison
@@ -145,6 +153,13 @@ OD.define('vn-liste', {
   // N° de commande DBS (commande fournisseur) ; « 0 » = pas de commande.
   function numCommande(r) { var c = r && r.commande_fournisseur; c = c == null ? '' : String(c).trim(); return c && c !== '0' ? c : ''; }
   function bacsDe(r) { var c = numCommande(r); return c ? S.bacs[c] || null : null; }
+  // v24 : marque du filtre, lue dans BACS ; à défaut, celle du DMS sans suffixe (TOYOTA VN -> TOYOTA).
+  function marqueF(r) {
+    var b = bacsDe(r);
+    if (b && notEmpty(b.marque)) return String(b.marque).toUpperCase();
+    var m = String((r && r.marque) || '').replace(/\s+V[NDO]$/i, '').trim().toUpperCase();
+    return m || null;
+  }
   // v19 : AMC = code et date AMC de la fiche véhicule BACS (seule source).
   function amcActif(r) { var b = bacsDe(r); return !!(b && (notEmpty(b.amc_code) || b.amc_date)); }
   function amcDate(r) { var b = bacsDe(r); return b && b.amc_date || null; }
@@ -387,6 +402,9 @@ OD.define('vn-liste', {
       S.f.reseau = p.reseau || null;
       S.f.affaire = p.affaire || null;
       S.f.site = p.site || null;
+      // v24 : marque du site de la barre du haut (SITE.RESEAU : TOYOTA, LEXUS)
+      var mq = String(p.reseau || '').trim().toUpperCase();
+      if (mq && S.raw.some(function (r) { return marqueF(r) === mq; })) { S.f.marque = mq; S.f.modele = null; }
       S.page = 1;
     }
     rendre();
@@ -402,7 +420,7 @@ OD.define('vn-liste', {
       if (f.reseau && r.reseau !== f.reseau) return false;
       if (f.affaire && r.affaire !== f.affaire) return false;
       if (f.site && r.site !== f.site) return false;
-      if (f.marque && r.marque !== f.marque) return false;
+      if (f.marque && marqueF(r) !== f.marque) return false;
       if (f.modele && familleDe(r) !== f.modele) return false;   // v14
       if (f.energie && r.energie !== f.energie) return false;
       if (f.statut && r.statut !== f.statut) return false;
@@ -446,10 +464,11 @@ OD.define('vn-liste', {
 
   // v14 : famille commerciale du modèle (repli : libellé brut)
   function familleDe(r) { return notEmpty(r.modele_famille) ? r.modele_famille : (r.modele || null); }
-  // v21 : visible sans marque choisie (familles de toutes les marques).
+  // v24 : de nouveau après la marque (v14) : visible une marque choisie, avec ses seules familles.
   function selModele() {
+    if (!S.f.marque) return '';
     var vues = {};
-    S.raw.forEach(function (r) { if (!S.f.marque || r.marque === S.f.marque) { var m = familleDe(r); if (notEmpty(m)) vues[m] = 1; } });
+    S.raw.forEach(function (r) { if (marqueF(r) === S.f.marque) { var m = familleDe(r); if (notEmpty(m)) vues[m] = 1; } });
     var vals = Object.keys(vues).sort(function (a, b) { return a.localeCompare(b, 'fr'); });
     if (!vals.length) return '';
     return '<select class="vn-sel" data-f="modele">'
@@ -534,8 +553,8 @@ OD.define('vn-liste', {
     return '<div class="vn-filtres">'
       + '<input class="vn-rech" id="vn-q" placeholder="VIN, immatriculation, modèle, n° de commande…" value="' + esc(S.recherche) + '">'
       + sel('reseau', 'Réseau') + sel('affaire', 'Affaire') + sel('site', 'Site')
-      + sel('marque', 'Marque') + selModele() + sel('energie', 'Énergie')
-      + selStatut() + selParc() + selAmcCode() + sel('lieu', 'Lieu de stockage', 'lieu_stockage')
+      + selMarque() + selModele() + sel('energie', 'Énergie')
+      + selStatut() + selParc() + selAmcCode()
       + '<button class="vn-raz" id="vn-raz">Tout effacer</button>'
       + '<button class="vn-xls" id="vn-xls" title="Exporter dans Excel les véhicules affichés (filtres en cours)">' + LOGO_XLS + '<span>Exporter</span></button>'
       + '</div>' + chips();
@@ -557,6 +576,17 @@ OD.define('vn-liste', {
       + '<span class="vn-chip-sep"></span>'
       + '<button type="button" class="vn-chip amc' + (S.f.amc === 'oui' ? ' on' : '') + '" data-chip="amc" data-val="' + (S.f.amc === 'oui' ? '' : 'oui') + '" title="Véhicules déclarés AMC dans BACS">AMC <i>' + ent(compte('amc', 'oui')) + '</i></button>'
       + '</div>';
+  }
+  // v24 : marques lues dans BACS (marqueF)
+  function selMarque() {
+    var vues = {};
+    S.raw.forEach(function (r) { var m = marqueF(r); if (m) vues[m] = 1; });
+    if (S.f.marque) vues[S.f.marque] = 1;
+    var vals = Object.keys(vues).sort(function (a, b) { return a.localeCompare(b, 'fr'); });
+    if (!vals.length) return '';
+    return '<select class="vn-sel" data-f="marque"><option value="">Marque</option>'
+      + vals.map(function (v) { return '<option value="' + esc(v) + '"' + (S.f.marque === v ? ' selected' : '') + '>' + esc(propre(v)) + '</option>'; }).join('')
+      + '</select>';
   }
   function sel(cle, lbl, champ) {
     var vals = valeursDe(champ || cle);
