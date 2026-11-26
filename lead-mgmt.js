@@ -4527,7 +4527,7 @@
         h += '<label class="cd-lab">Commentaire (facultatif)<textarea id="cd-com" rows="2" placeholder="Ce que le client a dit…">' + esc(D.com || '') + '</textarea></label>'
           + '<div class="cd-btns"><button type="button" class="btn pri" data-a="cd-valider"' + (D.busy ? ' disabled' : '') + '>' + (D.busy ? 'Enregistrement…' : 'Enregistrer') + '</button></div>';
       }
-      h += '</section></div><footer class="dr-f"><div class="row pied"><span class="cd-mut">Pas pour vous ? Remettez-le à disposition de l\'équipe.</span><button type="button" class="btn ghost sm" data-a="camp-rendre" data-id="' + D.id + '">Rendre</button></div></footer>';
+      h += '</section></div><footer class="dr-f"><div class="row pied"><span class="cd-mut">Pas pour vous ? Confiez-le à un collègue ou remettez-le à l\'équipe.</span><span class="cd-pied-btns"><button type="button" class="fs-btn passer" data-a="camp-passer" data-id="' + D.id + '">' + svgIc(PM_ICONE) + 'Passer la main</button><button type="button" class="btn ghost sm" data-a="camp-rendre" data-id="' + D.id + '">Rendre</button></span></div></footer>';
       $drawer.innerHTML = h;
     }
     function fTelCd(n) {
@@ -6058,8 +6058,9 @@
     // un collègue (l'équipe du site d'abord, les autres sites par filtres marque /
     // affaire / site / VN-VO et recherche), un motif et écrit une note de contexte.
     // Le collègue est notifié ; avec « Lui confier le suivi », les leads ouverts du
-    // vendeur sur ce client passent dans sa file, sur son site s'il travaille
-    // ailleurs (RPC passer_main_contexte / passer_main).
+    // vendeur sur ce client (et ses relances de campagne en cours) passent chez
+    // lui ; un lead va sur son site s'il travaille ailleurs, une relance reste sur
+    // le sien (RPC passer_main_contexte / passer_main).
     var PM_MOTIFS = [['projet_vn', 'Projet VN'], ['projet_vo', 'Projet VO'], ['deja_suivi', 'Client déjà suivi par ce collègue'], ['absence', 'Absence'], ['autre', 'Autre']];
     var PM_CSS = ''
       + '.pm-ov{position:fixed;inset:0;z-index:100000;background:rgba(20,48,90,.38);display:flex;align-items:center;justify-content:center;padding:16px;font-family:inherit}'
@@ -6077,7 +6078,7 @@
       + '.pm-chips button[aria-pressed="true"]{border-color:#1F4A85;background:#E8EEF7;color:#1F4A85}'
       // Sélecteur de collègue
       + '.pm-onglets{display:flex;background:#F0F4FA;border-radius:10px;padding:3px;gap:3px;margin-bottom:8px}'
-      + '.pm-onglets button{flex:1;border:0;background:none;border-radius:8px;padding:8px 10px;font:inherit;font-size:13px;font-weight:800;color:#5A72A0;cursor:pointer;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}'
+      + '.pm-onglets button{flex:1;border:0;background:none;border-radius:8px;padding:8px 10px;font:inherit;font-size:13px;font-weight:800;color:#5A72A0;cursor:pointer;line-height:1.25}'
       + '.pm-onglets button[aria-selected="true"]{background:#fff;color:#1F4A85;box-shadow:0 1px 3px rgba(20,48,90,.12)}'
       + '.pm-liste{border:1.5px solid #DCE4F0;border-radius:10px;max-height:260px;overflow:auto}'
       + '.pm-gr{position:sticky;top:0;background:#F5F8FC;padding:6px 12px;font-size:11.5px;font-weight:800;letter-spacing:.03em;text-transform:uppercase;color:#5A72A0;border-bottom:1px solid #E8EEF7}'
@@ -6090,8 +6091,12 @@
       + '.pm-p small{display:block;font-size:12.5px;color:#5A72A0;margin-top:1px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}'
       + '.pm-bad{flex:none;font-size:11.5px;font-weight:800;color:#1F7A4D;background:#E6F4EC;border-radius:999px;padding:3px 8px}'
       + '.pm-filtres{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:8px}'
-      + '.pm-filtres select{flex:1 1 130px;width:auto}'
       + '.pm-filtres .pm-q,.pm-filtres .pm-chips{flex:1 1 100%}'
+      + '.pm-n{display:flex;align-items:center;gap:6px;width:100%;border:0;border-bottom:1px solid #EEF2F8;background:#fff;padding:9px 12px;font:inherit;font-size:14px;font-weight:800;color:#14305A;text-align:left;cursor:pointer}'
+      + '.pm-n:hover{background:#F5F8FC}.pm-n .t{flex:1;min-width:0}.pm-n em{font-style:normal;font-size:12px;font-weight:600;color:#5A72A0;flex:none}'
+      + '.pm-chev{width:14px;flex:none;color:#5A72A0;font-size:11px}'
+      + '.pm-n.niv1{padding-left:28px;font-weight:700}.pm-n.niv2{padding-left:44px;font-weight:600}.pm-n.niv3{padding-left:60px;font-weight:600}'
+      + '.pm-p.niv1{padding-left:30px}.pm-p.niv2{padding-left:48px}.pm-p.niv3{padding-left:66px}'
       + '.pm-vide{padding:14px 12px;font-size:13px;color:#5A72A0}'
       + '.pm-plus{padding:8px 12px;font-size:12.5px;color:#5A72A0;background:#F5F8FC}'
       + '.pm-choisi{display:flex;align-items:center;gap:10px;border:1.5px solid #1F4A85;background:#F5F8FC;border-radius:10px;padding:10px 12px}'
@@ -6112,7 +6117,7 @@
       + '.pm select,.pm textarea,.pm input[type=search]{font-size:16px}.pm-liste{max-height:42vh}}';
     var PM_ICONE = '<path d="M7 7h11l-3-3M17 17H6l3 3"/><circle cx="4.5" cy="7" r="1.5"/><circle cx="19.5" cy="17" r="1.5"/>';
 
-    // o : { doc, rpc(nom, args) → Promise, idClient, idLead, nomClient, toast(msg, err), apres(resultat) }
+    // o : { doc, rpc(nom, args) → Promise, idClient, idLead, idRapport, nomClient, toast(msg, err), apres(resultat) }
     function pmOuvrir(o) {
       var d = o.doc || document;
       var echap = function (s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); };
@@ -6123,7 +6128,7 @@
         + '<button type="button" class="pm-x" data-pm="fermer" aria-label="Fermer">×</button></div><div class="pm-b"><p class="pm-hint">Chargement des collègues…</p></div></div>';
       d.body.appendChild(ov);
       var etat = { ctx: null, vers: null, motif: null, confier: true, envoi: false, erreur: null, note: '',
-                   choix: true, onglet: 'site', f: { marque: '', affaire: '', site: '', univ: '', q: '' } };
+                   choix: true, onglet: 'site', f: { univ: '', q: '' }, plis: {} };
       var fermer = function () { ov.remove(); d.removeEventListener('keydown', clavier); };
       var clavier = function (e) { if (e.key === 'Escape') fermer(); };
       d.addEventListener('keydown', clavier);
@@ -6154,11 +6159,16 @@
         vs.sort(function (a, b) { return ((String(b.id) === String(etat.ctx.site_ref)) - (String(a.id) === String(etat.ctx.site_ref))) || ((b.affaire === af) - (a.affaire === af)) || (Number(a.id) - Number(b.id)); });
         return vs[0];
       };
-      var peutConfier = function () { var c = collegue(); return !!(etat.ctx && etat.ctx.leads.length && c && siteCible(c)); };
+      // Ce qui peut être confié à ce collègue : les leads s'il est vendeur quelque part, les relances
+      // de campagne s'il couvre leur site.
+      var leadsConfiables = function (c) { return c && siteCible(c) ? etat.ctx.leads : []; };
+      var relancesConfiables = function (c) { return !c ? [] : etat.ctx.relances.filter(function (r) { return sitesDe(c).some(function (s) { return String(s.id) === String(r.id_site); }); }); };
+      var aConfier = function () { return etat.ctx.leads.length + etat.ctx.relances.length; };
+      var peutConfier = function () { var c = collegue(); return !!(etat.ctx && c && (leadsConfiables(c).length || relancesConfiables(c).length)); };
       var nomsSites = function (c) { return sitesDe(c).map(function (s) { return s.nom; }).sort(cmp).join(', '); };
 
-      var ligne = function (c, sousTitre) {
-        return '<button type="button" class="pm-p" role="radio" data-pm="choisir" data-v="' + c.id_user + '" aria-checked="' + (String(c.id_user) === String(etat.vers)) + '">'
+      var ligne = function (c, sousTitre, niv) {
+        return '<button type="button" class="pm-p' + (niv ? ' niv' + Math.min(niv, 3) : '') + '" role="radio" data-pm="choisir" data-v="' + c.id_user + '" aria-checked="' + (String(c.id_user) === String(etat.vers)) + '">'
           + '<span class="pm-rd"></span><span class="t"><b>' + echap(c.nom) + '</b>' + (sousTitre ? '<small>' + echap(sousTitre) + '</small>' : '') + '</span>'
           + (c.suit ? '<span class="pm-bad">suit ce client</span>' : '') + '</button>';
       };
@@ -6173,53 +6183,84 @@
         }).join('') + '</div>';
       }
 
-      // Autres sites : filtres en cascade marque → affaire → site, univers VN/VO, recherche par nom.
+      // Autres sites : arbre dépliable marque › affaire › site › collègues (comme le périmètre du
+      // tableau de bord direction), filtre VN/VO, et recherche par nom qui aplatit la liste.
       var autres = function () { return etat.ctx.collegues.filter(function (c) { return !surSiteRef(c); }); };
-      var sitesFiltres = function (niveau) {
-        var f = etat.f, out = [];
-        autres().forEach(function (c) { sitesDe(c).forEach(function (s) {
-          if (niveau !== 'marque' && f.marque && s.marque !== f.marque) return;
-          if (niveau === 'site' && f.affaire && s.affaire !== f.affaire) return;
-          out.push(s);
-        }); });
-        return out;
+      var passeUniv = function (c) { var f = etat.f.univ; if (!f) return true; var u = univ(c); return u === f || u === 'VNVO' || (u === '' && estChef(c, false)); };
+      var nbC = function (n) { return n + (n > 1 ? ' collègues' : ' collègue'); };
+      function arbreAutres() {
+        var M = {};
+        autres().filter(passeUniv).forEach(function (c) {
+          sitesDe(c).forEach(function (s) {
+            if (String(s.id) === String(etat.ctx.site_ref)) return;
+            var mk = s.marque || 'Sans marque', ak = s.affaire || 'Sans affaire';
+            var m = M[mk] || (M[mk] = { lab: mk, aff: {} });
+            var af = m.aff[ak] || (m.aff[ak] = { lab: ak, sites: {} });
+            var st = af.sites[s.id] || (af.sites[s.id] = { id: s.id, lab: s.nom, gens: [] });
+            st.gens.push({ c: c, chef: !!s.chef });
+          });
+        });
+        var trie = function (o) { return Object.keys(o).map(function (k) { return o[k]; }).sort(function (x, y) { return cmp(x.lab, y.lab); }); };
+        return trie(M).map(function (m) {
+          var affs = trie(m.aff).map(function (af) {
+            var ss = trie(af.sites); ss.forEach(function (s) { s.n = s.gens.length; });
+            return { lab: af.lab, sites: ss, n: ss.reduce(function (t, s) { return t + s.n; }, 0) };
+          });
+          return { lab: m.lab, aff: affs, n: affs.reduce(function (t, a) { return t + a.n; }, 0) };
+        });
+      }
+      // Plis : marques ouvertes, affaires et sites fermés par défaut ; un échelon sans choix est sauté.
+      var ouvert = function (k, defaut) { return etat.plis[k] == null ? defaut : etat.plis[k]; };
+      var noeud = function (k, lab, n, niv, ouv) {
+        return '<button type="button" class="pm-n niv' + niv + '" data-pm="pli" data-k="' + echap(k) + '" aria-expanded="' + ouv + '">'
+          + '<span class="pm-chev">' + (ouv ? '▾' : '▸') + '</span><span class="t">' + echap(lab) + '</span><em>' + nbC(n) + '</em></button>';
       };
-      var valeurs = function (liste, cle) { var vu = {}; liste.forEach(function (s) { if (s[cle] != null && s[cle] !== '') vu[s[cle]] = s; }); return Object.keys(vu).sort(cmp).map(function (k) { return vu[k]; }); };
-      var selectF = function (cle, libTous, opts, val, lib) {
-        return '<select data-pmf="' + cle + '" aria-label="' + libTous + '"><option value="">' + libTous + '</option>' + opts.map(function (s) {
-          var v = String(val(s)); return '<option value="' + echap(v) + '"' + (v === String(etat.f[cle]) ? ' selected' : '') + '>' + echap(lib(s)) + '</option>'; }).join('') + '</select>';
-      };
+      function htmlArbre() {
+        var arbre = arbreAutres();
+        if (!arbre.length) return '<div class="pm-vide">Aucun collègue sur les autres sites' + (etat.f.univ ? ' pour ce filtre' : '') + '.</div>';
+        var h = '', plusieursM = arbre.length > 1;
+        arbre.forEach(function (m) {
+          var niv = 0;
+          if (plusieursM) { var km = 'm:' + m.lab, om = ouvert(km, true); h += noeud(km, m.lab, m.n, 0, om); if (!om) return; niv = 1; }
+          var plusieursA = m.aff.length > 1;
+          m.aff.forEach(function (af) {
+            var niv2 = niv;
+            if (plusieursA) { var ka = 'a:' + m.lab + '|' + af.lab, oa = ouvert(ka, false); h += noeud(ka, af.lab, af.n, niv, oa); if (!oa) return; niv2 = niv + 1; }
+            af.sites.forEach(function (s) {
+              var ks = 's:' + s.id, os = ouvert(ks, false);
+              h += noeud(ks, s.lab, s.n, niv2, os);
+              if (!os) return;
+              s.gens.sort(function (x, y) { return (y.chef - x.chef) || (y.c.suit - x.c.suit) || cmp(x.c.nom, y.c.nom); }).forEach(function (g) {
+                h += ligne(g.c, g.chef ? 'chef des ventes' : fonctionCourte(g.c, false), niv2 + 1);
+              });
+            });
+          });
+        });
+        return h;
+      }
+      function htmlRecherche(q) {
+        var cs = autres().filter(function (c) { return passeUniv(c) && sansAccent(c.nom).indexOf(q) >= 0; })
+          .sort(function (a, b) { return (b.suit - a.suit) || cmp(a.nom, b.nom); });
+        if (!cs.length) return '<div class="pm-vide">Aucun collègue ne porte ce nom sur les autres sites.</div>';
+        var MAX = 40;
+        return cs.slice(0, MAX).map(function (c) { return ligne(c, [fonctionCourte(c, false), nomsSites(c)].join(' · ')); }).join('')
+          + (cs.length > MAX ? '<div class="pm-plus">' + (cs.length - MAX) + ' autres : précisez le nom.</div>' : '');
+      }
       function htmlFiltres() {
-        var marques = valeurs(sitesFiltres('marque'), 'marque'), affaires = valeurs(sitesFiltres('affaire'), 'affaire'), sites = valeurs(sitesFiltres('site'), 'nom');
         return '<div class="pm-filtres">'
           + '<input type="search" class="pm-q" data-pmf="q" placeholder="Rechercher un nom" value="' + echap(etat.f.q) + '" autocomplete="off">'
-          + (marques.length > 1 ? selectF('marque', 'Toutes marques', marques, function (s) { return s.marque; }, function (s) { return s.marque; }) : '')
-          + (affaires.length > 1 ? selectF('affaire', 'Toutes affaires', affaires, function (s) { return s.affaire; }, function (s) { return s.affaire; }) : '')
-          + selectF('site', 'Tous sites', sites, function (s) { return s.id; }, function (s) { return s.nom; })
           + '<div class="pm-chips" role="group" aria-label="Univers">' + [['', 'VN et VO'], ['VN', 'VN'], ['VO', 'VO']].map(function (u) {
               return '<button type="button" data-pm="univ" data-v="' + u[0] + '" aria-pressed="' + (etat.f.univ === u[0]) + '">' + u[1] + '</button>'; }).join('') + '</div>'
           + '</div><div class="pm-liste pm-res" role="radiogroup"></div>';
       }
-      function htmlResultats() {
-        var f = etat.f, q = sansAccent(f.q).trim();
-        var cs = autres().filter(function (c) {
-          var ss = sitesDe(c).filter(function (s) { return (!f.marque || s.marque === f.marque) && (!f.affaire || s.affaire === f.affaire) && (!f.site || String(s.id) === String(f.site)); });
-          if (!ss.length) return false;
-          if (f.univ) { var u = univ(c); if (u !== f.univ && u !== 'VNVO' && !(u === '' && estChef(c, false))) return false; }
-          return !q || sansAccent(c.nom).indexOf(q) >= 0;
-        }).sort(function (a, b) { return (b.suit - a.suit) || cmp(a.nom, b.nom); });
-        if (!cs.length) return '<div class="pm-vide">Aucun collègue ne correspond à ces filtres.</div>';
-        var MAX = 40;
-        return cs.slice(0, MAX).map(function (c) { return ligne(c, [fonctionCourte(c, false), nomsSites(c)].join(' · ')); }).join('')
-          + (cs.length > MAX ? '<div class="pm-plus">' + (cs.length - MAX) + ' autres : affinez avec les filtres ou le nom.</div>' : '');
-      }
+      function htmlResultats() { var q = sansAccent(etat.f.q).trim(); return q ? htmlRecherche(q) : htmlArbre(); }
       function rendreResultats() { var r = ov.querySelector('.pm-res'); if (r) r.innerHTML = htmlResultats(); }
 
       function dessiner() {
         var ctx = etat.ctx, b = ov.querySelector('.pm-b');
         var f = ov.querySelector('.pm-f'); if (f) f.remove();
         if (!ctx.collegues.length) { b.innerHTML = '<p class="pm-hint">Aucun collègue vendeur actif dans le groupe.</p>'; return; }
-        var n = ctx.leads.length, c = collegue(), ok = peutConfier();
+        var n = aConfier(), c = collegue(), ok = peutConfier();
         var nomSite = ctx.site_ref_nom ? String(ctx.site_ref_nom) : 'Ce site';
         var h = '<div><span class="pm-l">Collègue</span>';
         if (c && !etat.choix) {
@@ -6236,15 +6277,23 @@
               return '<button type="button" data-pm="motif" data-v="' + m[0] + '" aria-pressed="' + (etat.motif === m[0]) + '">' + m[1] + '</button>'; }).join('') + '</div></div>'
           + '<div><label class="pm-l" for="pm-note">Note pour votre collègue</label><textarea id="pm-note" maxlength="600" placeholder="Ce qu\'il doit savoir : le besoin, le véhicule, ce qui a été dit, la prochaine étape…">' + echap(etat.note) + '</textarea></div>';
         if (n) {
-          var liste = ctx.leads.slice(0, 3).map(function (l) { return [l.vehicule, l.source].filter(Boolean).join(' · ') || 'lead'; }).join(' ; ');
-          var cible = c && ok ? siteCible(c) : null;
+          var ls = c ? leadsConfiables(c) : ctx.leads, rs = c ? relancesConfiables(c) : ctx.relances;
+          var cible = c && ls.length ? siteCible(c) : null;
           var ailleurs = cible && String(cible.id) !== String(ctx.site_ref);
+          var morceaux = [];
+          if (ls.length) morceaux.push((ls.length > 1 ? 'Vos ' + ls.length + ' leads ouverts sur ce client passent dans sa file' : 'Votre lead passe dans sa file')
+            + (ailleurs ? ', sur le site ' + echap(cible.nom) : '') + ' (' + echap(ls.slice(0, 3).map(function (l) { return [l.vehicule, l.source].filter(Boolean).join(' · ') || 'lead'; }).join(' ; ')) + ')');
+          if (rs.length) morceaux.push((rs.length > 1 ? 'vos ' + rs.length + ' relances de campagne passent' : 'la relance' + (rs[0].campagne ? ' « ' + echap(rs[0].campagne) + ' »' : '') + ' passe')
+            + ' dans ses relances, avec une heure pour la traiter');
+          var pasTout = c && ok && (ls.length < ctx.leads.length || rs.length < ctx.relances.length);
+          var txt = !c || ok ? (morceaux.join(' ; ').replace(/^./, function (x) { return x.toUpperCase(); }) + '. Vous n\'en serez plus responsable, ni crédité de la vente.'
+                                + (pasTout ? ' Le reste ne peut pas lui être confié (site non couvert, ou lead réservé à un vendeur).' : ''))
+            : (ctx.leads.length && !ctx.relances.length ? 'Un chef des ventes peut être prévenu, mais le lead ne peut être confié qu\'à un vendeur.'
+               : 'Ce collègue ne couvre pas le site concerné : il peut être prévenu, pas recevoir le suivi.');
           h += '<label class="pm-conf' + (ok || !c ? '' : ' off') + '"><input type="checkbox" id="pm-confier"' + (ok && etat.confier ? ' checked' : '') + (ok || !c ? '' : ' disabled') + '>'
-            + '<span><b>Lui confier le suivi</b><small>' + (c && !ok ? 'Un chef des ventes peut être prévenu, mais le lead ne peut être confié qu\'à un vendeur.'
-              : (n > 1 ? 'Vos ' + n + ' leads ouverts sur ce client passent dans sa file' : 'Votre lead passe dans sa file')
-                + (ailleurs ? ', sur le site ' + echap(cible.nom) : '') + ' (' + echap(liste) + '). Vous n\'en serez plus responsable, ni crédité de la vente.') + '</small></span></label>';
+            + '<span><b>Lui confier le suivi</b><small>' + txt + '</small></span></label>';
         } else {
-          h += '<p class="pm-hint">Aucun lead ouvert à votre nom sur ce client : votre collègue est prévenu sur la fiche, le suivi ne change pas.</p>';
+          h += '<p class="pm-hint">Rien d\'ouvert à votre nom sur ce client : votre collègue est prévenu sur la fiche, le suivi ne change pas.</p>';
         }
         if (etat.erreur) h += '<p class="pm-err">' + echap(etat.erreur) + '</p>';
         b.innerHTML = h;
@@ -6262,13 +6311,6 @@
         var k = e.target.getAttribute && e.target.getAttribute('data-pmf'); if (k !== 'q') return;
         etat.f.q = e.target.value; rendreResultats();
       });
-      ov.addEventListener('change', function (e) {
-        var k = e.target.getAttribute && e.target.getAttribute('data-pmf'); if (!k || k === 'q') return;
-        etat.f[k] = e.target.value;
-        if (k === 'marque') { etat.f.affaire = ''; etat.f.site = ''; }
-        if (k === 'affaire') etat.f.site = '';
-        lireNote(); dessiner();
-      });
       ov.addEventListener('click', function (e) {
         if (e.target === ov) return fermer();
         var x = e.target.closest('[data-pm]'); if (!x) return;
@@ -6277,6 +6319,7 @@
         lireNote();
         if (a === 'motif') { etat.motif = x.getAttribute('data-v'); return dessiner(); }
         if (a === 'onglet') { etat.onglet = x.getAttribute('data-v'); return dessiner(); }
+        if (a === 'pli') { var kp = x.getAttribute('data-k'); etat.plis[kp] = x.getAttribute('aria-expanded') !== 'true'; return rendreResultats(); }
         if (a === 'univ') { etat.f.univ = x.getAttribute('data-v'); return dessiner(); }
         if (a === 'changer') { etat.choix = true; var cc0 = collegue(); if (cc0) etat.onglet = surSiteRef(cc0) ? 'site' : 'autre'; return dessiner(); }
         if (a === 'choisir') {
@@ -6291,24 +6334,27 @@
           else if (!etat.motif) etat.erreur = 'Choisissez un motif.';
           else if (etat.note.trim().length < 5) etat.erreur = 'Écrivez une note de contexte : votre collègue ne doit pas avoir à rappeler le client pour reposer les mêmes questions.';
           if (etat.erreur) return dessiner();
-          var confier = !!(etat.ctx.leads.length && peutConfier() && etat.confier);
+          var confier = !!(aConfier() && peutConfier() && etat.confier), cv = collegue();
           etat.envoi = true; dessiner();
           o.rpc('passer_main', { p_id_vers: Number(etat.vers), p_id_client: etat.ctx.client != null ? Number(etat.ctx.client) : (o.idClient != null ? Number(o.idClient) : null),
-            p_id_leads: confier ? etat.ctx.leads.map(function (l) { return Number(l.id_lead); }) : null, p_confier: confier, p_motif: etat.motif, p_note: etat.note.trim() })
+            p_id_leads: confier ? leadsConfiables(cv).map(function (l) { return Number(l.id_lead); }) : null,
+            p_id_rapports: confier ? relancesConfiables(cv).map(function (r) { return Number(r.id_rapport); }) : null,
+            p_confier: confier, p_motif: etat.motif, p_note: etat.note.trim() })
             .then(function (r) {
               if (!r || !r.ok) { etat.envoi = false; etat.erreur = (r && r.motif) || 'Échec, réessayez.'; return dessiner(); }
               fermer();
-              if (o.toast) o.toast(r.confies ? 'Confié à ' + r.vers_nom + ' : ' + (r.confies > 1 ? r.confies + ' leads sont' : 'le lead est') + ' dans sa file' + (r.site_change ? ' (' + r.site_change + ')' : '') + '.' : r.vers_nom + ' est prévenu.');
+              if (o.toast) o.toast(r.confies ? 'Confié à ' + r.vers_nom + (r.site_change ? ' (' + r.site_change + ')' : '') + '.' : r.vers_nom + ' est prévenu.');
               if (o.apres) try { o.apres(r); } catch (e2) {}
             })
             .catch(function (e3) { etat.envoi = false; etat.erreur = String((e3 && e3.message) || e3).replace(/^\[lead\]\s*/, ''); dessiner(); });
         }
       });
 
-      o.rpc('passer_main_contexte', { p_id_client: o.idClient != null ? Number(o.idClient) : null, p_id_lead: o.idLead != null ? Number(o.idLead) : null })
+      o.rpc('passer_main_contexte', { p_id_client: o.idClient != null ? Number(o.idClient) : null, p_id_lead: o.idLead != null ? Number(o.idLead) : null,
+        p_id_rapport: o.idRapport != null ? Number(o.idRapport) : null })
         .then(function (ctx) {
-          etat.ctx = ctx || { leads: [], collegues: [] };
-          etat.ctx.leads = etat.ctx.leads || []; etat.ctx.collegues = etat.ctx.collegues || [];
+          etat.ctx = ctx || { leads: [], relances: [], collegues: [] };
+          etat.ctx.leads = etat.ctx.leads || []; etat.ctx.relances = etat.ctx.relances || []; etat.ctx.collegues = etat.ctx.collegues || [];
           // Quelqu'un suit déjà ce client : présélectionné (préférence à l'équipe du site).
           var suiveurs = etat.ctx.collegues.filter(function (c) { return c.suit; }).sort(function (a, b) { return surSiteRef(b) - surSiteRef(a); });
           if (suiveurs[0]) { etat.vers = suiveurs[0].id_user; etat.motif = 'deja_suivi'; etat.choix = false; }
@@ -6316,6 +6362,11 @@
           dessiner();
         })
         .catch(function (e) { ov.querySelector('.pm-b').innerHTML = '<p class="pm-err">' + echap(String((e && e.message) || e)) + '</p>'; });
+    }
+    function campPasser(id) {
+      var D = S.cdr; if (!D || D.id !== Number(id)) return;
+      pmOuvrir({ doc: doc, rpc: rpc, idRapport: Number(id), idClient: D.ct && D.ct.id_client, nomClient: propre(D.t.client_nom), toast: toast,
+        apres: function (r) { if (r && r.confies) { fermerTout(); chargerCampagnes().then(function () { render(); }); } } });
     }
     function passerMain(id) {
       var l = S.dr && S.dr.l; if (!l) return;
@@ -6471,6 +6522,7 @@
         case 'clore-inj': if (S.dr) fermerDrawer(); await ouvrir(id); if (S.dr) { S.dr.mode = 'clore'; renderDrawer(); var mm = $drawer.querySelector('#clore-motif'); if (mm) mm.value = 'injoignable'; } return;
         case 'fiche': return ficheClient(id);
         case 'camp-prendre': return campagneGeste('campagne_prendre', id, 'Client pris : vous avez 1 heure pour le traiter, sinon il revient à l\'équipe.');
+        case 'camp-passer': return campPasser(id);
         case 'camp-rendre': return campagneGeste('campagne_rendre', id, 'Client rendu : il est de nouveau à prendre.');
         case 'cp-raz': S.cf = { q: '', mod: '', flt: '' }; render(); return;
         case 'cp-camp':
@@ -6885,6 +6937,8 @@
 .lmtc-ov .drawer.pick{width:min(1080px,100%)}
 .lmtc-ov .drawer .lm-pick{min-height:320px}
 .lmtc-ov .dr-f .row.pied{justify-content:space-between;flex-wrap:nowrap}
+.lmtc-ov .dr-f .cd-pied-btns{display:flex;gap:8px;flex:none;align-items:center}
+@media (max-width:560px){.lmtc-ov .dr-f .row.pied{flex-wrap:wrap}.lmtc-ov .dr-f .cd-pied-btns{width:100%}.lmtc-ov .dr-f .cd-pied-btns>*{flex:1;justify-content:center}}
 .lmtc-ov .dr-f .row.inj-msg{gap:16px;margin-top:6px}
 .lmtc-ov .dr-f .row.inj-msg label{display:inline-flex;align-items:center;gap:6px;cursor:pointer;color:var(--ink,#1F4A85)}
 .lmtc-ov .dr-f .row.pied .hint{flex:1}
