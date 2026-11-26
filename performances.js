@@ -1,5 +1,8 @@
 // ============================================================================
 //  PERFORMANCES ÉQUIPE — module One Data (OD.define)  v1
+//  v43 (26/11/2026) : contrôle des financements borné aux commandes créées
+//    depuis la synchronisation BACS ↔ EPOS (cg_config.financement_depuis,
+//    18/11/2026) — avant, la vérité était dans DBS.
 //  v42 (26/11/2026) TEAM COLIN : vue « Contrôle de gestion » (demande de Nadia
 //    Atlas), réservée aux administrateurs et directeurs de groupe. Deux
 //    contrôles BACS ↔ DBS : commandes transmises TFR / validées / clôturées
@@ -196,7 +199,7 @@ OD.define('performances', {
 
   const doc = __anchor.ownerDocument || document;
   function getRoot() { return __anchor; }
-  try { window.__perfVer = 'v42-teamcolin'; } catch (e) { }
+  try { window.__perfVer = 'v43-teamcolin'; } catch (e) { }
 
   // --- PROFIL TENANT -----------------------------------------------------------
   // Team Colin est reconnu par la ref de son projet Supabase (source sûre), ou
@@ -3428,7 +3431,8 @@ OD.define('performances', {
 
       h += '<div class="pp-regles cg-regle">' + (G.ctl === 'stock_dbs'
         ? '<b>La règle :</b> une commande BACS <b>transmise à TFR, validée ou clôturée</b> doit être saisie dans DBS. Elle est signalée tant que son véhicule (même VIN) reste <b>disponible</b> ou en <b>commande stock</b> dans DBS, sans facture de vente DBS depuis la date de la commande.'
-        : '<b>La règle :</b> le financement saisi dans DBS doit être le reflet fidèle de la commande BACS — même produit (Easy, LOA, crédit, LLD ou comptant), même organisme, même montant financé. DBS est lu sur la <b>facture</b> si le véhicule est facturé, sinon sur la <b>fiche stock réservée</b> au client.')
+        : '<b>La règle :</b> le financement saisi dans DBS doit être le reflet fidèle de la commande BACS — même produit (Easy, LOA, crédit, LLD ou comptant), même organisme, même montant financé. DBS est lu sur la <b>facture</b> si le véhicule est facturé, sinon sur la <b>fiche stock réservée</b> au client. '
+          + '<b>BACS fait foi depuis le ' + e(dateFr((data && data.fin_depuis) || '2026-11-18')) + '</b> (synchronisation des financements BACS ↔ EPOS) : seules les commandes créées depuis cette date sont contrôlées.')
         + '</div>';
       if (toast) h += '<div class="cg-toast">' + toast + '</div>';
 
@@ -3447,7 +3451,7 @@ OD.define('performances', {
       } else {
         const tx = S.controlees ? Math.round(100 * (S.conformes || 0) / S.controlees) : null;
         h += '<div class="pl-tiles">'
-          + tuile('Commandes contrôlées', S.controlees || 0, 'transmises, validées ou clôturées, présentes dans DBS', '')
+          + tuile('Commandes contrôlées', S.controlees || 0, 'créées depuis le ' + dateFr(data.fin_depuis || '2026-11-18') + ', présentes dans DBS', '')
           + tuile('Taux de conformité', tx == null ? '—' : tx + ' %', (S.conformes || 0) + ' commandes conformes', tx == null ? '' : tx >= 90 ? 'ok' : 'warn')
           + tuile('Écarts à corriger', S.anomalies || 0, (S.notifiees || 0) + ' déjà notifiés', S.anomalies ? 'warn' : 'ok')
           + tuile('Corrigés', S.corrigees || 0, (S.corrigees_30j || 0) + ' ces 30 derniers jours', 'ok')
@@ -3469,7 +3473,7 @@ OD.define('performances', {
 
       h += '<p class="pl-note pied">Contrôle recalculé chaque jour vers 7 h 40 et 13 h 40, après la mise à jour DBS de la nuit'
         + (data.maj ? ' — dernier calcul le ' + new Date(data.maj).toLocaleString('fr-FR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) : '') + '. '
-        + 'Périmètre : commandes BACS depuis le 1er janvier 2023 (DBS n\'est pas fiable avant). Une commande « corrigée » est sortie du contrôle : véhicule réservé ou facturé dans DBS, saisie de financement rectifiée, ou commande abandonnée dans BACS. '
+        + (G.ctl === 'financement' ? 'Périmètre : commandes BACS créées depuis le ' + e(dateFr(data.fin_depuis || '2026-11-18')) + ' — avant la synchronisation des financements dans BACS, la référence était DBS. ' : 'Périmètre : commandes BACS depuis le 1er janvier 2023 (DBS n\'est pas fiable avant). ') + 'Une commande « corrigée » est sortie du contrôle : véhicule réservé ou facturé dans DBS, saisie de financement rectifiée, ou commande abandonnée dans BACS. '
         + (G.ctl === 'financement' ? 'Sur la facture DBS, Easy et LOA sont tous deux saisis « LOA » : ils sont comparés ensemble à ce niveau. Kinto et Toyota France Financement comptent comme le même organisme. Écart de montant : plus de 100 € et plus de 1 %. Quand la commande BACS n\'a pas de financement renseigné, la simulation EPOS sert de référence.' : '')
         + '</p>';
       host.innerHTML = h;
