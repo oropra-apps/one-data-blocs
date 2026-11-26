@@ -14,6 +14,10 @@
 //    le détail (vn_bacs_fiche), avec un lien direct vers le véhicule dans BACS.
 //  * Le stock reste celui du DMS (v_liste_vn) : c'est lui qui dit ce qui est
 //    en stock, à quel prix et depuis quand ; BACS décrit la voiture.
+//  v25 (26/11/2026) : marque du DMS (sans suffixe) et non de BACS, où 4 fiches
+//    Suzuki sont de mauvais rapprochements ; listes Marque et Modèle limitées au
+//    périmètre affiché ; marque du site posée même si la barre du haut répond
+//    avant le chargement du stock (elle restait sur « Marque »).
 //  v24 (26/11/2026) : retour d'Antoine sur la v21.
 //  * Marque lue dans BACS (TOYOTA, LEXUS…) et non plus dans le DMS, qui en
 //    donnait trois (TOYOTA, TOYOTA VN, LEXUS) ; véhicule absent de BACS : marque
@@ -153,12 +157,22 @@ OD.define('vn-liste', {
   // N° de commande DBS (commande fournisseur) ; « 0 » = pas de commande.
   function numCommande(r) { var c = r && r.commande_fournisseur; c = c == null ? '' : String(c).trim(); return c && c !== '0' ? c : ''; }
   function bacsDe(r) { var c = numCommande(r); return c ? S.bacs[c] || null : null; }
-  // v24 : marque du filtre, lue dans BACS ; à défaut, celle du DMS sans suffixe (TOYOTA VN -> TOYOTA).
+  // v24 : marque du filtre (TOYOTA, LEXUS) : celle du DMS sans suffixe (TOYOTA VN -> TOYOTA),
+  // confirmée par BACS. v25 : une fiche BACS d'une autre marque est un mauvais rapprochement
+  // (4 fiches Suzuki « Privilège » sur des commandes Toyota / Lexus) : la marque du DMS prime.
   function marqueF(r) {
-    var b = bacsDe(r);
-    if (b && notEmpty(b.marque)) return String(b.marque).toUpperCase();
     var m = String((r && r.marque) || '').replace(/\s+V[NDO]$/i, '').trim().toUpperCase();
-    return m || null;
+    if (m) return m;
+    var b = bacsDe(r);
+    return b && notEmpty(b.marque) ? String(b.marque).toUpperCase() : null;
+  }
+  // v25 : véhicules du périmètre affiché (onglet, réseau, affaire, site) : les listes Marque et
+  // Modèle ne proposent que ce qu'on y trouve.
+  function duPerimetre(r) {
+    if (S.onglet === 'stock' && r.en_commande) return false;
+    if (S.onglet === 'commandes' && !r.en_commande) return false;
+    var f = S.f;
+    return (!f.reseau || r.reseau === f.reseau) && (!f.affaire || r.affaire === f.affaire) && (!f.site || r.site === f.site);
   }
   // v19 : AMC = code et date AMC de la fiche véhicule BACS (seule source).
   function amcActif(r) { var b = bacsDe(r); return !!(b && (notEmpty(b.amc_code) || b.amc_date)); }
@@ -402,9 +416,10 @@ OD.define('vn-liste', {
       S.f.reseau = p.reseau || null;
       S.f.affaire = p.affaire || null;
       S.f.site = p.site || null;
-      // v24 : marque du site de la barre du haut (SITE.RESEAU : TOYOTA, LEXUS)
+      // v24 : marque du site de la barre du haut (SITE.RESEAU : TOYOTA, LEXUS). v25 : posée même si
+      // le stock n'est pas encore chargé (la barre du haut peut répondre avant).
       var mq = String(p.reseau || '').trim().toUpperCase();
-      if (mq && S.raw.some(function (r) { return marqueF(r) === mq; })) { S.f.marque = mq; S.f.modele = null; }
+      if (mq) { S.f.marque = mq; S.f.modele = null; }
       S.page = 1;
     }
     rendre();
@@ -468,7 +483,7 @@ OD.define('vn-liste', {
   function selModele() {
     if (!S.f.marque) return '';
     var vues = {};
-    S.raw.forEach(function (r) { if (marqueF(r) === S.f.marque) { var m = familleDe(r); if (notEmpty(m)) vues[m] = 1; } });
+    S.raw.forEach(function (r) { if (duPerimetre(r) && marqueF(r) === S.f.marque) { var m = familleDe(r); if (notEmpty(m)) vues[m] = 1; } });
     var vals = Object.keys(vues).sort(function (a, b) { return a.localeCompare(b, 'fr'); });
     if (!vals.length) return '';
     return '<select class="vn-sel" data-f="modele">'
@@ -580,7 +595,7 @@ OD.define('vn-liste', {
   // v24 : marques lues dans BACS (marqueF)
   function selMarque() {
     var vues = {};
-    S.raw.forEach(function (r) { var m = marqueF(r); if (m) vues[m] = 1; });
+    S.raw.forEach(function (r) { if (!duPerimetre(r)) return; var m = marqueF(r); if (m) vues[m] = 1; });
     if (S.f.marque) vues[S.f.marque] = 1;
     var vals = Object.keys(vues).sort(function (a, b) { return a.localeCompare(b, 'fr'); });
     if (!vals.length) return '';
