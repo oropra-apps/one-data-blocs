@@ -6107,14 +6107,27 @@
         var ctx = etat.ctx, b = ov.querySelector('.pm-b');
         var f = ov.querySelector('.pm-f'); if (f) f.remove();
         if (!ctx.collegues.length) { b.innerHTML = '<p class="pm-hint">Aucun collègue vendeur sur vos sites.</p>'; return; }
-        var suivent = ctx.collegues.filter(function (c) { return c.suit; }), autres = ctx.collegues.filter(function (c) { return !c.suit; });
-        var opt = function (c) {
-          return '<option value="' + c.id_user + '"' + (String(c.id_user) === String(etat.vers) ? ' selected' : '') + '>' + echap([c.nom, c.vn_vo, c.role === 'Chef des ventes' ? 'chef des ventes' : null, c.sites_noms].filter(Boolean).join(' · ')) + '</option>';
+        // Regroupement par fonction : ceux qui suivent déjà le client, puis chefs des ventes, vendeurs VN,
+        // vendeurs VO, vendeurs VN et VO ; dans chaque groupe, par site puis par nom.
+        var fonction = function (c) {
+          if (c.role === 'Chef des ventes') return 'Chefs des ventes';
+          var u = String(c.vn_vo || '').toUpperCase().replace(/[^A-Z]/g, '');
+          return u === 'VN' ? 'Vendeurs VN' : u === 'VO' ? 'Vendeurs VO' : u === 'VNVO' || u === 'VOVN' ? 'Vendeurs VN et VO' : 'Vendeurs';
+        };
+        var ORDRE = ['Chefs des ventes', 'Vendeurs VN', 'Vendeurs VO', 'Vendeurs VN et VO', 'Vendeurs'];
+        var tri = function (a, b) { return String(a.sites_noms || '').localeCompare(String(b.sites_noms || ''), 'fr') || String(a.nom).localeCompare(String(b.nom), 'fr'); };
+        var suivent = ctx.collegues.filter(function (c) { return c.suit; }).sort(tri);
+        var groupes = ORDRE.map(function (g) { return [g, ctx.collegues.filter(function (c) { return !c.suit && fonction(c) === g; }).sort(tri)]; }).filter(function (g) { return g[1].length; });
+        var opt = function (c, avecFonction) {
+          var f = fonction(c);
+          return '<option value="' + c.id_user + '"' + (String(c.id_user) === String(etat.vers) ? ' selected' : '') + '>'
+            + echap([c.nom, avecFonction ? (f === 'Chefs des ventes' ? 'chef des ventes' : f.replace('Vendeurs', 'vendeur')) : null, c.sites_noms].filter(Boolean).join(' · ')) + '</option>';
         };
         var n = ctx.leads.length, c = collegue(), ok = peutConfier();
         var h = '<div><label class="pm-l" for="pm-vers">Collègue</label><select id="pm-vers">'
           + (etat.vers == null ? '<option value="" selected disabled>Choisir un collègue</option>' : '')
-          + (suivent.length ? '<optgroup label="Suit déjà ce client">' + suivent.map(opt).join('') + '</optgroup><optgroup label="Autres collègues">' + autres.map(opt).join('') + '</optgroup>' : autres.map(opt).join(''))
+          + (suivent.length ? '<optgroup label="Suit déjà ce client">' + suivent.map(function (c) { return opt(c, true); }).join('') + '</optgroup>' : '')
+          + groupes.map(function (g) { return '<optgroup label="' + g[0] + '">' + g[1].map(function (c) { return opt(c, false); }).join('') + '</optgroup>'; }).join('')
           + '</select></div>'
           + '<div><span class="pm-l">Motif</span><div class="pm-chips" role="group" aria-label="Motif">' + PM_MOTIFS.map(function (m) {
               return '<button type="button" data-pm="motif" data-v="' + m[0] + '" aria-pressed="' + (etat.motif === m[0]) + '">' + m[1] + '</button>'; }).join('') + '</div></div>'
