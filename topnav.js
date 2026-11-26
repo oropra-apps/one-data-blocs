@@ -1,5 +1,7 @@
 // ============================================================================
-//  TOP NAV — module One Data (OD.define)  v47 — ACCÈS AU COCKPIT PAR LA BASE
+//  TOP NAV — module One Data (OD.define)  v48 — SANS « EMAIL SUPPORT »
+//  v48 (26/11/2026) : l'entrée « Email Support » du menu Mon compte est
+//    retirée.
 //  v47 (17/11/2026) : « Cockpit marketing » s'affiche si la base répond oui
 //    (RPC mkt_acces, champ acces des items). Pilote : seuls les utilisateurs
 //    de od_predict.mkt_acces ; table vide = rôles 1, 2, 5, 6, 7, 8.
@@ -288,7 +290,6 @@ OD.define('topnav', {
   const FICHE_TAB_VAR = 'fb2cad2c-cd04-42e0-8909-e3c91c8dcfac';
   const FICHE_TAB_DEFAULT = 0;
   const VAR_NB_NOTIFS = '9fc0eca4-2325-4774-8e27-4c66515a9166';
-  const SUPPORT_MAIL = 'oropra.gen@gmail.com';
   const LOGO_URL = (ctx && ctx.tenant && ctx.tenant.logo_url) || "";   // logo du tenant
 
   // ---------------------------------------------------------------- helpers
@@ -449,7 +450,6 @@ OD.define('topnav', {
     { t: 'Doublons', act: 'doublons', badge: true },
     { t: 'Annuaire', p: P.annuaire },
     { t: 'Tutos', p: P.tutos },
-    { t: 'Email Support', act: 'support' },
     { t: 'Se déconnecter', act: 'logout', danger: true }
   ];
 
@@ -778,7 +778,6 @@ OD.define('topnav', {
         closeAll();
         if (a === 'account') openAccount();
         else if (a === 'doublons') openArbitrage();
-        else if (a === 'support') { try { (wwLib.getFrontWindow && wwLib.getFrontWindow() || window).location.href = 'mailto:' + SUPPORT_MAIL; } catch (er) {} }
         else if (a === 'logout') goAuth();
         else if (a === 'fiche') { if (clientLabel()) openFicheClient(); }
       });
