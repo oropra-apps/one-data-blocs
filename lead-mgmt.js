@@ -5093,6 +5093,31 @@
         + '</section></aside>';
       return h + '</div>';
     }
+    // ── Passations de main (26/11/2026) : ce que les vendeurs du site se sont confié ou signalé
+    // sur 7 jours, et la suite donnée (rappelé, en attente, lu…). RPC passations_site.
+    var PASS_MOTIF = { projet_vn: 'projet VN', projet_vo: 'projet VO', deja_suivi: 'client déjà suivi', absence: 'absence', autre: 'autre' };
+    var PASS_SUITE = { traite: ['Traité', 'ok'], attente: ['En attente', 'o'], repasse: ['Repassé', ''], lu: ['Prévenu · lu', ''], non_lu: ['Prévenu · non lu', 'o'] };
+    function chargerPassations(sid) {
+      S.passSite = sid; S.passLe = Date.now();
+      rpc('passations_site', { p_id_site: Number(sid), p_jours: 7 })
+        .then(function (r) { if (S.passSite === sid) { S.pass = r || []; if (S.tab === 'accueil') render(); } })
+        .catch(function () { if (S.passSite === sid) { S.pass = []; } });
+    }
+    function blocPassations(sid) {
+      if (S.passSite !== sid || !S.passLe || Date.now() - S.passLe > 60000) { if (S.passSite !== sid) S.pass = null; chargerPassations(sid); }
+      var ps = S.pass;
+      var h = '<section class="ac-c pass"><div class="ac-ch"><b>Passations · 7 jours' + (ps && ps.length ? ' · ' + ps.length : '') + '</b><span>qui a confié quoi à qui</span></div>';
+      if (ps == null) return h + '<p class="ac-vide">Chargement…</p></section>';
+      if (!ps.length) return h + '<p class="ac-vide">Aucune passation cette semaine.</p></section>';
+      return h + ps.slice(0, 8).map(function (p) {
+        var su = PASS_SUITE[p.suite] || ['', ''];
+        var quoi = p.confie ? [p.nb_leads ? plural(p.nb_leads, 'lead') : '', p.nb_relances ? plural(p.nb_relances, 'relance') : ''].filter(Boolean).join(' + ') + ' confié' + ((p.nb_leads + p.nb_relances) > 1 ? 's' : '') : 'prévenu';
+        return '<div class="ac-p"' + (p.id_client ? ' data-a="fiche" data-id="' + esc(p.id_client) + '" tabindex="0" role="button"' : '') + '>'
+          + '<div class="ac-p-h"><b>' + esc(prenom(propre(p.de))) + ' → ' + esc(prenom(propre(p.vers))) + '</b><span class="ac-p-s ' + su[1] + '">' + esc(su[0]) + '</span></div>'
+          + '<div class="ac-p-c">' + esc(propre(p.client || 'Client')) + ' · ' + esc(PASS_MOTIF[p.motif] || p.motif || '') + ' · ' + esc(quoi) + ' · ' + esc(quand(p.cree_le)) + '</div>'
+          + (p.note ? '<div class="ac-p-n">« ' + esc(p.note) + ' »</div>' : '') + '</div>';
+      }).join('') + (ps.length > 8 ? '<p class="ac-vide">Et ' + (ps.length - 8) + ' autres cette semaine.</p>' : '') + '</section>';
+    }
     function accueilChef() {
       var sid = sitePoste(), gere = manager(sid);
       var pool = trierPool(libres(sid));
@@ -5134,6 +5159,7 @@
       h += '<aside class="ac-side"><section class="ac-c"><div class="ac-ch"><b>Mon équipe</b><span>ouverts · en souffrance</span></div>'
         + (vs.length ? vs.map(function (x) { return '<div class="ac-v"><i>' + esc(String(propre(x.v.nom) || '?').split(' ').map(function (w) { return w.charAt(0); }).slice(0, 2).join('')) + '</i><span>' + esc(x.v.moi ? 'Vous' : propre(x.v.nom)) + (x.v.equipe || x.v.moi ? '' : '<small>autre équipe</small>') + '</span><b>' + x.o + '</b><b class="' + (x.r ? 'r' : 'z') + '">' + x.r + '</b></div>'; }).join('')
           : '<p class="ac-vide">Aucun vendeur rattaché à ce site.</p>') + '</section>'
+        + blocPassations(sid)
         + (!sansPlateauSite(sid) && vrs.length > 10 ? '<section class="ac-c"><div class="ac-ch"><b>La Vroom Team et vous</b></div>'
             + '<div class="ac-r"><span>Transmis par la Vroom Team</span><b>' + vrs.length + '</b></div>'
             + '<div class="ac-r"><span>dont pas encore rappelés</span><b class="' + (vrs.filter(function (l) { return !l.tentatives; }).length ? 'o' : '') + '">' + vrs.filter(function (l) { return !l.tentatives; }).length + '</b></div></section>' : '')
@@ -7508,6 +7534,12 @@
 .lmtc .ac-pied{padding:12px 20px;margin:0;font-size:12.5px;color:#4b5563;background:#f6f9fd}
 .lmtc .ac-r{display:flex;justify-content:space-between;gap:12px;align-items:center;width:100%;box-sizing:border-box;padding:11px 20px;border:0;border-bottom:1px solid #f0f4fa;background:#fff;font:inherit;font-size:13.5px;color:#1c2b45;text-align:left}
 .lmtc button.ac-r{cursor:pointer}.lmtc button.ac-r:hover{background:#f6f9fd}.lmtc .ac-r b{font-weight:900;color:var(--bleu-dk);white-space:nowrap}.lmtc .ac-r b.o{color:#8a5a00}
+.lmtc .ac-p{padding:10px 20px;border-bottom:1px solid #f0f4fa;cursor:pointer}.lmtc .ac-p:hover{background:#f6f9fd}
+.lmtc .ac-p-h{display:flex;justify-content:space-between;gap:10px;align-items:center;font-size:13.5px;color:#1c2b45}.lmtc .ac-p-h b{font-weight:800}
+.lmtc .ac-p-s{flex:none;font-size:11.5px;font-weight:800;border-radius:999px;padding:2px 8px;background:#eef2f8;color:#5A72A0}
+.lmtc .ac-p-s.ok{background:#e6f4ec;color:#1f7a4d}.lmtc .ac-p-s.o{background:#fdf1dc;color:#8a5a00}
+.lmtc .ac-p-c{font-size:12.5px;color:#5A72A0;margin-top:2px}
+.lmtc .ac-p-n{font-size:12.5px;color:#1c2b45;margin-top:3px;font-style:italic;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
 .lmtc .ac-v{display:flex;align-items:center;gap:10px;padding:9px 20px;border-bottom:1px solid #f0f4fa;font-size:13.5px}
 .lmtc .ac-v i{width:30px;height:30px;border-radius:50%;background:var(--sel);color:var(--bleu-dk);font-style:normal;font-weight:900;font-size:11px;display:flex;align-items:center;justify-content:center;flex:0 0 auto}
 .lmtc .ac-v span{flex:1;min-width:0}.lmtc .ac-v b{min-width:24px;text-align:right;color:var(--bleu-dk)}.lmtc .ac-v b.r{color:#b23433}.lmtc .ac-v b.z{color:#acc5e4}
