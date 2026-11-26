@@ -1,6 +1,10 @@
 // ============================================================================
 //  LEAD MANAGEMENT — module One Data (OD.define 'lead-mgmt')
-//  VERSION TEAM COLIN (v133) — déploiement CIBLÉ (publish-targets :
+//  VERSION TEAM COLIN (v134) — déploiement CIBLÉ (publish-targets :
+//  v134 (26/11/2026) : « Passer la main » dans la fiche d'un lead (vendeur
+//    propriétaire) : inviter un collègue du site avec une note, et lui confier
+//    le suivi (le lead passe dans sa file, propriétaire BACS mis à jour). Le
+//    vendeur qui confie n'est pas crédité de la vente. Demande de J. Faugeras.
 //  v133 (25/11/2026) : CAMPAGNES — plus de liseré vert à gauche des clients
 //    PRISME : dans One Data, le liseré gauche dit l'univers (vert = VN, jaune
 //    = VO) ; sur une campagne VO il se lisait « VN ». PRISME reste signalé par
@@ -4919,7 +4923,7 @@
     }
     // ── v100 : SUIVIS — où en est la demande d'un client, quel que soit le vendeur ──
     var SUIVI_GESTE = { bacs: 'Mis à jour dans BACS', bacs_activite: 'Activité dans BACS', contact_detecte: 'Contact détecté', retour_pool: 'Revenu au Pool',
-                        congelateur: 'Mis au congélateur', congelateur_retour: 'Sorti du congélateur', apv: 'Orienté après-vente', reaffectation: 'Réattribué', stock_equipe: 'Réparti dans l\'équipe' };
+                        congelateur: 'Mis au congélateur', congelateur_retour: 'Sorti du congélateur', apv: 'Orienté après-vente', reaffectation: 'Réattribué', passation: 'Confié à un collègue', stock_equipe: 'Réparti dans l\'équipe' };
     function suiviEtat() { if (!S.suivis) S.suivis = { rows: null, err: null, q: '', t: null, seq: 0 }; return S.suivis; }
     async function chargerSuivis() {
       var X = suiviEtat(), seq = ++X.seq, sid = sitePoste();
@@ -5240,7 +5244,8 @@
         : '<button type="button" class="fx-ret" data-a="close"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 6l-6 6 6 6"/></svg>' + (POSTE === 'vendeur' ? 'Mes leads' : 'Les leads') + '</button>';
       var canaux = [['Appeler', 'appel', 'call', IC.phone], ['SMS', 'sms', 'sms', IC.sms], ['WhatsApp', 'wa', 'wa', IC.wa], ['E-mail', 'mail', 'mail', IC.mail]]
         .filter(function (c) { return c[1] !== 'appel' || __lmPeutAppeler(); }).map(function (c) {
-          return '<button type="button" class="fs-btn ' + c[2] + (D.canal === c[1] ? ' on' : '') + '" data-a="canal" data-id="' + c[1] + '"' + ((c[1] === 'mail' ? !l.email : !l.telephone) ? ' disabled' : '') + '>' + svgIc(c[3]) + c[0] + '</button>'; }).join('');
+          return '<button type="button" class="fs-btn ' + c[2] + (D.canal === c[1] ? ' on' : '') + '" data-a="canal" data-id="' + c[1] + '"' + ((c[1] === 'mail' ? !l.email : !l.telephone) ? ' disabled' : '') + '>' + svgIc(c[3]) + c[0] + '</button>'; }).join('')
+        + (mien ? '<button type="button" class="fs-btn passer" data-a="passer" data-id="' + l.id_lead + '" title="Inviter un collègue sur ce client, ou lui confier le suivi">' + svgIc(PM_ICONE) + 'Passer la main</button>' : '');
       var ml = mesLeads(), pos = ml.findIndex(function (z) { return Number(z.id_lead) === Number(l.id_lead); });
       var sv = leadSuivant();
       var chez = l.vendeur_nom ? 'chez ' + propre(l.vendeur_nom) : l.zone === 'piscine' ? 'dans le Pool' : l.zone === 'plateau' ? 'à la Vroom Team' : '';
@@ -6048,6 +6053,275 @@
       } catch (e) { toast('Canal indisponible : ' + messageErreur(e), true); }
     }
     // v62 : SMS, WhatsApp, e-mail passent d'abord par les modèles du lead.
+    // ── Passer la main (26/11/2026, demande de J. Faugeras) ───────────────────
+    // Panneau commun à la fiche client et à la fiche d'un lead : le vendeur choisit
+    // un collègue (l'équipe du site d'abord, les autres sites par filtres marque /
+    // affaire / site / VN-VO et recherche), un motif et écrit une note de contexte.
+    // Le collègue est notifié ; avec « Lui confier le suivi », les leads ouverts du
+    // vendeur sur ce client passent dans sa file, sur son site s'il travaille
+    // ailleurs (RPC passer_main_contexte / passer_main).
+    var PM_MOTIFS = [['projet_vn', 'Projet VN'], ['projet_vo', 'Projet VO'], ['deja_suivi', 'Client déjà suivi par ce collègue'], ['absence', 'Absence'], ['autre', 'Autre']];
+    var PM_CSS = ''
+      + '.pm-ov{position:fixed;inset:0;z-index:100000;background:rgba(20,48,90,.38);display:flex;align-items:center;justify-content:center;padding:16px;font-family:inherit}'
+      + '.pm{background:#fff;border-radius:14px;width:100%;max-width:540px;max-height:92vh;overflow:auto;box-shadow:0 18px 50px rgba(20,48,90,.28);color:#14305A}'
+      + '.pm-h{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;padding:18px 20px 10px;border-bottom:1px solid #E8EEF7}'
+      + '.pm-h h3{margin:0;font-size:17px;font-weight:800}.pm-h p{margin:3px 0 0;font-size:13px;color:#5A72A0}'
+      + '.pm-x{border:0;background:none;font-size:24px;line-height:1;color:#5A72A0;cursor:pointer;padding:2px 6px}'
+      + '.pm-b{padding:14px 20px 4px;display:flex;flex-direction:column;gap:14px}'
+      + '.pm-l{font-size:12.5px;font-weight:800;color:#5A72A0;margin:0 0 6px;display:block}'
+      + '.pm select,.pm textarea,.pm input[type=search]{width:100%;box-sizing:border-box;border:1.5px solid #DCE4F0;border-radius:9px;padding:9px 11px;font:inherit;font-size:14px;color:#14305A;background:#fff;min-width:0}'
+      + '.pm select:focus,.pm textarea:focus,.pm input[type=search]:focus{outline:none;border-color:#1F4A85}'
+      + '.pm textarea{min-height:92px;resize:vertical;line-height:1.45}'
+      + '.pm-chips{display:flex;flex-wrap:wrap;gap:6px}'
+      + '.pm-chips button{border:1.5px solid #DCE4F0;background:#fff;border-radius:999px;padding:6px 12px;font:inherit;font-size:13px;font-weight:700;color:#5A72A0;cursor:pointer}'
+      + '.pm-chips button[aria-pressed="true"]{border-color:#1F4A85;background:#E8EEF7;color:#1F4A85}'
+      // Sélecteur de collègue
+      + '.pm-onglets{display:flex;background:#F0F4FA;border-radius:10px;padding:3px;gap:3px;margin-bottom:8px}'
+      + '.pm-onglets button{flex:1;border:0;background:none;border-radius:8px;padding:8px 10px;font:inherit;font-size:13px;font-weight:800;color:#5A72A0;cursor:pointer;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}'
+      + '.pm-onglets button[aria-selected="true"]{background:#fff;color:#1F4A85;box-shadow:0 1px 3px rgba(20,48,90,.12)}'
+      + '.pm-liste{border:1.5px solid #DCE4F0;border-radius:10px;max-height:260px;overflow:auto}'
+      + '.pm-gr{position:sticky;top:0;background:#F5F8FC;padding:6px 12px;font-size:11.5px;font-weight:800;letter-spacing:.03em;text-transform:uppercase;color:#5A72A0;border-bottom:1px solid #E8EEF7}'
+      + '.pm-p{display:flex;align-items:center;gap:10px;width:100%;border:0;border-bottom:1px solid #EEF2F8;background:#fff;padding:9px 12px;font:inherit;text-align:left;cursor:pointer;color:#14305A}'
+      + '.pm-p:last-child{border-bottom:0}.pm-p:hover{background:#F5F8FC}'
+      + '.pm-p[aria-checked="true"]{background:#E8EEF7}'
+      + '.pm-rd{flex:none;width:16px;height:16px;border-radius:50%;border:2px solid #B7C5DB;box-sizing:border-box}'
+      + '.pm-p[aria-checked="true"] .pm-rd{border:5px solid #1F4A85}'
+      + '.pm-p span.t{flex:1;min-width:0}.pm-p b{display:block;font-size:14px;font-weight:700}'
+      + '.pm-p small{display:block;font-size:12.5px;color:#5A72A0;margin-top:1px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}'
+      + '.pm-bad{flex:none;font-size:11.5px;font-weight:800;color:#1F7A4D;background:#E6F4EC;border-radius:999px;padding:3px 8px}'
+      + '.pm-filtres{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:8px}'
+      + '.pm-filtres select{flex:1 1 130px;width:auto}'
+      + '.pm-filtres .pm-q,.pm-filtres .pm-chips{flex:1 1 100%}'
+      + '.pm-vide{padding:14px 12px;font-size:13px;color:#5A72A0}'
+      + '.pm-plus{padding:8px 12px;font-size:12.5px;color:#5A72A0;background:#F5F8FC}'
+      + '.pm-choisi{display:flex;align-items:center;gap:10px;border:1.5px solid #1F4A85;background:#F5F8FC;border-radius:10px;padding:10px 12px}'
+      + '.pm-choisi span.t{flex:1;min-width:0}.pm-choisi b{display:block;font-size:14.5px}.pm-choisi small{display:block;font-size:12.5px;color:#5A72A0;margin-top:1px}'
+      + '.pm-chg{flex:none;border:1.5px solid #DCE4F0;background:#fff;border-radius:8px;padding:6px 10px;font:inherit;font-size:13px;font-weight:800;color:#1F4A85;cursor:pointer}'
+      // Bas du panneau
+      + '.pm-conf{display:flex;gap:10px;align-items:flex-start;background:#F5F8FC;border:1px solid #DCE4F0;border-radius:10px;padding:11px 12px;font-size:13.5px;line-height:1.45;cursor:pointer}'
+      + '.pm-conf input{margin-top:3px;width:17px;height:17px;accent-color:#1F4A85}'
+      + '.pm-conf b{display:block;color:#14305A}.pm-conf small{display:block;color:#5A72A0;margin-top:2px}'
+      + '.pm-conf.off{opacity:.6;cursor:default}'
+      + '.pm-hint{margin:0;font-size:12.5px;color:#5A72A0;line-height:1.45}'
+      + '.pm-err{margin:0;padding:8px 11px;border-radius:8px;background:#FDECEA;color:#B42318;font-size:13px}'
+      + '.pm-f{display:flex;justify-content:flex-end;gap:8px;padding:14px 20px 18px}'
+      + '.pm-f button{border-radius:9px;padding:9px 16px;font:inherit;font-size:14px;font-weight:800;cursor:pointer}'
+      + '.pm-annuler{border:1.5px solid #DCE4F0;background:#fff;color:#14305A}'
+      + '.pm-ok{border:0;background:#1F4A85;color:#fff}.pm-ok[disabled]{opacity:.55;cursor:default}'
+      + '@media (max-width:560px){.pm-ov{align-items:flex-end;padding:0}.pm{max-width:none;border-radius:14px 14px 0 0;max-height:94vh}.pm-f button{flex:1}'
+      + '.pm select,.pm textarea,.pm input[type=search]{font-size:16px}.pm-liste{max-height:42vh}}';
+    var PM_ICONE = '<path d="M7 7h11l-3-3M17 17H6l3 3"/><circle cx="4.5" cy="7" r="1.5"/><circle cx="19.5" cy="17" r="1.5"/>';
+
+    // o : { doc, rpc(nom, args) → Promise, idClient, idLead, nomClient, toast(msg, err), apres(resultat) }
+    function pmOuvrir(o) {
+      var d = o.doc || document;
+      var echap = function (s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); };
+      var ancien = d.getElementById('od-pm'); if (ancien) ancien.remove();
+      if (!d.getElementById('od-pm-css')) { var st = d.createElement('style'); st.id = 'od-pm-css'; st.textContent = PM_CSS; (d.head || d.body).appendChild(st); }
+      var ov = d.createElement('div'); ov.id = 'od-pm'; ov.className = 'pm-ov';
+      ov.innerHTML = '<div class="pm" role="dialog" aria-modal="true" aria-labelledby="pm-t"><div class="pm-h"><div><h3 id="pm-t">Passer la main</h3><p>' + echap(o.nomClient || '') + '</p></div>'
+        + '<button type="button" class="pm-x" data-pm="fermer" aria-label="Fermer">×</button></div><div class="pm-b"><p class="pm-hint">Chargement des collègues…</p></div></div>';
+      d.body.appendChild(ov);
+      var etat = { ctx: null, vers: null, motif: null, confier: true, envoi: false, erreur: null, note: '',
+                   choix: true, onglet: 'site', f: { marque: '', affaire: '', site: '', univ: '', q: '' } };
+      var fermer = function () { ov.remove(); d.removeEventListener('keydown', clavier); };
+      var clavier = function (e) { if (e.key === 'Escape') fermer(); };
+      d.addEventListener('keydown', clavier);
+
+      var cmp = function (a, b) { return String(a).localeCompare(String(b), 'fr'); };
+      var sansAccent = function (s) { return String(s || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, ''); };
+      var collegue = function () { var cs = (etat.ctx && etat.ctx.collegues) || []; for (var i = 0; i < cs.length; i++) if (String(cs[i].id_user) === String(etat.vers)) return cs[i]; return null; };
+      var sitesDe = function (c) { return c.sites || []; };
+      var surSiteRef = function (c) { return etat.ctx.site_ref != null && sitesDe(c).some(function (s) { return String(s.id) === String(etat.ctx.site_ref); }); };
+      var univ = function (c) { var u = String(c.vn_vo || '').toUpperCase().replace(/[^A-Z]/g, ''); return u === 'VN' ? 'VN' : u === 'VO' ? 'VO' : (u === 'VNVO' || u === 'VOVN') ? 'VNVO' : ''; };
+      // Fonction sur le site de référence pour l'équipe du site, sinon fonction principale.
+      var estChef = function (c, ici) {
+        var ss = sitesDe(c).filter(function (s) { return !ici || String(s.id) === String(etat.ctx.site_ref); });
+        return ss.length ? ss.every(function (s) { return s.chef; }) || (ici && ss.some(function (s) { return s.chef; })) : c.role === 'Chef des ventes';
+      };
+      var fonction = function (c, ici) {
+        if (estChef(c, ici)) return 'Chefs des ventes';
+        var u = univ(c); return u === 'VN' ? 'Vendeurs VN' : u === 'VO' ? 'Vendeurs VO' : u === 'VNVO' ? 'Vendeurs VN et VO' : 'Vendeurs';
+      };
+      var fonctionCourte = function (c, ici) { var f = fonction(c, ici); return f === 'Chefs des ventes' ? 'chef des ventes' : f.replace('Vendeurs', 'vendeur'); };
+      var ORDRE = ['Chefs des ventes', 'Vendeurs VN', 'Vendeurs VO', 'Vendeurs VN et VO', 'Vendeurs'];
+      // Site où le lead atterrirait : celui de référence si le collègue y est vendeur, sinon un site
+      // vendeur de la même affaire, sinon le premier (même règle que passer_main).
+      var affaireRef = function () { var cs = etat.ctx.collegues; for (var i = 0; i < cs.length; i++) { var ss = sitesDe(cs[i]); for (var j = 0; j < ss.length; j++) if (String(ss[j].id) === String(etat.ctx.site_ref)) return ss[j].affaire; } return null; };
+      var siteCible = function (c) {
+        var vs = sitesDe(c).filter(function (s) { return !s.chef; }); if (!vs.length) return null;
+        var af = affaireRef();
+        vs.sort(function (a, b) { return ((String(b.id) === String(etat.ctx.site_ref)) - (String(a.id) === String(etat.ctx.site_ref))) || ((b.affaire === af) - (a.affaire === af)) || (Number(a.id) - Number(b.id)); });
+        return vs[0];
+      };
+      var peutConfier = function () { var c = collegue(); return !!(etat.ctx && etat.ctx.leads.length && c && siteCible(c)); };
+      var nomsSites = function (c) { return sitesDe(c).map(function (s) { return s.nom; }).sort(cmp).join(', '); };
+
+      var ligne = function (c, sousTitre) {
+        return '<button type="button" class="pm-p" role="radio" data-pm="choisir" data-v="' + c.id_user + '" aria-checked="' + (String(c.id_user) === String(etat.vers)) + '">'
+          + '<span class="pm-rd"></span><span class="t"><b>' + echap(c.nom) + '</b>' + (sousTitre ? '<small>' + echap(sousTitre) + '</small>' : '') + '</span>'
+          + (c.suit ? '<span class="pm-bad">suit ce client</span>' : '') + '</button>';
+      };
+
+      // Équipe du site : groupée par fonction.
+      function htmlEquipe() {
+        var cs = etat.ctx.collegues.filter(surSiteRef);
+        if (!cs.length) return '<div class="pm-liste"><div class="pm-vide">Personne d\'autre sur ce site : cherchez dans « Autre site ».</div></div>';
+        return '<div class="pm-liste" role="radiogroup">' + ORDRE.map(function (g) {
+          var gs = cs.filter(function (c) { return fonction(c, true) === g; }).sort(function (a, b) { return (b.suit - a.suit) || cmp(a.nom, b.nom); });
+          return gs.length ? '<div class="pm-gr">' + g + '</div>' + gs.map(function (c) { return ligne(c, null); }).join('') : '';
+        }).join('') + '</div>';
+      }
+
+      // Autres sites : filtres en cascade marque → affaire → site, univers VN/VO, recherche par nom.
+      var autres = function () { return etat.ctx.collegues.filter(function (c) { return !surSiteRef(c); }); };
+      var sitesFiltres = function (niveau) {
+        var f = etat.f, out = [];
+        autres().forEach(function (c) { sitesDe(c).forEach(function (s) {
+          if (niveau !== 'marque' && f.marque && s.marque !== f.marque) return;
+          if (niveau === 'site' && f.affaire && s.affaire !== f.affaire) return;
+          out.push(s);
+        }); });
+        return out;
+      };
+      var valeurs = function (liste, cle) { var vu = {}; liste.forEach(function (s) { if (s[cle] != null && s[cle] !== '') vu[s[cle]] = s; }); return Object.keys(vu).sort(cmp).map(function (k) { return vu[k]; }); };
+      var selectF = function (cle, libTous, opts, val, lib) {
+        return '<select data-pmf="' + cle + '" aria-label="' + libTous + '"><option value="">' + libTous + '</option>' + opts.map(function (s) {
+          var v = String(val(s)); return '<option value="' + echap(v) + '"' + (v === String(etat.f[cle]) ? ' selected' : '') + '>' + echap(lib(s)) + '</option>'; }).join('') + '</select>';
+      };
+      function htmlFiltres() {
+        var marques = valeurs(sitesFiltres('marque'), 'marque'), affaires = valeurs(sitesFiltres('affaire'), 'affaire'), sites = valeurs(sitesFiltres('site'), 'nom');
+        return '<div class="pm-filtres">'
+          + '<input type="search" class="pm-q" data-pmf="q" placeholder="Rechercher un nom" value="' + echap(etat.f.q) + '" autocomplete="off">'
+          + (marques.length > 1 ? selectF('marque', 'Toutes marques', marques, function (s) { return s.marque; }, function (s) { return s.marque; }) : '')
+          + (affaires.length > 1 ? selectF('affaire', 'Toutes affaires', affaires, function (s) { return s.affaire; }, function (s) { return s.affaire; }) : '')
+          + selectF('site', 'Tous sites', sites, function (s) { return s.id; }, function (s) { return s.nom; })
+          + '<div class="pm-chips" role="group" aria-label="Univers">' + [['', 'VN et VO'], ['VN', 'VN'], ['VO', 'VO']].map(function (u) {
+              return '<button type="button" data-pm="univ" data-v="' + u[0] + '" aria-pressed="' + (etat.f.univ === u[0]) + '">' + u[1] + '</button>'; }).join('') + '</div>'
+          + '</div><div class="pm-liste pm-res" role="radiogroup"></div>';
+      }
+      function htmlResultats() {
+        var f = etat.f, q = sansAccent(f.q).trim();
+        var cs = autres().filter(function (c) {
+          var ss = sitesDe(c).filter(function (s) { return (!f.marque || s.marque === f.marque) && (!f.affaire || s.affaire === f.affaire) && (!f.site || String(s.id) === String(f.site)); });
+          if (!ss.length) return false;
+          if (f.univ) { var u = univ(c); if (u !== f.univ && u !== 'VNVO' && !(u === '' && estChef(c, false))) return false; }
+          return !q || sansAccent(c.nom).indexOf(q) >= 0;
+        }).sort(function (a, b) { return (b.suit - a.suit) || cmp(a.nom, b.nom); });
+        if (!cs.length) return '<div class="pm-vide">Aucun collègue ne correspond à ces filtres.</div>';
+        var MAX = 40;
+        return cs.slice(0, MAX).map(function (c) { return ligne(c, [fonctionCourte(c, false), nomsSites(c)].join(' · ')); }).join('')
+          + (cs.length > MAX ? '<div class="pm-plus">' + (cs.length - MAX) + ' autres : affinez avec les filtres ou le nom.</div>' : '');
+      }
+      function rendreResultats() { var r = ov.querySelector('.pm-res'); if (r) r.innerHTML = htmlResultats(); }
+
+      function dessiner() {
+        var ctx = etat.ctx, b = ov.querySelector('.pm-b');
+        var f = ov.querySelector('.pm-f'); if (f) f.remove();
+        if (!ctx.collegues.length) { b.innerHTML = '<p class="pm-hint">Aucun collègue vendeur actif dans le groupe.</p>'; return; }
+        var n = ctx.leads.length, c = collegue(), ok = peutConfier();
+        var nomSite = ctx.site_ref_nom ? String(ctx.site_ref_nom) : 'Ce site';
+        var h = '<div><span class="pm-l">Collègue</span>';
+        if (c && !etat.choix) {
+          h += '<div class="pm-choisi"><span class="t"><b>' + echap(c.nom) + '</b><small>' + echap([fonctionCourte(c, surSiteRef(c)), nomsSites(c), c.suit ? 'suit déjà ce client' : null].filter(Boolean).join(' · ')) + '</small></span>'
+            + '<button type="button" class="pm-chg" data-pm="changer">Changer</button></div>';
+        } else {
+          h += '<div class="pm-onglets" role="tablist">'
+            + '<button type="button" role="tab" data-pm="onglet" data-v="site" aria-selected="' + (etat.onglet === 'site') + '">Équipe de ' + echap(nomSite) + '</button>'
+            + '<button type="button" role="tab" data-pm="onglet" data-v="autre" aria-selected="' + (etat.onglet === 'autre') + '">Autre site</button></div>'
+            + (etat.onglet === 'site' ? htmlEquipe() : htmlFiltres());
+        }
+        h += '</div>'
+          + '<div><span class="pm-l">Motif</span><div class="pm-chips" role="group" aria-label="Motif">' + PM_MOTIFS.map(function (m) {
+              return '<button type="button" data-pm="motif" data-v="' + m[0] + '" aria-pressed="' + (etat.motif === m[0]) + '">' + m[1] + '</button>'; }).join('') + '</div></div>'
+          + '<div><label class="pm-l" for="pm-note">Note pour votre collègue</label><textarea id="pm-note" maxlength="600" placeholder="Ce qu\'il doit savoir : le besoin, le véhicule, ce qui a été dit, la prochaine étape…">' + echap(etat.note) + '</textarea></div>';
+        if (n) {
+          var liste = ctx.leads.slice(0, 3).map(function (l) { return [l.vehicule, l.source].filter(Boolean).join(' · ') || 'lead'; }).join(' ; ');
+          var cible = c && ok ? siteCible(c) : null;
+          var ailleurs = cible && String(cible.id) !== String(ctx.site_ref);
+          h += '<label class="pm-conf' + (ok || !c ? '' : ' off') + '"><input type="checkbox" id="pm-confier"' + (ok && etat.confier ? ' checked' : '') + (ok || !c ? '' : ' disabled') + '>'
+            + '<span><b>Lui confier le suivi</b><small>' + (c && !ok ? 'Un chef des ventes peut être prévenu, mais le lead ne peut être confié qu\'à un vendeur.'
+              : (n > 1 ? 'Vos ' + n + ' leads ouverts sur ce client passent dans sa file' : 'Votre lead passe dans sa file')
+                + (ailleurs ? ', sur le site ' + echap(cible.nom) : '') + ' (' + echap(liste) + '). Vous n\'en serez plus responsable, ni crédité de la vente.') + '</small></span></label>';
+        } else {
+          h += '<p class="pm-hint">Aucun lead ouvert à votre nom sur ce client : votre collègue est prévenu sur la fiche, le suivi ne change pas.</p>';
+        }
+        if (etat.erreur) h += '<p class="pm-err">' + echap(etat.erreur) + '</p>';
+        b.innerHTML = h;
+        rendreResultats();
+        var confie = n && ok && etat.confier;
+        var lib = !c ? 'Passer la main' : (confie ? 'Confier à ' : 'Prévenir ') + c.nom.split(' ')[0];
+        b.insertAdjacentHTML('afterend', '<div class="pm-f"><button type="button" class="pm-annuler" data-pm="fermer">Annuler</button><button type="button" class="pm-ok" data-pm="valider"' + (etat.envoi ? ' disabled' : '') + '>' + echap(etat.envoi ? 'Envoi…' : lib) + '</button></div>');
+        var cb = ov.querySelector('#pm-confier'); if (cb) cb.addEventListener('change', function () { etat.confier = cb.checked; lireNote(); dessiner(); });
+      }
+      function lireNote() { var t = ov.querySelector('#pm-note'); if (t) etat.note = t.value; }
+
+      // Filtres : la recherche ne redessine que la liste (le champ garde le focus) ; les listes
+      // déroulantes redessinent tout pour la cascade marque → affaire → site.
+      ov.addEventListener('input', function (e) {
+        var k = e.target.getAttribute && e.target.getAttribute('data-pmf'); if (k !== 'q') return;
+        etat.f.q = e.target.value; rendreResultats();
+      });
+      ov.addEventListener('change', function (e) {
+        var k = e.target.getAttribute && e.target.getAttribute('data-pmf'); if (!k || k === 'q') return;
+        etat.f[k] = e.target.value;
+        if (k === 'marque') { etat.f.affaire = ''; etat.f.site = ''; }
+        if (k === 'affaire') etat.f.site = '';
+        lireNote(); dessiner();
+      });
+      ov.addEventListener('click', function (e) {
+        if (e.target === ov) return fermer();
+        var x = e.target.closest('[data-pm]'); if (!x) return;
+        var a = x.getAttribute('data-pm');
+        if (a === 'fermer') return fermer();
+        lireNote();
+        if (a === 'motif') { etat.motif = x.getAttribute('data-v'); return dessiner(); }
+        if (a === 'onglet') { etat.onglet = x.getAttribute('data-v'); return dessiner(); }
+        if (a === 'univ') { etat.f.univ = x.getAttribute('data-v'); return dessiner(); }
+        if (a === 'changer') { etat.choix = true; var cc0 = collegue(); if (cc0) etat.onglet = surSiteRef(cc0) ? 'site' : 'autre'; return dessiner(); }
+        if (a === 'choisir') {
+          etat.vers = x.getAttribute('data-v'); etat.choix = false; etat.erreur = null;
+          var cc = collegue(); if (cc && cc.suit && !etat.motif) etat.motif = 'deja_suivi';
+          else if (cc && !cc.suit && etat.motif === 'deja_suivi') etat.motif = null;
+          return dessiner();
+        }
+        if (a === 'valider') {
+          etat.erreur = null;
+          if (!collegue()) etat.erreur = 'Choisissez le collègue à prévenir.';
+          else if (!etat.motif) etat.erreur = 'Choisissez un motif.';
+          else if (etat.note.trim().length < 5) etat.erreur = 'Écrivez une note de contexte : votre collègue ne doit pas avoir à rappeler le client pour reposer les mêmes questions.';
+          if (etat.erreur) return dessiner();
+          var confier = !!(etat.ctx.leads.length && peutConfier() && etat.confier);
+          etat.envoi = true; dessiner();
+          o.rpc('passer_main', { p_id_vers: Number(etat.vers), p_id_client: etat.ctx.client != null ? Number(etat.ctx.client) : (o.idClient != null ? Number(o.idClient) : null),
+            p_id_leads: confier ? etat.ctx.leads.map(function (l) { return Number(l.id_lead); }) : null, p_confier: confier, p_motif: etat.motif, p_note: etat.note.trim() })
+            .then(function (r) {
+              if (!r || !r.ok) { etat.envoi = false; etat.erreur = (r && r.motif) || 'Échec, réessayez.'; return dessiner(); }
+              fermer();
+              if (o.toast) o.toast(r.confies ? 'Confié à ' + r.vers_nom + ' : ' + (r.confies > 1 ? r.confies + ' leads sont' : 'le lead est') + ' dans sa file' + (r.site_change ? ' (' + r.site_change + ')' : '') + '.' : r.vers_nom + ' est prévenu.');
+              if (o.apres) try { o.apres(r); } catch (e2) {}
+            })
+            .catch(function (e3) { etat.envoi = false; etat.erreur = String((e3 && e3.message) || e3).replace(/^\[lead\]\s*/, ''); dessiner(); });
+        }
+      });
+
+      o.rpc('passer_main_contexte', { p_id_client: o.idClient != null ? Number(o.idClient) : null, p_id_lead: o.idLead != null ? Number(o.idLead) : null })
+        .then(function (ctx) {
+          etat.ctx = ctx || { leads: [], collegues: [] };
+          etat.ctx.leads = etat.ctx.leads || []; etat.ctx.collegues = etat.ctx.collegues || [];
+          // Quelqu'un suit déjà ce client : présélectionné (préférence à l'équipe du site).
+          var suiveurs = etat.ctx.collegues.filter(function (c) { return c.suit; }).sort(function (a, b) { return surSiteRef(b) - surSiteRef(a); });
+          if (suiveurs[0]) { etat.vers = suiveurs[0].id_user; etat.motif = 'deja_suivi'; etat.choix = false; }
+          if (!etat.ctx.collegues.some(surSiteRef)) etat.onglet = 'autre';
+          dessiner();
+        })
+        .catch(function (e) { ov.querySelector('.pm-b').innerHTML = '<p class="pm-err">' + echap(String((e && e.message) || e)) + '</p>'; });
+    }
+    function passerMain(id) {
+      var l = S.dr && S.dr.l; if (!l) return;
+      pmOuvrir({ doc: doc, rpc: rpc, idLead: Number(id), idClient: l.id_client, nomClient: nomLead(l), toast: toast,
+        apres: function (r) { if (r && r.confies) { fermerTout(); rafraichir(true); } } });
+    }
     function choisirCanal(act) {
       var D = S.dr; if (!D || !D.l) return;
       if (act === 'appel') return canal('appel');
@@ -6216,6 +6490,7 @@
         case 'close': return fermerTout();
         case 'copier': try { await (FW.navigator || navigator).clipboard.writeText(id); toast('Numéro copié'); } catch (e) { toast(id); } return;
         case 'canal': return choisirCanal(id);
+        case 'passer': return passerMain(id);
         case 'tpl': if (S.dr) { S.dr.tpl = Number(id); S.dr.txt = null; S.dr.subj = null; lireRdvF(); renderDrawer(); } return;
         case 'canal-ouvrir': return ouvrirCanalModele();
         case 'avis': if (!S.dr) return; if (id === 'juste') return envoyerAvis('juste'); S.dr.avisChoix = S.dr.avisChoix === id ? null : id; renderDrawerPreserve(); return;
@@ -6588,6 +6863,7 @@
 .lmtc-ov .fs-btn{display:inline-flex;align-items:center;gap:8px;border:1.5px solid #e8eef7;background:#fff;border-radius:10px;padding:8px 14px;font-size:13.5px;font-weight:700;cursor:pointer;transition:background .15s;color:var(--bleu-dk)}
 .lmtc-ov .fs-btn svg{width:17px;height:17px}
 .lmtc-ov .fs-btn[disabled]{opacity:.45;cursor:not-allowed}
+.lmtc-ov .fs-btn.passer{color:var(--ardoise,#5A72A0);border-color:#DCE4F0;border-style:dashed}.lmtc-ov .fs-btn.passer:hover{background:#F5F8FC}
 .lmtc-ov .fs-btn.call{color:var(--bleu);border-color:#c9d9ee}.lmtc-ov .fs-btn.call:hover{background:var(--sel)}
 .lmtc-ov .fs-btn.wa{color:#1f9d63;border-color:#bfe6cf}.lmtc-ov .fs-btn.wa:hover{background:#eafaf1}
 .lmtc-ov .fs-btn.mail{color:var(--bleu-dk);border-color:#d7dfe9}.lmtc-ov .fs-btn.mail:hover{background:#f2f5f9}
