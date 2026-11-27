@@ -1,5 +1,10 @@
 // ============================================================================
 //  PERFORMANCES ÉQUIPE — module One Data (OD.define)  v1
+//  v44 (27/11/2026) TEAM COLIN : Contrôle de gestion › « Suivi facturation
+//    VoP » (demande de Nadia Atlas). Factures VO DBS hors ventes inter-groupe,
+//    marchands (VoM) et casses, par mois, site et vendeur ; acheteurs pro à
+//    classer, reclassement d'un client, export Excel. SQL : cg_vop,
+//    cg_client_classer, cg_client_liste.
 //  v43 (26/11/2026) : contrôle des financements borné aux commandes créées
 //    depuis la synchronisation BACS ↔ EPOS (cg_config.financement_depuis,
 //    18/11/2026) — avant, la vérité était dans DBS.
@@ -199,7 +204,7 @@ OD.define('performances', {
 
   const doc = __anchor.ownerDocument || document;
   function getRoot() { return __anchor; }
-  try { window.__perfVer = 'v43-teamcolin'; } catch (e) { }
+  try { window.__perfVer = 'v44-teamcolin'; } catch (e) { }
 
   // --- PROFIL TENANT -----------------------------------------------------------
   // Team Colin est reconnu par la ref de son projet Supabase (source sûre), ou
@@ -3224,7 +3229,9 @@ OD.define('performances', {
     };
     G.sel = G.sel instanceof Set ? G.sel : new Set();
     let data = null, charge = false, erreur = null, jeton = 0, toast = '';
-    const compteurs = { stock_dbs: null, financement: null };
+    const compteurs = { stock_dbs: null, financement: null, vop: null };
+    G.cat = G.cat || 'VoP';
+    let listeClasses = null, listeOuverte = false;
     injecterCssControle();
 
     const e = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -3265,16 +3272,18 @@ OD.define('performances', {
       const t = ++jeton; if (!silencieux) { charge = false; erreur = null; rendre(); }
       const [d, f] = periode();
       try {
-        const r = await sb.rpc('cg_lire', { p_controle: G.ctl, p_deb: d, p_fin: f, p_sites: null, p_etat: G.etat });
+        const r = G.ctl === 'vop'
+          ? await sb.rpc('cg_vop', { p_deb: d, p_fin: f, p_sites: null })
+          : await sb.rpc('cg_lire', { p_controle: G.ctl, p_deb: d, p_fin: f, p_sites: null, p_etat: G.etat });
         if (t !== jeton) return;
         if (r.error) throw r.error;
         data = r.data || {}; charge = true;
-        compteurs[G.ctl] = (data.synthese || {}).anomalies;
-        const autre = G.ctl === 'stock_dbs' ? 'financement' : 'stock_dbs';
-        if (compteurs[autre] == null) {
-          sb.rpc('cg_lire', { p_controle: autre, p_deb: d, p_fin: f, p_sites: null, p_etat: 'ouvertes' })
-            .then(x => { if (!x.error && x.data) { compteurs[autre] = (x.data.synthese || {}).anomalies; rendre(); } }).catch(() => {});
-        }
+        compteurs[G.ctl] = G.ctl === 'vop' ? (data.synthese || {}).vop : (data.synthese || {}).anomalies;
+        ['stock_dbs', 'financement', 'vop'].filter(c => c !== G.ctl && compteurs[c] == null).forEach(c => {
+          const q = c === 'vop' ? sb.rpc('cg_vop', { p_deb: d, p_fin: f, p_sites: null })
+                                : sb.rpc('cg_lire', { p_controle: c, p_deb: d, p_fin: f, p_sites: null, p_etat: 'ouvertes' });
+          q.then(x => { if (!x.error && x.data) { compteurs[c] = c === 'vop' ? (x.data.synthese || {}).vop : (x.data.synthese || {}).anomalies; rendre(); } }).catch(() => {});
+        });
         const ids = new Set((data.lignes || []).map(l => String(l.id)));
         [...G.sel].forEach(k => { if (!ids.has(k)) G.sel.delete(k); });
       } catch (x) { if (t !== jeton) return; erreur = (x && x.message) || String(x); charge = true; }
@@ -3406,13 +3415,138 @@ OD.define('performances', {
       return h + '</tbody></table></div>';
     }
 
+
+    // ---- SUIVI FACTURATION VoP (v44) ---------------------------------------
+    //  Factures VO DBS (avoirs et factures annulées exclus) classées :
+    //  GROUPE (compte DBS « technique » ou affaire du groupe — vente
+    //  inter-site), CASSE et VoM (liste de Nadia, enrichissable ici), sinon
+    //  VoP. Rattachement au site par le code site DBS de la facture.
+    const LIB_CAT = { VoP: 'VoP', VoM: 'VoM (marchand)', CASSE: 'Casse', GROUPE: 'Inter-groupe' };
+    function filtreesVop() {
+      const q = String(G.q || '').trim().toLowerCase();
+      return (data && data.lignes || []).filter(l => {
+        if (G.cat && G.cat !== 'tout' && l.cat !== G.cat) return false;
+        if (G.site != null && String(l.id_site) !== String(G.site)) return false;
+        if (q && [l.client, l.utilisateur, l.vin, l.vendeur, l.site, l.num, l.desig].join(' ').toLowerCase().indexOf(q) < 0) return false;
+        return true;
+      });
+    }
+    async function classer(libelle, cat) {
+      if (!libelle) return;
+      try {
+        const r = await sb.rpc('cg_client_classer', { p_libelle: libelle, p_categorie: cat });
+        if (r.error) throw r.error;
+        toast = '« ' + e(propre(libelle)) + ' » est désormais classé ' + e(LIB_CAT[cat] || cat) + '.';
+      } catch (x) { toast = 'Classement impossible : ' + e((x && x.message) || x); }
+      listeClasses = null; compteurs.vop = null;
+      setTimeout(() => { toast = ''; rendre(); }, 5000);
+      charger(true);
+    }
+    function rendreVop() {
+      const [d, f] = periode();
+      let h = '<div class="pl-bar"><span class="pl-lbl">Factures du</span><div class="pl-seg">'
+        + PRESETS.map(p => '<button type="button" class="' + (!G.du && G.preset === p[0] ? 'on' : '') + '" data-cg-preset="' + p[0] + '">' + p[1] + '</button>').join('') + '</div>'
+        + (DPL ? DPL.bouton(d, f, 'data-cg-dp="1"', 'Choisir les dates') : '')
+        + '<span class="pl-lbl">Catégorie</span><div class="pl-seg">'
+        + [['VoP', 'VoP'], ['VoM', 'VoM'], ['CASSE', 'Casse'], ['GROUPE', 'Inter-groupe'], ['tout', 'Toutes']].map(x => '<button type="button" class="' + (G.cat === x[0] ? 'on' : '') + '" data-cg-cat="' + x[0] + '">' + x[1] + '</button>').join('') + '</div>'
+        + '<input type="search" class="cg-q" data-cg-q placeholder="Client, VIN, n° de facture, vendeur…" value="' + e(G.q) + '">'
+        + '<span class="cg-outils"><button type="button" class="cg-btn" data-cg-xls>⇩ Excel</button></span></div>';
+      h += '<div class="pp-regles cg-regle"><b>La règle :</b> une facture VO DBS est une <b>VoP</b> sauf si le client facturé est une <b>société du groupe</b> (vente inter-site : compte DBS « technique » ou affaire du groupe), un <b>marchand (VoM)</b> ou une <b>casse</b> — selon la liste de classement, que vous pouvez compléter ci-dessous. Les factures annulées par un avoir sont exclues.</div>';
+      if (toast) h += '<div class="cg-toast">' + toast + '</div>';
+      if (!charge) return h + '<div class="pl-vide">Chargement des factures…</div>';
+      if (erreur) return h + '<div class="pl-vide err">Le suivi n\'a pas pu être chargé : ' + e(erreur) + '</div>';
+      const S = data.synthese || {};
+      const part = (a) => S.total ? Math.round(100 * a / S.total) + ' % des VO facturés' : '';
+      h += '<div class="pl-tiles">'
+        + tuile('VO facturés', S.total || 0, 'factures DBS de la période', '')
+        + tuile('VoP', S.vop || 0, eur(S.ca_vop) + ' HT · ' + part(S.vop || 0), 'ok')
+        + tuile('VoM (marchands)', S.vom || 0, part(S.vom || 0), '')
+        + tuile('Casse', S.casse || 0, part(S.casse || 0), '')
+        + tuile('Inter-groupe', S.groupe || 0, part(S.groupe || 0), '')
+        + '</div>';
+
+      // Par mois
+      const mois = data.mois || [];
+      if (mois.length) {
+        const maxV = Math.max(1, ...mois.map(m => m.vop));
+        const libMois = m => { const [y, mm] = m.split('-'); return new Date(Number(y), Number(mm) - 1, 15).toLocaleDateString('fr-FR', { month: 'short', year: '2-digit' }); };
+        h += carte('Par mois', '', '<div class="pl-tw"><table class="pl-t"><thead><tr><th>Mois</th><th>VoP</th><th>CA VoP HT</th><th>VoM</th><th>Casse</th><th>Inter-groupe</th></tr></thead><tbody>'
+          + mois.map(m => '<tr><td class="l">' + e(libMois(m.mois)) + '</td><td><span class="pl-vol"><i style="width:' + Math.max(4, 100 * m.vop / maxV) + '%"></i><b>' + m.vop + '</b></span></td><td>' + eur(m.ca_vop) + '</td><td>' + (m.vom || '<span class="pl-na">0</span>') + '</td><td>' + (m.casse || '<span class="pl-na">0</span>') + '</td><td>' + (m.groupe || '<span class="pl-na">0</span>') + '</td></tr>').join('')
+          + '</tbody></table></div>');
+      }
+
+      // Par site
+      const sites = (data.sites || []).slice().sort((a, b) => b.vop - a.vop);
+      h += carte('Par site', 'Cliquez un site pour filtrer les vendeurs et les factures, recliquez-le pour revenir à tout le groupe.',
+        '<div class="pl-tw"><table class="pl-t cg-sites"><thead><tr><th>Site</th><th>VoP</th><th>CA VoP HT</th><th>VoM</th><th>Casse</th><th>Inter-groupe</th><th>Part VoP</th></tr></thead><tbody>'
+        + sites.map(s0 => {
+            const on = G.site != null && String(G.site) === String(s0.id_site);
+            return '<tr class="cg-row' + (on ? ' on' : '') + '" data-cg-site="' + e(s0.id_site) + '" data-cg-sitelib="' + e(propre(s0.site)) + '"><td class="l">' + e(propre(s0.site) || 'Site non rattaché') + ' <small>' + e(propre(s0.affaire) || '') + '</small></td>'
+              + '<td><b>' + s0.vop + '</b></td><td>' + eur(s0.ca_vop) + '</td><td>' + (s0.vom || '<span class="pl-na">0</span>') + '</td><td>' + (s0.casse || '<span class="pl-na">0</span>') + '</td><td>' + (s0.groupe || '<span class="pl-na">0</span>') + '</td>'
+              + '<td>' + pctTxt(s0.vop, s0.total) + '</td></tr>';
+          }).join('') + '</tbody></table></div>');
+
+      // Par vendeur
+      const vend = (data.vendeurs || []).filter(v => G.site == null || String(v.id_site) === String(G.site)).filter(v => v.vop > 0).sort((a, b) => b.vop - a.vop);
+      if (vend.length) h += carte('Par vendeur', 'Vendeur porté par la facture DBS' + (G.site != null ? ' · ' + e(G.siteLabel) : '') + '.',
+        '<div class="pl-tw cg-tw" style="max-height:360px"><table class="pl-t"><thead><tr><th>Vendeur</th><th>Site</th><th>VoP</th><th>CA VoP HT</th><th>Autres VO</th></tr></thead><tbody>'
+        + vend.map(v => '<tr><td class="l">' + e(propre(v.vendeur)) + '</td><td>' + e(propre(v.site) || '—') + '</td><td><b>' + v.vop + '</b></td><td>' + eur(v.ca_vop) + '</td><td>' + (v.autres || '<span class="pl-na">0</span>') + '</td></tr>').join('')
+        + '</tbody></table></div>');
+
+      // Acheteurs pro restés en VoP
+      const ac = data.a_classer || [];
+      if (ac.length) h += carte('Acheteurs professionnels comptés en VoP', 'Sociétés qui ont acheté au moins 2 VO sur la période et ne sont pas dans la liste : classez les marchands, casses ou sociétés du groupe d\'un clic. Les loueurs et organismes de financement (LOA) restent en VoP si vous ne les classez pas.',
+        '<div class="pl-tw cg-tw" style="max-height:380px"><table class="pl-t"><thead><tr><th>Client</th><th>Factures</th><th>CA HT</th><th>Classer en</th></tr></thead><tbody>'
+        + ac.map(a => '<tr><td class="l">' + e(a.client || a.cle) + '</td><td>' + a.n + '</td><td>' + eur(a.ca) + '</td><td class="cg-act">'
+          + [['VoM', 'VoM'], ['CASSE', 'Casse'], ['GROUPE', 'Groupe']].map(x => '<button type="button" class="cg-btn mini" data-cg-classer="' + x[0] + '" data-cg-lib="' + e(a.client || a.cle) + '">' + x[1] + '</button>').join(' ')
+          + '</td></tr>').join('') + '</tbody></table></div>');
+
+      // Factures
+      const rows = filtreesVop();
+      const vis = rows.slice(0, G.page);
+      const extra = '<div class="cg-selbar">' + (G.site != null ? '<span class="cg-chip">' + e(G.siteLabel || 'Site') + ' <button type="button" data-cg-sitex aria-label="Retirer le filtre">×</button></span>' : '')
+        + '<span class="cg-nsel">' + rows.length + ' facture' + (rows.length > 1 ? 's' : '') + '</span></div>';
+      let t = '';
+      if (!rows.length) t = '<div class="pl-vide">Aucune facture avec ces filtres.</div>';
+      else {
+        t = '<div class="pl-tw cg-tw"><table class="pl-t cg-t"><thead><tr><th>Date</th><th class="l">Facture</th><th class="l">Site · vendeur</th><th class="l">Client facturé</th><th class="l">Véhicule</th><th>CA HT</th><th>Catégorie</th></tr></thead><tbody>'
+          + vis.map(l => {
+              const peutClasser = l.client && l.type_compte !== 'technique';
+              const sel = peutClasser ? '<select class="pl-sel cg-mini" data-cg-reclasse="' + e(l.client) + '" title="Reclasser ce client pour toutes ses factures"><option value="">' + e(LIB_CAT[l.cat] || l.cat) + '</option>'
+                  + ['VoP', 'VoM', 'CASSE', 'GROUPE'].filter(c => c !== l.cat).map(c => '<option value="' + c + '">→ ' + e(LIB_CAT[c]) + '</option>').join('') + '</select>'
+                : '<span class="cg-st">' + e(LIB_CAT[l.cat] || l.cat) + '</span>';
+              return '<tr><td>' + dateFr(l.df) + '</td><td class="l"><b>' + e(l.num || l.numero_document) + '</b><small>' + e(l.dep || '') + '</small></td>'
+                + '<td class="l">' + e(propre(l.site) || '—') + '<small>' + e(propre(l.vendeur) || '') + '</small></td>'
+                + '<td class="l">' + e(l.client || 'Client non retrouvé') + (l.utilisateur && l.client && l.type_compte !== 'particulier' && l.utilisateur.toUpperCase() !== String(l.client).toUpperCase() ? '<small>utilisateur : ' + e(propre(l.utilisateur)) + '</small>' : '') + (l.fin ? '<small>' + e(l.fin) + '</small>' : '') + '</td>'
+                + '<td class="l">' + e(l.desig || '') + '<small class="cg-vin">' + e(l.vin || '') + '</small></td>'
+                + '<td>' + eur(l.ca_veh) + '</td><td>' + sel + '</td></tr>';
+            }).join('') + '</tbody></table></div>';
+        if (rows.length > vis.length) t += '<div class="cg-plus"><button type="button" data-cg-plus>Afficher ' + Math.min(200, rows.length - vis.length) + ' factures de plus</button><span>' + vis.length + ' sur ' + rows.length + '</span></div>';
+      }
+      h += carte('Factures', (data.total_lignes > (data.lignes || []).length ? 'Les ' + (data.lignes || []).length + ' plus récentes sur ' + data.total_lignes + ' — resserrez la période pour tout voir. ' : '') + 'Le menu de la colonne Catégorie reclasse le client pour toutes ses factures.', t, extra);
+
+      // Liste de classement
+      let lc = '<button type="button" class="cg-btn" data-cg-liste>' + (listeOuverte ? 'Masquer' : 'Afficher') + ' la liste (' + (data.liste || 0) + ' clients)</button>';
+      if (listeOuverte) {
+        const L = listeClasses || [];
+        lc += L.length ? '<div class="pl-tw cg-tw" style="max-height:360px;margin-top:10px"><table class="pl-t"><thead><tr><th>Client</th><th>Catégorie</th><th>Origine</th><th></th></tr></thead><tbody>'
+          + L.map(x => '<tr><td class="l">' + e(x.libelle) + '</td><td>' + e(LIB_CAT[x.categorie] || x.categorie) + '</td><td><small>' + e(x.source || '') + '</small></td><td><button type="button" class="cg-btn mini" data-cg-classer="VoP" data-cg-lib="' + e(x.libelle) + '">Remettre en VoP</button></td></tr>').join('')
+          + '</tbody></table></div>' : '<p class="pl-note">Chargement…</p>';
+      }
+      h += carte('Liste de classement des clients', 'Marchands, casses et sociétés du groupe exclus des VoP. Rapprochement sur le nom, sans tenir compte de la civilité ni de la forme juridique (« Sté », « SAS », « GGE »…).', lc);
+      h += '<p class="pl-note pied">Source : factures de vente VO du DMS DBS (dernière facture reçue le ' + e(dateFr(data.maj)) + '), y compris celles saisies par le service VN. Client facturé = propriétaire de la facture ; en LOA, c\'est l\'organisme de financement et l\'utilisateur est indiqué en dessous. CA HT = chiffre d\'affaires véhicule de la facture.</p>';
+      return h;
+    }
+
     function rendre() {
       if (!host.isConnected) return;
       injecterCssControle();
-      const nS = compteurs.stock_dbs, nF = compteurs.financement;
+      const nS = compteurs.stock_dbs, nF = compteurs.financement, nV = compteurs.vop;
       let h = '<div class="cg-ctl" role="tablist">'
         + '<button type="button" class="' + (G.ctl === 'stock_dbs' ? 'on' : '') + '" data-cg-ctl="stock_dbs"><b>Commandes non saisies dans DBS</b><span>' + (nS == null ? '…' : nS) + '</span></button>'
-        + '<button type="button" class="' + (G.ctl === 'financement' ? 'on' : '') + '" data-cg-ctl="financement"><b>Qualité des financements DBS</b><span>' + (nF == null ? '…' : nF) + '</span></button></div>';
+        + '<button type="button" class="' + (G.ctl === 'financement' ? 'on' : '') + '" data-cg-ctl="financement"><b>Qualité des financements DBS</b><span>' + (nF == null ? '…' : nF) + '</span></button>'
+        + '<button type="button" class="' + (G.ctl === 'vop' ? 'on' : '') + '" data-cg-ctl="vop"><b>Suivi facturation VoP</b><span>' + (nV == null ? '…' : nV) + '</span></button></div>';
+      if (G.ctl === 'vop') { host.innerHTML = h + rendreVop(); lier(); return; }
       const [d, f] = periode();
       h += '<div class="pl-bar"><span class="pl-lbl">Commandes du</span><div class="pl-seg">'
         + PRESETS.map(p => '<button type="button" class="' + (!G.du && G.preset === p[0] ? 'on' : '') + '" data-cg-preset="' + p[0] + '">' + p[1] + '</button>').join('') + '</div>'
@@ -3516,6 +3650,14 @@ OD.define('performances', {
         try { ((wwLib.getFrontWindow && wwLib.getFrontWindow()) || window).open(BACS_BASE + 'order/' + rid, '_blank', 'noopener'); } catch (x) { window.open(BACS_BASE + 'order/' + rid, '_blank', 'noopener'); }
       });
       on('[data-cg-xls]', 'click', ev => exporter(ev.currentTarget));
+      on('[data-cg-cat]', 'click', ev => { G.cat = ev.currentTarget.getAttribute('data-cg-cat'); G.page = 200; rendre(); });
+      on('[data-cg-classer]', 'click', ev => { ev.stopPropagation(); classer(ev.currentTarget.getAttribute('data-cg-lib'), ev.currentTarget.getAttribute('data-cg-classer')); });
+      on('select[data-cg-reclasse]', 'change', ev => { const v = ev.currentTarget.value; if (v) classer(ev.currentTarget.getAttribute('data-cg-reclasse'), v); });
+      on('[data-cg-liste]', 'click', async () => {
+        listeOuverte = !listeOuverte;
+        if (listeOuverte && !listeClasses) { const r = await sb.rpc('cg_client_liste'); listeClasses = r.error ? [] : (r.data || []); }
+        rendre();
+      });
       on('[data-cg-notifier]', 'click', () => ouvrirNotifier());
       on('[data-cg-recalc]', 'click', async ev => {
         // Le calcul (~15 s) tourne côté base : on pose une demande, traitée
@@ -3545,6 +3687,15 @@ OD.define('performances', {
 
     // ---- export Excel (edge function export-xslx, comme la vue Ventes) -----
     function lignesExport() {
+      if (G.ctl === 'vop') return filtreesVop().map(l => ({
+        'Date facture': l.df || '', 'N° facture': l.num || '', 'Document DBS': l.numero_document || '',
+        'Réseau': propre(l.reseau || ''), 'Affaire': propre(l.affaire || ''), 'Site': propre(l.site || ''),
+        'Département': l.dep || '', 'Vendeur': propre(l.vendeur || ''),
+        'Client facturé': l.client || '', 'Utilisateur': l.utilisateur || '', 'Type de compte DBS': l.type_compte || '',
+        'Catégorie': LIB_CAT[l.cat] || l.cat, 'Financement': l.fin || '',
+        'Véhicule': l.desig || '', 'VIN': l.vin || '',
+        'CA véhicule HT': l.ca_veh != null ? Number(l.ca_veh) : null, 'Montant HT facture': l.mht != null ? Number(l.mht) : null
+      }));
       return triees(filtrees()).map(l => {
         const d = l.detail || {};
         const o = {
@@ -3583,11 +3734,11 @@ OD.define('performances', {
         if (!SUPABASE_KEY) SUPABASE_KEY = getSupabaseKey();
         const jwt = await getUserJwt();
         const [d, f] = periode();
-        const nom = (G.ctl === 'stock_dbs' ? 'controle_cdes_non_saisies_DBS_' : 'controle_financements_DBS_') + (G.site != null ? String(G.siteLabel || G.site).normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^a-zA-Z0-9]+/g, '_') + '_' : '') + d + '_' + f + '.xlsx';
+        const nom = (G.ctl === 'stock_dbs' ? 'controle_cdes_non_saisies_DBS_' : G.ctl === 'vop' ? 'facturation_VO_' + (G.cat || 'toutes') + '_' : 'controle_financements_DBS_') + (G.site != null ? String(G.siteLabel || G.site).normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^a-zA-Z0-9]+/g, '_') + '_' : '') + d + '_' + f + '.xlsx';
         const res = await fetch(SUPABASE_URL + '/functions/v1/export-xslx', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', 'apikey': SUPABASE_KEY, 'Authorization': 'Bearer ' + (jwt || SUPABASE_KEY) },
-          body: JSON.stringify({ rows, fileName: nom, sheetName: G.ctl === 'stock_dbs' ? 'Non saisies DBS' : 'Financements', expiresIn: 300 })
+          body: JSON.stringify({ rows, fileName: nom, sheetName: G.ctl === 'stock_dbs' ? 'Non saisies DBS' : G.ctl === 'vop' ? 'Facturation VO' : 'Financements', expiresIn: 300 })
         });
         const j = await res.json();
         if (!res.ok || !j.url) throw new Error(j.error || ('HTTP ' + res.status));
@@ -3664,7 +3815,7 @@ OD.define('performances', {
       if (doc.getElementById('cg-css')) return;
       const st = doc.createElement('style'); st.id = 'cg-css';
       st.textContent = `
-.cg-ctl{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;margin:0 0 12px}
+.cg-ctl{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;margin:0 0 12px}
 .cg-ctl button{display:flex;align-items:center;justify-content:space-between;gap:10px;border:1px solid #e3e9f3;background:#fff;border-radius:12px;padding:12px 16px;font:inherit;cursor:pointer;text-align:left}
 .cg-ctl button b{font-size:13.5px;font-weight:800;color:#5a6b86}
 .cg-ctl button span{font-size:20px;font-weight:800;color:#2a5ea9;font-variant-numeric:tabular-nums}
@@ -3676,6 +3827,8 @@ OD.define('performances', {
 .cg-outils{display:flex;gap:6px;margin-left:auto}
 .cg-btn{border:1px solid #acc5e4;background:#fff;color:#2a5ea9;border-radius:8px;padding:6px 12px;font:inherit;font-size:12px;font-weight:800;cursor:pointer;white-space:nowrap}
 .cg-btn:hover{background:#eef4fc}
+.cg-btn.mini{padding:3px 8px;font-size:11px}
+.pl-sel.cg-mini{padding:3px 6px;font-size:11px}
 .cg-btn:disabled{opacity:.5;cursor:default}
 .cg-btn.prim{background:#2a5ea9;border-color:#2a5ea9;color:#fff}
 .cg-btn.prim:hover{background:#1F4A85}
