@@ -1,5 +1,9 @@
 // ============================================================================
 //  PERFORMANCES ÉQUIPE — module One Data (OD.define)  v1
+//  v45 (27/11/2026) : suivi facturation VoP — objectifs de commandes VO des
+//    sites (OBJECTIF, somme des objectifs individuels) contre les VoP
+//    facturés : barre d'avancement + rythme attendu (jours lun-sam), par
+//    groupe, site et mois (demande de Nadia Atlas).
 //  v44 (27/11/2026) TEAM COLIN : Contrôle de gestion › « Suivi facturation
 //    VoP » (demande de Nadia Atlas). Factures VO DBS hors ventes inter-groupe,
 //    marchands (VoM) et casses, par mois, site et vendeur ; acheteurs pro à
@@ -204,7 +208,7 @@ OD.define('performances', {
 
   const doc = __anchor.ownerDocument || document;
   function getRoot() { return __anchor; }
-  try { window.__perfVer = 'v44-teamcolin'; } catch (e) { }
+  try { window.__perfVer = 'v45-teamcolin'; } catch (e) { }
 
   // --- PROFIL TENANT -----------------------------------------------------------
   // Team Colin est reconnu par la ref de son projet Supabase (source sûre), ou
@@ -3442,6 +3446,50 @@ OD.define('performances', {
       setTimeout(() => { toast = ''; rendre(); }, 5000);
       charger(true);
     }
+    // ---- v45 : objectifs de commandes VO (somme des objectifs individuels
+    //  de la table OBJECTIF, comme le dashboard), ramenés à la période au
+    //  prorata des jours ouvrés lundi → samedi de chaque mois. Le repère orange
+    //  marque le rythme attendu à date quand la période est en cours.
+    function jOuvres(a, z) {               // jours lun-sam de a à z inclus (Date)
+      let n = 0; const x = new Date(a); x.setHours(12, 0, 0, 0);
+      const fin = new Date(z); fin.setHours(12, 0, 0, 0);
+      while (x <= fin) { if (x.getDay() !== 0) n++; x.setDate(x.getDate() + 1); }
+      return n;
+    }
+    function objectifVop(idSite) {
+      const [d, f] = periode();
+      const D = new Date(d + 'T12:00:00'); let F = new Date(f + 'T12:00:00');
+      const auj = new Date(); auj.setHours(12, 0, 0, 0);
+      // Une période qui s'arrête aujourd'hui court jusqu'à la fin du mois :
+      // l'objectif du mois en cours compte en entier, avec le repère de rythme.
+      if (F >= auj) F = new Date(auj.getFullYear(), auj.getMonth() + 1, 0, 12);
+      let obj = 0, attendu = 0;
+      (data.objectifs || []).forEach(o => {
+        if (idSite != null && String(o.id_site) !== String(idSite)) return;
+        const [y, m] = o.mois.split('-').map(Number);
+        const m0 = new Date(y, m - 1, 1, 12), m1 = new Date(y, m, 0, 12);
+        const a = m0 < D ? D : m0, z = m1 > F ? F : m1;
+        if (a > z) return;
+        const tot = jOuvres(m0, m1) || 1;
+        const part = Number(o.obj) * jOuvres(a, z) / tot;
+        obj += part;
+        if (auj >= a) attendu += auj >= z ? part : Number(o.obj) * jOuvres(a, auj) / tot;
+      });
+      const enCours = auj >= D && auj < F;
+      return { obj: Math.round(obj), attendu: Math.round(attendu), pr: obj > 0 && enCours ? Math.min(1, attendu / obj) : 1 };
+    }
+    function barreObj(v, o, pr, grand) {
+      if (!(o > 0)) return '<span class="pl-na">pas d\'objectif</span>';
+      const w = Math.min(100, Math.round(100 * v / o));
+      return '<div class="cg-obj' + (grand ? ' grand' : '') + '"><div class="cg-bar"><div class="f' + (v >= o ? ' ok' : '') + '" style="width:' + w + '%"></div>'
+        + (pr < 1 ? '<div class="ryt" style="left:' + Math.round(pr * 1000) / 10 + '%" title="Rythme attendu à date"></div>' : '') + '</div>'
+        + '<span>' + v.toLocaleString('fr-FR') + ' <i>/ ' + o.toLocaleString('fr-FR') + '</i></span></div>';
+    }
+    function ecartRythme(v, O) {
+      if (!(O.obj > 0)) return '<span class="pl-na">—</span>';
+      const ref = O.pr < 1 ? O.attendu : O.obj, e0 = v - ref;
+      return '<b class="' + (e0 < 0 ? 'cg-rouge' : 'cg-vert') + '">' + (e0 > 0 ? '+' : e0 < 0 ? '−' : '') + Math.abs(e0).toLocaleString('fr-FR') + '</b>';
+    }
     function rendreVop() {
       const [d, f] = periode();
       let h = '<div class="pl-bar"><span class="pl-lbl">Factures du</span><div class="pl-seg">'
@@ -3464,25 +3512,50 @@ OD.define('performances', {
         + tuile('Casse', S.casse || 0, part(S.casse || 0), '')
         + tuile('Inter-groupe', S.groupe || 0, part(S.groupe || 0), '')
         + '</div>';
+      const OG = objectifVop(G.site);
+      const vG = G.site == null ? (S.vop || 0) : ((data.sites || []).find(x => String(x.id_site) === String(G.site)) || {}).vop || 0;
+      if (OG.obj > 0) {
+        const tx = Math.round(100 * vG / OG.obj);
+        const proj = OG.pr < 1 && OG.pr > 0 ? Math.round(vG / OG.pr) : null;
+        h += '<section class="pl-card large cg-hero"><div class="cg-hero-t"><div><span class="pl-tile-t">VoP facturés contre objectif de commandes VO' + (G.site != null ? ' · ' + e(G.siteLabel) : ' · groupe') + '</span>'
+          + '<div class="cg-hero-n"><b>' + vG.toLocaleString('fr-FR') + '</b><span>/ ' + OG.obj.toLocaleString('fr-FR') + '</span><em class="pl-pill ' + (tx >= 100 ? 'ok' : OG.pr < 1 && vG >= OG.attendu ? 'ok' : 'warn') + '">' + tx + ' % de l\'objectif</em></div></div>'
+          + '<div class="cg-hero-leg">' + (OG.pr < 1
+              ? '<span>Attendu à date : <b>' + OG.attendu.toLocaleString('fr-FR') + '</b></span><span>Écart au rythme : ' + ecartRythme(vG, OG) + '</span>' + (proj != null ? '<span>Au rythme actuel : <b>' + proj.toLocaleString('fr-FR') + '</b> en fin de période</span>' : '')
+              : '<span>Écart à l\'objectif : ' + ecartRythme(vG, OG) + '</span>') + '</div></div>'
+          + barreObj(vG, OG.obj, OG.pr, true)
+          + '<p class="pl-note">Objectif = somme des objectifs individuels de commandes VO saisis dans la page Objectifs, ramenée à la période au prorata des jours ouvrés (lundi-samedi)' + (OG.pr < 1 ? ' ; le repère orange marque le rythme attendu à date' : '') + '.</p></section>';
+      }
 
       // Par mois
       const mois = data.mois || [];
       if (mois.length) {
         const maxV = Math.max(1, ...mois.map(m => m.vop));
         const libMois = m => { const [y, mm] = m.split('-'); return new Date(Number(y), Number(mm) - 1, 15).toLocaleDateString('fr-FR', { month: 'short', year: '2-digit' }); };
-        h += carte('Par mois', '', '<div class="pl-tw"><table class="pl-t"><thead><tr><th>Mois</th><th>VoP</th><th>CA VoP HT</th><th>VoM</th><th>Casse</th><th>Inter-groupe</th></tr></thead><tbody>'
-          + mois.map(m => '<tr><td class="l">' + e(libMois(m.mois)) + '</td><td><span class="pl-vol"><i style="width:' + Math.max(4, 100 * m.vop / maxV) + '%"></i><b>' + m.vop + '</b></span></td><td>' + eur(m.ca_vop) + '</td><td>' + (m.vom || '<span class="pl-na">0</span>') + '</td><td>' + (m.casse || '<span class="pl-na">0</span>') + '</td><td>' + (m.groupe || '<span class="pl-na">0</span>') + '</td></tr>').join('')
+        const objMois = mm => (data.objectifs || []).filter(o => o.mois === mm && (G.site == null || String(o.id_site) === String(G.site))).reduce((a, o) => a + Number(o.obj || 0), 0);
+        const auj = new Date();
+        const prMois = mm => { const [y, m] = mm.split('-').map(Number); const m0 = new Date(y, m - 1, 1, 12), m1 = new Date(y, m, 0, 12);
+          if (auj < m0 || auj > m1) return 1; return Math.min(1, jOuvres(m0, auj) / (jOuvres(m0, m1) || 1)); };
+        h += carte('Par mois', 'VoP du mois contre l\'objectif de commandes VO du mois' + (G.site != null ? ' · ' + e(G.siteLabel) : '') + '. Pas d\'objectif saisi pour août : les objectifs de juillet couvrent l\'été.',
+          '<div class="pl-tw"><table class="pl-t"><thead><tr><th>Mois</th><th class="l">VoP / objectif VO</th><th>Taux</th><th>CA VoP HT</th><th>VoM</th><th>Casse</th><th>Inter-groupe</th></tr></thead><tbody>'
+          + mois.map(m => {
+              const vm = G.site == null ? m.vop : (data.lignes || []).filter(l => l.cat === 'VoP' && String(l.id_site) === String(G.site) && String(l.df || '').slice(0, 7) === m.mois).length;
+              const om = objMois(m.mois);
+              return '<tr><td class="l">' + e(libMois(m.mois)) + '</td><td class="l">' + (om > 0 ? barreObj(vm, om, prMois(m.mois)) : '<span class="pl-vol"><i style="width:' + Math.max(4, 100 * vm / maxV) + '%"></i><b>' + vm + '</b></span>') + '</td>'
+                + '<td>' + (om > 0 ? '<span class="pl-pill ' + (vm >= om ? 'ok' : vm >= om * prMois(m.mois) ? 'ok' : 'warn') + '">' + Math.round(100 * vm / om) + ' %</span>' : '<span class="pl-na">—</span>') + '</td>'
+                + '<td>' + eur(m.ca_vop) + '</td><td>' + (m.vom || '<span class="pl-na">0</span>') + '</td><td>' + (m.casse || '<span class="pl-na">0</span>') + '</td><td>' + (m.groupe || '<span class="pl-na">0</span>') + '</td></tr>';
+            }).join('')
           + '</tbody></table></div>');
       }
 
       // Par site
       const sites = (data.sites || []).slice().sort((a, b) => b.vop - a.vop);
       h += carte('Par site', 'Cliquez un site pour filtrer les vendeurs et les factures, recliquez-le pour revenir à tout le groupe.',
-        '<div class="pl-tw"><table class="pl-t cg-sites"><thead><tr><th>Site</th><th>VoP</th><th>CA VoP HT</th><th>VoM</th><th>Casse</th><th>Inter-groupe</th><th>Part VoP</th></tr></thead><tbody>'
+        '<div class="pl-tw"><table class="pl-t cg-sites"><thead><tr><th>Site</th><th class="l">VoP / objectif VO</th><th>Écart au rythme</th><th>CA VoP HT</th><th>VoM</th><th>Casse</th><th>Inter-groupe</th><th>Part VoP</th></tr></thead><tbody>'
         + sites.map(s0 => {
             const on = G.site != null && String(G.site) === String(s0.id_site);
+            const O = objectifVop(s0.id_site);
             return '<tr class="cg-row' + (on ? ' on' : '') + '" data-cg-site="' + e(s0.id_site) + '" data-cg-sitelib="' + e(propre(s0.site)) + '"><td class="l">' + e(propre(s0.site) || 'Site non rattaché') + ' <small>' + e(propre(s0.affaire) || '') + '</small></td>'
-              + '<td><b>' + s0.vop + '</b></td><td>' + eur(s0.ca_vop) + '</td><td>' + (s0.vom || '<span class="pl-na">0</span>') + '</td><td>' + (s0.casse || '<span class="pl-na">0</span>') + '</td><td>' + (s0.groupe || '<span class="pl-na">0</span>') + '</td>'
+              + '<td class="l">' + (O.obj > 0 ? barreObj(s0.vop, O.obj, O.pr) : '<b>' + s0.vop + '</b> <span class="pl-na">· pas d\'objectif</span>') + '</td><td>' + ecartRythme(s0.vop, O) + '</td><td>' + eur(s0.ca_vop) + '</td><td>' + (s0.vom || '<span class="pl-na">0</span>') + '</td><td>' + (s0.casse || '<span class="pl-na">0</span>') + '</td><td>' + (s0.groupe || '<span class="pl-na">0</span>') + '</td>'
               + '<td>' + pctTxt(s0.vop, s0.total) + '</td></tr>';
           }).join('') + '</tbody></table></div>');
 
@@ -3850,6 +3923,27 @@ OD.define('performances', {
 .cg-sites tbody tr.cg-row:hover td{background:#f5f8fc}
 .cg-sites tbody tr.on td{background:#e6effa !important}
 .cg-rouge{color:#c0524f}
+.cg-vert{color:#00997f}
+.cg-obj{display:flex;align-items:center;gap:10px;min-width:220px}
+.cg-obj .cg-bar{flex:1;position:relative;height:8px;border-radius:5px;background:#eef4fc;min-width:110px}
+.cg-obj .cg-bar .f{position:absolute;left:0;top:0;bottom:0;border-radius:5px;background:#2a5ea9}
+.cg-obj .cg-bar .f.ok{background:#00997f}
+.cg-obj .cg-bar .ryt{position:absolute;top:-3px;bottom:-3px;width:2px;border-radius:2px;background:#d2941f}
+.cg-obj span{font-weight:800;color:#1F4A85;white-space:nowrap;font-variant-numeric:tabular-nums}
+.cg-obj span i{font-style:normal;font-weight:600;color:#8b99b0}
+.cg-obj.grand{margin:12px 0 6px}
+.cg-obj.grand .cg-bar{height:14px;border-radius:7px}
+.cg-obj.grand .cg-bar .f{border-radius:7px}
+.cg-obj.grand .cg-bar .ryt{top:-5px;bottom:-5px;width:3px}
+.cg-obj.grand span{font-size:14px}
+.cg-hero{margin-bottom:14px}
+.cg-hero-t{display:flex;flex-wrap:wrap;justify-content:space-between;align-items:flex-end;gap:12px}
+.cg-hero-n{display:flex;align-items:baseline;gap:8px;margin-top:4px}
+.cg-hero-n b{font-size:30px;font-weight:800;color:#1F4A85;font-variant-numeric:tabular-nums}
+.cg-hero-n span{font-size:16px;font-weight:700;color:#8b99b0}
+.cg-hero-n em{font-style:normal;margin-left:6px}
+.cg-hero-leg{display:flex;flex-wrap:wrap;gap:16px;font-size:12.5px;color:#5a6b86;font-weight:600}
+.cg-hero-leg b{color:#1F4A85}
 .cg-tw{max-height:70vh;overflow:auto}
 .cg-t{min-width:1080px}
 .cg-t thead th{position:sticky;top:0;z-index:1;cursor:pointer;user-select:none;white-space:nowrap}
