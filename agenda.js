@@ -1,4 +1,7 @@
 // ============================================================================
+//  v57 (27/11/2026) : COMPTEUR DE LIVRAISONS DU JOUR sous la date de chaque
+//    jour (vues Jour, 3 j, Semaine) : « 🚚 N livraisons ». Compte les
+//    livraisons affichées (mêmes filtres), blocs groupés inclus, sans doublon.
 //  v56 (18/11/2026) : COULEURS PLEINES dans « Livraisons du site » (préparateur)
 //    et dans « Agenda du site » (secrétaire commerciale, chefs) : les teintes
 //    pâles (10-16 %) donnaient un agenda quasi blanc. Livraisons, préparations,
@@ -585,6 +588,42 @@ OD.define('agenda', {
       });
     });
     return autres;
+  }
+  // v57 : compteur « 🚚 N livraisons » sous la date de chaque jour (vues
+  // Jour, 3 j, Semaine). Compte les livraisons chargées et affichées (mêmes
+  // filtres que l'agenda), blocs « N livraisons » dépliés, sans doublon.
+  let livrParJour = {};
+  function compterLivr() {
+    const parJour = {}, vus = new Set();
+    (calendar ? calendar.getEvents() : []).forEach(ev => {
+      const p = ev.extendedProps || {};
+      if (p._provisoire) return;
+      const lot = p._groupe ? p._groupe.map(g => g.extendedProps || {}) : [p];
+      lot.forEach(x => {
+        if (x.source_type === 'groupe' || familleEvt(x) !== 'livraison') return;
+        const k = (x.source_type === 'rdv' && x.origin_id != null) ? 'rdv:' + x.origin_id : 'u:' + String(x.uid || ev.id || '');
+        if (vus.has(k)) return; vus.add(k);
+        const j = String(x.event_start_time || '').slice(0, 10);
+        if (j) parJour[j] = (parJour[j] || 0) + 1;
+      });
+    });
+    livrParJour = parJour;
+  }
+  function poserCompteurLivr(cell) {
+    if (!cell || !cell.getAttribute) return;
+    const old = cell.querySelector('.ag-nliv'); if (old) old.remove();
+    const n = livrParJour[cell.getAttribute('data-date')] || 0;
+    if (!n) return;
+    const b = (cell.ownerDocument || document).createElement('div');
+    b.className = 'ag-nliv'; b.textContent = '🚚 ' + n + ' livraison' + (n > 1 ? 's' : '');
+    (cell.querySelector('.fc-scrollgrid-sync-inner') || cell).appendChild(b);
+  }
+  function majCompteursLivr() {
+    try {
+      compterLivr();
+      const r = __anchor; if (!r) return;
+      r.querySelectorAll('.fc-timegrid .fc-col-header-cell[data-date]').forEach(poserCompteurLivr);
+    } catch (e) {}
   }
   // Dépli d'un groupe : la liste des livraisons, chacune ouvrable comme avant.
   function ouvrirGroupe(p) {
@@ -1831,6 +1870,8 @@ OD.define('agenda', {
   width:13px;height:13px;border-radius:50%;background:#d2941f;color:#fff;
   font:800 10px/13px system-ui,sans-serif;text-align:center;vertical-align:-1px;
   flex:0 0 auto}
+#agenda-root .fc .ag-nliv{margin:1px auto 2px;padding:0 6px;width:max-content;border-radius:8px;
+  background:${CFG.colors.livraison};color:#fff;font:700 10px/16px system-ui,sans-serif;white-space:nowrap}
 #agenda-root .fc .ag-aconclure-note{display:inline-block;margin-left:5px;padding:0 5px;
   border-radius:7px;background:#d2941f;color:#fff;
   font:800 9px/15px system-ui,sans-serif;letter-spacing:.04em;text-transform:uppercase;
@@ -2467,7 +2508,11 @@ OD.define('agenda', {
         const empile = String(arg.view && arg.view.type || '').indexOf('timeGrid') === 0;
         if (window.__agendaVueEmpile !== undefined && window.__agendaVueEmpile !== empile) refetch();
         window.__agendaVueEmpile = empile;
+        setTimeout(majCompteursLivr, 0);
       },
+      // v57 : compteur de livraisons sous la date de chaque jour.
+      eventsSet: () => majCompteursLivr(),
+      dayHeaderDidMount: (arg) => { try { if (arg.view && String(arg.view.type).indexOf('timeGrid') === 0) poserCompteurLivr(arg.el); } catch (e) {} },
       eventDrop: applyDragResize,
       eventResize: applyDragResize,
     });
