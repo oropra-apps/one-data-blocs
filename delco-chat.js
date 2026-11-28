@@ -1,5 +1,9 @@
 // ============================================================================
-//  DELCO — CHAT AGENT — module One Data (OD.define)  v11
+//  DELCO — CHAT AGENT — module One Data (OD.define)  v14
+//  v14 (28/11/2026) : bouton « Sources » sous chaque réponse (plan performance
+//     Delco, phase 4) : la liste des requêtes et indicateurs certifiés d'où
+//     viennent les chiffres (agent_run_outils, orchestrateur v8), SQL compris.
+//     Pouces relabellisés « Juste » / « Faux » pour être utilisés.
 //  v13 (22/10/2026) : accès selon la licence (Intelligence, Full) — OD.peut('delco'),
 //  socle v29. Repli sur delco_roles_exclus si le socle est plus ancien.
 //  v11 (12/10/2026) — sous-titre : « Ne traite que les questions métier, mais
@@ -221,6 +225,15 @@ await (async function () {
       .cp-export-btn.xlsx:hover{ background:#ecf8f5; border-color:var(--green); }
       .cp-export-btn:disabled{ opacity:.55; cursor:wait; }
 
+      /* ─── v14 : sources ─── */
+      .cp-sources-btn{ margin-left:auto; font-size:12px; font-weight:700; color:var(--blue); background:var(--lblue); border:1px solid var(--line); border-radius:999px; padding:4px 10px; cursor:pointer; }
+      .cp-sources-btn:hover{ border-color:var(--blue); }
+      .cp-sources{ width:100%; margin-top:8px; border:1px solid var(--line); border-radius:10px; background:var(--soft); padding:8px 10px; font-size:12px; color:var(--text); }
+      .cp-source{ padding:6px 0; border-bottom:1px dashed var(--line); }
+      .cp-source:last-child{ border-bottom:none; }
+      .cp-source-t{ font-weight:700; color:var(--blue); }
+      .cp-source-m{ color:var(--muted); font-weight:600; }
+      .cp-source pre{ white-space:pre-wrap; word-break:break-word; background:#fff; border:1px solid var(--line); border-radius:6px; padding:6px 8px; margin:4px 0 0; font-size:11px; color:var(--blue); font-family:"SF Mono",Monaco,monospace; }
       /* ─── v9 : pouces ─── */
       .cp-pouces{ display:flex; align-items:center; gap:6px; margin-top:10px; flex-wrap:wrap; }
       .cp-pouce{
@@ -654,13 +667,55 @@ await (async function () {
       return `
         <div class="cp-msg assistant">
           <div class="cp-avatar">${LOGO_SVG}</div>
-          <div class="cp-bubble">${renderMarkdown(clean)}${cartes}${exportBtns}${m.run_id ? `<div class="cp-pouces" data-run="${m.run_id}"><button class="cp-pouce" data-note="1" title="Réponse utile">👍</button><button class="cp-pouce" data-note="-1" title="Réponse fausse ou inutile">👎</button><span class="cp-pouce-merci"></span></div>` : ""}</div>
+          <div class="cp-bubble">${renderMarkdown(clean)}${cartes}${exportBtns}${m.run_id ? `<div class="cp-pouces" data-run="${m.run_id}"><button class="cp-pouce" data-note="1" title="Réponse juste et utile">👍 Juste</button><button class="cp-pouce" data-note="-1" title="Réponse fausse ou inutile : dis-moi pourquoi, je corrige">👎 Faux</button><span class="cp-pouce-merci"></span><button class="cp-sources-btn" data-run="${m.run_id}" title="D'où viennent les chiffres">Sources</button></div>` : ""}</div>
         </div>`;
     }).join("");
     bindExportButtons();
     remplirActions().catch((e) => console.warn("[delco] actions", e));
     brancherPouces();
+    brancherSources();
     scrollToBottom();
+  }
+
+  // ── v14 : sources des chiffres ───────────────────────────────────────
+  const LIBELLE_OUTIL = {
+    interroger_donnees: "Requête sur les données", indicateur: "Indicateur certifié",
+    synthese_pipeline: "Tableau de bord (synthèse)", dossiers_chauds: "Tableau de bord (dossiers à signer)",
+    analyser_activite_equipe: "Activité de l'équipe", comparer_sites: "Comparaison des sites", coacher_vendeur: "Point de coaching",
+    detecter_signaux_faibles: "Signaux faibles", brief_du_matin: "Brief du matin", rechercher_clients: "Recherche de clients",
+    lire_historique_client: "Historique du client", lire_fiche_client: "Fiche client", rechercher_echanges: "Recherche dans les échanges",
+    mes_relances_du_jour: "Relances du jour", preparer_prochain_rdv: "Préparation du RDV", suivi_delco: "Journal de Delco",
+  };
+  function brancherSources() {
+    $stream.querySelectorAll(".cp-sources-btn").forEach((b) => b.addEventListener("click", async () => {
+      const zone = b.closest(".cp-pouces");
+      const deja = zone.querySelector(".cp-sources");
+      if (deja) { deja.remove(); return; }
+      const box = doc.createElement("div");
+      box.className = "cp-sources";
+      box.textContent = "Chargement…";
+      zone.appendChild(box);
+      try {
+        const { data, error } = await sb.from("agent_run_outils").select("tour, outil, lignes, ms, erreur, entree, apercu")
+          .eq("run_id", b.dataset.run).order("id");
+        if (error) throw error;
+        const lignes = (data || []).filter((o) => !o.erreur && !["memoriser_correction", "decrire_vue"].includes(o.outil));
+        if (!lignes.length) { box.textContent = "Aucune source enregistrée pour cette réponse (réponse sans calcul, ou antérieure au 28/11/2026)."; return; }
+        box.innerHTML = lignes.map((o) => {
+          const e = o.entree || {}, a = o.apercu || {};
+          const titre = LIBELLE_OUTIL[o.outil] || o.outil;
+          const quoi = e.intention || a.indicateur || (e.code ? e.code : "") || (e.nom ? e.nom : "");
+          const def = a.definition ? `<div class="cp-source-m">${escapeHtml(a.definition)}</div>` : "";
+          const per = a.periode ? ` · ${escapeHtml(a.periode)}` : "";
+          const sql = e.sql || a.sql;
+          const n = o.lignes != null ? ` · ${o.lignes} ligne${o.lignes > 1 ? "s" : ""}` : "";
+          return `<div class="cp-source"><span class="cp-source-t">${escapeHtml(titre)}</span>${quoi ? " — " + escapeHtml(String(quoi)) : ""}<span class="cp-source-m">${per}${n}</span>${def}${sql ? `<pre>${escapeHtml(sql)}</pre>` : ""}</div>`;
+        }).join("");
+      } catch (err) {
+        box.textContent = "Sources indisponibles.";
+        console.warn("[delco] sources", err);
+      }
+    }));
   }
 
   // ── v9 : pouces ──────────────────────────────────────────────────────
